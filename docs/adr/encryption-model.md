@@ -4,7 +4,7 @@ Context: Envweave stores secret values and hands them to workloads in plaintext,
 
 **Amends the revision ADR ([#11](https://github.com/Dunky13/envweave/issues/11)).** [revision-model.md](./revision-model.md) offered the operations spec a choice between a backup-retention bound and "per-revision cryptographic erasure". **The second option is unavailable under this architecture** — the key hierarchy travels inside every backup, so destroying a live key erases nothing already written (§ *Erasure, and why crypto-shredding is not retention*). The retention bound is mandatory in v1, not one of two alternatives.
 
-**Amends the threat model ([#8](https://github.com/Dunky13/envweave/issues/8)).** Trust boundary 5 specifies "age-encrypted exports". The backup container is now a stdlib construction (§ *Backups and exports*); the property the threat model required — an export encrypted to a backup identity **distinct from the root key and stored separately**, with restore requiring both — is unchanged. Mechanism differs, guarantee does not.
+**Conforms to the threat model ([#8](https://github.com/Dunky13/envweave/issues/8)) as written.** Trust boundary 5 specifies "age-encrypted exports", and § *Backups and exports* ships exactly that. An intermediate revision of this ADR substituted a stdlib container to preserve a FIPS goal that has since been withdrawn (§ *Primitives*); no amendment to the threat model is required.
 
 Granularity note: this is the wayfinding-level encryption ADR. It fixes the key hierarchy, primitives, envelope format, binding, bootstrap, rotation semantics, the encrypted-field set, the backup container, and the honest compromise statement. Mechanism-level detail is delegated: concrete bounds, quotas, retention defaults and the backup/restore runbook → operations spec; token and credential formats → machine identities ([#17](https://github.com/Dunky13/envweave/issues/17)); which capability gates `reveal`, rotation and restore → RBAC ([#15](https://github.com/Dunky13/envweave/issues/15)); password KDF parameters and session mechanics → human auth ([#16](https://github.com/Dunky13/envweave/issues/16)); which crypto events are audited → audit ([#24](https://github.com/Dunky13/envweave/issues/24)); command surface for `init`, `rotate-root-key`, `rotate-dek`, `reencrypt`, `export`, `restore` → API & CLI ([#25](https://github.com/Dunky13/envweave/issues/25)); language choice and the crypto package's place in the codebase → architecture ([#22](https://github.com/Dunky13/envweave/issues/22)). Each delegated ticket MUST satisfy the constraints stated here; a delegation satisfied in letter but violating an intent stated here reopens this ADR.
 
@@ -33,37 +33,38 @@ Deriving these from a **project DEK** instead was considered and rejected: DEK r
 
 Any future per-purpose key follows the same rule — a distinct tier-3 key with its own purpose, derived per scope with a domain-separated `info` label, never overloaded onto a key that already has a job.
 
-## Primitives — AES-256-GCM, stdlib only
+## Primitives — XChaCha20-Poly1305
 
-**AES-256-GCM** for every layer, from `crypto/aes` + `crypto/cipher`. **XChaCha20-Poly1305 was rejected** despite being the research's recommendation: it lives in `x/crypto`, is not FIPS-approved, and Envweave keeps FIPS 140-3 alignment reachable. Go 1.24+ ships a natively validated FIPS 140-3 module covering stdlib crypto behind a toolchain flag (`GOFIPS140`), so **every primitive inside Envweave's security boundary MUST come from the standard library** — that is the price of the open door, and it binds the backup container too (§ *Backups*).
-
-**What that door does and does not open, precisely.** This preserves FIPS eligibility for the **cryptographic subsystem**, not compliance for Envweave as a product. Three limits, all stated rather than implied. Go's own documentation is explicit that using the module *facilitates* compliance — the operating environment, the certified module version, the runtime mode, and application-level usage all still matter. A **product FIPS profile does not exist yet** and is not defined here. And the threat model mandates **Argon2id** for human password verifiers, which is neither stdlib nor FIPS-approved: a whole-product FIPS build therefore requires the human-auth ticket ([#16](https://github.com/Dunky13/envweave/issues/16)) to select an approved KDF for that profile. Until then, "FIPS-ready" is a claim about this subsystem only, and documentation must not upgrade it.
-
-The 96-bit GCM nonce is safe for ~2³² encryptions per key. Envweave does not budget that ceiling; it removes it.
-
-**Per-record derived keys.** Every seal generates a fresh 256-bit random salt and derives a single-use record key:
+**XChaCha20-Poly1305** for every layer, from `golang.org/x/crypto/chacha20poly1305` (`NewX`), with a random 192-bit nonce per message:
 
 ```
-salt      = 32 random bytes
-recordKey = HKDF-SHA256(dek, salt, info = "envweave/record/v1")
-nonce     = 12 random bytes
-ct        = AES-256-GCM(recordKey, nonce, plaintext, aad)
+nonce = 24 random bytes
+ct    = XChaCha20-Poly1305(key, nonce, plaintext, aad)
 ```
 
-Each record key is used for exactly one message. Both HKDF-SHA256 (SP 800-56C) and AES-256-GCM are FIPS-approved and both are stdlib (`crypto/hkdf`, Go 1.24+). Cost is 32 bytes per ciphertext and one KDF call.
+**FIPS 140-3 alignment is explicitly NOT a goal of this project.** An earlier revision of this ADR chose AES-256-GCM to keep it reachable; that goal is withdrawn, and this section records why so it is not re-litigated. Envweave's positioning ([#3](https://github.com/Dunky13/envweave/issues/3)) is self-hosting developers and platform engineers at 1–3 orgs and ≤25 users, under a "fully open, no enterprise tier" wedge — which is precisely the procurement motion FIPS-buying organizations do not use. Actual validation is unreachable regardless: it requires a CMVP laboratory, funding, and a legal entity to hold the certificate, so "FIPS-capable" would never have become "FIPS-compliant" for a buyer who genuinely needs the paperwork. Meanwhile the goal was extracting real costs — a hand-specified backup container in place of a reviewed one, and pressure on [#16](https://github.com/Dunky13/envweave/issues/16) to adopt PBKDF2 over Argon2id, which is a **genuine security downgrade** since PBKDF2 is not memory-hard. Trading password-cracking resistance for an unreachable checkbox is a bad trade, and it is not made.
 
-**The property this delivers, stated exactly.** Catastrophic GCM nonce reuse requires a collision in **both** the 32-byte salt and the 12-byte nonce — 352 bits of fresh randomness per record — so with a healthy CSPRNG it is negligible. It is **probabilistic, not structural**: a salt collision alone reuses a record key, after which nonce uniqueness matters again exactly as it would without the derivation. Compared to raw per-DEK GCM this replaces a *birthday bound reached by counting* (2³² records) with one *reached only by RNG failure*, which is the improvement claimed and the only one claimed.
+With that constraint gone, XChaCha20-Poly1305 wins on the merits:
 
-Two consequences follow and must not be elided. **`crypto/rand` failure must be fatal** at every seal — a degraded or short read aborts the operation, never proceeds with weak randomness. And **RNG rollback breaks the property**: restoring a VM snapshot or forking a container image can replay the CSPRNG state and repeat salt and nonce together. This is an operations-spec hazard (documented alongside restore), not something the crypto layer can detect.
+- **The 192-bit nonce makes random nonces unconditionally safe** — 2⁸⁰ messages per key stays under a 2⁻³² collision probability. There is no ceiling to budget and no derivation trick needed to dodge one. AES-GCM's 96-bit nonce is safe only to ~2³² messages per key.
+- **Constant-time in software, by construction.** ChaCha20 uses no data-dependent table lookups. Go's software AES fallback is table-driven and cache-timing sensitive, and hardware AES is not universal on the ARM boards this product is deployed to — the **Raspberry Pi 4 has no ARMv8 crypto extensions** (verify the Pi 5 separately rather than assuming).
+- **Zero marginal dependency.** `filippo.io/age` (§ *Backups*) already imports `golang.org/x/crypto`, so the module is in the build either way, and it is Go-team maintained.
+- **One cipher family end to end** — the same primitive protects database records and backup payloads, rather than AES in one and ChaCha in the other.
 
-**Rejected:** usage counters with rotation thresholds (makes every encrypt's safety depend on a counter write succeeding under concurrent writers); deterministic nonce construction (a restore-from-backup rewinds the counter, and GCM nonce reuse on one key is catastrophic — the threat model makes restore a first-class event, so this is a trap, not a trade-off).
+**A per-record derived key is therefore NOT used.** An earlier revision derived a single-use record key via `HKDF-SHA256(dek, 32-byte random salt)` purely to escape the GCM nonce ceiling. XChaCha removes that ceiling natively, so the salt, the KDF call and 32 bytes per record are deleted rather than retained as ornament. Key separation is not lost: § *Envelope format*'s per-kind AAD already binds every ciphertext to its exact context.
+
+HKDF-SHA256 survives in exactly one place — deriving scoped change-token keys from the root token key (§ *Key hierarchy*) — where it is doing key *derivation*, its actual job.
+
+Two properties must not be elided. **`crypto/rand` failure is fatal** at every seal: a degraded or short read aborts the operation and never proceeds with weak randomness. And **RNG rollback breaks nonce uniqueness** — restoring a VM snapshot or forking a container image can replay CSPRNG state and repeat a nonce. Nonce reuse under ChaCha20-Poly1305 is serious (it leaks the XOR of plaintexts and enables Poly1305 key recovery), so this is an operations-spec hazard documented alongside restore, not something the crypto layer can detect.
+
+**Rejected:** AES-256-GCM (nonce ceiling, software-timing exposure on target hardware, and its only remaining advantage — stdlib purity — was already forfeited by adopting age); usage counters with rotation thresholds (makes every encrypt's safety depend on a counter write under concurrent writers); deterministic nonce construction (a restore rewinds the counter, and the threat model makes restore a first-class event — a trap, not a trade-off).
 
 ## Envelope format and AAD binding
 
 Every ciphertext — wrapped keys and data alike — carries a versioned header:
 
 ```
-header = format_version ‖ envelope_kind ‖ algorithm_id ‖ key_id ‖ key_version ‖ salt ‖ nonce
+header = format_version ‖ envelope_kind ‖ algorithm_id ‖ key_id ‖ key_version ‖ nonce
 record = header ‖ ciphertext ‖ tag
 ```
 
@@ -80,7 +81,8 @@ The header is **authenticated as part of the AAD**, so format version, envelope 
 | `wrapped_master` | `master_key_version`, `root_key_epoch` |
 | `wrapped_token_key` | `token_key_version`, `master_key_version` |
 | `instance_field` | `owner_table`, `owner_row_id`, `field_tag` |
-| `backup_payload` | container header digest (§ *Backups*) |
+
+There is no `backup_payload` kind: § *Backups* delegates the entire container to age, so no Envweave envelope record appears in an export.
 
 `layer_id`, **not** `env_id`, for `value` — inheritance-ADR values live on layers and project-defaults has no environment; binding to `env_id` would leave that layer unbound.
 
@@ -186,43 +188,22 @@ Two consequences, recorded rather than discovered later:
 
 ## Backups and exports
 
-`envweave export` produces a container holding the already-field-encrypted datastore export, encrypted again to one or more **operator-held recipients**. The recipient wrapping is **`crypto/hpke`** (Go 1.26+), RFC 9180 base mode, ciphersuite **DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM** — a specified KEM with published test vectors rather than a hand-composed ECDH-to-AEAD path:
+`envweave export` produces an **age-encrypted** archive (`filippo.io/age`) holding the already-field-encrypted datastore export, encrypted to one or more **operator-held recipients**. This restores the research recommendation and conforms to the threat model's trust boundary 5 as originally written.
 
-```
-header       = LP(magic, format_version, recipient_count, stanza_0 … stanza_n, payload_length)
-fileKey      = 32 random bytes
-headerDigest = SHA-256(header)
+**Envweave specifies no container format of its own.** Age supplies the whole of it — X25519 recipient stanzas, `scrypt` passphrase recipients, plugin recipients for hardware tokens, the STREAM chunked payload construction with chunk ordering and truncation detection, and a parser hardened by wide deployment. An earlier revision of this ADR hand-specified an equivalent container over ECDH and later over HPKE; cross-model review correctly called the first version a sketch rather than a specification, and the honest conclusion is that **the pieces it kept getting wrong are exactly the pieces age already gets right**. The threat model mandates minimal dependencies and maintainer review of all crypto contributions; adopting a reviewed format is the cheaper side of that mandate, not the expensive one.
 
-stanza (hpke)       = LP(recipient_kind, recipient_fingerprint,
-                         hpke.Seal(pk_i, HKDFSHA256, AES256GCM,
-                                   info = LP(domain, magic, format_version, recipient_fingerprint),
-                                   fileKey))
-stanza (passphrase) = LP(recipient_kind, pbkdf2_salt, pbkdf2_iterations, wrap_nonce,
-                         AES-256-GCM(PBKDF2-HMAC-SHA256(passphrase, pbkdf2_salt, pbkdf2_iterations, 32),
-                                     wrap_nonce, fileKey,
-                                     aad = LP(domain, magic, format_version, pbkdf2_salt, pbkdf2_iterations, wrap_nonce)))
+What Envweave still owns:
 
-payload   = envelope record, envelope_kind = backup_payload, key = fileKey,
-            aad = header schema for that kind, i.e. LP(headerDigest)
-container = header ‖ payload
-```
+- **Recipient policy.** Multi-recipient wrapping means any single recipient restores. The instance stores only **public recipients**; the private identity never touches the datastore.
+- **Refusing a zero-recipient export**, loudly, rather than writing plaintext.
+- **Passphrase recipients** are supported through age's `scrypt` recipient, documented as the weakest kind. Note this is a **strictly better position than the ADR's previous one**: `scrypt` is memory-hard, where the FIPS-constrained PBKDF2 it replaces is not.
+- **Recipient-set hygiene** — see § *Erasure*, where the conditions for erasure-by-identity-destruction are stated.
 
-The payload is **an ordinary envelope record** (§ *Envelope format*), not a bespoke construction — so its format version, algorithm id, salt and nonce are carried and authenticated by the standard header exactly as every other ciphertext's are, rather than being referenced and never serialized. That also resolves the `backup_payload` row of the AAD-schema table instead of contradicting it: the file key takes the place of a DEK, and the per-record HKDF derivation of § *Primitives* applies unchanged.
-
-Fixed by this ADR, because "same envelope layer" does not answer them — a file container has no row identity to anchor to:
-
-- **Ephemeral key material and encoding** are HPKE's, not Envweave's. No custom KEM.
-- **Domain separation** — the HPKE `info` is a constant domain string concatenated with the header prefix, so a stanza cannot be lifted into another container.
-- **Recipient fingerprint** — SHA-256 over the recipient's public key, present so restore can select a stanza without trial decryption, and authenticated as part of the stanza.
-- **Whole-header binding** — the payload record's AAD is a digest over the complete header including every stanza and the recipient count, so a stanza cannot be added, removed or reordered.
-- **Strict parsing bounds** — declared lengths must consume the buffer exactly; a recipient count, stanza length or payload length beyond configured maxima is rejected before allocation.
-- **Every stanza is self-describing and authenticated.** A passphrase stanza carries its own salt, iteration count and wrapping nonce in the clear *and* under its AEAD's associated data, so an attacker cannot downgrade the work factor by editing the plaintext copy. There is no implicit parameter anywhere in the container.
-- **Single-shot payload with a hard size cap** (bound set by the operations spec). Above the cap, export refuses rather than silently degrading. This deliberately removes chunk framing, ordering and truncation-detection from the v1 format: authenticated decryption must buffer to verify the tag regardless, and streaming decryption is the standard route to releasing unverified plaintext during a restore. Chunked framing is the documented upgrade path at a new `format_version` if dumps outgrow the cap.
-- **Passphrase recipients** are a distinct `recipient_kind`, fully specified above: PBKDF2-HMAC-SHA256 over a 16-byte random salt derives a 32-byte wrapping key that seals `fileKey` under AES-256-GCM with its own nonce; salt, iteration count and nonce are serialized and authenticated; the iteration count must meet a documented minimum work factor, enforced on **read** as well as write so a downgraded container is refused; passphrases are NFC-normalized UTF-8. Documented as the weakest recipient kind. Argon2id is unavailable here — neither stdlib nor FIPS-approved (§ *Primitives*).
-
-**`filippo.io/age` was rejected**, reversing the research recommendation. Its format solves genuinely more of this surface — STREAM chunking, stanza handling, passphrase and hardware-plugin recipients, independent tooling — and it is the better choice for any project that does not care about FIPS. It loses here on one point: X25519 and ChaCha20-Poly1305 are outside the stdlib FIPS boundary, so adopting it would permanently forfeit the door § *Primitives* deliberately bought, for a subsystem where `crypto/hpke` supplies a specified, test-vectored alternative. Its secondary advantage also does not survive this design — "restore with the standard `age` CLI" yields a dump whose every value is still root-key ciphertext, so Envweave is required either way. **This trade is worth revisiting if a product FIPS profile is ever abandoned** (§ *Primitives*); it is the ADR's most reversible decision, since the container is versioned and only ever read by Envweave.
+**`crypto/hpke` was considered and rejected.** It is a specified KEM with published test vectors and would have been the right answer *if* the stdlib-only constraint had survived — but it wraps a key, and a backup needs a container: framing, chunking, truncation detection, stanza encoding and parser bounds would all still have been Envweave's to write and test. Since the FIPS goal that motivated staying in stdlib is withdrawn (§ *Primitives*), there is no longer a reason to reimplement what age has already shipped.
 
 **tink-go** was likewise rejected for this container, on the same grounds as § *Implementation seam*.
+
+**Restoring with the standard `age` CLI yields a dump whose every value is still root-key ciphertext** — Envweave is required to read it either way. That was previously argued as a reason age's interoperability was worthless; it is more honestly stated as a limit on what interoperability buys: the operator can verify, copy, re-key and archive the artifact with standard tooling, but not read secrets out of it without the instance and its root key.
 
 Shipping no backup encryption at all — leaving it to restic/borg/kopia — was considered and rejected: the export's **metadata** (§ *What is encrypted*) is the infrastructure map in plaintext, and an unconditional encrypted artifact beats one contingent on the operator having configured their backup tool correctly. It also gives instance migration a first-class artifact.
 
@@ -244,11 +225,11 @@ For v1, therefore:
 
 ## Implementation seam
 
-The envelope layer is **hand-rolled over stdlib** — header struct, injective AAD encoder, `seal(ctx, plaintext)` / `open(ctx, ciphertext)`, keyring lookup, HKDF derivation. Recipient wrapping for backups is **not** hand-rolled; it is `crypto/hpke` (§ *Backups*).
+The envelope layer is **thin and hand-written over vetted primitives** — header struct, injective AAD encoder, `seal(ctx, plaintext)` / `open(ctx, ciphertext)`, keyring lookup. It composes `x/crypto`'s XChaCha20-Poly1305 and stdlib HKDF; it implements no primitive and no key agreement. The backup container is **not** hand-written at all; it is age (§ *Backups*).
 
-**`tink-go` was rejected on a concrete comparison, not on "it has its own format".** Tink exists to reduce primitive misuse, which is a real benefit and the reason the rejection needs a real argument. Against it: Tink's unit of work is a **keyset** whose serialization would sit underneath Envweave's storage format, duplicating the key-version and key-state machinery that § *Rotation*'s four operations already own — the adapter would have to keep Tink keysets and Envweave's fenced keyring consistent, which is more custom code than the layer it replaces. Its AEAD abstraction does not express the per-record HKDF derivation of § *Primitives* or the per-kind AAD schemas of § *Envelope format*; both would be fought rather than used. It pulls its own primitive implementations, breaking the stdlib-only boundary § *Primitives* requires. And it conflicts with the threat model's minimal-dependency mandate. What remains hand-written after adopting it — derivation, AAD schemas, fencing, rotation — is most of what Tink was meant to supply.
+**`tink-go` was rejected on a concrete comparison, not on "it has its own format".** Tink exists to reduce primitive misuse, which is a real benefit and the reason the rejection needs a real argument. Against it: Tink's unit of work is a **keyset** whose serialization would sit underneath Envweave's storage format, duplicating the key-version and key-state machinery that § *Rotation*'s five operations already own — the adapter would have to keep Tink keysets and Envweave's fenced keyring consistent, which is more custom code than the layer it replaces. Its AEAD abstraction does not express the per-kind AAD schemas of § *Envelope format*, which would be fought rather than used. And it conflicts with the threat model's minimal-dependency mandate. What remains hand-written after adopting it — AAD schemas, fencing, rotation — is most of what Tink was meant to supply.
 
-The custom cryptographic surface this ADR retains is therefore small and enumerable: an injective AAD encoder, a header codec, and a keyring lookup. Every primitive and every key-agreement construction comes from the standard library. Key management is Envweave's product; the format stays under Envweave's control and Envweave's version number.
+The custom cryptographic surface this ADR retains is therefore small and enumerable: **an injective AAD encoder, a header codec, and a keyring lookup**. Every primitive, every key agreement, and the entire backup container come from reviewed external code. Key management is Envweave's product; the storage format stays under Envweave's control and Envweave's version number.
 
 **The envelope package is the only caller of a cryptographic primitive in the codebase.** No import of `crypto/cipher`, `crypto/aes`, `crypto/hkdf`, `crypto/ecdh` or `crypto/pbkdf2` outside it. Enforced by test (§ *CI-enforced invariants*), not by convention. Together with the threat model's redacting logger types, that is the mechanism half of "plaintext never leaks".
 
@@ -262,9 +243,9 @@ Envweave makes **no memory-secrecy claim**. What it does:
 - Master key held unwrapped for the process lifetime; project DEKs decrypted on demand into a bounded LRU cache, evicted on rotation and on project delete.
 - **No** `mlock`, no guarded enclaves. Swap hygiene (encrypted swap, or none) is the operator's, documented and not claimed.
 
-`memguard`-style enclaves were rejected: the Go runtime still copies buffers during GC and interface boxing, so the guarantee is partial while reading as total — precisely what the threat model forbids this ADR from doing — and it is a dependency in the crypto path § *Implementation seam* keeps stdlib-only.
+`memguard`-style enclaves were rejected: the Go runtime still copies buffers during GC and interface boxing, so the guarantee is partial while reading as total — precisely what the threat model forbids this ADR from doing — and it adds a dependency to the crypto path for a property it cannot actually deliver.
 
-**Recorded residual, and an input to the architecture ticket ([#22](https://github.com/Dunky13/envweave/issues/22)):** Go's garbage collector prevents *guaranteed* zeroization of key material — a zeroed `[]byte` may leave residue in freed memory the program never had a handle to. A language with deterministic drop (Rust + `zeroize`) would close this. The residual sits **below** the line the threat model already draws — running-server compromise is conceded as full control-plane compromise in any language, and core-dump/swap/forensic residue is largely covered by the measures above — while Go retains the natively validated FIPS 140-3 module (§ *Primitives*) and the contributor pool of this product's ecosystem. This is an input to #22's language decision, **not a blocker on it**.
+**Recorded residual, and an input to the architecture ticket ([#22](https://github.com/Dunky13/envweave/issues/22)):** Go's garbage collector prevents *guaranteed* zeroization of key material — a zeroed `[]byte` may leave residue in freed memory the program never had a handle to. A language with deterministic drop (Rust + `zeroize`) would close this. The residual sits **below** the line the threat model already draws — running-server compromise is conceded as full control-plane compromise in any language, and core-dump/swap/forensic residue is largely covered by the measures above — while Go retains the contributor pool and operator ecosystem of this product's niche. Note that withdrawing the FIPS goal (§ *Primitives*) **removes one argument that previously favoured Go**, since Go's validated module no longer counts for anything here; the remaining case is ecosystem, not cryptography. This is an input to #22's language decision, **not a blocker on it**.
 
 ## The honest compromise statement (documentation requirement)
 
@@ -290,20 +271,19 @@ Every invariant this ADR creates is a test, not a paragraph:
 8. **Crash-safe root rotation** — the instance boots with either the old or the new root at every point in prepare/verify/finalize, and warns while dual-wrapped.
 9. **Master rotation completeness** — after `rotate-master-key`, no tier-3 key references the retired master; a tier-3 key created concurrently with master rotation lands under the new master, never the retiring one; `rotate-master-key` during dual-wrapped root state is refused, and vice versa.
 10. **Scoped token-key injectivity** — identifier tuples that differ only in where the boundary falls (`org "a" / project "bc"` versus `org "ab" / project "c"`) derive distinct token keys.
-11. **Ciphertext uniqueness** — N encryptions of identical plaintext under one DEK produce N distinct ciphertexts (salt and nonce freshness).
-12. **Crypto chokepoint** — no import of a crypto primitive package outside the envelope package.
-13. **Backup container** — zero recipients refused; a stanza added, removed or reordered fails the payload's header binding; oversize declared lengths are rejected before allocation; a passphrase stanza whose iteration count is below the minimum is refused on read; each recipient kind round-trips.
-14. **FIPS build** — the build runs under `GOFIPS140` set to a certified module version, and the test suite **asserts `crypto/fips140.Enabled()` and the expected module version at runtime** rather than merely compiling. Compiling with an unspecified `GOFIPS140` value proves nothing.
+11. **Ciphertext uniqueness** — N encryptions of identical plaintext under one key produce N distinct ciphertexts (nonce freshness).
+12. **Crypto chokepoint** — no import of a cryptographic primitive package outside the envelope package.
+13. **Backup round-trip** — zero recipients refused; every recipient kind (X25519, passphrase) round-trips; a tampered container fails to decrypt; a restore requires the identity **and** the root key, and neither alone yields a value.
 
 ## Propagations (binding on downstream tickets)
 
-- **Operations spec** (fog): the **backup-retention bound is mandatory in v1** — § *Erasure* removes the alternative the revision ADR offered. Also owns: root-key escrow and loss procedure; rotation runbooks including the **full post-compromise recovery order** (root → master → tier-3 keys → `reencrypt` → token key) and the dual-wrapped transition state; restore procedure under the threat model's fail-closed recovery mode; **backup recipient-set hygiene** (one identity per retention class, inventoried, since one surviving recipient defeats erasure and a shared identity spans containers); the **backup size cap** and PBKDF2 iteration floor; `reencrypt` scheduling guidance; DEK cache size bound; the **RNG-rollback hazard** (VM snapshot restore and image forking can replay CSPRNG state, § *Primitives*); the **benign rollout wave** triggered by root-token-key rotation (already required by the revision ADR); and the requirement that the root key never share a backup or storage domain with the datastore.
+- **Operations spec** (fog): the **backup-retention bound is mandatory in v1** — § *Erasure* removes the alternative the revision ADR offered. Also owns: root-key escrow and loss procedure; rotation runbooks including the **full post-compromise recovery order** (root → master → tier-3 keys → `reencrypt` → token key) and the dual-wrapped transition state; restore procedure under the threat model's fail-closed recovery mode; **backup recipient-set hygiene** (one identity per retention class, inventoried, since one surviving recipient defeats erasure and a shared identity spans containers); `reencrypt` scheduling guidance; DEK cache size bound; the **RNG-rollback hazard** (VM snapshot restore and image forking can replay CSPRNG state, § *Primitives*); the **benign rollout wave** triggered by root-token-key rotation (already required by the revision ADR); and the requirement that the root key never share a backup or storage domain with the datastore.
 - **RBAC ([#15](https://github.com/Dunky13/envweave/issues/15))**: `rotate-root-key`, `rotate-master-key`, `rotate-dek`, `reencrypt`, `export` and `restore` are operator- or instance-level capabilities, separate grants, never bundled with org administration. A project delete that crypto-shreds a DEK is irreversible and MUST be gated accordingly.
 - **Revision model ([#11](https://github.com/Dunky13/envweave/issues/11))**, satisfied rather than amended: the root token key is a distinct key tier (§ *Key hierarchy*), so encryption-key hygiene never perturbs change tokens; and rollback's re-encryption into new rows is an internal server operation requiring no `reveal` (§ *Envelope format*), preserving restore-without-reveal.
 - **Architecture ([#22](https://github.com/Dunky13/envweave/issues/22))**, additionally: identifiers bound into an AAD are **immutable and never reused**, which constrains every future storage migration — renumbering rows or reusing freed ids renders existing ciphertext undecryptable.
 - **Machine identities ([#17](https://github.com/Dunky13/envweave/issues/17))**: tokens are high-entropy random stored as hash verifiers, never envelope-encrypted — a root-key holder must not be able to recover a token.
-- **Human auth ([#16](https://github.com/Dunky13/envweave/issues/16))**: password verifiers use a memory-hard KDF per the threat model; note that Argon2id is neither stdlib nor FIPS-approved, so a FIPS build and Argon2id are mutually exclusive — #16 must choose knowingly rather than inherit the conflict.
-- **Architecture ([#22](https://github.com/Dunky13/envweave/issues/22))**: stdlib-only crypto boundary; the envelope package as sole primitive caller, enforced by architecture test; the Go zeroization residual as a recorded input to the language decision; and a **minimum toolchain of Go 1.26**, since `crypto/hpke` (§ *Backups*) and `crypto/hkdf` (§ *Primitives*) are stdlib only from 1.26 and 1.24 respectively.
+- **Human auth ([#16](https://github.com/Dunky13/envweave/issues/16))**: password verifiers use **Argon2id**, per the threat model, with **no conflict to resolve** — an earlier revision of this ADR flagged Argon2id as incompatible with a FIPS build, and that constraint is withdrawn (§ *Primitives*). #16 chooses parameters, not algorithms-under-duress.
+- **Architecture ([#22](https://github.com/Dunky13/envweave/issues/22))**: the envelope package as sole caller of a cryptographic primitive, enforced by architecture test; the Go zeroization residual as a recorded input to the language decision, now with the FIPS argument for Go removed; a **minimum toolchain of Go 1.24** for stdlib `crypto/hkdf`; and two accepted dependencies in the crypto path — `golang.org/x/crypto` (XChaCha20-Poly1305) and `filippo.io/age` (backup container), both of which the threat model's crypto-contribution review rule covers.
 - **Audit ([#24](https://github.com/Dunky13/envweave/issues/24))**: root-key rotation, DEK rotation, re-encryption start/completion, DEK retirement, project crypto-shred, export, and restore are auditable events.
 - **API & CLI ([#25](https://github.com/Dunky13/envweave/issues/25))**: `init`, `rotate-root-key` (with `--prepare` / `--verify` / `--finalize`), `rotate-master-key`, `rotate-dek`, `rotate-token-key`, `reencrypt`, `export`, `restore` command surface; `reencrypt` must be resumable from the CLI and report progress; `rotate-token-key` must warn that it triggers a rollout wave before proceeding.
 - **Kubernetes ([#19](https://github.com/Dunky13/envweave/issues/19))** and **Compose ([#18](https://github.com/Dunky13/envweave/issues/18))**: the delivery boundary is where these guarantees end — documentation must carry that statement, including K3s `--secrets-encryption`.
