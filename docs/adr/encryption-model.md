@@ -13,8 +13,8 @@ Granularity note: this is the wayfinding-level encryption ADR. It fixes the key 
 1. **Root key (KEK)** — 256-bit, operator-provided, **never stored in the datastore**. Wraps tier 2 only.
 2. **Master key** — 256-bit random, generated at first startup, stored wrapped in a single versioned row. Wraps tier 3 only.
 3. **Tier-3 keys** — 256-bit random, stored wrapped by the master key, versioned:
-   - one **DEK per project**, covering every layer of that project (project-defaults, base chain, environment) — a project is one key domain;
-   - one **instance DEK** for sensitive rows belonging to no project (MFA seeds, recovery codes, instance-level adapter credentials);
+   - one **DEK per project**, covering every layer of that project (project-defaults, base chain, environment) **and every project-scoped sensitive field** — a project is one key domain;
+   - one **instance DEK** for sensitive rows belonging to no project (MFA seeds, recovery codes, instance-scoped credentials);
    - one **root token key**, used for derivation only and never for encryption (below).
 
 Per-project granularity buys blast-radius isolation, per-project rotation and crypto-shred on project delete. Per-environment DEKs were rejected: project-defaults-layer values belong to no environment, so a per-environment scheme requires the per-project scheme underneath it — it adds a tier rather than replacing one. Per-value DEKs were rejected; see § *Erasure*.
@@ -42,20 +42,34 @@ nonce = 24 random bytes
 ct    = XChaCha20-Poly1305(key, nonce, plaintext, aad)
 ```
 
-**FIPS 140-3 alignment is explicitly NOT a goal of this project.** An earlier revision of this ADR chose AES-256-GCM to keep it reachable; that goal is withdrawn, and this section records why so it is not re-litigated. Envweave's positioning ([#3](https://github.com/Dunky13/envweave/issues/3)) is self-hosting developers and platform engineers at 1–3 orgs and ≤25 users, under a "fully open, no enterprise tier" wedge — which is precisely the procurement motion FIPS-buying organizations do not use. Actual validation is unreachable regardless: it requires a CMVP laboratory, funding, and a legal entity to hold the certificate, so "FIPS-capable" would never have become "FIPS-compliant" for a buyer who genuinely needs the paperwork. Meanwhile the goal was extracting real costs — a hand-specified backup container in place of a reviewed one, and pressure on [#16](https://github.com/Dunky13/envweave/issues/16) to adopt PBKDF2 over Argon2id, which is a **genuine security downgrade** since PBKDF2 is not memory-hard. Trading password-cracking resistance for an unreachable checkbox is a bad trade, and it is not made.
+**FIPS 140-3 alignment is explicitly NOT a goal of this project.** An earlier revision chose AES-256-GCM to keep it reachable; that goal is withdrawn, and this section records the reasoning so it is not re-litigated.
+
+The argument is **cost versus target requirement**, and it must not be overstated in either direction. Two things that are *not* claimed, because they would be false: that FIPS-regulated organizations never adopt open-source self-hosted software, and that validation is technically unreachable. Go's cryptographic module holds a CMVP certificate, and an application may incorporate a validated module without holding a certificate of its own — full compliance then remains dependent on operating environment, module version, runtime mode, and usage.
+
+What is claimed: **FIPS is outside the requirements of Envweave's target users, and retaining it as a goal imposes primitive and product constraints that are not justified by that absence of demand.** Positioning ([#3](https://github.com/Dunky13/envweave/issues/3)) is self-hosting developers and platform engineers at 1–3 orgs and ≤25 users under a "fully open, no enterprise tier" wedge. Against zero identified demand, the goal was extracting two concrete costs: a hand-specified backup container in place of a reviewed one (§ *Backups*), and pressure on [#16](https://github.com/Dunky13/envweave/issues/16) toward PBKDF2 over Argon2id — a **genuine security downgrade**, since PBKDF2 is not memory-hard. Paying reduced password-cracking resistance for an unrequested capability is the trade being declined.
+
+If a real FIPS requirement ever appears, this is revisitable: the envelope format is versioned, and the constraint would be a primitive swap plus a `reencrypt` pass, not a redesign.
 
 With that constraint gone, XChaCha20-Poly1305 wins on the merits:
 
-- **The 192-bit nonce makes random nonces unconditionally safe** — 2⁸⁰ messages per key stays under a 2⁻³² collision probability. There is no ceiling to budget and no derivation trick needed to dodge one. AES-GCM's 96-bit nonce is safe only to ~2³² messages per key.
+- **The 192-bit nonce makes random nonces safe without a counting ceiling** — 2⁸⁰ messages per key stays under a 2⁻³² collision probability, *assuming a secure RNG* (the XChaCha specification's own condition). There is no ceiling to budget and no derivation trick needed to dodge one. AES-GCM's 96-bit nonce is safe only to ~2³² messages per key.
 - **Constant-time in software, by construction.** ChaCha20 uses no data-dependent table lookups. Go's software AES fallback is table-driven and cache-timing sensitive, and hardware AES is not universal on the ARM boards this product is deployed to — the **Raspberry Pi 4 has no ARMv8 crypto extensions** (verify the Pi 5 separately rather than assuming).
 - **Zero marginal dependency.** `filippo.io/age` (§ *Backups*) already imports `golang.org/x/crypto`, so the module is in the build either way, and it is Go-team maintained.
-- **One cipher family end to end** — the same primitive protects database records and backup payloads, rather than AES in one and ChaCha in the other.
+- **One cipher family end to end** — ChaCha20-Poly1305 protects database records and, inside age, backup payloads. Not the *same primitive*: Envweave uses XChaCha20-Poly1305 with random 192-bit nonces, while age's payload uses ChaCha20-Poly1305 with derived keys and counter nonces under its STREAM construction. One family, two profiles.
 
-**A per-record derived key is therefore NOT used.** An earlier revision derived a single-use record key via `HKDF-SHA256(dek, 32-byte random salt)` purely to escape the GCM nonce ceiling. XChaCha removes that ceiling natively, so the salt, the KDF call and 32 bytes per record are deleted rather than retained as ornament. Key separation is not lost: § *Envelope format*'s per-kind AAD already binds every ciphertext to its exact context.
+**A per-record derived key is therefore NOT used.** An earlier revision derived a single-use record key via `HKDF-SHA256(dek, 32-byte random salt)` purely to escape the GCM nonce ceiling. XChaCha removes that ceiling natively, so the salt, the KDF call and 32 bytes per record are deleted.
 
-HKDF-SHA256 survives in exactly one place — deriving scoped change-token keys from the root token key (§ *Key hierarchy*) — where it is doing key *derivation*, its actual job.
+**Three properties are lost with it, and are accepted explicitly rather than waved away.** The per-kind AAD of § *Envelope format* supplies *context binding*, which is a different thing from key separation, so it does not substitute for any of these:
 
-Two properties must not be elided. **`crypto/rand` failure is fatal** at every seal: a degraded or short read aborts the operation and never proceeds with weak randomness. And **RNG rollback breaks nonce uniqueness** — restoring a VM snapshot or forking a container image can replay CSPRNG state and repeat a nonce. Nonce reuse under ChaCha20-Poly1305 is serious (it leaks the XOR of plaintexts and enables Poly1305 key recovery), so this is an operations-spec hazard documented alongside restore, not something the crypto layer can detect.
+1. **Record-level key isolation** — every ciphertext under a given DEK version now shares one key. Accepted: the DEK is the real unit of compromise in this design; an attacker who extracts a record key from process memory has the DEK alongside it, so the isolation was theoretical rather than operational.
+2. **Nonce-reuse containment** — with derivation, a repeated nonce was harmless unless the salt repeated too. Now a repeated nonce under one DEK is directly damaging (ChaCha20-Poly1305 reuse leaks the XOR of plaintexts and enables Poly1305 key recovery). Accepted, and it is the reason the RNG conditions below are stated as requirements rather than notes.
+3. **Blast radius of a single leaked key** — a leaked record key exposed one record; a leaked DEK exposes a project. Accepted: crypto-shred, rotation and `reencrypt` are all already scoped to the DEK, so the DEK was the blast-radius unit regardless.
+
+HKDF-SHA256 survives in exactly one place in **Envweave's own** code — deriving scoped change-token keys from the root token key (§ *Key hierarchy*) — where it is doing key *derivation*, its actual job. (Age uses HKDF internally for its own recipient and payload keys; that is age's business, not this ADR's.)
+
+Two properties must not be elided. **`crypto/rand` failure is fatal** at every seal: a degraded or short read aborts the operation and never proceeds with weak randomness.
+
+And **VM snapshot rollback or cloning can replay kernel CSPRNG state**, repeating a nonce under a live DEK. Scoped precisely, because the sloppy version of this warning is worse than none: the hazard is restoring or cloning a **virtual machine** where the hypervisor lacks VMGenID support, the guest ignores it, or the mechanism is broken — modern VMGenID exists exactly to notify the guest and reinitialize its RNG. **Forking a container image is not this hazard**: an image carries no host-kernel CSPRNG state, and `crypto/rand` reads from the host kernel. This is an operations-spec item covering VM-level snapshot and clone workflows, and it is not something the crypto layer can detect.
 
 **Rejected:** AES-256-GCM (nonce ceiling, software-timing exposure on target hardware, and its only remaining advantage — stdlib purity — was already forfeited by adopting age); usage counters with rotation thresholds (makes every encrypt's safety depend on a counter write under concurrent writers); deterministic nonce construction (a restore rewinds the counter, and the threat model makes restore a first-class event — a trap, not a trade-off).
 
@@ -64,9 +78,11 @@ Two properties must not be elided. **`crypto/rand` failure is fatal** at every s
 Every ciphertext — wrapped keys and data alike — carries a versioned header:
 
 ```
-header = format_version ‖ envelope_kind ‖ algorithm_id ‖ key_id ‖ key_version ‖ nonce
+header = format_version ‖ envelope_kind ‖ algorithm_id ‖ wrapping_key_id ‖ wrapping_key_version ‖ nonce
 record = header ‖ ciphertext ‖ tag
 ```
+
+`format_version`, `envelope_kind` and `algorithm_id` are single bytes; `wrapping_key_version` is a `uint32` big-endian; `wrapping_key_id` and `nonce` are length-prefixed as below. **`wrapping_key_id` names the key that encrypted this record** — a DEK, the master key, or a backup file key — and is deliberately *not* called `key_id`, because `key_id` in the `value` AAD schema means the domain object (a configuration key). Two different things sharing one name in one format is a decoding bug waiting to be written. For `wrapped_master`, whose wrapping key is the operator's root and has no stored identifier, `wrapping_key_id` carries the **`root_key_epoch`** and `wrapping_key_version` is zero.
 
 The header is **authenticated as part of the AAD**, so format version, envelope kind, algorithm id and key version cannot be edited independently of the payload.
 
@@ -80,6 +96,7 @@ The header is **authenticated as part of the AAD**, so format version, envelope 
 | `wrapped_dek` | `org_id`, `project_id` (empty for the instance DEK), `dek_id`, `dek_version`, `master_key_version` |
 | `wrapped_master` | `master_key_version`, `root_key_epoch` |
 | `wrapped_token_key` | `token_key_version`, `master_key_version` |
+| `project_field` | `org_id`, `project_id`, `owner_table`, `owner_row_id`, `field_tag` |
 | `instance_field` | `owner_table`, `owner_row_id`, `field_tag` |
 
 There is no `backup_payload` kind: § *Backups* delegates the entire container to age, so no Envweave envelope record appears in an export.
@@ -92,7 +109,9 @@ The attack this defeats is intra-project, not merely cross-tenant: a datastore w
 
 Consequence, accepted: **any operation that produces a new row re-encrypts; a ciphertext is never copied between rows.** This covers copying a value to another environment, re-keying, and — importantly — **rollback**. The revision ADR is explicit that restoring an earlier state "creates a **new** revision through the normal publish pipeline", staging pending changes owned by the restoring user, and that restoring an inherited value flattens it into a local override ([revision-model.md § Rollback](./revision-model.md)). There is no existing row to point at: the target layer differs, the row id differs, so the AAD differs and the value must be decrypted and re-sealed.
 
-That re-encryption is an **internal server operation, not a disclosure**: the server decrypts and re-seals without rendering plaintext to any principal, so restoring a secret requires no `reveal` capability. This preserves the revision ADR's rule that a principal may restore a secret value while holding only write-presence over it.
+**That re-encryption is an internal server operation, but it is NOT unauthorized.** The crypto layer renders no plaintext to any principal, so the *cryptographic* step needs no capability — but the schema ADR gates the *operation*, and this ADR conforms rather than contradicting it. [schema-model.md § Newly inheriting a secret](./schema-model.md) requires **`reveal-history` on the key** to restore a `secret` occurrence, plus the routing gate, precisely because the plaintext comes from server-held historical material rather than from the publisher: without it, a principal holding publish-on-dev and no reveal could restore production's superseded secret into a development environment they control and read it out of the workload. The same gate covers **any other server-side duplication of stored secret material** — cross-environment copy, environment clone, bulk apply.
+
+The rule this ADR states, precisely: **an internal decrypt-and-reseal is never itself a disclosure, and never itself an authorization.** Whether the operation is permitted is decided by the schema and RBAC ADRs, evaluated before the crypto layer is called.
 
 **Residual, documented:** AAD prevents *transplant*. It does not prevent *deletion*, nor *resurrection of a row's own earlier ciphertext*. An actor who can do either already holds datastore write access and is operator-equivalent under the threat model. "AAD-bound" must never be presented in documentation as "tamper-proof".
 
@@ -105,7 +124,7 @@ Startup refusals, all **hard failures with no override flag**:
 1. **No root key present** — abort. The server never auto-generates a root key on first run: a silently generated key is a key nobody backed up, discovered at restore time.
 2. **Key file readable by group or other** — abort. One `os.Stat` check.
 3. **Not exactly 256 bits after decoding** — abort. No padding, no stretching, no derivation from a short string. (Infisical's 128-bit default is the anti-pattern the research flagged.)
-4. **Master key's GCM tag fails to verify** — abort with "root key does not match this datastore". Never a partial boot.
+4. **Master key's Poly1305 tag fails to verify** — abort with "root key does not match this datastore". Never a partial boot.
 5. **Datastore contains a master key wrapped at an unknown format version** — abort rather than guess.
 6. **Backup export with zero configured recipients** — refuse (§ *Backups*); never silently write plaintext.
 
@@ -122,7 +141,7 @@ Five operations across the three key tiers; all ship in v1, all **operator-initi
 - **`rotate-root-key`** — replace the operator-held root. Re-wraps the master key only; no data touched. Crash-safe protocol below. This is the rotation operators actually need after an env-file leak.
 - **`rotate-master-key`** — generate a new master key and re-wrap **every** tier-3 key (all project DEKs, the instance DEK, the root token key) under it. Retire the old master only after a fenced zero-reference check. Bounded by the number of projects, so seconds.
 - **`rotate-dek --project X` / `--instance`** — append a new DEK version. New writes use it; old versions remain readable (Vault keyring semantics). Free, and incomplete on its own.
-- **`rotate-token-key`** — new root token key version. Changes every change token, so it forces exactly one benign rollout wave across every workload; the revision ADR permits that wave and requires the operations spec to document it. Separate command precisely so it is never a side effect of another rotation.
+- **`rotate-token-key`** — new root token key version, then **recompute the stored change token of every current published snapshot**. Separate command precisely so it is never a side effect of another rotation. Protocol below, because "rotate the key and tokens change" is false as stated: tokens are values recorded on snapshots at materialization, so a new key changes nothing until something rewrites them.
 - **`reencrypt --project X` / `--instance`** — walk every ciphertext onto the current version, then retire the old one. **Resumable and per-row transactional**: interrupt and re-run; rows already current are skipped. No global lock. Scope is **every ciphertext including historical revision payloads and pinned revisions** — a rotation that skips history is not one.
 
 **`rotate-master-key` is not optional, and its absence would have made post-compromise recovery a fiction.** The threat model's recovery posture after a running-server compromise is to rotate *everything*. An attacker who held the process memory holds the **master key**; every DEK — including DEKs minted after the incident — is wrapped under it, so rotating the root re-wraps the same compromised master and rotating a DEK produces a new key the attacker can still unwrap. Recovery is therefore ordered and complete, each key named exactly once:
@@ -147,6 +166,15 @@ So:
 "No global lock" means no lock over *data*. Key-state transitions are serialized: per scope for tier-3, hierarchy-wide for tier-1 and tier-2.
 
 **A key version is retired only when zero ciphertexts reference it, verified by query inside the fence, never assumed.** Retiring a still-referenced version is refused loudly; this is the Kubernetes "mistakes can make data unrecoverable" failure mode, and a count query prevents it.
+
+**Token-key rotation is a metadata rewrite, and needs its own completion protocol.** The two-level fencing above guards *encryption* key state; change tokens are stored snapshot fields, so rotating the root token key touches data the encryption fences do not cover. Fixed here:
+
+- **Scope of recomputation: the current published snapshot of every environment, and nothing else.** Those are the only tokens any consumer compares — the Kubernetes operator reads the latest snapshot's token from a pod annotation. **Historical and pinned snapshots keep their original tokens**, tagged with the token-key version that produced them. Rewriting history would be both pointless and a lie about what was delivered.
+- **Version-tagged tokens.** Every stored token records its token-key version alongside the `v1:` scheme prefix. A comparison across two versions is **not equality-comparable** and must be treated as "changed", never as equal — this is what makes a partially completed rotation safe rather than silently wrong.
+- **Fencing.** Recomputation takes the project's publish serialization (the inheritance ADR's serializable per-project publish), so a concurrent publish either precedes it and gets recomputed, or follows it and materializes under the new key. No snapshot is written under the old key after its environment has been recomputed.
+- **Retirement.** The old token-key version retires when zero *current* snapshots reference it. Historical snapshots pin it forever, so the key material is retained, not destroyed — it is a verification key for history, and § *Erasure* does not apply to it.
+- **Atomicity is per environment, not global.** A rollout wave crossing environments over a few seconds is acceptable; a snapshot with a half-written token is not. Interrupted rotation is resumable and leaves every snapshot on exactly one key version.
+- **Exactly one wave** follows from recomputing each current snapshot exactly once. Running the command twice produces two waves, which is the operator's choice and is warned about, not prevented.
 
 **Root-key rotation is crash-safe across two storage domains.** The wrapped master lives in the datastore; the root key lives in a file, environment, systemd credential or secret mount that no database transaction can update atomically. Writing either side first has a failure window that bricks startup. So rotation is a three-phase protocol over a **dual-wrapped master**:
 
@@ -173,7 +201,7 @@ Re-encryption earns its place after a **running-server compromise**, where maste
 **Every Value, of both classifications**, current and historical, plus:
 
 - MFA seeds and recovery codes;
-- adapter / deployment-module outbound credentials and provider config secrets.
+- adapter / deployment-module outbound credentials and provider config secrets — under the **project DEK** with envelope kind `project_field` when the adapter belongs to a project, under the instance DEK with `instance_field` when it is instance-scoped. A project-owned secret must never land under the instance DEK: it would survive that project's crypto-shred and escape its rotation.
 
 Encrypting `config`-classified values as well as `secret` ones is deliberate. The schema ADR permits reclassification `config → secret`; if `config` values were plaintext, every historical row written before that moment would remain plaintext in the datastore and in every backup already taken, and the reclassification would protect nothing that already exists. It also keeps classification out of the envelope layer entirely — no `if classification == secret` branch in the one place where a wrong branch is unrecoverable. The cost is one AEAD call on a `DATABASE_HOST`.
 
@@ -192,12 +220,14 @@ Two consequences, recorded rather than discovered later:
 
 **Envweave specifies no container format of its own.** Age supplies the whole of it — X25519 recipient stanzas, `scrypt` passphrase recipients, plugin recipients for hardware tokens, the STREAM chunked payload construction with chunk ordering and truncation detection, and a parser hardened by wide deployment. An earlier revision of this ADR hand-specified an equivalent container over ECDH and later over HPKE; cross-model review correctly called the first version a sketch rather than a specification, and the honest conclusion is that **the pieces it kept getting wrong are exactly the pieces age already gets right**. The threat model mandates minimal dependencies and maintainer review of all crypto contributions; adopting a reviewed format is the cheaper side of that mandate, not the expensive one.
 
-What Envweave still owns:
+What Envweave still owns — the contract around the container, which delegation does not supply:
 
 - **Recipient policy.** Multi-recipient wrapping means any single recipient restores. The instance stores only **public recipients**; the private identity never touches the datastore.
 - **Refusing a zero-recipient export**, loudly, rather than writing plaintext.
-- **Passphrase recipients** are supported through age's `scrypt` recipient, documented as the weakest kind. Note this is a **strictly better position than the ADR's previous one**: `scrypt` is memory-hard, where the FIPS-constrained PBKDF2 it replaces is not.
-- **Recipient-set hygiene** — see § *Erasure*, where the conditions for erasure-by-identity-destruction are stated.
+- **Passphrase recipients** use age's `scrypt` recipient — memory-hard, where the FIPS-constrained PBKDF2 it replaces was not. **An `scrypt` stanza must be the only stanza in its container**, per the age specification, so passphrase mode is mutually exclusive with multi-recipient policy: `export` either takes public recipients or a passphrase, never both, and says so rather than silently dropping one.
+- **Distinct keys are not automatically distinct failure domains.** The threat model requires backup identity and root key to fail separately, which is a **custody** requirement, not a cryptographic one: the deployment docs must require separate storage and separate access control for the two, exactly as they already do for the root key versus the datastore. Two keys in one password manager is one failure domain wearing two names.
+- **Restore authenticates the whole archive before committing any state.** Age detects truncation only by reaching a verified final chunk, so a restore that streams-and-applies would commit a prefix of a truncated archive. Restore therefore verifies to the final chunk **first**, and only then begins mutating the instance. Export likewise publishes its artifact atomically — a partially written backup must never be mistakable for a complete one.
+- **Recipient-set hygiene** — see § *Erasure* for the conditions under which destroying identities actually erases anything.
 
 **`crypto/hpke` was considered and rejected.** It is a specified KEM with published test vectors and would have been the right answer *if* the stdlib-only constraint had survived — but it wraps a key, and a backup needs a container: framing, chunking, truncation detection, stanza encoding and parser bounds would all still have been Envweave's to write and test. Since the FIPS goal that motivated staying in stdlib is withdrawn (§ *Primitives*), there is no longer a reason to reimplement what age has already shipped.
 
@@ -219,7 +249,7 @@ For v1, therefore:
 
 - **Per-revision cryptographic erasure is not offered**, and per-value DEKs would not deliver it if it were.
 - **Crypto-shred on project delete** is retained, correctly scoped: destroying a project's DEK after its rows are gone protects **future** copies of the datastore, not retained ones.
-- The construction that *does* erase history is **destroying a backup container's recipient identities** — but only under conditions that must be stated, because "destroy the identity" is easy to believe and hard to achieve. Erasure of a container holds only when **every** identity capable of opening it is gone: each recipient private key, every escrowed or offline copy, every hardware token holding one, and any passphrase recipient's passphrase wherever it is written down or memorized. **One surviving recipient defeats erasure entirely.** Conversely a shared identity spans containers, so destroying it erases every backup wrapped to it, including ones the operator meant to keep. Recipient-set hygiene — one identity per retention class, inventoried — is an operations-spec requirement, not a detail.
+- The construction that *does* erase history is **destroying a backup container's recipient identities** — but only under conditions that must be stated, because "destroy the identity" is easy to believe and hard to achieve. Erasure of a container holds only when **every** identity capable of opening it is gone *and* **no decrypted form of its contents survives anywhere**. That means: each recipient private key, every escrowed or offline copy, every hardware token holding one, any passphrase wherever written or memorized — **and** every decrypted dump, extracted file key, restored replica, downstream copy, and storage-layer or filesystem snapshot taken while the data was readable. **One surviving recipient, or one surviving decrypted copy, defeats erasure entirely.** Conversely a shared identity spans containers, so destroying it erases every backup wrapped to it, including ones the operator meant to keep. Recipient-set hygiene — one identity per retention class, inventoried — is an operations-spec requirement, not a detail.
 
 **Binding on the operations spec, sharper than the revision ADR's version:** payload GC retires a secret from the live datastore only; retiring it from history requires **deleting the backups, or destroying every identity that opens them** under the conditions above; the **backup-retention bound is mandatory in v1**, because the cryptographic alternative the revision ADR offered is unavailable in a design where the key hierarchy travels inside the backup.
 
@@ -231,7 +261,7 @@ The envelope layer is **thin and hand-written over vetted primitives** — heade
 
 The custom cryptographic surface this ADR retains is therefore small and enumerable: **an injective AAD encoder, a header codec, and a keyring lookup**. Every primitive, every key agreement, and the entire backup container come from reviewed external code. Key management is Envweave's product; the storage format stays under Envweave's control and Envweave's version number.
 
-**The envelope package is the only caller of a cryptographic primitive in the codebase.** No import of `crypto/cipher`, `crypto/aes`, `crypto/hkdf`, `crypto/ecdh` or `crypto/pbkdf2` outside it. Enforced by test (§ *CI-enforced invariants*), not by convention. Together with the threat model's redacting logger types, that is the mechanism half of "plaintext never leaks".
+**The envelope package is the only caller of a cryptographic primitive in the codebase.** No import of `golang.org/x/crypto/chacha20poly1305`, `crypto/cipher`, `crypto/aes`, `crypto/hkdf` or `crypto/hmac` outside it, and no import of `filippo.io/age` outside the backup package. Enforced by test (§ *CI-enforced invariants*), not by convention. Together with the threat model's redacting logger types, that is the mechanism half of "plaintext never leaks".
 
 ## Key material in memory
 
@@ -240,7 +270,7 @@ Envweave makes **no memory-secrecy claim**. What it does:
 - **The root key is zeroed after startup.** It is needed exactly twice — unwrapping the master key at boot, and `rotate-root-key` — and is re-read from its source on demand. This shrinks the extraction window from *always* to *two brief moments*. **It only works when the key arrives as a file or systemd credential**; with `ENVWEAVE_ROOT_KEY` the value sits in the process environment for the whole lifetime regardless, which is the strongest concrete reason documentation steers to the file path.
 - `RLIMIT_CORE = 0` (no core dumps) and `PR_SET_DUMPABLE = 0` on Linux (no same-uid ptrace attach, no `/proc/<pid>/mem` read).
 - Best-effort zeroing of key buffers whose lifetime is known.
-- Master key held unwrapped for the process lifetime; project DEKs decrypted on demand into a bounded LRU cache, evicted on rotation and on project delete.
+- Master key, **instance DEK** and **root token key** held unwrapped for the process lifetime; project DEKs decrypted on demand into a bounded LRU cache, evicted on rotation and on project delete. Derived scoped token keys are computed per use and not cached.
 - **No** `mlock`, no guarded enclaves. Swap hygiene (encrypted swap, or none) is the operator's, documented and not claimed.
 
 `memguard`-style enclaves were rejected: the Go runtime still copies buffers during GC and interface boxing, so the guarantee is partial while reading as total — precisely what the threat model forbids this ADR from doing — and it adds a dependency to the crypto path for a property it cannot actually deliver.
@@ -251,7 +281,7 @@ Envweave makes **no memory-secrecy claim**. What it does:
 
 Envweave's documentation MUST state, in Vault's enumerate-the-exclusions style and never as marketing:
 
-**Protected:** stolen datastore files, dumps, disks and backups without the root key; mis-scoped datastore credentials; tamper detection via GCM tags; ciphertext transplant between rows, projects or organizations (§ *Envelope format*); crypto-shred of a deleted project against future copies.
+**Protected:** stolen datastore files, dumps, disks and backups without the root key; mis-scoped datastore credentials; tamper detection via AEAD authentication tags; ciphertext transplant between rows, projects or organizations (§ *Envelope format*); crypto-shred of a deleted project against future copies.
 
 **Not protected:** root or code execution on the app host; memory inspection of the running process (the root key at its two moments, the master key, and cached DEKs are in RAM); an attacker holding API-level admin credentials (that is authorization, not cryptography); a single-box install whose root key sits in the same env file that gets backed up alongside the database — at-rest encryption then defends the dump path only, which remains the most common leak vector; anything already delivered to a workload, a Kubernetes Secret, or a CI provider (the delivery boundary is where Envweave's guarantees end).
 
@@ -268,18 +298,23 @@ Every invariant this ADR creates is a test, not a paragraph:
 5. **AAD injectivity** — adversarial field values chosen to collide under naive concatenation (a field ending where the next begins) must produce distinct AADs; a header whose declared lengths do not consume the buffer exactly is rejected.
 6. **Startup refusals** — missing root key, wrong root key, non-256-bit key, group/world-readable key file: each aborts with its own distinct error.
 7. **Rotation completeness** — after `reencrypt`, zero ciphertexts reference the retired version; retiring a still-referenced version is refused; a writer holding a stale key generation is rejected rather than committing under a retired key.
-8. **Crash-safe root rotation** — the instance boots with either the old or the new root at every point in prepare/verify/finalize, and warns while dual-wrapped.
+8. **Crash-safe root rotation** — the instance boots with either root while dual-wrapped, and warns on every start; **after finalize only the new root boots** and the old is rejected.
 9. **Master rotation completeness** — after `rotate-master-key`, no tier-3 key references the retired master; a tier-3 key created concurrently with master rotation lands under the new master, never the retiring one; `rotate-master-key` during dual-wrapped root state is refused, and vice versa.
 10. **Scoped token-key injectivity** — identifier tuples that differ only in where the boundary falls (`org "a" / project "bc"` versus `org "ab" / project "c"`) derive distinct token keys.
 11. **Ciphertext uniqueness** — N encryptions of identical plaintext under one key produce N distinct ciphertexts (nonce freshness).
 12. **Crypto chokepoint** — no import of a cryptographic primitive package outside the envelope package.
-13. **Backup round-trip** — zero recipients refused; every recipient kind (X25519, passphrase) round-trips; a tampered container fails to decrypt; a restore requires the identity **and** the root key, and neither alone yields a value.
+13. **Backup round-trip** — zero recipients refused; X25519 and passphrase recipients each round-trip; a tampered container fails to decrypt; an **`scrypt` stanza combined with any other recipient is refused** at export; a **truncated archive is detected before any restored state is committed**; a restore requires the identity **and** the root key, and neither alone yields a value.
+14. **`crypto/rand` failure is fatal** — with randomness injected to fail or short-read, every seal aborts and no ciphertext is written.
+15. **Token-key rotation** — after `rotate-token-key`, every current published snapshot carries a token under the new key version and every historical and pinned snapshot retains its original; a publish racing the rotation lands under exactly one key version; tokens of differing versions never compare equal; an interrupted rotation is resumable and leaves no snapshot half-written.
+16. **Project-scoped field routing** — a project-owned sensitive field encrypted under the instance DEK is rejected; after a project crypto-shred, no `project_field` ciphertext for that project remains readable.
 
 ## Propagations (binding on downstream tickets)
 
+- **Operations spec** (fog), additionally from this revision: **separate custody and access control for the backup identity versus the root key** (distinct keys are not distinct failure domains if one password manager holds both); the **VM snapshot/clone RNG hazard** (VMGenID absent, ignored or broken) with ordinary container image forking explicitly excluded; passphrase-versus-recipient exclusivity in export runbooks; and token-key rotation as a **deliberate, warned, one-wave operation**.
 - **Operations spec** (fog): the **backup-retention bound is mandatory in v1** — § *Erasure* removes the alternative the revision ADR offered. Also owns: root-key escrow and loss procedure; rotation runbooks including the **full post-compromise recovery order** (root → master → tier-3 keys → `reencrypt` → token key) and the dual-wrapped transition state; restore procedure under the threat model's fail-closed recovery mode; **backup recipient-set hygiene** (one identity per retention class, inventoried, since one surviving recipient defeats erasure and a shared identity spans containers); `reencrypt` scheduling guidance; DEK cache size bound; the **RNG-rollback hazard** (VM snapshot restore and image forking can replay CSPRNG state, § *Primitives*); the **benign rollout wave** triggered by root-token-key rotation (already required by the revision ADR); and the requirement that the root key never share a backup or storage domain with the datastore.
 - **RBAC ([#15](https://github.com/Dunky13/envweave/issues/15))**: `rotate-root-key`, `rotate-master-key`, `rotate-dek`, `reencrypt`, `export` and `restore` are operator- or instance-level capabilities, separate grants, never bundled with org administration. A project delete that crypto-shreds a DEK is irreversible and MUST be gated accordingly.
-- **Revision model ([#11](https://github.com/Dunky13/envweave/issues/11))**, satisfied rather than amended: the root token key is a distinct key tier (§ *Key hierarchy*), so encryption-key hygiene never perturbs change tokens; and rollback's re-encryption into new rows is an internal server operation requiring no `reveal` (§ *Envelope format*), preserving restore-without-reveal.
+- **Revision model ([#11](https://github.com/Dunky13/envweave/issues/11))**, satisfied rather than amended: the root token key is a distinct key tier (§ *Key hierarchy*), so encryption-key hygiene never perturbs change tokens.
+- **Schema model ([#12](https://github.com/Dunky13/envweave/issues/12))**, conformed to: rollback re-encrypts into new rows as an internal server operation, which is **not** an authorization — restoring a `secret` occurrence still requires **`reveal-history`** plus the routing gate, and so does every other server-side duplication of stored secret material (§ *Envelope format*).
 - **Architecture ([#22](https://github.com/Dunky13/envweave/issues/22))**, additionally: identifiers bound into an AAD are **immutable and never reused**, which constrains every future storage migration — renumbering rows or reusing freed ids renders existing ciphertext undecryptable.
 - **Machine identities ([#17](https://github.com/Dunky13/envweave/issues/17))**: tokens are high-entropy random stored as hash verifiers, never envelope-encrypted — a root-key holder must not be able to recover a token.
 - **Human auth ([#16](https://github.com/Dunky13/envweave/issues/16))**: password verifiers use **Argon2id**, per the threat model, with **no conflict to resolve** — an earlier revision of this ADR flagged Argon2id as incompatible with a FIPS build, and that constraint is withdrawn (§ *Primitives*). #16 chooses parameters, not algorithms-under-duress.
