@@ -69,6 +69,15 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 17 — polish pass
+
+Unified :focus-visible ring on every control; key names truncate inside a
+flex span so the req badge always survives; monogram hues assigned by
+golden angle (no near-identical projects); light-theme zebra strengthened;
+icon buttons fixed-width for optical equality; env picker button reaches a
+32px target; inline SVG favicon kills the last console error; dead pill
+CSS (own/inh/def/masked) removed.
+
 ## Iteration 16 — clarify pass (critique issue 3 + copy sweep)
 
 Reveal gets real button chrome ("reveal value" / "hide value") — the most
