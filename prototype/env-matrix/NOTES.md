@@ -69,6 +69,14 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 19 — normalize (critique issue 5)
+
+One .btn vocabulary (sheet actions, reveal, empty-state CTAs — three
+duplicate rule-sets deleted). One badge rule: pending/error counts render
+only when non-zero. The problems view is a real filter: total badge,
+active state, matrix reduced to problem keys (empty groups skipped),
+"no problems" state with a show-all escape, cleared on project switch.
+
 ## Iteration 18 — empty state + real projects (critique issue 2)
 
 Per-project key store: envweave-demo is seeded, the other projects start
