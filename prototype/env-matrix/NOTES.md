@@ -69,6 +69,11 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 9 — rail + panel de-duped
+
+**Standing convention (Marc): every change is a new numbered iteration —
+never mutate a published one.**
+
 Refinement (Marc): rail + panel leads, but rail and panel must not both
 list projects — the rail owns switching, the panel navigates inside the
 current project (its name as header + groups/views + a settings entry).
