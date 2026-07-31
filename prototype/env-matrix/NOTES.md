@@ -35,6 +35,17 @@ Demo data unchanged: 58 keys, seeded finds (type violation, relative-URL
 violation, required-unset in prod, masked-while-required, secret satisfied in
 prod only via inheritance from staging).
 
+## Decided during testing (Marc)
+
+- **Origin visibility = sharp rule (b)**: config keys always show provenance;
+  a secret cell shows provenance only where the viewer holds reveal for that
+  env (uniform 🔒 pill otherwise). Secret-row drift tint only when the viewer
+  can reveal every readable env. Rationale: a visible "prod inherits stg" plus
+  reveal(stg) is prod plaintext — the comparison oracle ADR #11 closes.
+- **Whole environments hideable per principal**: no read(env) → env
+  nonexistent (no column, chip, counts) — permission ADR #15 already locks
+  this (unauthorized ≡ nonexistent). `external` role demonstrates.
+
 ## Verdict
 
 _(fill in when the ticket resolves)_
