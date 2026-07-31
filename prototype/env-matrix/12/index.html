@@ -582,8 +582,9 @@ function renderMatrix(){
   const head=`<thead><tr><th class="keyh">key
     <button class="envbtn" onclick="toggleEnvPop(event)">envs ${envs.length}/${readableEnvs().length} ▾</button></th>${envs.map(e=>
     `<th style="min-width:190px">${e.name}${e.protected?'<span class="pp">PROTECTED</span>':''}</th>`).join('')}</tr></thead>`;
-  let body='',ri=0;
+  let body='';
   for(const f of FOLDERS){
+    let ri=0;
     const ks=KEYS.filter(k=>k.folder===f);
     const closed=S.collapsed.has(f);
     const probs=groupProblems(f);
