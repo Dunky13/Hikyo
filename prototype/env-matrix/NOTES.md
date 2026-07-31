@@ -49,6 +49,16 @@ prod only via inheritance from staging).
   nonexistent (no column, chip, counts) — permission ADR #15 already locks
   this (unauthorized ≡ nonexistent). `external` role demonstrates.
 
+## Trialing in iteration 5 (not yet decided)
+
+- **Opaque inheritance**: grid shows only resolved values (uniform pill, no
+  `◂ origin`, no base arrows anywhere); provenance appears only in the cell
+  sheet, still under the sharp rule. Trade being felt: calmer grid and no
+  confusion, versus losing at-a-glance "which cells are overrides" scanning.
+  Compare against `/4/` which keeps origins in-grid.
+- **Sticky header row + sticky group headers** while scrolling (the matrix
+  scrolls inside a fixed-height container now; key column sticky as before).
+
 ## Verdict
 
 _(fill in when the ticket resolves)_

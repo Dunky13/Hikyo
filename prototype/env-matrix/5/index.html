@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
 <!--
-  THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 2.
-  Variant C (Cascade) won round 1; editorial style dropped project-wide.
-  This iteration: dark default + light theme, mobile-first, in-place editing
-  via a bottom sheet, permission-gated reveal (role simulator), mask-vs-secret
-  clarity, env show/hide chips, collapsible groups with comma key list.
+  THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 5.
+  On top of iteration 4 (sharp origin rule): inheritance is OPAQUE in the
+  grid — cells show only the resolved value; provenance appears only in the
+  cell sheet (still gated: config always, secrets only with reveal there).
+  Sticky env header row and sticky group headers while scrolling.
   Design context: PRODUCT.md / DESIGN.md at repo root.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -58,6 +58,7 @@
   body{
     background:var(--bg);color:var(--tx);font-family:var(--sans);
     font-size:14px;-webkit-font-smoothing:antialiased;
+    height:100dvh;display:flex;flex-direction:column;overflow:hidden;
     padding-bottom:env(safe-area-inset-bottom);
   }
   button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -68,7 +69,7 @@
   header{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:12px 16px;border-bottom:1px solid var(--line);
-    position:sticky;top:0;background:var(--bg);z-index:10;
+    background:var(--bg);flex:none;
   }
   header .crumb{font-weight:600;font-size:15px;letter-spacing:.01em}
   header .crumb span{color:var(--accent)}
@@ -93,7 +94,7 @@
   .envbar{
     display:flex;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none;
     padding:10px 16px;border-bottom:1px solid var(--line);
-    position:sticky;top:61px;background:var(--bg);z-index:9;
+    background:var(--bg);flex:none;
   }
   .envbar::-webkit-scrollbar{display:none}
   .envbar .hint{font-size:11.5px;color:var(--tx-faint);white-space:nowrap;margin-right:2px}
@@ -111,15 +112,17 @@
   .chip:not(.on){opacity:.55}
 
   /* ---------------- matrix ---------------- */
-  .wrap{overflow-x:auto;overscroll-behavior-x:contain}
+  /* .wrap is THE scroll container (both axes) so thead, group rows and the
+     key column can all stick inside it */
+  .wrap{flex:1;overflow:auto;overscroll-behavior:contain}
   table{border-collapse:separate;border-spacing:0;min-width:100%}
   thead th{
-    position:sticky;top:0;background:var(--bg);text-align:left;
+    position:sticky;top:0;z-index:4;background:var(--bg);text-align:left;
     padding:12px 12px 10px;border-bottom:1px solid var(--line);
     font-size:12px;font-weight:600;
   }
   thead th.keyh{
-    position:sticky;left:0;z-index:3;background:var(--bg);
+    position:sticky;left:0;z-index:5;background:var(--bg);
     font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--tx-faint);
     min-width:150px;max-width:200px;
   }
@@ -135,7 +138,8 @@
   td.key .lock{color:var(--bad);margin-right:5px}
   td.key .req{color:var(--tx-faint);font-size:9.5px;margin-left:6px;font-family:var(--sans)}
   tr.grp td{
-    position:sticky;left:0;background:var(--bg);padding:0;border-bottom:1px solid var(--line);
+    position:sticky;top:var(--gh,55px);z-index:3;
+    background:var(--bg);padding:0;border-bottom:1px solid var(--line);
   }
   tr.grp button.gbtn{
     display:flex;align-items:center;gap:10px;text-align:left;
@@ -170,6 +174,8 @@
   .pill:hover{filter:brightness(1.12)}
   .pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .pill .tx{overflow:hidden;text-overflow:ellipsis}
+  .pill.val{border-color:var(--line);color:var(--tx)}
+  .pill.val .from{color:var(--bad);font-size:10px}
   .pill.own{background:var(--accent);color:var(--on-accent);font-weight:500}
   .pill.inh{border-color:var(--line);color:var(--tx-dim)}
   .pill.inh .from,.pill.def .from{color:var(--accent);font-weight:600;font-size:10px}
@@ -188,8 +194,9 @@
 
   /* ---------------- legend ---------------- */
   .legend{
-    display:flex;gap:10px 20px;flex-wrap:wrap;align-items:center;
-    padding:18px 16px 120px;font-size:11.5px;color:var(--tx-dim);
+    flex:none;display:flex;gap:8px 18px;flex-wrap:wrap;align-items:center;
+    padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);font-size:11.5px;color:var(--tx-dim);
   }
   .legend .pill{cursor:default;min-height:24px;padding:4px 10px}
   .legend .pill:hover{filter:none}
@@ -269,7 +276,7 @@
   @media (max-width:700px){
     header{padding:10px 12px;gap:8px}
     header .crumb{font-size:14px}
-    .envbar{top:57px;padding:8px 12px}
+    .envbar{padding:8px 12px}
     thead th{padding:10px 8px}
     thead th.keyh{min-width:120px;max-width:140px}
     td.key{max-width:140px;font-size:11px}
@@ -285,10 +292,11 @@
   <span class="grow"></span>
   <span class="drafts" id="drafts" hidden></span>
   <span class="ctl"><span class="lbl">acting as</span>
-    <select id="role" title="simulated principal — decides reveal permission">
+    <select id="role" title="simulated principal — decides read/reveal permission and inheritance visibility">
       <option value="admin">admin · reveal everywhere</option>
       <option value="dev" selected>developer · reveal except prod</option>
       <option value="viewer">viewer · no reveal</option>
+      <option value="external">external · production hidden</option>
     </select>
   </span>
   <button class="iconbtn" id="themebtn" title="toggle theme">◐</button>
@@ -396,7 +404,8 @@ function cellInfo(k,envId){
   return{...r,required,invalid,missing,changed};
 }
 function rowDiff(k){
-  const vals=ENVS.map(e=>resolve(k,e.id)).filter(r=>r.value!==undefined).map(r=>r.value);
+  /* computed over readable envs only — an unreadable env must not move any signal */
+  const vals=readableEnvs().map(e=>resolve(k,e.id)).filter(r=>r.value!==undefined).map(r=>r.value);
   return new Set(vals).size>1;
 }
 function provChain(k,envId){
@@ -426,25 +435,37 @@ const S={
   sheet:null,                     // {key,envId,mode:'view'|'edit'}
   adding:null,
 };
-/* who may reveal where (simulated permission model; real one = ADR #15) */
-function canReveal(envId){
-  if(S.role==='admin')return true;
-  if(S.role==='dev')return !envById(envId).protected;
-  return false;
-}
+/* simulated permission model; real one = ADR #15.
+   read=false ⇒ env nonexistent for this principal (unauthorized ≡ nonexistent). */
+const ROLES={
+  admin:{read:e=>true,reveal:e=>true},
+  dev:{read:e=>true,reveal:e=>!e.protected},
+  viewer:{read:e=>true,reveal:e=>false},
+  external:{read:e=>!e.protected,reveal:e=>!e.protected},
+};
+const role=()=>ROLES[S.role];
+const canReveal=envId=>role().reveal(envById(envId));
+/* origin rule ("sharp"): config keys always show provenance (values are
+   readable anyway, no oracle); a secret cell shows provenance only where the
+   viewer holds reveal for THAT env — "prod inherits stg" + reveal(stg) would
+   otherwise be prod plaintext (the comparison oracle ADR #11 closes). */
+const showOrigin=(k,envId)=>!k.secret||canReveal(envId);
+/* drift on a secret row compares envs pairwise — visible only when the viewer
+   could reveal every readable env, i.e. the comparison adds nothing new */
+const secretDriftVisible=()=>readableEnvs().every(e=>role().reveal(e));
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const MASK='••••••••';
-const visibleEnvs=()=>ENVS.filter(e=>!S.hiddenEnvs.has(e.id));
+const readableEnvs=()=>ENVS.filter(e=>role().read(e));
+const visibleEnvs=()=>readableEnvs().filter(e=>!S.hiddenEnvs.has(e.id));
 
 /* ============================ render ============================ */
 function renderEnvbar(){
   document.getElementById('envbar').innerHTML=
     `<span class="hint">environments</span>`+
-    ENVS.map(e=>{
+    readableEnvs().map(e=>{
       const on=!S.hiddenEnvs.has(e.id);
       return`<button class="chip ${on?'on':''}" onclick="toggleEnv('${e.id}')" aria-pressed="${on}">
         <span class="eye">${on?'●':'○'}</span>${e.name}
-        ${e.base?`<span class="b">◂ ${e.base}</span>`:'<span class="b">◂ defaults</span>'}
         ${e.protected?'<span class="p">PROT</span>':''}
       </button>`;
     }).join('');
@@ -460,7 +481,7 @@ function toggleGroup(f){
 }
 function groupProblems(f){
   let n=0;
-  for(const k of KEYS.filter(k=>k.folder===f))for(const e of ENVS){
+  for(const k of KEYS.filter(k=>k.folder===f))for(const e of readableEnvs()){
     const c=cellInfo(k,e.id);if(c.invalid||c.missing)n++;
   }
   return n;
@@ -475,10 +496,10 @@ function pillFor(k,e,c){
   else if(c.state==='masked')inner=`<span class="pill masked" ${open}><span class="tx">∅ masked</span></span>`;
   else if(c.state==='absent')inner=`<span class="pill absent" ${open}><span class="tx">·</span></span>`;
   else{
+    /* inheritance is opaque in the grid: every resolved value renders the
+       same, wherever it comes from — provenance lives in the cell sheet */
     const v=esc(shownValue(k,e.id,c));
-    if(c.state==='own')inner=`<span class="pill own" ${open}>${k.secret?'<span class="from">🔒</span>':''}<span class="tx">${v}</span>${d}${draft}</span>`;
-    else if(c.state==='def')inner=`<span class="pill def" ${open}><span class="from">◂ def</span><span class="tx">${v}</span>${d}${draft}</span>`;
-    else inner=`<span class="pill inh" ${open}><span class="from">◂ ${c.origin}</span><span class="tx">${v}</span>${d}${draft}</span>`;
+    inner=`<span class="pill val" ${open}>${k.secret?'<span class="from">🔒</span>':''}<span class="tx">${v}</span>${d}${draft}</span>`;
   }
   return inner;
 }
@@ -490,8 +511,7 @@ function shownValue(k,envId,c){
 function renderMatrix(){
   const envs=visibleEnvs();
   const head=`<thead><tr><th class="keyh">key</th>${envs.map(e=>
-    `<th style="min-width:190px">${e.name}${e.protected?'<span class="pp">PROTECTED</span>':''}
-     <span class="base">inherits <b>◂ ${e.base?envById(e.base).name:'project defaults'}</b></span></th>`).join('')}</tr></thead>`;
+    `<th style="min-width:190px">${e.name}${e.protected?'<span class="pp">PROTECTED</span>':''}</th>`).join('')}</tr></thead>`;
   let body='';
   for(const f of FOLDERS){
     const ks=KEYS.filter(k=>k.folder===f);
@@ -515,7 +535,8 @@ function renderMatrix(){
         <button class="x" onclick="S.adding=null;render()">cancel</button>
       </span></td></tr>`;
     for(const k of ks){
-      body+=`<tr class="${rowDiff(k)?'drift':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
+      const drift=rowDiff(k)&&(!k.secret||secretDriftVisible());
+      body+=`<tr class="${drift?'drift':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
       for(const e of envs)body+=`<td>${pillFor(k,e,cellInfo(k,e.id))}</td>`;
       body+='</tr>';
     }
@@ -524,12 +545,10 @@ function renderMatrix(){
 }
 function renderLegend(){
   document.getElementById('legend').innerHTML=`
-    <span class="pill own">value</span> set in this environment
-    <span class="pill inh"><span class="from">◂ stg</span>value</span> inherited
-    <span class="pill def"><span class="from">◂ def</span>value</span> from project defaults
+    <span class="pill val">value</span> resolved value — tap for where it comes from
     <span class="pill masked">∅ masked</span> no value here, on purpose
     <span class="pill missing">! required · unset</span> blocks publish
-    <span>🔒 secret (tap to reveal, if permitted) · Δ changed · amber row = values drift · tap any cell to inspect or edit</span>`;
+    <span>🔒 secret (tap to reveal, if permitted) · Δ changed · amber row = values drift</span>`;
 }
 function renderDrafts(){
   const el=document.getElementById('drafts');
@@ -538,6 +557,9 @@ function renderDrafts(){
 }
 function render(){
   renderEnvbar();renderMatrix();renderLegend();renderDrafts();
+  /* group headers stick right under the measured thead */
+  const th=document.querySelector('#matrix thead');
+  if(th)document.getElementById('matrix').style.setProperty('--gh',th.offsetHeight+'px');
   if(S.sheet)renderSheet();
 }
 
@@ -556,7 +578,10 @@ function renderSheet(opening){
   const reveal=canReveal(envId);
   const revealed=S.revealed.has(key+':'+envId);
 
-  const chain=hops.map((h,i)=>{
+  /* provenance shown per the sharp rule: config always; secret only with
+     reveal here — naming the origin env of an unrevealable cell turns
+     reveal(origin) into that cell's plaintext */
+  const chain=!showOrigin(k,envId)?'':hops.map((h,i)=>{
     const t=h.layer==='defaults'?'defaults':h.layer;
     const cls=h.win?'win':h.masked?'stop':'';
     const inner=h.masked?`${t} ∅`:h.has?t:`<span style="opacity:.45">${t}</span>`;
@@ -568,6 +593,7 @@ function renderSheet(opening){
   else if(c.missing)stateLine=`<b>required here and ${c.state==='masked'?'masked':'unset'}</b> — publish is blocked`;
   else if(c.state==='masked')stateLine=`<b>masked</b> in ${env.name}`;
   else if(c.state==='absent')stateLine=`unset — no layer provides a value`;
+  else if(!showOrigin(k,envId))stateLine=`has a value in <b>${env.name}</b>`;
   else if(c.state==='own')stateLine=`set in <b>${env.name}</b>`;
   else stateLine=`inherited from <b>${c.origin==='defaults'?'project defaults':c.origin}</b>`;
 
@@ -597,8 +623,8 @@ function renderSheet(opening){
     vrow=`<div class="vrow">${cur}${revealBtn}</div>
     ${k.secret&&c.value!==undefined&&!reveal?`<div class="noperm">your role (${S.role}) has no reveal permission ${env.protected?'in protected environments':'here'} — you can still replace the value write-only.</div>`:''}
     <div class="acts">
-      <button class="primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${c.state==='own'?'edit value':'override here'}</button>
-      ${c.state==='own'&&!k.draft?`<button onclick="clearOverride()">clear override</button>`:''}
+      <button class="primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${!showOrigin(k,envId)?'edit value':c.state==='own'?'edit value':'override here'}</button>
+      ${showOrigin(k,envId)&&c.state==='own'&&!k.draft?`<button onclick="clearOverride()">clear override</button>`:''}
       ${c.state!=='masked'?`<button class="danger" onclick="maskHere()">mask here</button>`:`<button onclick="clearOverride()">unmask</button>`}
       <button onclick="closeSheet()">close</button>
     </div>`;
@@ -609,8 +635,8 @@ function renderSheet(opening){
     <h2>${k.secret?'<span class="lock">🔒</span>':''}${esc(k.name)}
       <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${k.folder}/ · ${k.type} · ${k.secret?'secret':'config'}</span></h2>
     <div class="sub">${env.name}${env.protected?' · <b>protected</b>':''} — ${stateLine}${c.changed?' · <b>Δ changed</b>':''}</div>
-    ${k.desc?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
-    <div class="chain">${chain}</div>
+    ${k.desc&&showOrigin(k,envId)?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
+    ${chain?`<div class="chain">${chain}</div>`:''}
     ${vrow}
     <div class="explain">
       <b>secret vs mask</b> — <b>secret</b> is what a key <i>is</i> (classification): its values exist but are hidden; seeing one takes reveal permission. <b>mask</b> is a per-environment value state: “no value here, on purpose” — it also stops inheritance from filling this cell.
@@ -665,7 +691,11 @@ function addKey(folder){
 }
 
 /* ============================ chrome ============================ */
-document.getElementById('role').onchange=e=>{S.role=e.target.value;S.revealed.clear();render()};
+document.getElementById('role').onchange=e=>{
+  S.role=e.target.value;S.revealed.clear();closeSheet();
+  if(visibleEnvs().length===0)S.hiddenEnvs.clear();
+  render();
+};
 document.getElementById('themebtn').onclick=()=>{
   S.theme=S.theme==='dark'?'light':'dark';
   document.body.dataset.theme=S.theme;

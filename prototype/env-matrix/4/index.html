@@ -286,7 +286,7 @@
   <span class="drafts" id="drafts" hidden></span>
   <span class="ctl"><span class="lbl">acting as</span>
     <select id="role" title="simulated principal — decides read/reveal permission and inheritance visibility">
-      <option value="admin">admin · reveal everywhere · sees inheritance</option>
+      <option value="admin">admin · reveal everywhere</option>
       <option value="dev" selected>developer · reveal except prod</option>
       <option value="viewer">viewer · no reveal</option>
       <option value="external">external · production hidden</option>
@@ -429,18 +429,23 @@ const S={
   adding:null,
 };
 /* simulated permission model; real one = ADR #15.
-   read=false ⇒ env nonexistent for this principal (unauthorized ≡ nonexistent).
-   inherit ⇒ may see origin markers / provenance / base topology — hidden
-   otherwise, because "prod inherits stg" + reveal(stg) = prod plaintext. */
+   read=false ⇒ env nonexistent for this principal (unauthorized ≡ nonexistent). */
 const ROLES={
-  admin:{read:e=>true,reveal:e=>true,inherit:true},
-  dev:{read:e=>true,reveal:e=>!e.protected,inherit:false},
-  viewer:{read:e=>true,reveal:e=>false,inherit:false},
-  external:{read:e=>!e.protected,reveal:e=>!e.protected,inherit:false},
+  admin:{read:e=>true,reveal:e=>true},
+  dev:{read:e=>true,reveal:e=>!e.protected},
+  viewer:{read:e=>true,reveal:e=>false},
+  external:{read:e=>!e.protected,reveal:e=>!e.protected},
 };
 const role=()=>ROLES[S.role];
 const canReveal=envId=>role().reveal(envById(envId));
-const seesInherit=()=>role().inherit;
+/* origin rule ("sharp"): config keys always show provenance (values are
+   readable anyway, no oracle); a secret cell shows provenance only where the
+   viewer holds reveal for THAT env — "prod inherits stg" + reveal(stg) would
+   otherwise be prod plaintext (the comparison oracle ADR #11 closes). */
+const showOrigin=(k,envId)=>!k.secret||canReveal(envId);
+/* drift on a secret row compares envs pairwise — visible only when the viewer
+   could reveal every readable env, i.e. the comparison adds nothing new */
+const secretDriftVisible=()=>readableEnvs().every(e=>role().reveal(e));
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const MASK='••••••••';
 const readableEnvs=()=>ENVS.filter(e=>role().read(e));
@@ -452,7 +457,7 @@ function renderEnvbar(){
     `<span class="hint">environments</span>`+
     readableEnvs().map(e=>{
       const on=!S.hiddenEnvs.has(e.id);
-      const base=seesInherit()?(e.base?`<span class="b">◂ ${e.base}</span>`:'<span class="b">◂ defaults</span>'):'';
+      const base=e.base?`<span class="b">◂ ${e.base}</span>`:'<span class="b">◂ defaults</span>';
       return`<button class="chip ${on?'on':''}" onclick="toggleEnv('${e.id}')" aria-pressed="${on}">
         <span class="eye">${on?'●':'○'}</span>${e.name}
         ${base}
@@ -485,11 +490,11 @@ function pillFor(k,e,c){
   else if(c.missing)inner=`<span class="pill missing" ${open}><span class="tx">! required · ${c.state==='masked'?'masked':'unset'}</span></span>`;
   else if(c.state==='masked')inner=`<span class="pill masked" ${open}><span class="tx">∅ masked</span></span>`;
   else if(c.state==='absent')inner=`<span class="pill absent" ${open}><span class="tx">·</span></span>`;
-  else if(!seesInherit()){
-    /* origin hidden: own / inherited / defaults all render identically —
-       an origin marker on an unrevealable env is a comparison oracle */
+  else if(!showOrigin(k,e.id)){
+    /* secret cell without reveal here: own / inherited / defaults render
+       identically — an origin marker would be a comparison oracle */
     const v=esc(shownValue(k,e.id,c));
-    inner=`<span class="pill inh" ${open}>${k.secret?'<span class="from">🔒</span>':''}<span class="tx">${v}</span>${d}${draft}</span>`;
+    inner=`<span class="pill inh" ${open}><span class="from">🔒</span><span class="tx">${v}</span>${d}${draft}</span>`;
   }else{
     const v=esc(shownValue(k,e.id,c));
     if(c.state==='own')inner=`<span class="pill own" ${open}>${k.secret?'<span class="from">🔒</span>':''}<span class="tx">${v}</span>${d}${draft}</span>`;
@@ -507,7 +512,7 @@ function renderMatrix(){
   const envs=visibleEnvs();
   const head=`<thead><tr><th class="keyh">key</th>${envs.map(e=>
     `<th style="min-width:190px">${e.name}${e.protected?'<span class="pp">PROTECTED</span>':''}
-     ${seesInherit()?`<span class="base">inherits <b>◂ ${e.base?envById(e.base).name:'project defaults'}</b></span>`:''}</th>`).join('')}</tr></thead>`;
+     <span class="base">inherits <b>◂ ${e.base?envById(e.base).name:'project defaults'}</b></span></th>`).join('')}</tr></thead>`;
   let body='';
   for(const f of FOLDERS){
     const ks=KEYS.filter(k=>k.folder===f);
@@ -531,8 +536,7 @@ function renderMatrix(){
         <button class="x" onclick="S.adding=null;render()">cancel</button>
       </span></td></tr>`;
     for(const k of ks){
-      /* drift on a secret row is itself a cross-env comparison signal — admin-only, like origin */
-      const drift=rowDiff(k)&&(seesInherit()||!k.secret);
+      const drift=rowDiff(k)&&(!k.secret||secretDriftVisible());
       body+=`<tr class="${drift?'drift':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
       for(const e of envs)body+=`<td>${pillFor(k,e,cellInfo(k,e.id))}</td>`;
       body+='</tr>';
@@ -541,15 +545,14 @@ function renderMatrix(){
   document.getElementById('matrix').innerHTML=head+`<tbody>${body}</tbody>`;
 }
 function renderLegend(){
-  const inheritBits=seesInherit()?`
+  document.getElementById('legend').innerHTML=`
     <span class="pill own">value</span> set in this environment
     <span class="pill inh"><span class="from">◂ stg</span>value</span> inherited
-    <span class="pill def"><span class="from">◂ def</span>value</span> from project defaults`:`
-    <span class="pill inh">value</span> resolved value (origin visible to admins only)`;
-  document.getElementById('legend').innerHTML=`${inheritBits}
+    <span class="pill def"><span class="from">◂ def</span>value</span> from project defaults
+    <span class="pill inh"><span class="from">🔒</span>value</span> secret where you lack reveal — origin deliberately not shown
     <span class="pill masked">∅ masked</span> no value here, on purpose
     <span class="pill missing">! required · unset</span> blocks publish
-    <span>🔒 secret (tap to reveal, if permitted) · Δ changed${seesInherit()?' · amber row = values drift':' · amber row = config values drift'} · tap any cell to inspect or edit</span>`;
+    <span>🔒 secret (tap to reveal, if permitted) · Δ changed · amber row = values drift · tap any cell to inspect or edit</span>`;
 }
 function renderDrafts(){
   const el=document.getElementById('drafts');
@@ -576,9 +579,10 @@ function renderSheet(opening){
   const reveal=canReveal(envId);
   const revealed=S.revealed.has(key+':'+envId);
 
-  /* provenance is admin-only: naming the origin env of an unrevealable cell
-     turns reveal(origin) into that cell's plaintext */
-  const chain=!seesInherit()?'':hops.map((h,i)=>{
+  /* provenance shown per the sharp rule: config always; secret only with
+     reveal here — naming the origin env of an unrevealable cell turns
+     reveal(origin) into that cell's plaintext */
+  const chain=!showOrigin(k,envId)?'':hops.map((h,i)=>{
     const t=h.layer==='defaults'?'defaults':h.layer;
     const cls=h.win?'win':h.masked?'stop':'';
     const inner=h.masked?`${t} ∅`:h.has?t:`<span style="opacity:.45">${t}</span>`;
@@ -590,7 +594,7 @@ function renderSheet(opening){
   else if(c.missing)stateLine=`<b>required here and ${c.state==='masked'?'masked':'unset'}</b> — publish is blocked`;
   else if(c.state==='masked')stateLine=`<b>masked</b> in ${env.name}`;
   else if(c.state==='absent')stateLine=`unset — no layer provides a value`;
-  else if(!seesInherit())stateLine=`has a value in <b>${env.name}</b>`;
+  else if(!showOrigin(k,envId))stateLine=`has a value in <b>${env.name}</b>`;
   else if(c.state==='own')stateLine=`set in <b>${env.name}</b>`;
   else stateLine=`inherited from <b>${c.origin==='defaults'?'project defaults':c.origin}</b>`;
 
@@ -620,8 +624,8 @@ function renderSheet(opening){
     vrow=`<div class="vrow">${cur}${revealBtn}</div>
     ${k.secret&&c.value!==undefined&&!reveal?`<div class="noperm">your role (${S.role}) has no reveal permission ${env.protected?'in protected environments':'here'} — you can still replace the value write-only.</div>`:''}
     <div class="acts">
-      <button class="primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${!seesInherit()?'edit value':c.state==='own'?'edit value':'override here'}</button>
-      ${seesInherit()&&c.state==='own'&&!k.draft?`<button onclick="clearOverride()">clear override</button>`:''}
+      <button class="primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${!showOrigin(k,envId)?'edit value':c.state==='own'?'edit value':'override here'}</button>
+      ${showOrigin(k,envId)&&c.state==='own'&&!k.draft?`<button onclick="clearOverride()">clear override</button>`:''}
       ${c.state!=='masked'?`<button class="danger" onclick="maskHere()">mask here</button>`:`<button onclick="clearOverride()">unmask</button>`}
       <button onclick="closeSheet()">close</button>
     </div>`;
@@ -632,7 +636,7 @@ function renderSheet(opening){
     <h2>${k.secret?'<span class="lock">🔒</span>':''}${esc(k.name)}
       <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${k.folder}/ · ${k.type} · ${k.secret?'secret':'config'}</span></h2>
     <div class="sub">${env.name}${env.protected?' · <b>protected</b>':''} — ${stateLine}${c.changed?' · <b>Δ changed</b>':''}</div>
-    ${k.desc&&seesInherit()?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
+    ${k.desc&&showOrigin(k,envId)?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
     ${chain?`<div class="chain">${chain}</div>`:''}
     ${vrow}
     <div class="explain">
