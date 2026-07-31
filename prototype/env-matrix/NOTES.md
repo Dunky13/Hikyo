@@ -69,6 +69,12 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 10 — env picker in header
+
+The env chips bar duplicated the column header row (Marc) — removed.
+Show/hide is now an "envs n/m ▾" checkbox popover anchored to the sticky
+corner cell of the matrix header.
+
 ## Iteration 9 — rail + panel de-duped
 
 **Standing convention (Marc): every change is a new numbered iteration —
