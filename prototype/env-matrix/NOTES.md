@@ -69,6 +69,15 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 15 — distilled sheet (critique issue 4)
+
+The cell sheet's one job is see/change this value. Removed: the permanent
+no-inheritance/secret teaching paragraph (the header "?" legend owns
+vocabulary), the redundant close button (backdrop, Escape, grab), and half
+the hint copy. Required-in is now a one-line "schema · required in …"
+disclosure that expands to the checkboxes and stays open while editing.
+Create and publish sheet explainers trimmed to one line each.
+
 ## Iteration 14 — distilled cells (critique issue 1)
 
 Border chrome reserved for exceptional states: ordinary set values render
