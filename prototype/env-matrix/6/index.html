@@ -251,16 +251,9 @@
   #sheet .copyrow label{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px}
   #sheet .copyrow button.go{border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:7px 14px}
 
-  /* ---------------- add key form ---------------- */
-  tr.addrow td{padding:10px 16px}
-  .addform{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px}
-  .addform input[type=text],.addform select{
-    background:var(--bg2);border:1px solid var(--line);color:var(--tx);
-    padding:9px 12px;border-radius:6px;font-family:var(--mono);font-size:12px;min-height:40px}
-  .addform label{display:flex;align-items:center;gap:5px;color:var(--tx-dim);font-size:12px}
-  .addform .envck{font-family:var(--mono);display:flex;gap:8px}
-  .addform button.go{background:var(--accent);color:var(--on-accent);border-radius:6px;padding:9px 16px;font-weight:600;min-height:40px}
-  .addform button.x{color:var(--tx-faint);padding:9px 6px}
+  #sheet select.fsel{
+    background:var(--bg);border:1px solid var(--line);color:var(--tx);
+    padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:13px;min-height:44px}
 
   /* ---------------- mobile ---------------- */
   @media (max-width:700px){
@@ -382,8 +375,7 @@ const S={
   collapsed:new Set(),
   revealed:new Set(),
   drafts:new Set(),
-  sheet:null,                 // {key,envId,mode:'view'|'edit'|'copy'}
-  adding:null,
+  sheet:null,                 // {key,envId,mode:'view'|'edit'|'copy'} | {mode:'create',folder}
 };
 function cellInfo(k,envId){
   const value=k.values[envId];
@@ -480,19 +472,9 @@ function renderMatrix(){
         <span class="tri">▾</span>${f}<span class="gcnt">${ks.length}</span>
         ${probs?`<span class="gprob">${probs} problem${probs>1?'s':''}</span>`:''}
         ${sum}
-        ${closed?'':`<span onclick="event.stopPropagation();S.adding='${f}';render()" class="addk" role="button">+ key</span>`}
+        ${closed?'':`<span onclick="event.stopPropagation();openCreate('${f}')" class="addk" role="button">+ key</span>`}
       </button></td></tr>`;
     if(closed)continue;
-    if(S.adding===f)body+=`<tr class="addrow"><td colspan="${envs.length+1}">
-      <span class="addform">
-        <input type="text" id="nk-name" placeholder="KEY_NAME" size="14">
-        <select id="nk-type"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
-        <label><input type="checkbox" id="nk-sec"> secret</label>
-        <input type="text" id="nk-val" placeholder="first value" size="12">
-        <span class="envck">${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-env" value="${e.id}" ${e.protected?'':'checked'}> ${e.id}</label>`).join('')}</span>
-        <button class="go" onclick="addKey('${f}')">declare</button>
-        <button class="x" onclick="S.adding=null;render()">cancel</button>
-      </span></td></tr>`;
     for(const k of ks){
       const drift=rowDiff(k)&&(!k.secret||secretDriftVisible());
       body+=`<tr class="${drift?'drift':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
@@ -523,6 +505,8 @@ function render(){
 
 /* ============================ bottom sheet ============================ */
 function openSheet(name,envId){S.sheet={key:name,envId,mode:'view'};renderSheet(true)}
+function openCreate(folder){S.sheet={mode:'create',folder};renderSheet(true);
+  setTimeout(()=>document.getElementById('nk-name')?.focus(),60)}
 function closeSheet(){
   S.sheet=null;
   document.getElementById('sheet').classList.remove('open');
@@ -530,6 +514,7 @@ function closeSheet(){
 }
 function renderSheet(opening){
   const{key,envId,mode}=S.sheet;
+  if(mode==='create'){renderCreateSheet();return}
   const k=KEYS.find(x=>x.name===key);const env=envById(envId);
   const c=cellInfo(k,envId);
   const reveal=canReveal(envId);
@@ -640,18 +625,61 @@ function doCopy(){
   S.sheet.mode='view';
   render();
 }
-function addKey(folder){
-  const name=document.getElementById('nk-name').value;
-  if(!name||KEYS.some(k=>k.name===name.toUpperCase()))return;
+function renderCreateSheet(){
+  const{folder}=S.sheet;
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>new key
+      <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${folder}/</span></h2>
+    <div class="sub">declared into the environments you pick — no inheritance, each gets its own copy</div>
+    <div class="vrow">
+      <input class="editor" id="nk-name" type="text" placeholder="KEY_NAME"
+        onkeydown="if(event.key==='Enter')addKey();if(event.key==='Escape')closeSheet()">
+    </div>
+    <div class="vrow">
+      <select id="nk-type" class="fsel"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx-dim)"><input type="checkbox" id="nk-sec"> 🔒 secret</label>
+    </div>
+    <div class="vrow">
+      <input class="editor" id="nk-val" type="text" placeholder="first value (optional)"
+        onkeydown="if(event.key==='Enter')addKey();if(event.key==='Escape')closeSheet()">
+    </div>
+    <div class="copyrow">
+      set that value in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-env" value="${e.id}" ${e.protected?'':'checked'}> ${e.id}${e.protected?' ⚠':''}</label>`).join('')}
+    </div>
+    <div class="verr" id="nk-err" hidden></div>
+    <div class="acts">
+      <button class="primary" onclick="addKey()">declare</button>
+      <button onclick="closeSheet()">cancel</button>
+    </div>
+    <div class="explain">
+      <b>secret</b> is permanent classification: values will be hidden and reveal-gated everywhere. Environments left unchecked start <b>not set</b> — required-ness comes from the schema, set per key later.
+    </div>`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function addKey(){
+  const{folder}=S.sheet;
+  const err=m=>{const e=document.getElementById('nk-err');e.textContent='✕ '+m;e.hidden=false};
+  const raw=document.getElementById('nk-name').value.trim();
+  if(!raw)return err('key name required');
+  const name=raw.toUpperCase().replace(/[^A-Z0-9_]/g,'_');
+  if(KEYS.some(k=>k.name===name))return err(name+' already exists');
+  const type=document.getElementById('nk-type').value;
   const val=document.getElementById('nk-val').value;
   const envs=[...document.querySelectorAll('.nk-env:checked')].map(i=>i.value);
-  const k=K(folder,name.toUpperCase().replace(/[^A-Z0-9_]/g,'_'),
-    document.getElementById('nk-type').value,document.getElementById('nk-sec').checked,'none',{});
+  if(val){
+    const v=validateEdit({type},val);
+    if(v)return err(v);
+    if(!envs.length)return err('pick at least one environment for the value');
+  }
+  const k=K(folder,name,type,document.getElementById('nk-sec').checked,'none',{});
   k.draft=true;
   if(val)for(const e of envs){k.values[e]=val;S.drafts.add(k.name+':'+e)}
   const last=KEYS.map(x=>x.folder).lastIndexOf(folder);
   KEYS.splice(last+1,0,k);
-  S.adding=null;render();
+  closeSheet();render();
 }
 
 /* ============================ chrome ============================ */
