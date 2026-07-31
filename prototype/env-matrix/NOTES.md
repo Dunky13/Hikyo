@@ -69,6 +69,14 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 12 — zebra rows, drift tint removed
+
+Every other data row gets a lightly raised hue (both themes; the sticky
+key cell gets a solid variant so horizontal scroll stays clean). The
+amber drift tint on differing-value rows is removed entirely (Marc),
+along with rowDiff/secretDriftVisible — no cross-env difference signal
+remains in the grid.
+
 ## Iteration 11 — legend as header tooltip
 
 The footer legend duplicated screen space (Marc) — moved into a "?" icon
