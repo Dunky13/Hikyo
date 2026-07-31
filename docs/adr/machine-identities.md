@@ -113,7 +113,7 @@ When both channels are populated, `--token-file` wins and the collision **warns 
 
 **Every operation that creates, replaces, or expands a working path from a machine credential to plaintext carries `manage-identities(project)` ∧ `reveal` ∧ reauthentication** (see the amendment note above). Three distinct operations fall under it, and naming only the first is the mistake this section exists to prevent. They differ in **which** environments the `reveal` conjunct ranges over, and that difference is deliberate:
 
-| Operation | `reveal` required over |
+| Operation | disclosure capability required over (per class, below) |
 |---|---|
 | **Minting** a credential — first issue or replacement | **every environment reachable in the resulting post-state** |
 | **Creating or replacing an `oidc-federation` binding** | **every environment reachable in the resulting post-state** |
@@ -123,7 +123,14 @@ When both channels are populated, `--token-file` wins and the collision **warns 
 
 **The third is the one an implementer will miss.** A grant landing on a machine principal is not an ordinary grant: authority lives entirely in the grants, so it re-scopes **every credential already in circulation** — instantly, with nobody re-presenting anything, including credentials held by people no longer in the room. It therefore requires **both** #15's ordinary granting authorization **and** this formula, **in one transaction**; where the two disagree, the stricter refuses.
 
-**The newly reachable set** is the environments where the principal's **post-state** satisfies `read(E)` ∧ `reveal(E)` (or `reveal-history(E)`) and its **pre-state** did not. It is a delta, not the post-state, and the distinction is what keeps the rule from being self-defeating: a delegated project administrator who deliberately holds no production `reveal` must still be able to add a **development-only** grant to a service account that already reaches production. Requiring production `reveal` for that mutation would refuse a change that discloses nothing new and would pressure administrators into acquiring exactly the production access least privilege withheld from them. The delta still catches the attack it was introduced for — adding `read(prod)` to a service account already carrying the project-wide `reveal` opt-in makes production plaintext newly reachable, so it demands `reveal(prod)` from the actor.
+**The newly reachable set is computed per authority class, independently, never as one boolean:**
+
+- **Newly reachable current plaintext** — environments where the post-state satisfies `read(E)` ∧ `reveal(E)` and the pre-state did not. Requires `reveal(E)` from the actor.
+- **Newly reachable historical plaintext** — environments where the post-state satisfies `read(E)` ∧ `reveal-history(E)` and the pre-state did not. Requires `reveal-history(E)` from the actor.
+
+Each non-empty set imposes its own requirement, and the same per-class split governs the whole-post-state rows of the table above. **Collapsing the two into a single "can reach plaintext" test is a bypass**, and a subtle one: a service account already holding `read(E)` ∧ `reveal(E)` would show an *empty* delta when granted `reveal-history(E)`, so an actor with no historical access at all could hand a machine principal the power to read superseded secrets — credentials that may still be live in an external service. #15 fixed the rule this violates: *"`reveal-history` implies nothing about `reveal`, and vice versa."*
+
+The delta is a delta and not the post-state, and that distinction is what keeps the rule from being self-defeating: a delegated project administrator who deliberately holds no production `reveal` must still be able to add a **development-only** grant to a service account that already reaches production. Requiring production `reveal` for that mutation would refuse a change that discloses nothing new and would pressure administrators into acquiring exactly the production access least privilege withheld from them. The delta still catches the attack it was introduced for — adding `read(prod)` to a service account already carrying the project-wide `reveal` opt-in makes production plaintext newly reachable, so it demands `reveal(prod)` from the actor.
 
 **Narrowing is never a widening**, so its delta is empty: removing a grant, revoking a credential, deleting a binding and reducing scope stay under the plain capability — #15's symmetric limit, so incident response is never gated on disclosure rights.
 
@@ -214,7 +221,7 @@ This is not symmetry for its own sake. The presented token's own short expiry bo
 
 **Federated bindings may be re-activated per binding**, because a binding holds no bearer value — there is nothing an attacker can have captured and nothing to redistribute. Re-activation is a re-validation, not a trust: #16's rule for human OIDC links applies for the same reason, since a restore can resurrect a binding removed precisely *because* that workload was compromised.
 
-**A token presented against a re-activated binding must have been issued after re-activation, by a margin that swallows clock skew.** Each re-activation records `reactivated_at`, and the binding refuses any token whose `iat` is not **strictly greater than `reactivated_at` plus the maximum accepted positive clock skew**, at the coarsest timestamp granularity either side uses. Equivalently, the binding stays quarantined for that interval.
+**A token presented against a re-activated binding must have been issued after re-activation, by a margin that swallows clock skew.** Each re-activation records `reactivated_at`, and the binding refuses any token whose `iat` is not **strictly greater than `reactivated_at` plus the maximum accepted positive clock skew**, at the coarsest timestamp granularity either side uses. **This predicate is permanent for the life of the binding, not a waiting period.** A time-boxed quarantine that simply expires is *not* equivalent and MUST NOT be substituted: once it lifts, a pre-restore token whose `iat` was skewed into the future is admitted by ordinary validation, which is the exact artifact the predicate exists to exclude.
 
 **The margin is the whole point, not padding.** Validation accepts `iat` within a bounded skew in both directions, so an issuer whose clock leads Envweave by the accepted skew `S` mints tokens with an `iat` in Envweave's *future*. An attacker capturing such a token immediately before the restore then holds an artifact that satisfies a naive `iat > epoch_bump` test while being, in fact, a pre-restore credential — precisely the artifact the threat model requires to be invalidated. A rule phrased against the epoch bump alone is defeated by the clock, silently.
 
