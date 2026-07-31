@@ -55,6 +55,27 @@ prod only via inheritance from staging).
   `masked` (#10 locked); the synthesis ticket (#27) must reconcile naming —
   either a glossary mapping or a mechanical rename across the spec set.
 
+## Trialing in iteration 6 — NO INHERITANCE (major, reopens ADR #10)
+
+Marc's direction (2026-07-31): drop cross-env inheritance AND the
+project-defaults layer. Flat model: every value explicit per environment;
+value states collapse to `set | absent` (the excluded/masked state has
+nothing left to block). Ergonomics instead of inheritance:
+
+- key creation takes a first value + checkboxes for which envs receive it;
+- per-cell "copy to…" pushes a value into chosen envs (secret copy gated on
+  reveal of the SOURCE env, per ADR #15 disclosure-by-proxy; copying into a
+  protected env asks confirmation);
+- secret-row drift stays gated (still a cross-env comparison oracle).
+
+**Not locked.** This supersedes ADR #10 (and #7's base pointer +
+project-defaults layer) and touches the competitive wedge (#2 lists
+inheritance as a differentiator). Formal path: amendment ADR + blocking
+cross-model grill, then ripple check over #12/#13/#15 references
+(group-closure layers, bundle topology, base re-parenting formula — all
+simplify or die). Until then iterations 4/5 remain the locked-model
+prototypes.
+
 ## Trialing in iteration 5 (not yet decided)
 
 - **Opaque inheritance**: grid shows only resolved values (uniform pill, no
