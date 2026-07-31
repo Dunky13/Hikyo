@@ -55,6 +55,20 @@ prod only via inheritance from staging).
   `masked` (#10 locked); the synthesis ticket (#27) must reconcile naming —
   either a glossary mapping or a mechanical rename across the spec set.
 
+## Iteration 8 — app-shell variants
+
+Desktop full-width question: three shells around the identical matrix,
+`?variant=a|b|c` + floating switcher (arrow keys), all collapsing to a
+hamburger drawer on mobile:
+
+- **A Sidebar** — 250px panel: project switcher, group links with problem
+  badges (tap scrolls to the group), views (problems, drafts → publish).
+- **B Centered + jump bar** — no sidebar; content capped at 1240px,
+  horizontal group-jump pills with problem counts.
+- **C Rail + panel** — 56px project icon rail + 210px group panel.
+
+Projects list is demo-only (switching changes the crumb, not the data).
+
 ## Iteration 7 — publish, required-in, create sheet
 
 On top of the flat model: key creation in the bottom sheet (same design
