@@ -69,6 +69,17 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 13 — drawer backdrop + mobile project select
+
+Marc's mobile findings: (1) tapping outside the open drawer fell through
+to the matrix and opened a cell sheet — a backdrop now sits behind the
+drawer and swallows the tap, closing the drawer; Escape closes it too.
+(2) Variant C on small screens hides the rail, leaving no project
+switching — the panel now tops with a project <select> styled via the
+customizable-select API (appearance:base-select + ::picker(select)),
+falling back to a plain styled select where unsupported. Shown only
+below 700px on variant C.
+
 ## Iteration 12 — zebra rows, drift tint removed
 
 Every other data row gets a lightly raised hue (both themes; the sticky
