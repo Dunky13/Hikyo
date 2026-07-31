@@ -153,8 +153,9 @@
   td.key .lock{color:var(--bad);margin-right:5px}
   td.key .req{color:var(--tx-faint);font-size:9.5px;margin-left:6px;font-family:var(--sans)}
   tr.grp td{
-    position:sticky;top:var(--gh,55px);z-index:3;
-    background:var(--bg);padding:0;border-bottom:1px solid var(--line);
+    position:sticky;top:calc(var(--gh,55px) - 1px);z-index:3;
+    background:var(--bg);padding:0;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
   }
   tr.grp button.gbtn{
     display:flex;align-items:center;gap:10px;text-align:left;
@@ -633,8 +634,7 @@ function renderDrafts(){
 }
 function render(){
   renderMatrix();renderDrafts();renderShell();renderEnvPop();renderLegendPop();
-  const th=document.querySelector('#matrix thead');
-  if(th)document.getElementById('matrix').style.setProperty('--gh',th.offsetHeight+'px');
+  syncGh();
   if(S.sheet)renderSheet();
 }
 
@@ -701,6 +701,16 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight')cycleShell(1);
 });
 document.body.dataset.v=VAR;
+
+/* group headers stick right under the measured thead — fractional height,
+   re-measured after webfont load and on resize (a rounded offsetHeight left
+   a visible seam) */
+function syncGh(){
+  const th=document.querySelector('#matrix thead');
+  if(th)document.getElementById('matrix').style.setProperty('--gh',th.getBoundingClientRect().height+'px');
+}
+document.fonts?.ready.then(syncGh);
+addEventListener('resize',syncGh);
 
 /* ============================ bottom sheet ============================ */
 function openSheet(name,envId){S.sheet={key:name,envId,mode:'view'};renderSheet(true)}
