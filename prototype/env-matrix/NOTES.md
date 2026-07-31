@@ -55,6 +55,15 @@ prod only via inheritance from staging).
   `masked` (#10 locked); the synthesis ticket (#27) must reconcile naming —
   either a glossary mapping or a mechanical rename across the spec set.
 
+## Iteration 7 — publish, required-in, create sheet
+
+On top of the flat model: key creation in the bottom sheet (same design
+language as editing); publish review sheet (per-env atomic revision with
+r-number, selective publish, protected-env confirm, veto when an env has a
+violation or missing required key); per-key required-in editor (cell sheet +
+create sheet), changes counted as schema drafts riding the same publish.
+Iteration 6 is frozen at the bare no-inheritance trial.
+
 ## Trialing in iteration 6 — NO INHERITANCE (major, reopens ADR #10)
 
 Marc's direction (2026-07-31): drop cross-env inheritance AND the

@@ -5,14 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
 <!--
-  THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 6.
-  NO INHERITANCE (trial, supersedes ADR #10 pending formal amendment +
-  cross-model grill): no base chains, no project-defaults layer. Every value
-  is explicit per environment; value states collapse to set | absent.
-  Ergonomics instead of inheritance: declare-into-N-envs on key creation,
-  copy-across-envs per cell (secret copy gated on reveal of the source env,
-  per ADR #15 disclosure-by-proxy). Secret drift stays gated (still a
-  cross-env comparison). Sticky headers and everything else from iteration 5.
+  THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 7.
+  On top of iteration 6 (no-inheritance trial): key creation moves into the
+  bottom sheet (same design language as editing), a publish review sheet
+  (per-env atomic revision, selective publish, protected-env confirm,
+  violation/missing-required veto per revision ADR #11), and a per-key
+  required-in editor (schema ADR #12 presence modes) whose changes ride the
+  same publish as schema drafts.
   Design context: PRODUCT.md / DESIGN.md at repo root.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -90,8 +89,10 @@
   }
   header .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
   header .drafts{
-    font-size:12.5px;color:var(--chg);border:1px solid var(--line);border-radius:999px;padding:6px 12px;
+    font-size:12.5px;color:var(--chg);border:1px solid var(--chg);border-radius:999px;padding:6px 12px;
+    font-weight:600;
   }
+  header .drafts:hover{background:var(--chg);color:var(--bg)}
 
   /* ---------------- env chips ---------------- */
   .envbar{
@@ -251,16 +252,22 @@
   #sheet .copyrow label{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px}
   #sheet .copyrow button.go{border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:7px 14px}
 
-  /* ---------------- add key form ---------------- */
-  tr.addrow td{padding:10px 16px}
-  .addform{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px}
-  .addform input[type=text],.addform select{
-    background:var(--bg2);border:1px solid var(--line);color:var(--tx);
-    padding:9px 12px;border-radius:6px;font-family:var(--mono);font-size:12px;min-height:40px}
-  .addform label{display:flex;align-items:center;gap:5px;color:var(--tx-dim);font-size:12px}
-  .addform .envck{font-family:var(--mono);display:flex;gap:8px}
-  .addform button.go{background:var(--accent);color:var(--on-accent);border-radius:6px;padding:9px 16px;font-weight:600;min-height:40px}
-  .addform button.x{color:var(--tx-faint);padding:9px 6px}
+  #sheet select.fsel{
+    background:var(--bg);border:1px solid var(--line);color:var(--tx);
+    padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:13px;min-height:44px}
+  #sheet .pubenv{
+    margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  }
+  #sheet .pubenv.blocked{border-color:var(--bad)}
+  #sheet .pubenv .ph{display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap}
+  #sheet .pubenv .ph b{font-weight:600}
+  #sheet .pubenv .ph .rev{font-family:var(--mono);font-size:11px;color:var(--tx-faint)}
+  #sheet .pubenv .ph .pp{color:var(--bad);font-size:10px;letter-spacing:.06em;font-weight:600}
+  #sheet .pubenv ul{list-style:none;margin-top:8px;display:grid;gap:4px}
+  #sheet .pubenv li{font-family:var(--mono);font-size:11.5px;color:var(--tx-dim);
+    display:flex;gap:10px;align-items:baseline}
+  #sheet .pubenv li .nv{color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}
+  #sheet .pubenv .blockmsg{margin-top:8px;font-size:12px;color:var(--bad);font-family:var(--mono)}
 
   /* ---------------- mobile ---------------- */
   @media (max-width:700px){
@@ -280,7 +287,7 @@
 <header>
   <span class="crumb">envweave <span>/</span> acme <span>/</span> demo</span>
   <span class="grow"></span>
-  <span class="drafts" id="drafts" hidden></span>
+  <button class="drafts" id="drafts" hidden onclick="openPublish()" title="review and publish"></button>
   <span class="ctl"><span class="lbl">acting as</span>
     <select id="role" title="simulated principal — decides read/reveal permission">
       <option value="admin">admin · reveal everywhere</option>
@@ -372,6 +379,8 @@ const KEYS=[
   }
 })();
 const FOLDERS=[...new Set(KEYS.map(k=>k.folder))];
+/* per-env published revision number (revision ADR #11: per-env monotonic) */
+const REV={dev:41,stg:38,prd:29,pre:12};
 
 /* ============================ state & permissions ============================ */
 const isRequired=(k,e)=>k.required==='all'||(Array.isArray(k.required)&&k.required.includes(e));
@@ -382,8 +391,7 @@ const S={
   collapsed:new Set(),
   revealed:new Set(),
   drafts:new Set(),
-  sheet:null,                 // {key,envId,mode:'view'|'edit'|'copy'}
-  adding:null,
+  sheet:null,                 // {key,envId,mode:'view'|'edit'|'copy'} | {mode:'create',folder}
 };
 function cellInfo(k,envId){
   const value=k.values[envId];
@@ -480,19 +488,9 @@ function renderMatrix(){
         <span class="tri">▾</span>${f}<span class="gcnt">${ks.length}</span>
         ${probs?`<span class="gprob">${probs} problem${probs>1?'s':''}</span>`:''}
         ${sum}
-        ${closed?'':`<span onclick="event.stopPropagation();S.adding='${f}';render()" class="addk" role="button">+ key</span>`}
+        ${closed?'':`<span onclick="event.stopPropagation();openCreate('${f}')" class="addk" role="button">+ key</span>`}
       </button></td></tr>`;
     if(closed)continue;
-    if(S.adding===f)body+=`<tr class="addrow"><td colspan="${envs.length+1}">
-      <span class="addform">
-        <input type="text" id="nk-name" placeholder="KEY_NAME" size="14">
-        <select id="nk-type"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
-        <label><input type="checkbox" id="nk-sec"> secret</label>
-        <input type="text" id="nk-val" placeholder="first value" size="12">
-        <span class="envck">${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-env" value="${e.id}" ${e.protected?'':'checked'}> ${e.id}</label>`).join('')}</span>
-        <button class="go" onclick="addKey('${f}')">declare</button>
-        <button class="x" onclick="S.adding=null;render()">cancel</button>
-      </span></td></tr>`;
     for(const k of ks){
       const drift=rowDiff(k)&&(!k.secret||secretDriftVisible());
       body+=`<tr class="${drift?'drift':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
@@ -512,7 +510,7 @@ function renderLegend(){
 function renderDrafts(){
   const el=document.getElementById('drafts');
   el.hidden=S.drafts.size===0;
-  el.textContent=`${S.drafts.size} unpublished edit${S.drafts.size>1?'s':''}`;
+  el.textContent=`${S.drafts.size} unpublished edit${S.drafts.size>1?'s':''} · publish…`;
 }
 function render(){
   renderEnvbar();renderMatrix();renderLegend();renderDrafts();
@@ -523,6 +521,9 @@ function render(){
 
 /* ============================ bottom sheet ============================ */
 function openSheet(name,envId){S.sheet={key:name,envId,mode:'view'};renderSheet(true)}
+function openCreate(folder){S.sheet={mode:'create',folder};renderSheet(true);
+  setTimeout(()=>document.getElementById('nk-name')?.focus(),60)}
+function openPublish(){S.sheet={mode:'publish'};renderSheet(true)}
 function closeSheet(){
   S.sheet=null;
   document.getElementById('sheet').classList.remove('open');
@@ -530,6 +531,8 @@ function closeSheet(){
 }
 function renderSheet(opening){
   const{key,envId,mode}=S.sheet;
+  if(mode==='create'){renderCreateSheet();return}
+  if(mode==='publish'){renderPublishSheet();return}
   const k=KEYS.find(x=>x.name===key);const env=envById(envId);
   const c=cellInfo(k,envId);
   const reveal=canReveal(envId);
@@ -591,6 +594,10 @@ function renderSheet(opening){
     <div class="sub">${env.name}${env.protected?' · <b>protected</b>':''} — ${stateLine}${c.changed?' · <b>Δ changed</b>':''}</div>
     ${k.desc?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
     ${vrow}
+    ${mode==='view'?`<div class="copyrow">required in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="rq-env" value="${e.id}" ${isRequired(k,e.id)?'checked':''} onchange="setRequired('${k.name}')"> ${e.id}</label>`).join('')}
+      <span style="font-size:11px;color:var(--tx-faint)">key-level (schema) — a required env without a value blocks its publish</span>
+    </div>`:''}
     <div class="explain">
       <b>no inheritance</b> — every environment holds its own values; nothing flows between them. <b>secret</b> is what a key <i>is</i> (classification): values exist but are hidden; seeing one takes reveal permission, and copying one to another environment takes reveal here first.
     </div>`;
@@ -640,18 +647,137 @@ function doCopy(){
   S.sheet.mode='view';
   render();
 }
-function addKey(folder){
-  const name=document.getElementById('nk-name').value;
-  if(!name||KEYS.some(k=>k.name===name.toUpperCase()))return;
+/* ---------------- publish (review → confirm; revision ADR #11) ---------------- */
+function envBlocked(envId){
+  return KEYS.some(k=>{const c=cellInfo(k,envId);return c.invalid||c.missing});
+}
+function renderPublishSheet(){
+  const valueDrafts=[...S.drafts].filter(d=>!d.endsWith(':schema'));
+  const schemaDrafts=[...S.drafts].filter(d=>d.endsWith(':schema')).map(d=>d.slice(0,-7));
+  const byEnv={};
+  for(const d of valueDrafts){const i=d.lastIndexOf(':');const key=d.slice(0,i),env=d.slice(i+1);
+    (byEnv[env]??=[]).push(key)}
+  const envs=readableEnvs().filter(e=>byEnv[e.id]?.length||schemaDrafts.length);
+  const secs=envs.map(e=>{
+    const blocked=envBlocked(e.id);
+    const items=(byEnv[e.id]||[]).map(key=>{
+      const k=KEYS.find(x=>x.name===key);const c=cellInfo(k,e.id);
+      const v=c.value===undefined?'(cleared)':k.secret?MASK:c.value;
+      return`<li>${k.secret?'🔒 ':''}${esc(key)}<span class="nv">${esc(v)}</span></li>`;
+    }).join('');
+    return`<div class="pubenv ${blocked?'blocked':''}">
+      <label class="ph">
+        <input type="checkbox" class="pb-env" value="${e.id}" ${blocked?'disabled':'checked'}>
+        <b>${e.name}</b>${e.protected?'<span class="pp">PROTECTED — confirms before publish</span>':''}
+        <span class="rev">r${REV[e.id]} → r${REV[e.id]+1}</span>
+      </label>
+      <ul>${items}${schemaDrafts.map(n=>`<li>schema: ${esc(n)} required-in changed</li>`).join('')}</ul>
+      ${blocked?`<div class="blockmsg">✕ this environment has violations or missing required keys — publish blocked until fixed</div>`:''}
+    </div>`;
+  }).join('');
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>review &amp; publish</h2>
+    <div class="sub">each environment publishes as its own atomic revision — untick any you want to hold back</div>
+    ${secs||'<div class="sub" style="margin-top:14px">nothing to publish</div>'}
+    <div class="acts">
+      ${secs?`<button class="primary" onclick="doPublish()">publish selected</button>`:''}
+      <button onclick="closeSheet()">close</button>
+    </div>
+    <div class="explain">
+      an environment with a schema violation or a missing required key cannot publish —
+      delivery only ever sees valid revisions. drafts stay yours until published.
+    </div>`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function doPublish(){
+  const targets=[...document.querySelectorAll('.pb-env:checked')].map(i=>i.value);
+  if(!targets.length)return;
+  const prot=targets.filter(id=>envById(id).protected);
+  if(prot.length&&!confirm(`publishing to protected environment${prot.length>1?'s':''} (${prot.join(', ')}) requires re-authentication.\n\n(prototype stand-in; real ceremony is ticket #21)\n\nProceed?`))return;
+  for(const env of targets){
+    REV[env]++;
+    for(const d of[...S.drafts]){
+      if(d.endsWith(':'+env)){
+        S.drafts.delete(d);
+        const k=KEYS.find(x=>x.name===d.slice(0,d.lastIndexOf(':')));
+        if(k&&!k.changed.includes(env))k.changed.push(env);
+      }
+    }
+  }
+  for(const d of[...S.drafts])if(d.endsWith(':schema'))S.drafts.delete(d);
+  closeSheet();render();
+}
+/* ---------------- required-in (schema ADR #12 presence per env) ---------------- */
+function setRequired(name){
+  const k=KEYS.find(x=>x.name===name);
+  const ids=[...document.querySelectorAll('.rq-env:checked')].map(i=>i.value);
+  k.required=ids.length===ENVS.length?'all':ids.length?ids:'none';
+  S.drafts.add(name+':schema');
+  render();
+}
+function renderCreateSheet(){
+  const{folder}=S.sheet;
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>new key
+      <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${folder}/</span></h2>
+    <div class="sub">declared into the environments you pick — no inheritance, each gets its own copy</div>
+    <div class="vrow">
+      <input class="editor" id="nk-name" type="text" placeholder="KEY_NAME"
+        onkeydown="if(event.key==='Enter')addKey();if(event.key==='Escape')closeSheet()">
+    </div>
+    <div class="vrow">
+      <select id="nk-type" class="fsel"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx-dim)"><input type="checkbox" id="nk-sec"> 🔒 secret</label>
+    </div>
+    <div class="vrow">
+      <input class="editor" id="nk-val" type="text" placeholder="first value (optional)"
+        onkeydown="if(event.key==='Enter')addKey();if(event.key==='Escape')closeSheet()">
+    </div>
+    <div class="copyrow">
+      set that value in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-env" value="${e.id}" ${e.protected?'':'checked'}> ${e.id}${e.protected?' ⚠':''}</label>`).join('')}
+    </div>
+    <div class="copyrow">
+      required in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-req" value="${e.id}"> ${e.id}</label>`).join('')}
+    </div>
+    <div class="verr" id="nk-err" hidden></div>
+    <div class="acts">
+      <button class="primary" onclick="addKey()">declare</button>
+      <button onclick="closeSheet()">cancel</button>
+    </div>
+    <div class="explain">
+      <b>secret</b> is permanent classification: values will be hidden and reveal-gated everywhere. Environments left unchecked start <b>not set</b> — required-ness comes from the schema, set per key later.
+    </div>`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function addKey(){
+  const{folder}=S.sheet;
+  const err=m=>{const e=document.getElementById('nk-err');e.textContent='✕ '+m;e.hidden=false};
+  const raw=document.getElementById('nk-name').value.trim();
+  if(!raw)return err('key name required');
+  const name=raw.toUpperCase().replace(/[^A-Z0-9_]/g,'_');
+  if(KEYS.some(k=>k.name===name))return err(name+' already exists');
+  const type=document.getElementById('nk-type').value;
   const val=document.getElementById('nk-val').value;
   const envs=[...document.querySelectorAll('.nk-env:checked')].map(i=>i.value);
-  const k=K(folder,name.toUpperCase().replace(/[^A-Z0-9_]/g,'_'),
-    document.getElementById('nk-type').value,document.getElementById('nk-sec').checked,'none',{});
+  if(val){
+    const v=validateEdit({type},val);
+    if(v)return err(v);
+    if(!envs.length)return err('pick at least one environment for the value');
+  }
+  const req=[...document.querySelectorAll('.nk-req:checked')].map(i=>i.value);
+  const k=K(folder,name,type,document.getElementById('nk-sec').checked,
+    req.length===ENVS.length?'all':req.length?req:'none',{});
   k.draft=true;
   if(val)for(const e of envs){k.values[e]=val;S.drafts.add(k.name+':'+e)}
   const last=KEYS.map(x=>x.folder).lastIndexOf(folder);
   KEYS.splice(last+1,0,k);
-  S.adding=null;render();
+  closeSheet();render();
 }
 
 /* ============================ chrome ============================ */
