@@ -3,7 +3,10 @@
 **Question:** does a side-by-side environment matrix communicate inheritance,
 overrides, gaps, validation, and drift legibly?
 
-**Run:** `./prototype/serve.sh` then open `/env-matrix/` (works on phones via LAN).
+**Run:** `./prototype/serve.sh` then open `/env-matrix/` — an iteration index
+(works on phones via LAN). Each iteration is frozen at `env-matrix/<n>/`,
+newest is LATEST; `/4/` is current. New iteration = copy the current top into
+`env-matrix/<n+1>/index.html`, add an `<li>` to `index.html`.
 
 Throwaway code — delete this directory once the ticket resolves; the answer
 lives in the ticket's resolution comment and the map.
