@@ -349,12 +349,12 @@ const KEYS=[
   K('mail','SMTP_PORT','int',false,'none','587',{},{},[]),
   K('mail','SMTP_PASSWORD','string',true,'none',undefined,
     {dev:{masked:true},stg:{v:'stg-smtp-pass'},prd:{v:'prd-smtp-pass'}},{},[],
-    'Deliberately masked in development: no mail from dev boxes.'),
+    'Deliberately excluded in development: no mail from dev boxes.'),
   K('integrations','FORGEJO_TOKEN','string',true,'none',undefined,{prd:{v:'ew_1_at_x9k2m4'}},{},[]),
   K('integrations','S3_ACCESS_KEY_ID','string',true,'all','AKIADEFAULT0000',
     {prd:{v:'AKIAPRODONLY9999'}},{},['prd']),
   K('integrations','S3_SECRET_ACCESS_KEY','string',true,'all','wJalrXUtnFEMI/DEMO',
-    {prd:{masked:true}},{},[],'Masked in production while required: publish is blocked.'),
+    {prd:{masked:true}},{},[],'Excluded in production while required: publish is blocked.'),
   K('observability','SENTRY_DSN','url',false,'none',undefined,
     {stg:{v:'https://s1@sentry.io/11'},prd:{v:'https://s2@sentry.io/12'}},{},[]),
   K('observability','OTEL_ENDPOINT','url',false,'none','http://otel.internal:4317',{},{},[]),
@@ -492,8 +492,8 @@ function pillFor(k,e,c){
   const open=`onclick="openSheet('${k.name}','${e.id}')" onkeydown="if(event.key==='Enter')openSheet('${k.name}','${e.id}')" tabindex="0" role="button"`;
   let inner;
   if(c.invalid)inner=`<span class="pill invalid" ${open}><span class="tx">✕ ${esc(shownValue(k,e.id,c))}</span>${d}${draft}</span><span class="viol">${esc(c.invalid)}</span>`;
-  else if(c.missing)inner=`<span class="pill missing" ${open}><span class="tx">! required · ${c.state==='masked'?'masked':'unset'}</span></span>`;
-  else if(c.state==='masked')inner=`<span class="pill masked" ${open}><span class="tx">∅ masked</span></span>`;
+  else if(c.missing)inner=`<span class="pill missing" ${open}><span class="tx">! required · ${c.state==='masked'?'excluded':'unset'}</span></span>`;
+  else if(c.state==='masked')inner=`<span class="pill masked" ${open}><span class="tx">∅ excluded</span></span>`;
   else if(c.state==='absent')inner=`<span class="pill absent" ${open}><span class="tx">·</span></span>`;
   else{
     /* inheritance is opaque in the grid: every resolved value renders the
@@ -546,7 +546,7 @@ function renderMatrix(){
 function renderLegend(){
   document.getElementById('legend').innerHTML=`
     <span class="pill val">value</span> resolved value — tap for where it comes from
-    <span class="pill masked">∅ masked</span> no value here, on purpose
+    <span class="pill masked">∅ excluded</span> deliberately nothing here — stops inheritance
     <span class="pill missing">! required · unset</span> blocks publish
     <span>🔒 secret (tap to reveal, if permitted) · Δ changed · amber row = values drift</span>`;
 }
@@ -590,8 +590,8 @@ function renderSheet(opening){
 
   let stateLine;
   if(c.invalid)stateLine=`schema violation: <b>${esc(c.invalid)}</b>`;
-  else if(c.missing)stateLine=`<b>required here and ${c.state==='masked'?'masked':'unset'}</b> — publish is blocked`;
-  else if(c.state==='masked')stateLine=`<b>masked</b> in ${env.name}`;
+  else if(c.missing)stateLine=`<b>required here and ${c.state==='masked'?'excluded':'unset'}</b> — publish is blocked`;
+  else if(c.state==='masked')stateLine=`<b>excluded</b> in ${env.name} — nothing delivered, inheritance stopped`;
   else if(c.state==='absent')stateLine=`unset — no layer provides a value`;
   else if(!showOrigin(k,envId))stateLine=`has a value in <b>${env.name}</b>`;
   else if(c.state==='own')stateLine=`set in <b>${env.name}</b>`;
@@ -614,7 +614,7 @@ function renderSheet(opening){
     </div>`;
   }else{
     let cur;
-    if(c.value===undefined)cur=`<span class="cur dim">${c.state==='masked'?'∅ masked':'—'}</span>`;
+    if(c.value===undefined)cur=`<span class="cur dim">${c.state==='masked'?'∅ excluded':'—'}</span>`;
     else if(k.secret&&!revealed)cur=`<span class="cur dim">${MASK}</span>`;
     else cur=`<span class="cur ${c.invalid?'err':''}">${esc(c.value)}</span>`;
     const revealBtn=k.secret&&c.value!==undefined?
@@ -625,7 +625,7 @@ function renderSheet(opening){
     <div class="acts">
       <button class="primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${!showOrigin(k,envId)?'edit value':c.state==='own'?'edit value':'override here'}</button>
       ${showOrigin(k,envId)&&c.state==='own'&&!k.draft?`<button onclick="clearOverride()">clear override</button>`:''}
-      ${c.state!=='masked'?`<button class="danger" onclick="maskHere()">mask here</button>`:`<button onclick="clearOverride()">unmask</button>`}
+      ${c.state!=='masked'?`<button class="danger" onclick="maskHere()">exclude here</button>`:`<button onclick="clearOverride()">include again</button>`}
       <button onclick="closeSheet()">close</button>
     </div>`;
   }
@@ -639,7 +639,7 @@ function renderSheet(opening){
     ${chain?`<div class="chain">${chain}</div>`:''}
     ${vrow}
     <div class="explain">
-      <b>secret vs mask</b> — <b>secret</b> is what a key <i>is</i> (classification): its values exist but are hidden; seeing one takes reveal permission. <b>mask</b> is a per-environment value state: “no value here, on purpose” — it also stops inheritance from filling this cell.
+      <b>secret vs excluded</b> — <b>secret</b> is what a key <i>is</i> (classification): its values exist but are hidden; seeing one takes reveal permission. <b>excluded</b> is a per-environment value state: deliberately nothing here — nothing is delivered, and inheritance is stopped from filling this cell.
     </div>`;
   document.getElementById('sheet').classList.add('open');
   document.getElementById('scrim').classList.add('open');

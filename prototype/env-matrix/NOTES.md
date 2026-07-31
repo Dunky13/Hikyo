@@ -49,6 +49,12 @@ prod only via inheritance from staging).
   nonexistent (no column, chip, counts) — permission ADR #15 already locks
   this (unauthorized ≡ nonexistent). `external` role demonstrates.
 
+- **"Masked" renamed "excluded" in the UI** (iteration 5): "mask" reads as
+  "present but hidden" (masked ball), colliding with secret ••••. UI now says
+  `∅ excluded` / "exclude here" / "include again". The ADR domain term stays
+  `masked` (#10 locked); the synthesis ticket (#27) must reconcile naming —
+  either a glossary mapping or a mechanical rename across the spec set.
+
 ## Trialing in iteration 5 (not yet decided)
 
 - **Opaque inheritance**: grid shows only resolved values (uniform pill, no
