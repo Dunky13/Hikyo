@@ -282,7 +282,7 @@
     padding:14px 0;border-right:1px solid var(--line);background:var(--bg2)}
   body[data-v=c] #rail{display:flex}
   #rail .pav{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
-    justify-content:center;font-weight:700;font-size:14px;color:var(--tx-dim);
+    justify-content:center;font-weight:700;font-size:12px;letter-spacing:.02em;color:var(--tx-dim);
     border:1px solid transparent}
   #rail .pav:hover{border-color:var(--line);color:var(--tx)}
   #rail .pav.act{background:var(--accent);color:var(--on-accent)}
@@ -607,23 +607,35 @@ function jumpGroup(f){
 }
 function pickProject(p){PROJ=p;document.getElementById('projname').textContent=p.replace('envweave-','');renderShell();
   document.getElementById('side').classList.remove('open')}
+const monogram=p=>p.split(/[-_]/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const projHue=p=>[...p].reduce((a,c)=>a+c.charCodeAt(0),0)%360;
 function renderShell(){
   const groups=FOLDERS.map(f=>{
     const n=KEYS.filter(k=>k.folder===f).length;
     const p=groupProblems(f);
     return{f,n,p};
   });
+  /* variant c: the rail owns project switching — the panel repeats none of it,
+     it navigates INSIDE the current project. variant a has no rail, so the
+     sidebar carries the projects list itself. */
+  const projectsBlock=VAR==='c'
+    ?`<div class="stitle" style="padding-top:18px">${esc(PROJ)}</div>`
+    :`<div class="stitle">projects</div>
+      ${PROJECTS.map(p=>`<button class="srow ${p===PROJ?'act':''}" onclick="pickProject('${p}')">${p}</button>`).join('')}`;
   document.getElementById('side').innerHTML=`
-    <div class="stitle">projects</div>
-    ${PROJECTS.map(p=>`<button class="srow ${p===PROJ?'act':''}" onclick="pickProject('${p}')">${p}</button>`).join('')}
+    ${projectsBlock}
     <div class="stitle">groups</div>
     ${groups.map(g=>`<button class="srow" onclick="jumpGroup('${g.f}')"><span class="mono">${g.f}/</span>
       ${g.p?`<span class="pb">${g.p}</span>`:`<span class="cnt">${g.n}</span>`}</button>`).join('')}
     <div class="stitle">views</div>
     <button class="srow" onclick="alert('prototype: saved views are future scope')">⚠ problems</button>
-    <button class="srow" onclick="if(S.drafts.size)openPublish()">Δ drafts<span class="cnt">${S.drafts.size}</span></button>`;
+    <button class="srow" onclick="if(S.drafts.size)openPublish()">Δ drafts<span class="cnt">${S.drafts.size}</span></button>
+    ${VAR==='c'?`<div class="stitle">project</div>
+    <button class="srow" onclick="alert('prototype: project settings (icon, access, metadata) — to be prototyped later')">⚙ settings</button>`:''}`;
   document.getElementById('rail').innerHTML=
-    PROJECTS.map(p=>`<button class="pav ${p===PROJ?'act':''}" title="${p}" onclick="pickProject('${p}')">${p[0].toUpperCase()}</button>`).join('');
+    PROJECTS.map(p=>`<button class="pav ${p===PROJ?'act':''}" title="${p}"
+      style="${p===PROJ?'':`background:oklch(0.32 0.04 ${projHue(p)});color:oklch(0.85 0.05 ${projHue(p)})`}"
+      onclick="pickProject('${p}')">${monogram(p)}</button>`).join('');
   document.getElementById('jumpbar').innerHTML=
     groups.map(g=>`<button class="jp" onclick="jumpGroup('${g.f}')">${g.f}${g.p?`<span class="pb">${g.p}</span>`:''}</button>`).join('');
   const v=SHELLS.find(x=>x.key===VAR);

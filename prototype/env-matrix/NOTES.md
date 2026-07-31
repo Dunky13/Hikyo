@@ -69,6 +69,13 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+Refinement (Marc): rail + panel leads, but rail and panel must not both
+list projects — the rail owns switching, the panel navigates inside the
+current project (its name as header + groups/views + a settings entry).
+Rail avatars are two-letter monograms with a per-project hue; a letter is
+not enough at scale ⇒ **project-level configuration (icon/avatar, access,
+metadata) recorded as map fog, to be prototyped in a later ticket.**
+
 ## Iteration 7 — publish, required-in, create sheet
 
 On top of the flat model: key creation in the bottom sheet (same design
