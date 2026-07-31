@@ -69,6 +69,16 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 16 — clarify pass (critique issue 3 + copy sweep)
+
+Reveal gets real button chrome ("reveal value" / "hide value") — the most
+security-relevant action no longer has the least affordance. Confirm
+dialogs name the action and consequence ("Reveal the production value of
+X? Re-authentication would be required…"). Validation messages are human
+with examples ("must be a whole number, e.g. 8080" — seeded demo data
+matched). Icon buttons (? ◐ ☰ envs) carry aria-labels; the sheet dialog
+is labelled.
+
 ## Iteration 15 — distilled sheet (critique issue 4)
 
 The cell sheet's one job is see/change this value. Removed: the permanent
