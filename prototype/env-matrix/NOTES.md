@@ -69,6 +69,15 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 14 — distilled cells (critique issue 1)
+
+Border chrome reserved for exceptional states: ordinary set values render
+as plain mono text (hover tint + focus ring keep the affordance), absent
+stays a faint dot, secrets are dim masked dots without a per-cell lock
+(the key column already carries 🔒). Pills survive only for missing and
+invalid — 228 bordered elements down to 4 on the demo screen. Legend
+updated to match.
+
 ## Iteration 13 — drawer backdrop + mobile project select
 
 Marc's mobile findings: (1) tapping outside the open drawer fell through
