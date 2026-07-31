@@ -69,6 +69,11 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 11 — legend as header tooltip
+
+The footer legend duplicated screen space (Marc) — moved into a "?" icon
+popover in the header, same pattern as the env picker.
+
 ## Iteration 10 — env picker in header
 
 The env chips bar duplicated the column header row (Marc) — removed.
