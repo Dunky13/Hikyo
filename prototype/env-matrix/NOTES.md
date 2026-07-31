@@ -3,39 +3,45 @@
 **Question:** does a side-by-side environment matrix communicate inheritance,
 overrides, gaps, validation, and drift legibly?
 
-**Run:** `open prototype/env-matrix/index.html` (or any static server).
-Switch variants with the floating bar, `←`/`→`, or `?variant=a|b|c`.
+**Run:** `./prototype/serve.sh` then open `/env-matrix/` (works on phones via LAN).
 
 Throwaway code — delete this directory once the ticket resolves; the answer
 lives in the ticket's resolution comment and the map.
 
-## Variants
+## Iteration 2 (current)
 
-| Key | Name | Structure |
-|---|---|---|
-| `a` | Ledger | Editorial print. Full dense spreadsheet; origin as superscript footnote glyphs; sticky provenance footnote bar explains the hovered cell's layer chain; summary tally in the masthead. |
-| `b` | Panel | Industrial dark master–detail. Left: key list with a 4-square per-env state strip. Right: per-env sections with the full defaults→base→env origin chain rendered per environment. Search + problems-only filter. |
-| `c` | Cascade | Inheritance-first lanes on linen. Columns ordered along the base chain; every inherited cell is a ghost pill pointing `◂` at its origin; drift rows tinted amber. |
+Round-1 verdict from Marc: **Cascade (C) wins**, editorial style rejected
+project-wide, mobile-first is now a standing rule (see PRODUCT.md / DESIGN.md
+at repo root, created this round via impeccable teach).
 
-## Shared semantics (from locked ADRs #10/#11/#12)
+Single design now, Cascade evolved:
 
-- Layers: project-defaults → base chain → environment, nearest-ancestor-wins.
-- Value states: set / absent / **masked** (deliberately unresolved).
-- Required + (absent|masked) = publish-blocking violation; schema violations shown per cell.
-- Δ = changed since last published revision; ≠ = resolved values differ across envs.
-- Secrets (§) masked by default; click reveals with auto-remask; production
-  (protected flag) throws a stand-in reauth confirm — real ceremony is ticket #21.
-- Demo data seeds deliberate finds: `DB_POOL_SIZE` staging = "ten" (type violation),
-  `OIDC_ISSUER` preview relative URL, `OIDC_CLIENT_SECRET` required in prod but only
-  set in staging (satisfied via base-chain inheritance — a footgun worth discussing),
-  `S3_SECRET_ACCESS_KEY` masked-while-required in prod (blocks publish),
-  `SMTP_PASSWORD` masked in dev.
+- **Dark default + light theme** (auto from `prefers-color-scheme`, ◐ toggles).
+- **Mobile-first**: sticky key column, horizontally scrolling lanes, 44px targets.
+- **Env show/hide chips** (also the density valve on phones; min 1 visible).
+- **Collapsible groups**; collapsed header shows a comma-separated key list.
+- **Tap any cell → bottom sheet**: provenance chain, state explanation,
+  in-place edit (override here / edit value), clear override, mask/unmask.
+- **Permission-gated reveal**: role simulator top right (admin / developer /
+  viewer). No permission → no reveal button, but **write-only replacement**
+  stays available. Production (protected) reveal shows a stand-in reauth
+  confirm (real ceremony is ticket #21).
+- **Mask vs secret** explained in the sheet: secret = key classification
+  (values exist, hidden, reveal-gated); mask = per-env value state ("no value
+  here, on purpose", blocks inheritance).
+- **Local edits** get a draft dot + header counter (publish flow is #21).
+
+Demo data unchanged: 58 keys, seeded finds (type violation, relative-URL
+violation, required-unset in prod, masked-while-required, secret satisfied in
+prod only via inheritance from staging).
 
 ## Verdict
 
-_(fill in when Marc has reacted — which variant, or which pieces of which)_
+_(fill in when the ticket resolves)_
 
-- Winning cell-state visual language:
+- Cell-state visual language:
 - Origin explanation mechanism:
-- Density at 58 keys × 4 envs:
+- Density at 58 keys × 4 envs (desktop + phone):
 - Add-key flow:
+- Mask-vs-secret presentation:
+- "Required satisfied only by inheritance" as a distinct signal?
