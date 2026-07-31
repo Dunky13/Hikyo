@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Envweave prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..800;1,9..144,400..600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{--paper:oklch(0.965 0.013 85);--ink:oklch(0.26 0.022 60);--ink-soft:oklch(0.26 0.022 60/.55);--ink-faint:oklch(0.26 0.022 60/.32);--rule:oklch(0.26 0.022 60/.16);--oxblood:oklch(0.44 0.13 25);--mono:"IBM Plex Mono",ui-monospace,monospace}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:"Fraunces",serif;min-height:100vh;padding:clamp(28px,6vw,80px) clamp(20px,6vw,80px)}
+  header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:8px}
+  h1{font-size:clamp(30px,5vw,52px);font-weight:560;letter-spacing:-0.02em;font-variation-settings:"opsz" 120}
+  h1 em{font-style:italic;font-weight:400;color:var(--ink-soft)}
+  .lede{font-size:15px;font-style:italic;color:var(--ink-soft);margin:12px 0 40px;max-width:56ch}
+  ul{list-style:none;display:grid;gap:2px}
+  li a{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:18px;text-decoration:none;color:inherit;padding:20px 4px;border-bottom:1px solid var(--rule);transition:padding-left .18s cubic-bezier(.2,.7,.3,1)}
+  li a:hover{padding-left:16px}
+  li a:hover .name{color:var(--oxblood)}
+  .name{font-size:clamp(20px,2.6vw,28px);font-weight:520}
+  .name .tkt{font-family:var(--mono);font-size:12px;color:var(--ink-faint);font-weight:400;margin-left:10px;vertical-align:middle}
+  .desc{font-size:14px;font-style:italic;color:var(--ink-soft);grid-column:1;max-width:60ch;margin-top:4px}
+  .go{font-family:var(--mono);font-size:13px;color:var(--ink-faint);white-space:nowrap}
+  li a:hover .go{color:var(--oxblood)}
+  footer{margin-top:48px;font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);line-height:1.7}
+</style>
+</head>
+<body>
+  <header><h1>envweave / <em>prototypes</em></h1></header>
+  <p class="lede">Throwaway UI explorations from the wayfinder map. Each answers one open design question; delete once its ticket resolves.</p>
+  <ul>
+    <li><a href="env-matrix/index.html">
+      <span class="name">Environment matrix<span class="tkt">#20</span></span>
+      <span class="go">open →</span>
+      <span class="desc">Side-by-side env grid — inheritance, overrides, gaps, validation, drift. Three variants: Ledger · Panel · Cascade (bottom bar / ← →).</span>
+    </a></li>
+  </ul>
+  <footer>
+    add a prototype: drop it in <code>prototype/&lt;slug&gt;/index.html</code>, then add one &lt;li&gt; above.<br>
+    serve: <code>./prototype/serve.sh</code> · stop: Ctrl-C
+  </footer>
+</body>
+</html>
