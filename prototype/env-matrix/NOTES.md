@@ -69,6 +69,15 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 18 — empty state + real projects (critique issue 2)
+
+Per-project key store: envweave-demo is seeded, the other projects start
+empty and keep whatever you declare (drafts/reveals clear on switch).
+Empty project shows a first-run state: what the matrix is, a primary
+"declare first key" (the create sheet gains a group field when no groups
+exist), and an "import from .env" stub pointing at the locked scaffold →
+review → apply → import flow (#13).
+
 ## Iteration 17 — polish pass
 
 Unified :focus-visible ring on every control; key names truncate inside a
