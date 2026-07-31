@@ -84,19 +84,28 @@ A bare content digest is forbidden, and not merely inadvisable: the revision ADR
 - **The key is deliberately local, not server-issued.** The server's change token is per `(org, project, environment)` and cannot be sliced per render target without a server-side per-key token, which #11 does not define and this ticket may not invent. A local key gives per-target granularity with the same unforgeability property, and its blast radius is nil: whoever reads the state directory also holds the token and the snapshot, so they can read the values outright.
 - **Stamps are consequently box-local and are never committed.** The managed stamp block is generated locally and `adopt` adds it to `.gitignore`. A fresh clone has no stamps and fails loudly (below) until `envweave compose render` runs — which is correct: an unprovisioned checkout has no values either.
 
-### Where the stamp goes
+### The stamp is the generation id, and it appears in the path
+
+**The stamp names the render generation, and the rendered file's path contains it.** There is exactly one mutable artifact on the box.
 
 ```yaml
 services:
   api:
     env_file:
-      - path: /run/envweave/acme-web-production/current/api.env
+      - path: /run/envweave/acme-web-production/${ENVWEAVE_GEN_API:?run 'envweave compose render' first}/api.env
         format: raw
     labels:
-      envweave.stamp: "${ENVWEAVE_STAMP_API:?run 'envweave compose render' first}"
+      envweave.stamp: "${ENVWEAVE_GEN_API:?run 'envweave compose render' first}"
 ```
 
-The stamp variable is defined in a managed block of a **generated, gitignored** env file that Compose auto-loads for interpolation.
+`ENVWEAVE_GEN_API` is defined in a managed block of a **generated, gitignored** env file that Compose auto-loads for interpolation. The Compose specification fixes that *"any values in a Compose file can be interpolated with variable substitution"*, so a path is an ordinary interpolation site.
+
+Two properties follow, and both matter more than they look:
+
+- **Correctness rests on the path, not the label.** Because the generation id is *in the `env_file` path*, a new generation changes the resolved service definition outright, so Compose's config hash moves for a reason that has nothing to do with whether it hashes file *contents*. The version-dependent behaviour that made § *Dotenv encoding* necessary is therefore not load-bearing here at all. The label is retained for inspection — `docker inspect` answers "which generation is this container running" — and is deliberately redundant.
+- **Values and stamp cannot disagree.** They are the same string. There is no ordering between "write the values" and "write the stamp" to get wrong, because the generation directory is immutable and the pointer to it is a single file.
+
+*Rejected: a `current` symlink plus a separate stamp variable.* This was the first draft and it is not crash-safe: an atomic rename protects one pathname, so a crash between swinging the symlink and regenerating the stamp block leaves new values under an old stamp — Compose does not recreate, and the staleness is silent and permanent. Adding a lock does not fix it, because the failure is a crash, not a race. Putting the generation id in the path removes the second artifact instead of trying to synchronize it.
 
 **The `:?` required form is mandatory, not stylistic.** Compose's default `.env` loading is bypassable — `--env-file`, `COMPOSE_ENV_FILES`, `COMPOSE_DISABLE_ENV_FILE`, a different `--project-directory`, or a shell variable of the same name all change or defeat it. Without `:?`, an undefined stamp interpolates to the **empty string**, which is a stable label value: Compose would then never recreate, and the failure would be silent and permanent. With `:?`, every one of those bypass paths turns into a refusal to start, naming the fix.
 
@@ -116,15 +125,15 @@ This is not bookkeeping. Folder path is non-semantic server-side — the schema 
 
 A fixed render path updated in place cannot be made crash-safe: rendering before stamping leaves new values under the old label, so `up -d` does not recreate; stamping before rendering recreates with old values under the new stamp. Both are silent.
 
-- Each render writes a **content-addressed generation directory** — all target files for that fetch, written fresh, fsynced, never mutated afterwards.
-- A **single metadata file** naming the generation and carrying every target's stamp is then written to a temporary path, fsynced, and moved into place with an **atomic rename**. That rename is the commit point; the stamp block is regenerated from it.
-- `current` is a symlink swung by the same rename discipline, so the absolute `env_file:` path stays stable.
-- A **per-project writer lock** serializes `sync`, `render` and `adopt`. A crash between generation write and metadata rename leaves an unreferenced generation, which recovery garbage-collects; no partially applied state is ever observable.
-- Retention of superseded generations is bounded (count in the operations spec) so a rollback does not require a fetch.
+- Each render writes a **generation directory named by its stamp** — every target file for that fetch, written fresh, fsynced, then never mutated. Generation directories are immutable.
+- **The generated stamp file is the single commit point.** It is written to a temporary path, fsynced, and moved into place with one **atomic rename**. Before that rename the new generation is invisible to Compose; after it, it is fully in effect. There is no second artifact to keep in step, and therefore no crash window in which values and stamp disagree.
+- A **per-project writer lock** serializes `sync`, `render` and `adopt`, so two concurrent writers cannot interleave generations. A crash before the rename leaves an unreferenced generation directory, which recovery garbage-collects; no partially applied state is observable at any point.
+- **A generation is complete or absent.** Recovery treats a generation directory lacking its completion marker as unreferenced, whatever its age, so a torn write is never adopted by a later cursor check.
+- Retention of superseded generations is bounded (count in the operations spec) so a rollback does not require a fetch. **GC never removes the generation named by the current stamp file**, and never removes a generation while the writer lock is held by another process.
 
 ### Missing or stale stamps are errors
 
-`envweave compose doctor` reads the resolved project and **fails loudly** when a service consumes an Envweave-rendered `env_file:` without a stamp label; when a stamp label omits the `:?` form; when a rendered generation's stamp matches neither the label nor the server's current manifest; when the Compose version is below the path-2 floor; when `format: raw` is missing; or when target membership has drifted. `sync` runs the same checks before its first render.
+`envweave compose doctor` reads the resolved project and **fails loudly** when any of the following holds: a service consumes an Envweave-rendered target without the generation variable in its `env_file` path; any use of that variable omits the `:?` form; the generation the resolved config interpolates to is not the one named by the current stamp file; that generation directory is absent, incomplete, or lacks its completion marker; the stamp does not correspond to the server's current manifest for that target; the running Compose version is below the path-2 floor; `format: raw` is missing; the token file is readable beyond its owner; or target membership has drifted from the recorded key ids. **Agreement on one side and disagreement on another is a failure, not a pass** — the check is that config, stamp file, generation on disk and server manifest all name the same generation. `sync` runs the same checks before its first render.
 
 This closes the research doc's open question on export staleness: **staleness is a check, not a documentation matter.**
 
@@ -229,7 +238,7 @@ A workload service account holds `read` at explicit `(project, environment)` sco
 The conditional cursor is local state and can desynchronize from local delivery state, which the server cannot see. Normative:
 
 - The stored cursor is bound to **credential identity, environment, pin generation, authorized delivery projection, delivery mode (`--config-only` or not), and the render-target id set**. Any change to any of these invalidates it.
-- **A cursor is presented only while the exact render generation it produced still exists.** After a reboot the tmpfs render is gone while a persistent cursor would still read "current" — the server would answer "current", deliver no plaintext, and rendering would be impossible. On local generation loss the client performs a **full authorized fetch**, with its per-key disclosure events.
+- **A cursor is presented only while the generation that produced it is the one currently named by the stamp file, and that generation is present and complete.** Mere existence somewhere under retention is not enough: a superseded generation kept for rollback, or a torn one missing its completion marker, must not make a cursor eligible. After a reboot the tmpfs render is gone while a persistent cursor would still read "current" — the server would answer "current", deliver no plaintext, and rendering would be impossible. On any failure of that three-part test the client performs a **full authorized fetch**, with its per-key disclosure events.
 - **A cursor is never advanced after a rejected or failed render** — including the all-or-nothing manifest refusal, a loader-control refusal, an encoding refusal, or a crash before the metadata rename.
 - Repeated cursor-less fetching by one credential is a signal the server surfaces, per #17.
 
