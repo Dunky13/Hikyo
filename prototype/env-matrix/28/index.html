@@ -646,7 +646,7 @@ function renderEnvPop(){
   const pop=document.getElementById('envpop');
   if(!S.envpop){pop.hidden=true;return}
   pop.hidden=false;
-  pop.style.left=Math.min(S.envpopX,innerWidth-230)+'px';
+  pop.style.left=Math.max(12,Math.min(S.envpopX,innerWidth-230))+'px';
   pop.style.top=S.envpopY+'px';
   pop.innerHTML=`<div class="et">environments</div>`+
     readableEnvs().map(e=>{
@@ -750,7 +750,8 @@ function renderLegendPop(){
   const pop=document.getElementById('legendpop');
   if(!S.legendpop){pop.hidden=true;return}
   pop.hidden=false;
-  pop.style.left=Math.min(S.legendpopX,innerWidth-352)+'px';
+  /* clamp both edges — r.right-340 goes negative on narrow screens */
+  pop.style.left=Math.max(12,Math.min(S.legendpopX,innerWidth-352))+'px';
   pop.style.top=S.legendpopY+'px';
   pop.innerHTML=`<div class="lt">what the cells mean</div>
     <div class="lrow"><span class="cellv" style="cursor:default">value</span> set in that environment — nothing inherits</div>

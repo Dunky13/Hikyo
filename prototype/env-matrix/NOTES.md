@@ -76,6 +76,11 @@ retired — the switcher, ?sheet= param, grab handle, and drag-to-dismiss
 (iteration 26) are removed; the modal CSS is the base now. Close = ✕,
 backdrop, Escape. No selectable parameters remain in the prototype.
 
+In-place fix (Marc, explicit): the "?" legend popover positioned at
+`r.right - 340` went off-screen left on phones (only the right edge was
+clamped). Both header popovers (legend, envs) now clamp to both viewport
+edges; verified at 390px.
+
 ## Iteration 27 — bottom sheet vs centered modal (Marc: compare)
 
 Two presentations of the same create/edit surface, toggleable live via
