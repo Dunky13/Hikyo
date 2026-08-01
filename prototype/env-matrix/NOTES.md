@@ -77,7 +77,9 @@ Four selectable strengths, cycle with the bottom-right "cell:" pill or
 - well — filled input-slot background
 - baseline — solid bottom edge, spreadsheet feel
 - pencil — trailing ✎ glyph
-Winner becomes the fixed style in the next iteration.
+Winner becomes the fixed style in the next iteration. Shell selection
+removed in-place (Marc): rail + panel (C) is the shell; the A/B switcher,
+its keyboard cycling and CSS are gone, ?cell= is the only param.
 
 ## Iteration 20 — editable-slot underline (Marc)
 

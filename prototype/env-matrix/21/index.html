@@ -12,7 +12,8 @@
     well      — filled input-slot background
     baseline  — solid bottom edge, spreadsheet feel
     pencil    — trailing edit glyph
-  Marc picks; the winner becomes the next iteration. Otherwise 20:
+  Marc picks; the winner becomes the next iteration. Shell selection
+  removed — rail + panel (C) is the shell. Otherwise 20:
   Refines iteration 8's variant C after Marc's feedback: the rail owns
   project switching, the panel navigates inside the current project (name
   header, groups, views, settings placeholder); rail avatars are two-letter
@@ -385,17 +386,6 @@
     select.projsel option:hover{background:var(--bg3);color:var(--tx)}
     select.projsel option:checked{color:var(--accent);font-weight:600}
   }
-  #vswitch{
-    position:fixed;bottom:calc(16px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);
-    z-index:15;display:flex;align-items:center;gap:2px;
-    background:oklch(0.14 0.015 250);color:oklch(0.97 0.01 90);
-    border-radius:999px;padding:5px 8px;box-shadow:0 6px 24px oklch(0 0 0/.4);
-    font-size:12.5px;letter-spacing:.02em;
-  }
-  #vswitch button{padding:4px 10px;border-radius:999px;font-size:14px}
-  #vswitch button:hover{background:oklch(0.28 0.02 250)}
-  #vswitch .lbl{padding:0 8px;min-width:160px;text-align:center}
-  #vswitch .lbl b{font-weight:600}
 
   /* ---------------- mobile ---------------- */
   @media (max-width:700px){
@@ -456,11 +446,6 @@
 <div id="sheet" role="dialog" aria-modal="true" aria-label="key details"></div>
 <div id="cellswitch">
   <button onclick="cycleCell()" title="cycle cell affordance option" aria-label="cycle cell affordance option">cell: <b id="cs-lbl"></b> ›</button>
-</div>
-<div id="vswitch">
-  <button onclick="cycleShell(-1)" title="previous shell (←)">‹</button>
-  <span class="lbl" id="vs-lbl"></span>
-  <button onclick="cycleShell(1)" title="next shell (→)">›</button>
 </div>
 
 <script>
@@ -732,13 +717,11 @@ function render(){
 /* ============================ app shell (variants) ============================ */
 const PROJECTS=['envweave-demo','adhd-kanban','poketracker','initiative-tracker'];
 let PROJ=PROJECTS[0];
-const SHELLS=[{key:'a',name:'Sidebar'},{key:'b',name:'Centered + jump bar'},{key:'c',name:'Rail + panel'}];
-let VAR=(()=>{try{return new URLSearchParams(location.search).get('variant')||'a'}catch(_){return'a'}})();
-if(!SHELLS.some(v=>v.key===VAR))VAR='a';
+const VAR='c'; /* shell settled: rail + panel */
 const CELLSTYLES=['underline','well','baseline','pencil'];
 let CVAR=(()=>{try{return new URLSearchParams(location.search).get('cell')||'underline'}catch(_){return'underline'}})();
 if(!CELLSTYLES.includes(CVAR))CVAR='underline';
-function syncQS(){try{history.replaceState(null,'','?variant='+VAR+'&cell='+CVAR)}catch(_){/* file:// */}}
+function syncQS(){try{history.replaceState(null,'','?cell='+CVAR)}catch(_){/* file:// */}}
 function applyCell(){
   document.body.dataset.cell=CVAR;
   document.getElementById('cs-lbl').textContent=CVAR;
@@ -800,24 +783,7 @@ function renderShell(){
       onclick="pickProject('${p}')">${monogram(p)}</button>`).join('');
   document.getElementById('jumpbar').innerHTML=
     groups.map(g=>`<button class="jp" onclick="jumpGroup('${g.f}')">${g.f}${g.p?`<span class="pb">${g.p}</span>`:''}</button>`).join('');
-  const v=SHELLS.find(x=>x.key===VAR);
-  document.getElementById('vs-lbl').innerHTML=`<b>${v.key.toUpperCase()}</b> — ${v.name}`;
 }
-function cycleShell(d){
-  const i=SHELLS.findIndex(v=>v.key===VAR);
-  VAR=SHELLS[(i+d+SHELLS.length)%SHELLS.length].key;
-  syncQS();
-  document.body.dataset.v=VAR;
-  setSide(false);
-  renderShell();
-}
-document.addEventListener('keydown',e=>{
-  const t=e.target;
-  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
-  if(S.sheet)return;
-  if(e.key==='ArrowLeft')cycleShell(-1);
-  if(e.key==='ArrowRight')cycleShell(1);
-});
 document.body.dataset.v=VAR;
 
 /* group headers stick right under the measured thead — fractional height,
