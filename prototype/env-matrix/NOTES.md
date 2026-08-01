@@ -69,6 +69,13 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 28 — modal locked (Marc)
+
+Decision: **centered modal** for create/edit/publish. Bottom sheet
+retired — the switcher, ?sheet= param, grab handle, and drag-to-dismiss
+(iteration 26) are removed; the modal CSS is the base now. Close = ✕,
+backdrop, Escape. No selectable parameters remain in the prototype.
+
 ## Iteration 27 — bottom sheet vs centered modal (Marc: compare)
 
 Two presentations of the same create/edit surface, toggleable live via
