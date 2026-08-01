@@ -1,0 +1,1217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<!--
+  THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 22.
+  Cell affordance decided: PENCIL — every editable slot carries a faint
+  trailing ✎ (accent on hover). The affordance switcher and the other
+  three options are removed. Rail + panel is the shell. Otherwise 21:
+  Refines iteration 8's variant C after Marc's feedback: the rail owns
+  project switching, the panel navigates inside the current project (name
+  header, groups, views, settings placeholder); rail avatars are two-letter
+  monograms with per-project hues. Project-level configuration (icon,
+  access, metadata) recorded as map fog for a later prototype.
+  Shell variants otherwise unchanged from 8:
+  ?variant=a  Sidebar: 250px panel with project switcher, group links
+              (problem badges), views.
+  ?variant=b  Centered + jump bar: no sidebar, capped content width,
+              horizontal group-jump pills.
+  ?variant=c  Rail + panel: 56px project icon rail + 210px group panel.
+  Floating bottom switcher / arrow keys flip variants; on mobile every shell
+  collapses to a hamburger drawer. Matrix behaviour identical to 7.
+  Design context: PRODUCT.md / DESIGN.md at repo root.
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d2b33'/%3E%3Cpath d='M8 12h16M8 16h16M8 20h10' stroke='%237fd0cd' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+    --sans:"Archivo",system-ui,sans-serif;
+    /* dark (default) */
+    --bg:oklch(0.19 0.012 220);
+    --bg2:oklch(0.225 0.014 220);
+    --bg3:oklch(0.27 0.016 220);
+    --line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);
+    --tx-dim:oklch(0.76 0.01 210);
+    --tx-faint:oklch(0.60 0.012 215);
+    --accent:oklch(0.82 0.09 195);
+    --on-accent:oklch(0.2 0.02 220);
+    --accent-soft:oklch(0.82 0.09 195/.14);
+    --bad:oklch(0.74 0.13 25);
+    --bad-soft:oklch(0.74 0.13 25/.14);
+    --chg:oklch(0.8 0.06 250);
+    --rowalt:oklch(0.93 0.008 200/.045);
+    --rowalt-solid:oklch(0.218 0.013 220);
+    --sheet-shadow:0 -12px 40px oklch(0 0 0/.5);
+  }
+  [data-theme=light]{
+    --bg:oklch(0.965 0.008 200);
+    --bg2:oklch(0.935 0.01 200);
+    --bg3:oklch(0.895 0.012 200);
+    --line:oklch(0.82 0.014 210);
+    --tx:oklch(0.25 0.03 225);
+    --tx-dim:oklch(0.4 0.025 220);
+    --tx-faint:oklch(0.52 0.02 218);
+    --accent:oklch(0.45 0.085 210);
+    --on-accent:oklch(0.97 0.008 200);
+    --accent-soft:oklch(0.45 0.085 210/.1);
+    --bad:oklch(0.48 0.14 30);
+    --bad-soft:oklch(0.48 0.14 30/.1);
+    --chg:oklch(0.45 0.08 255);
+    --rowalt:oklch(0.25 0.03 225/.07);
+    --rowalt-solid:oklch(0.943 0.009 200);
+    --sheet-shadow:0 -12px 40px oklch(0.3 0.02 220/.25);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);color:var(--tx);font-family:var(--sans);
+    font-size:14px;-webkit-font-smoothing:antialiased;
+    height:100dvh;display:flex;flex-direction:column;overflow:hidden;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  input,select{font:inherit}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  :is(button,select,input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------------- header ---------------- */
+  header{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 16px;border-bottom:1px solid var(--line);
+    background:var(--bg);flex:none;
+  }
+  header .crumb{font-weight:600;font-size:15px;letter-spacing:.01em}
+  header .crumb span{color:var(--accent)}
+  header .grow{flex:1}
+  header .ctl{
+    display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--tx-dim);
+  }
+  header select{
+    background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+    padding:7px 10px;border-radius:6px;font-size:13px;
+  }
+  header .iconbtn{
+    border:1px solid var(--line);border-radius:6px;padding:7px 0;font-size:13px;color:var(--tx-dim);
+    min-height:36px;min-width:38px;display:inline-flex;align-items:center;justify-content:center;
+  }
+  header .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  header .drafts{
+    font-size:12.5px;color:var(--chg);border:1px solid var(--chg);border-radius:999px;padding:6px 12px;
+    font-weight:600;
+  }
+  header .drafts:hover{background:var(--chg);color:var(--bg)}
+
+  /* ---------------- env visibility popover ---------------- */
+  .envbtn{
+    display:inline-flex;align-items:center;gap:4px;margin-left:8px;
+    border:1px solid var(--line);border-radius:6px;padding:6px 10px;min-height:32px;
+    font-size:10px;letter-spacing:.08em;color:var(--tx-dim);text-transform:none;
+  }
+  .envbtn:hover{border-color:var(--accent);color:var(--accent)}
+  #envpop{
+    position:fixed;z-index:30;min-width:210px;
+    background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 10px 34px oklch(0 0 0/.4);padding:6px;
+  }
+  #envpop .et{font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--tx-faint);padding:8px 10px 4px;font-weight:700}
+  #envpop label{
+    display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;
+    font-size:13px;color:var(--tx);cursor:pointer;min-height:40px;
+  }
+  #envpop label:hover{background:var(--bg3)}
+  #envpop label.off{color:var(--tx-faint)}
+  #envpop .p{font-size:10px;letter-spacing:.06em;color:var(--bad);font-weight:600;margin-left:auto}
+
+  /* ---------------- matrix ---------------- */
+  /* .wrap is THE scroll container (both axes) so thead, group rows and the
+     key column can all stick inside it */
+  .wrap{flex:1;overflow:auto;overscroll-behavior:contain}
+  table{border-collapse:separate;border-spacing:0;min-width:100%}
+  thead th{
+    position:sticky;top:0;z-index:4;background:var(--bg);text-align:left;
+    padding:12px 12px 10px;border-bottom:1px solid var(--line);
+    font-size:12px;font-weight:600;
+  }
+  thead th.keyh{
+    position:sticky;left:0;z-index:5;background:var(--bg);
+    font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--tx-faint);
+    min-width:150px;max-width:200px;
+  }
+  thead th .pp{color:var(--bad);font-size:9.5px;letter-spacing:.08em;margin-left:5px;vertical-align:2px}
+  tbody td{padding:5px 12px;border-bottom:1px solid oklch(from var(--line) l c h/.45)}
+  td.key{
+    position:sticky;left:0;background:var(--bg);z-index:2;
+    font-family:var(--mono);font-size:12px;white-space:nowrap;
+    max-width:200px;
+  }
+  td.key .kn{display:inline-block;vertical-align:bottom;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 34px)}
+  td.key .lock{color:var(--bad);margin-right:5px}
+  td.key .req{color:var(--tx-faint);font-size:9.5px;margin-left:6px;font-family:var(--sans)}
+  tr.grp td{
+    position:sticky;top:calc(var(--gh,55px) - 1px);z-index:3;
+    background:var(--bg);padding:0;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  }
+  tr.grp button.gbtn{
+    display:flex;align-items:center;gap:10px;text-align:left;
+    position:sticky;left:0;max-width:100vw;
+    padding:14px 16px;min-height:44px;
+    font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
+  }
+  tr.grp .tri{transition:transform .18s cubic-bezier(.25,1,.5,1);font-size:10px;color:var(--tx-faint)}
+  tr.grp.closed .tri{transform:rotate(-90deg)}
+  tr.grp .gsum{
+    font-family:var(--mono);font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;
+    color:var(--tx-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;
+  }
+  tr.grp .gprob{
+    font-size:10.5px;font-weight:600;letter-spacing:.02em;text-transform:none;
+    color:var(--bad);background:var(--bad-soft);border-radius:999px;padding:3px 9px;white-space:nowrap;
+  }
+  tr.grp .gcnt{font-weight:400;letter-spacing:0;color:var(--tx-faint);font-size:11px;text-transform:none}
+  tr.grp button.addk{
+    font-size:11px;color:var(--tx-faint);border:1px dashed var(--line);border-radius:999px;
+    padding:4px 12px;letter-spacing:.02em;text-transform:none;font-weight:500;white-space:nowrap}
+  tr.grp button.addk:hover{color:var(--accent);border-color:var(--accent)}
+  tr.alt td{background:var(--rowalt)}
+  tr.alt td.key{background:var(--rowalt-solid)}
+
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;max-width:240px;
+    font-family:var(--mono);font-size:11.5px;line-height:1;
+    padding:7px 12px;border-radius:999px;white-space:nowrap;overflow:hidden;
+    min-height:30px;cursor:pointer;border:1px solid transparent;
+    transition:filter .12s,border-color .12s;
+  }
+  .pill:hover{filter:brightness(1.12)}
+  .pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .pill .tx{overflow:hidden;text-overflow:ellipsis}
+  .cellv{
+    display:inline-flex;align-items:center;gap:6px;max-width:240px;
+    font-family:var(--mono);font-size:11.5px;line-height:1;
+    padding:7px 10px;min-height:30px;border-radius:8px;cursor:pointer;
+  }
+  .cellv .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-bottom:2px}
+  .cellv:hover{background:oklch(from var(--tx) l c h/.07)}
+  .cellv.absent .tx{min-width:20px;text-align:center}
+  /* editable-slot affordance: trailing pencil (decided iteration 22) */
+  .cellv::after{content:'✎';font-size:10px;color:var(--tx-faint);margin-left:2px}
+  .cellv:hover::after{color:var(--accent)}
+  .cellv:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .cellv.dim{color:var(--tx-dim)}
+  .cellv.absent{color:var(--tx-faint)}
+  .cellv .d{color:var(--chg);font-weight:700}
+  .cellv .draftdot{width:6px;height:6px;border-radius:50%;background:var(--chg);flex:none}
+  .pill.missing{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:500}
+  .pill.invalid{border:1.5px solid var(--bad);color:var(--bad)}
+  .pill .d{color:var(--chg);font-weight:700;font-style:normal}
+  td .viol{display:block;font-size:10px;color:var(--bad);margin-top:3px;font-family:var(--mono)}
+
+  #empty{max-width:400px;margin:10vh auto 0;text-align:center;padding:0 20px}
+  #empty h3{font-size:16px;font-weight:600;margin:16px 0 8px}
+  #empty p{font-size:13px;color:var(--tx-dim);line-height:1.6}
+  #empty .ecta{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+
+  /* ---------------- legend popover ---------------- */
+  #legendpop{
+    position:fixed;z-index:30;width:min(340px,calc(100vw - 24px));
+    background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 10px 34px oklch(0 0 0/.4);padding:12px 14px;
+    font-size:12px;color:var(--tx-dim);
+  }
+  #legendpop .lt{font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--tx-faint);font-weight:700;margin-bottom:8px}
+  #legendpop .lrow{display:flex;align-items:center;gap:10px;padding:5px 0}
+  #legendpop .lrow .pill{cursor:default;min-height:24px;padding:4px 10px;flex:none}
+  #legendpop .lrow .pill:hover{filter:none}
+  #legendpop .lfoot{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);line-height:1.6}
+
+  /* ---------------- bottom sheet ---------------- */
+  #scrim{
+    position:fixed;inset:0;background:oklch(0 0 0/.45);z-index:20;
+    opacity:0;pointer-events:none;transition:opacity .18s;
+  }
+  #scrim.open{opacity:1;pointer-events:auto}
+  #sheet{
+    position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);
+    width:min(600px,100%);max-height:82vh;overflow-y:auto;
+    background:var(--bg2);border:1px solid var(--line);border-bottom:none;
+    border-radius:14px 14px 0 0;z-index:21;box-shadow:var(--sheet-shadow);
+    transition:transform .22s cubic-bezier(.25,1,.5,1);
+    padding:18px 20px calc(24px + env(safe-area-inset-bottom));
+  }
+  #sheet.open{transform:translate(-50%,0)}
+  #sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 14px}
+  #sheet h2{font-family:var(--mono);font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  #sheet h2 .lock{color:var(--bad)}
+  #sheet .sub{font-size:12px;color:var(--tx-dim);margin-top:4px}
+  #sheet .sub b{color:var(--tx)}
+  #sheet .vrow{
+    display:flex;align-items:center;gap:10px;margin:16px 0 0;flex-wrap:wrap;
+  }
+  #sheet .vrow .cur{
+    font-family:var(--mono);font-size:13px;background:var(--bg);border:1px solid var(--line);
+    border-radius:8px;padding:11px 14px;flex:1;min-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  #sheet .vrow .cur.err{color:var(--bad);border-color:var(--bad)}
+  #sheet .vrow .cur.dim{color:var(--tx-dim)}
+  #sheet .editor{
+    font-family:var(--mono);font-size:13px;background:var(--bg);border:1px solid var(--accent);
+    color:var(--tx);border-radius:8px;padding:11px 14px;flex:1;min-width:180px;
+  }
+  #sheet .editor::placeholder{color:var(--tx-faint);font-style:italic}
+  #sheet textarea.editor{resize:vertical;line-height:1.55;width:100%}
+  #sheet .vrow .cur.json{white-space:pre-wrap;overflow:auto;max-height:200px;text-overflow:clip}
+  #sheet .editor:disabled{opacity:.45}
+  .btn{border:1px solid var(--line);border-radius:8px;padding:11px 16px;font-size:13px;color:var(--tx-dim);min-height:44px}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{filter:brightness(1.08);color:var(--on-accent)}
+  .btn.danger{color:var(--bad)}
+  .btn.danger:hover{border-color:var(--bad)}
+  #sheet .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  #sheet .noperm{font-size:12px;color:var(--tx-faint);font-style:italic;margin-top:10px}
+  #sheet .verr{font-size:12px;color:var(--bad);font-family:var(--mono);margin-top:10px}
+  #sheet .schemarow{
+    display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    margin-top:12px;padding:9px 12px;border:1px solid transparent;border-radius:8px;
+    font-size:12px;color:var(--tx-faint);min-height:40px;
+  }
+  #sheet .schemarow:hover{color:var(--tx-dim);border-color:var(--line)}
+  #sheet .schemarow .tri{font-size:9px;transition:transform .18s cubic-bezier(.25,1,.5,1)}
+  #sheet .schemarow.open .tri{transform:rotate(90deg)}
+  #sheet .copyrow{
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;
+    padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+    font-size:12.5px;color:var(--tx-dim);
+  }
+  #sheet .copyrow label{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:12px}
+  #sheet .copyrow button.go{border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:7px 14px}
+
+  #sheet select.fsel{
+    background:var(--bg);border:1px solid var(--line);color:var(--tx);
+    padding:10px 12px;border-radius:8px;font-family:var(--mono);font-size:13px;min-height:44px}
+  #sheet .pubenv{
+    margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  }
+  #sheet .pubenv.blocked{border-color:var(--bad)}
+  #sheet .pubenv .ph{display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap}
+  #sheet .pubenv .ph b{font-weight:600}
+  #sheet .pubenv .ph .rev{font-family:var(--mono);font-size:11px;color:var(--tx-faint)}
+  #sheet .pubenv .ph .pp{color:var(--bad);font-size:10px;letter-spacing:.06em;font-weight:600}
+  #sheet .pubenv ul{list-style:none;margin-top:8px;display:grid;gap:4px}
+  #sheet .pubenv li{font-family:var(--mono);font-size:11.5px;color:var(--tx-dim);
+    display:flex;gap:10px;align-items:baseline}
+  #sheet .pubenv li .nv{color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50%}
+  #sheet .pubenv .blockmsg{margin-top:8px;font-size:12px;color:var(--bad);font-family:var(--mono)}
+
+  /* ---------------- app shell (iteration 8 variants) ---------------- */
+  #app{display:grid;grid-template-columns:1fr;height:100dvh;overflow:hidden}
+  body[data-v=a] #app{grid-template-columns:250px 1fr}
+  body[data-v=c] #app{grid-template-columns:56px 210px 1fr}
+  #main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  body[data-v=b] #main{width:min(1240px,100%);justify-self:center;
+    border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  #rail{display:none;flex-direction:column;align-items:center;gap:8px;
+    padding:14px 0;border-right:1px solid var(--line);background:var(--bg2)}
+  body[data-v=c] #rail{display:flex}
+  #rail .pav{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
+    justify-content:center;font-weight:700;font-size:12px;letter-spacing:.02em;color:var(--tx-dim);
+    border:1px solid transparent}
+  #rail .pav:hover{border-color:var(--line);color:var(--tx)}
+  #rail .pav.act{background:var(--accent);color:var(--on-accent)}
+  #side{display:none;flex-direction:column;overflow-y:auto;
+    border-right:1px solid var(--line);background:var(--bg2);padding:6px 0 20px}
+  body[data-v=a] #side,body[data-v=c] #side{display:flex}
+  #side .stitle{font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--tx-faint);padding:16px 16px 6px;font-weight:700}
+  #side .srow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    padding:9px 16px;font-size:13px;color:var(--tx-dim);min-height:38px}
+  #side .srow:hover{color:var(--tx);background:var(--bg3)}
+  #side .srow.act{color:var(--tx);background:var(--accent-soft);
+    font-weight:600}
+  #side .srow .cnt{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+  #side .srow .pb{margin-left:auto;font-size:10px;font-weight:600;color:var(--bad);
+    background:var(--bad-soft);border-radius:999px;padding:2px 8px}
+  #side .srow .mono{font-family:var(--mono);font-size:12px}
+  #jumpbar{display:none;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none;
+    padding:8px 16px;border-bottom:1px solid var(--line);flex:none;background:var(--bg)}
+  #jumpbar::-webkit-scrollbar{display:none}
+  body[data-v=b] #jumpbar{display:flex}
+  #jumpbar .jp{white-space:nowrap;border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;font-size:12px;color:var(--tx-dim);min-height:32px}
+  #jumpbar .jp:hover{border-color:var(--accent);color:var(--accent)}
+  #jumpbar .jp .pb{color:var(--bad);font-weight:600;margin-left:5px;font-size:10.5px}
+  #menubtn{display:none}
+  #sidescrim{position:fixed;inset:0;z-index:24;background:oklch(0 0 0/.35);display:none}
+  body.sideopen #sidescrim{display:block}
+  .projsel-wrap{display:none;padding:10px 16px 2px}
+  select.projsel{
+    width:100%;background:var(--bg);border:1px solid var(--line);color:var(--tx);
+    border-radius:8px;padding:11px 12px;font:inherit;font-size:13.5px;min-height:44px}
+  @supports (appearance:base-select){
+    select.projsel,select.projsel::picker(select){appearance:base-select}
+    select.projsel::picker(select){
+      background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+      box-shadow:0 10px 34px oklch(0 0 0/.4);padding:6px}
+    select.projsel option{padding:10px;border-radius:7px;font-size:13px;color:var(--tx-dim)}
+    select.projsel option:hover{background:var(--bg3);color:var(--tx)}
+    select.projsel option:checked{color:var(--accent);font-weight:600}
+  }
+
+  /* ---------------- mobile ---------------- */
+  @media (max-width:700px){
+    header{padding:10px 12px;gap:8px}
+    header .crumb{font-size:14px}
+    thead th{padding:10px 8px}
+    thead th.keyh{min-width:120px;max-width:140px}
+    td.key{max-width:140px;font-size:11px}
+    tbody td{padding:4px 8px}
+    .pill{max-width:170px;font-size:11px}
+    .ctl .lbl{display:none}
+    body[data-v=a] #app,body[data-v=c] #app{grid-template-columns:1fr}
+    body[data-v=b] #main{border:none}
+    #rail{display:none!important}
+    body[data-v=a] #side,body[data-v=c] #side{
+      position:fixed;top:0;bottom:0;left:0;width:min(300px,80vw);z-index:25;
+      transform:translateX(-105%);transition:transform .2s cubic-bezier(.25,1,.5,1);
+      box-shadow:12px 0 40px oklch(0 0 0/.4);
+    }
+    body[data-v=a] #side.open,body[data-v=c] #side.open{transform:none}
+    body[data-v=a] #menubtn,body[data-v=c] #menubtn{display:inline-flex}
+    body[data-v=c] .projsel-wrap{display:block}
+  }
+</style>
+</head>
+<body data-theme="dark" data-v="a">
+<div id="app">
+<div id="rail"></div>
+<aside id="side"></aside>
+<div id="main">
+<header>
+  <button class="iconbtn" id="menubtn" onclick="setSide(!document.getElementById('side').classList.contains('open'))" title="menu" aria-label="open navigation">☰</button>
+  <span class="crumb">envweave <span>/</span> acme <span>/</span> <span id="projname" style="color:var(--tx)">demo</span></span>
+  <span class="grow"></span>
+  <button class="drafts" id="drafts" hidden onclick="openPublish()" title="review and publish"></button>
+  <span class="ctl"><span class="lbl">acting as</span>
+    <select id="role" title="simulated principal — decides read/reveal permission" aria-label="acting as role">
+      <option value="admin">admin · reveal everywhere</option>
+      <option value="dev" selected>developer · reveal except prod</option>
+      <option value="viewer">viewer · no reveal</option>
+      <option value="external">external · production hidden</option>
+    </select>
+  </span>
+  <button class="iconbtn" id="legendbtn" onclick="toggleLegendPop(event)" title="what the cells mean" aria-label="what the cells mean">?</button>
+  <button class="iconbtn" id="themebtn" title="switch light / dark" aria-label="switch light or dark theme">◐</button>
+</header>
+
+<div id="jumpbar"></div>
+<div class="wrap"><table id="matrix"></table>
+<div id="empty" hidden></div></div>
+</div><!-- /main -->
+</div><!-- /app -->
+
+<div id="sidescrim" onclick="setSide(false)"></div>
+<div id="envpop" hidden></div>
+<div id="legendpop" hidden></div>
+<div id="scrim"></div>
+<div id="sheet" role="dialog" aria-modal="true" aria-label="key details"></div>
+
+<script>
+/* ============================ domain data ============================ */
+/* NO INHERITANCE: environments are flat peers; every value explicit. */
+const ENVS=[
+  {id:'dev',name:'development'},
+  {id:'stg',name:'staging'},
+  {id:'prd',name:'production',protected:true},
+  {id:'pre',name:'preview'},
+];
+const envById=id=>ENVS.find(e=>e.id===id);
+
+/* key: {folder,name,type,secret,required:'all'|'none'|[ids],
+         values:{env:'...'}, invalid:{env:msg}, changed:[envIds], draft?} */
+const K=(folder,name,type,secret,required,values,invalid,changed,desc)=>(
+  {folder,name,type,secret,required,values:values||{},invalid:invalid||{},changed:changed||[],desc});
+const all=v=>({dev:v,stg:v,prd:v,pre:v});
+
+const KEYS=[
+  K('app','APP_NAME','string',false,'all',all('Envweave Demo')),
+  K('app','APP_URL','url',false,'all',
+    {dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.envweave.dev'},{},['prd']),
+  K('app','PORT','int',false,'all',all('8080')),
+  K('app','LOG_LEVEL','string',false,'all',{dev:'debug',stg:'info',prd:'info',pre:'info'}),
+  K('app','FEATURE_MATRIX_V2','bool',false,'none',{dev:'false',stg:'false',prd:'false',pre:'true'},{},['pre']),
+  K('app','FEATURE_FLAGS','json',false,'all',
+    {dev:'{"beta":true,"newNav":true}',stg:'{"beta":"yes","newNav":false}',prd:'{"beta":false,"newNav":false}',pre:'{"beta":true,"newNav":true}'},
+    {stg:'/beta: expected boolean, got string'},[],
+    'json key with an attached JSON Schema — flag names must map to booleans.'),
+  K('database','DATABASE_URL','url',true,'all',
+    {dev:'postgres://ew:ew@localhost:5432/ew',stg:'postgres://ew@db.stg:5432/ew',prd:'postgres://ew@db.prd:5432/ew',pre:'postgres://ew@db.stg:5432/ew'},{},[],
+    'Preview points at staging’s database — an explicit copy now, not inheritance.'),
+  K('database','DB_POOL_SIZE','int',false,'all',{dev:'10',stg:'ten',prd:'40',pre:'10'},{stg:'must be a whole number — got "ten"'},[]),
+  K('database','DB_SSL_MODE','string',false,['prd'],{prd:'verify-full'}),
+  K('database','DB_MIGRATIONS_AUTO','bool',false,'all',{dev:'true',stg:'true',prd:'false',pre:'true'}),
+  K('auth','SESSION_SECRET','string',true,'all',
+    {dev:'dev-only-not-secret',stg:'s3cr3t-stg-9f2e',prd:'s3cr3t-prd-77aa',pre:'s3cr3t-stg-9f2e'},{},['stg']),
+  K('auth','OIDC_ISSUER','url',false,['stg','prd'],
+    {dev:'https://id.example.dev',stg:'https://id.example.dev',prd:'https://id.example.dev',pre:'localhost:8080'},{pre:'must be a full URL, e.g. https://id.example.dev'}),
+  K('auth','OIDC_CLIENT_ID','string',false,['stg','prd'],{stg:'ew-stg',prd:'ew-prd'}),
+  K('auth','OIDC_CLIENT_SECRET','string',true,['stg','prd'],{stg:'oidc-stg-secret'},{},[],
+    'Required in production and simply not there — the gap is honest now.'),
+  K('mail','SMTP_HOST','string',false,'none',{dev:'mail.internal',stg:'mail.internal',prd:'smtp.eu.mailer.dev',pre:'mail.internal'}),
+  K('mail','SMTP_PORT','int',false,'none',all('587')),
+  K('mail','SMTP_PASSWORD','string',true,'none',{stg:'stg-smtp-pass',prd:'prd-smtp-pass'},{},[],
+    'Not set in development or preview: no mail from those boxes.'),
+  K('integrations','FORGEJO_TOKEN','string',true,'none',{prd:'ew_1_at_x9k2m4'}),
+  K('integrations','GCP_SERVICE_ACCOUNT','json',true,['prd'],
+    {dev:'{"type":"service_account","project_id":"ew-dev","private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEdemo","AKIAIOSFODNN7":"pasted-extra"}',
+     stg:'{"type":"service_account","project_id":"ew-stg","private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEdemo"}',
+     prd:'{"type":"service_account","project_id":"ew-prd","private_key":"-----BEGIN PRIVATE KEY-----\\nMIIEdemo"}'},
+    {dev:'unexpected property — instance details redacted (secret)'},[],
+    'secret json: schema errors never echo the value or an instance-derived path (ADR #12).'),
+  K('integrations','S3_ACCESS_KEY_ID','string',true,'all',
+    {dev:'AKIADEFAULT0000',stg:'AKIADEFAULT0000',prd:'AKIAPRODONLY9999',pre:'AKIADEFAULT0000'},{},['prd']),
+  K('integrations','S3_SECRET_ACCESS_KEY','string',true,'all',
+    {dev:'wJalrXUtnFEMI/DEMO',stg:'wJalrXUtnFEMI/DEMO',pre:'wJalrXUtnFEMI/DEMO'},{},[],
+    'Required in production and unset: publish is blocked.'),
+  K('observability','SENTRY_DSN','url',false,'none',{stg:'https://s1@sentry.io/11',prd:'https://s2@sentry.io/12'}),
+  K('observability','OTEL_ENDPOINT','url',false,'none',all('http://otel.internal:4317')),
+];
+/* JSON Schema attached inline on the key (schema ADR #12: rules live on the key,
+   pinned + profiled subset — demo checker below covers type/required/properties/
+   additionalProperties/enum) */
+KEYS.find(k=>k.name==='FEATURE_FLAGS').schema=
+  {type:'object',additionalProperties:{type:'boolean'}};
+KEYS.find(k=>k.name==='GCP_SERVICE_ACCOUNT').schema=
+  {type:'object',required:['type','project_id','private_key'],
+   properties:{type:{enum:['service_account']},project_id:{type:'string'},private_key:{type:'string'}},
+   additionalProperties:false};
+/* per-type constraints, also inline on the key (ADR #12: pattern anchored to
+   the whole value, integer min/max, url scheme allowlist) */
+KEYS.find(k=>k.name==='PORT').constraints={min:1,max:65535};
+KEYS.find(k=>k.name==='LOG_LEVEL').constraints={pattern:'debug|info|warn|error'};
+(function fill(){
+  let s=42; const rnd=()=>((s=(Math.imul(48271,s)>>>0)%2147483647)/2147483647);
+  const names={
+    app:['APP_TIMEZONE','APP_LOCALE','MAX_UPLOAD_MB','REQUEST_TIMEOUT_MS','CORS_ORIGINS','TRUSTED_PROXIES','SESSION_IDLE_MIN','SESSION_ABS_HOURS','RATE_LIMIT_RPS','MAINTENANCE_MODE'],
+    database:['DB_STATEMENT_TIMEOUT_MS','DB_IDLE_TIMEOUT_S','DB_MAX_LIFETIME_MIN','DB_LOG_QUERIES','DB_SCHEMA'],
+    auth:['PASSWORD_MIN_LENGTH','TOTP_ISSUER_LABEL','WEBAUTHN_RP_ID','RECOVERY_CODE_COUNT','INVITE_TTL_HOURS','JIT_PROVISIONING'],
+    mail:['SMTP_FROM','SMTP_STARTTLS','MAIL_REPLY_TO'],
+    integrations:['WEBHOOK_SIGNING_KEY','FORGEJO_BASE_URL','S3_BUCKET','S3_REGION','S3_ENDPOINT','GH_APP_ID'],
+    observability:['METRICS_ENABLED','TRACE_SAMPLE_RATE','LOG_FORMAT','AUDIT_EXPORT_PATH','HEALTHCHECK_PATH','PPROF_ENABLED','SLOW_QUERY_MS'],
+  };
+  const samples={int:['30','120','5','8','60'],bool:['true','false'],string:['on','off','eu-west-1','v1','main'],url:['http://svc.internal:9090']};
+  for(const folder in names) for(const n of names[folder]){
+    const r=rnd();
+    const type=/(_MS|_S|_MIN|_HOURS|_MB|_RPS|_COUNT|_ID$|RATE|LENGTH)/.test(n)?'int':/(ENABLED|MODE|STARTTLS|QUERIES|PROVISIONING)/.test(n)?'bool':/(URL|ENDPOINT|PATH)/.test(n)?'url':'string';
+    const secret=/(KEY|TOKEN|SECRET)/.test(n);
+    const val=type==='url'?samples.url[0]:samples[type][Math.floor(rnd()*samples[type].length)];
+    const k=K(folder,n,type,secret,'none',all(val));
+    if(r<0.2){const e=ENVS[Math.floor(rnd()*4)].id;k.values[e]=type==='int'?String(Math.floor(rnd()*90)+10):val;}
+    if(r>0.93)k.changed=[ENVS[Math.floor(rnd()*4)].id];
+    KEYS.push(k);
+  }
+})();
+const folders=()=>[...new Set(KEYS.map(k=>k.folder))];
+/* per-project key store: the demo project is seeded, others start empty */
+const PDATA={'envweave-demo':KEYS.slice()};
+/* per-env published revision number (revision ADR #11: per-env monotonic) */
+const REV={dev:41,stg:38,prd:29,pre:12};
+
+/* ============================ state & permissions ============================ */
+const isRequired=(k,e)=>k.required==='all'||(Array.isArray(k.required)&&k.required.includes(e));
+const S={
+  theme:'dark',
+  role:'dev',
+  hiddenEnvs:new Set(),
+  collapsed:new Set(),
+  revealed:new Set(),
+  drafts:new Set(),
+  envpop:false,envpopX:0,envpopY:0,
+  filter:null,
+  legendpop:false,legendpopX:0,legendpopY:0,
+  sheet:null,                 // {key,envId,mode:'view'|'edit'|'copy'} | {mode:'create',folder}
+};
+function cellInfo(k,envId){
+  const value=k.values[envId];
+  const state=value!==undefined?'set':'absent';
+  const required=isRequired(k,envId);
+  const invalid=k.invalid[envId];
+  const missing=required&&state==='absent';
+  const changed=k.changed.includes(envId)||S.drafts.has(k.name+':'+envId);
+  return{state,value,required,invalid,missing,changed};
+}
+/* simulated permission model; real one = ADR #15.
+   read=false ⇒ env nonexistent for this principal (unauthorized ≡ nonexistent). */
+const ROLES={
+  admin:{read:e=>true,reveal:e=>true},
+  dev:{read:e=>true,reveal:e=>!e.protected},
+  viewer:{read:e=>true,reveal:e=>false},
+  external:{read:e=>!e.protected,reveal:e=>!e.protected},
+};
+const role=()=>ROLES[S.role];
+const canReveal=envId=>role().reveal(envById(envId));
+const readableEnvs=()=>ENVS.filter(e=>role().read(e));
+const visibleEnvs=()=>readableEnvs().filter(e=>!S.hiddenEnvs.has(e.id));
+function groupProblems(f){
+  let n=0;
+  for(const k of KEYS.filter(k=>k.folder===f))for(const e of readableEnvs()){
+    const c=cellInfo(k,e.id);if(c.invalid||c.missing)n++;
+  }
+  return n;
+}
+/* tiny JSON Schema checker (demo subset of the pinned 2020-12 profile).
+   Returns {path,msg,safe} — `safe` carries no instance-derived data, for
+   secret keys (ADR #12: schema-keyword locations only, no instance pointer). */
+function checkJson(sch,v,path){
+  const t=Array.isArray(v)?'array':v===null?'null':typeof v;
+  if(sch.type&&t!==sch.type)
+    return{path,msg:`expected ${sch.type}, got ${t}`,safe:`expected ${sch.type}`};
+  if(sch.enum&&!sch.enum.includes(v))
+    return{path,msg:`must be one of: ${sch.enum.join(', ')}`,safe:`must be one of: ${sch.enum.join(', ')}`};
+  if(t==='object'){
+    for(const r of sch.required||[])if(!(r in v))
+      return{path,msg:`missing required property "${r}"`,safe:`missing required property "${r}"`};
+    for(const p in v){
+      const ps=sch.properties?.[p];
+      let e=null;
+      if(ps)e=checkJson(ps,v[p],path+'/'+p);
+      else if(sch.additionalProperties===false)
+        e={path:path+'/'+p,msg:`unexpected property "${p}"`,safe:'unexpected property'};
+      else if(typeof sch.additionalProperties==='object')
+        e=checkJson(sch.additionalProperties,v[p],path+'/'+p);
+      if(e)return e;
+    }
+  }
+  return null;
+}
+function validateEdit(k,val){
+  if(k.type==='int'&&!/^-?\d+$/.test(val))return'must be a whole number, e.g. 8080';
+  if(k.type==='bool'&&!/^(true|false)$/.test(val))return'must be true or false';
+  if(k.type==='url'&&!/^[a-z][a-z0-9+.-]*:\/\//i.test(val))return'must be a full URL, e.g. https://example.dev';
+  const cn=k.constraints;
+  if(cn){
+    if(k.type==='string'){
+      /* pattern anchored to the whole value (ADR #12) */
+      if(cn.pattern&&!(new RegExp('^(?:'+cn.pattern+')$')).test(val))return`must match pattern ${cn.pattern}`;
+      if(cn.minLength!==undefined&&val.length<cn.minLength)return`too short — at least ${cn.minLength} characters`;
+      if(cn.maxLength!==undefined&&val.length>cn.maxLength)return`too long — at most ${cn.maxLength} characters`;
+    }
+    if(k.type==='int'){
+      const n=Number(val);
+      if(cn.min!==undefined&&n<cn.min)return`must be at least ${cn.min}`;
+      if(cn.max!==undefined&&n>cn.max)return`must be at most ${cn.max}`;
+    }
+    if(k.type==='url'&&cn.schemes?.length&&!cn.schemes.includes(val.split(':')[0].toLowerCase()))
+      return`URL scheme must be ${cn.schemes.join(' or ')}`;
+  }
+  if(k.type==='json'){
+    let v;
+    try{v=JSON.parse(val)}catch(e){return'not valid JSON — '+String(e.message)}
+    if(k.schema){
+      const er=checkJson(k.schema,v,'');
+      if(er)return k.secret
+        ?er.safe+' — instance details redacted (secret)'
+        :(er.path||'value')+': '+er.msg;
+    }
+  }
+  return null;
+}
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MASK='••••••••';
+function shownValue(k,envId,c){
+  if(c.value===undefined)return'';
+  if(!k.secret)return c.value;
+  return S.revealed.has(k.name+':'+envId)?c.value:MASK;
+}
+
+/* ============================ render ============================ */
+function renderEnvPop(){
+  const pop=document.getElementById('envpop');
+  if(!S.envpop){pop.hidden=true;return}
+  pop.hidden=false;
+  pop.style.left=Math.min(S.envpopX,innerWidth-230)+'px';
+  pop.style.top=S.envpopY+'px';
+  pop.innerHTML=`<div class="et">environments</div>`+
+    readableEnvs().map(e=>{
+      const on=!S.hiddenEnvs.has(e.id);
+      return`<label class="${on?'':'off'}">
+        <input type="checkbox" ${on?'checked':''} onchange="toggleEnv('${e.id}')">
+        ${e.name}${e.protected?'<span class="p">PROT</span>':''}
+      </label>`;
+    }).join('');
+}
+function toggleEnvPop(ev){
+  ev.stopPropagation();
+  if(!S.envpop){
+    const r=ev.currentTarget.getBoundingClientRect();
+    S.envpopX=r.left;S.envpopY=r.bottom+6;
+  }
+  S.envpop=!S.envpop;renderEnvPop();
+}
+document.addEventListener('click',e=>{
+  if(S.envpop&&!e.target.closest('#envpop')){S.envpop=false;renderEnvPop()}
+  if(S.legendpop&&!e.target.closest('#legendpop')){S.legendpop=false;renderLegendPop()}
+});
+function toggleEnv(id){
+  if(S.hiddenEnvs.has(id))S.hiddenEnvs.delete(id);
+  else if(visibleEnvs().length>1)S.hiddenEnvs.add(id);
+  render();
+}
+function toggleProblemFilter(){S.filter=S.filter?null:'problems';render()}
+function toggleGroup(f){
+  if(S.collapsed.has(f))S.collapsed.delete(f);else S.collapsed.add(f);
+  render();
+}
+function pillFor(k,e,c){
+  const d=c.changed?`<span class="d" title="changed since last publish">Δ</span>`:'';
+  const draft=S.drafts.has(k.name+':'+e.id)?`<span class="draftdot" title="unpublished local edit"></span>`:'';
+  const open=`onclick="openSheet('${k.name}','${e.id}')" onkeydown="if(event.key==='Enter')openSheet('${k.name}','${e.id}')" tabindex="0" role="button"`;
+  if(c.invalid){
+    let iv=shownValue(k,e.id,c);
+    if(k.type==='json'){iv=iv.replace(/\s+/g,' ');if(iv.length>42)iv=iv.slice(0,42)+'…'}
+    return`<span class="pill invalid" ${open}><span class="tx">✕ ${esc(iv)}</span>${d}${draft}</span><span class="viol">${esc(c.invalid)}</span>`;
+  }
+  if(c.missing)return`<span class="pill missing" ${open}><span class="tx">! required · unset</span></span>`;
+  if(c.state==='absent')return`<span class="cellv absent" ${open}><span class="tx">·</span></span>`;
+  let raw=shownValue(k,e.id,c);
+  if(k.type==='json'){raw=raw.replace(/\s+/g,' ');if(raw.length>42)raw=raw.slice(0,42)+'…'}
+  const v=esc(raw);
+  const dim=k.secret&&!S.revealed.has(k.name+':'+e.id);
+  return`<span class="cellv ${dim?'dim':''}" ${open}><span class="tx">${v}</span>${d}${draft}</span>`;
+}
+const EMPTY_ICON=`<svg width="44" height="44" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="none" stroke="var(--line)"/><path d="M8 12h16M8 16h16M8 20h10" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round" opacity=".7"/></svg>`;
+function renderEmpty(kind){
+  const el=document.getElementById('empty');el.hidden=false;
+  document.getElementById('matrix').innerHTML='';
+  if(kind==='nokeys')el.innerHTML=`${EMPTY_ICON}
+    <h3>no keys in ${esc(PROJ)} yet</h3>
+    <p>declare a key once, give each environment its own value — the matrix shows the whole configuration surface at a glance.</p>
+    <div class="ecta">
+      <button class="btn primary" onclick="openCreate(null)">declare first key</button>
+      <button class="btn" onclick="alert('imports run through the CLI:\n\n  envweave scaffold --from .env\n\nreview the generated definitions, apply, then import values (source-of-truth flow, ticket #13). Out of scope for this prototype.')">import from .env</button>
+    </div>`;
+  else el.innerHTML=`${EMPTY_ICON}
+    <h3>no problems</h3>
+    <p>every readable environment validates — nothing blocks publish.</p>
+    <div class="ecta"><button class="btn primary" onclick="toggleProblemFilter()">show all keys</button></div>`;
+}
+const keyHasProblem=k=>readableEnvs().some(e=>{const c=cellInfo(k,e.id);return c.invalid||c.missing});
+function totalProblems(){let n=0;for(const f of folders())n+=groupProblems(f);return n}
+function renderMatrix(){
+  if(KEYS.length===0){renderEmpty('nokeys');return}
+  if(S.filter==='problems'&&!KEYS.some(keyHasProblem)){renderEmpty('noproblems');return}
+  document.getElementById('empty').hidden=true;
+  const envs=visibleEnvs();
+  const head=`<thead><tr><th class="keyh">key
+    <button class="envbtn" onclick="toggleEnvPop(event)" aria-label="choose visible environments">envs ${envs.length}/${readableEnvs().length} ▾</button></th>${envs.map(e=>
+    `<th style="min-width:190px">${e.name}${e.protected?'<span class="pp">PROTECTED</span>':''}</th>`).join('')}</tr></thead>`;
+  let body='';
+  for(const f of folders()){
+    let ri=0;
+    const ks=KEYS.filter(k=>k.folder===f&&(S.filter!=='problems'||keyHasProblem(k)));
+    if(!ks.length)continue;
+    const closed=S.collapsed.has(f);
+    const probs=groupProblems(f);
+    const sum=closed?`<span class="gsum">${ks.map(k=>k.name).join(', ')}</span>`:'';
+    body+=`<tr class="grp ${closed?'closed':''}"><td colspan="${envs.length+1}">
+      <button class="gbtn" id="grp-${f}" onclick="toggleGroup('${f}')" aria-expanded="${!closed}">
+        <span class="tri">▾</span>${f}<span class="gcnt">${ks.length}</span>
+        ${probs?`<span class="gprob">${probs} problem${probs>1?'s':''}</span>`:''}
+        ${sum}
+        ${closed?'':`<span onclick="event.stopPropagation();openCreate('${f}')" class="addk" role="button">+ key</span>`}
+      </button></td></tr>`;
+    if(closed)continue;
+    for(const k of ks){
+      body+=`<tr class="${(ri++%2)?'alt':''}"><td class="key" title="${esc(k.name)}">${k.secret?'<span class="lock" title="secret">🔒</span>':''}<span class="kn">${esc(k.name)}</span><span class="req">${k.required==='all'?'req':Array.isArray(k.required)?'req·'+k.required.join(','):''}</span></td>`;
+      for(const e of envs)body+=`<td>${pillFor(k,e,cellInfo(k,e.id))}</td>`;
+      body+='</tr>';
+    }
+  }
+  document.getElementById('matrix').innerHTML=head+`<tbody>${body}</tbody>`;
+}
+function renderLegendPop(){
+  const pop=document.getElementById('legendpop');
+  if(!S.legendpop){pop.hidden=true;return}
+  pop.hidden=false;
+  pop.style.left=Math.min(S.legendpopX,innerWidth-352)+'px';
+  pop.style.top=S.legendpopY+'px';
+  pop.innerHTML=`<div class="lt">what the cells mean</div>
+    <div class="lrow"><span class="cellv" style="cursor:default">value</span> set in that environment — nothing inherits</div>
+    <div class="lrow"><span class="cellv dim" style="cursor:default">••••••••</span> secret value (🔒 marks the key) — tap to reveal, if permitted</div>
+    <div class="lrow"><span class="cellv absent" style="cursor:default">·</span> not set</div>
+    <div class="lrow"><span class="pill missing">! required · unset</span> blocks publish</div>
+    <div class="lrow"><span class="pill invalid">✕ value</span> schema violation</div>
+    <div class="lfoot">Δ changed since last publish · <span class="draftdot" style="display:inline-block"></span> unpublished draft<br>tap any cell to inspect or edit</div>`;
+}
+function toggleLegendPop(ev){
+  ev.stopPropagation();
+  if(!S.legendpop){
+    const r=ev.currentTarget.getBoundingClientRect();
+    S.legendpopX=r.right-340;S.legendpopY=r.bottom+8;
+  }
+  S.legendpop=!S.legendpop;renderLegendPop();
+}
+function renderDrafts(){
+  const el=document.getElementById('drafts');
+  el.hidden=S.drafts.size===0;
+  el.textContent=`${S.drafts.size} unpublished edit${S.drafts.size>1?'s':''} · publish…`;
+}
+function render(){
+  renderMatrix();renderDrafts();renderShell();renderEnvPop();renderLegendPop();
+  syncGh();
+  if(S.sheet)renderSheet();
+}
+
+/* ============================ app shell (variants) ============================ */
+const PROJECTS=['envweave-demo','adhd-kanban','poketracker','initiative-tracker'];
+let PROJ=PROJECTS[0];
+const VAR='c'; /* shell settled: rail + panel */
+function setSide(open){
+  document.getElementById('side').classList.toggle('open',open);
+  document.body.classList.toggle('sideopen',open);
+}
+function jumpGroup(f){
+  S.collapsed.delete(f);render();
+  document.getElementById('grp-'+f)?.scrollIntoView({behavior:'smooth',block:'start'});
+  setSide(false);
+}
+function pickProject(p){
+  if(p===PROJ){setSide(false);return}
+  PDATA[PROJ]=KEYS.slice();
+  KEYS.length=0;KEYS.push(...(PDATA[p]||[]));
+  PROJ=p;
+  S.drafts.clear();S.revealed.clear();S.collapsed.clear();S.filter=null;closeSheet();
+  document.getElementById('projname').textContent=p.replace('envweave-','');
+  render();
+  setSide(false);
+}
+const monogram=p=>p.split(/[-_]/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const projHue=p=>(PROJECTS.indexOf(p)*137.5)%360;
+function renderShell(){
+  const groups=folders().map(f=>{
+    const n=KEYS.filter(k=>k.folder===f).length;
+    const p=groupProblems(f);
+    return{f,n,p};
+  });
+  /* variant c: the rail owns project switching — the panel repeats none of it,
+     it navigates INSIDE the current project. variant a has no rail, so the
+     sidebar carries the projects list itself. */
+  const projectsBlock=VAR==='c'
+    ?`<div class="projsel-wrap"><select class="projsel" onchange="pickProject(this.value)" aria-label="project">
+        ${PROJECTS.map(p=>`<option ${p===PROJ?'selected':''}>${p}</option>`).join('')}
+      </select></div>
+      <div class="stitle" style="padding-top:14px">${esc(PROJ)}</div>`
+    :`<div class="stitle">projects</div>
+      ${PROJECTS.map(p=>`<button class="srow ${p===PROJ?'act':''}" onclick="pickProject('${p}')">${p}</button>`).join('')}`;
+  document.getElementById('side').innerHTML=`
+    ${projectsBlock}
+    <div class="stitle">groups</div>
+    ${groups.map(g=>`<button class="srow" onclick="jumpGroup('${g.f}')"><span class="mono">${g.f}/</span>
+      ${g.p?`<span class="pb">${g.p}</span>`:`<span class="cnt">${g.n}</span>`}</button>`).join('')}
+    <div class="stitle">views</div>
+    <button class="srow ${S.filter==='problems'?'act':''}" onclick="toggleProblemFilter()">⚠ problems${totalProblems()?`<span class="pb">${totalProblems()}</span>`:''}</button>
+    <button class="srow" onclick="if(S.drafts.size)openPublish()">Δ drafts${S.drafts.size?`<span class="cnt">${S.drafts.size}</span>`:''}</button>
+    ${VAR==='c'?`<div class="stitle">project</div>
+    <button class="srow" onclick="alert('prototype: project settings (icon, access, metadata) — to be prototyped later')">⚙ settings</button>`:''}`;
+  document.getElementById('rail').innerHTML=
+    PROJECTS.map(p=>`<button class="pav ${p===PROJ?'act':''}" title="${p}"
+      style="${p===PROJ?'':`background:oklch(0.32 0.04 ${projHue(p)});color:oklch(0.85 0.05 ${projHue(p)})`}"
+      onclick="pickProject('${p}')">${monogram(p)}</button>`).join('');
+  document.getElementById('jumpbar').innerHTML=
+    groups.map(g=>`<button class="jp" onclick="jumpGroup('${g.f}')">${g.f}${g.p?`<span class="pb">${g.p}</span>`:''}</button>`).join('');
+}
+document.body.dataset.v=VAR;
+
+/* group headers stick right under the measured thead — fractional height,
+   re-measured after webfont load and on resize (a rounded offsetHeight left
+   a visible seam) */
+function syncGh(){
+  const th=document.querySelector('#matrix thead');
+  if(th)document.getElementById('matrix').style.setProperty('--gh',th.getBoundingClientRect().height+'px');
+}
+document.fonts?.ready.then(syncGh);
+addEventListener('resize',syncGh);
+
+/* ============================ bottom sheet ============================ */
+function openSheet(name,envId){S.sheet={key:name,envId,mode:'view'};renderSheet(true)}
+function openCreate(folder){S.sheet={mode:'create',folder};renderSheet(true);
+  setTimeout(()=>document.getElementById('nk-name')?.focus(),60)}
+function openPublish(){S.sheet={mode:'publish'};renderSheet(true)}
+function closeSheet(){
+  S.sheet=null;
+  document.getElementById('sheet').classList.remove('open');
+  document.getElementById('scrim').classList.remove('open');
+}
+function renderSheet(opening){
+  const{key,envId,mode}=S.sheet;
+  if(mode==='create'){renderCreateSheet();return}
+  if(mode==='publish'){renderPublishSheet();return}
+  const k=KEYS.find(x=>x.name===key);const env=envById(envId);
+  const c=cellInfo(k,envId);
+  const reveal=canReveal(envId);
+  const revealed=S.revealed.has(key+':'+envId);
+
+  let stateLine;
+  if(c.invalid)stateLine=`schema violation: <b>${esc(c.invalid)}</b>`;
+  else if(c.missing)stateLine=`<b>required here and unset</b> — publish is blocked`;
+  else if(c.state==='absent')stateLine=`not set in <b>${env.name}</b> — nothing is delivered`;
+  else stateLine=`set in <b>${env.name}</b>`;
+
+  let vrow='';
+  if(mode==='edit'){
+    const writeOnly=k.secret&&!reveal&&c.value!==undefined;
+    const isJson=k.type==='json';
+    let init=!k.secret&&c.value!==undefined?c.value:'';
+    if(isJson&&init){try{init=JSON.stringify(JSON.parse(init),null,2)}catch(e){}}
+    const ph=writeOnly?'write-only replacement — current value stays hidden'
+      :'new value ('+k.type+(isJson&&k.schema?' — validated against this key’s schema':'')+')';
+    const field=isJson
+      ?`<textarea class="editor" id="editval" rows="7" spellcheck="false" placeholder="${ph}"
+          onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey))saveEdit();if(event.key==='Escape'){S.sheet.mode='view';renderSheet()}">${esc(init)}</textarea>`
+      :`<input class="editor" id="editval" type="text" placeholder="${ph}" value="${esc(init)}"
+          onkeydown="if(event.key==='Enter')saveEdit();if(event.key==='Escape'){S.sheet.mode='view';renderSheet()}">`;
+    vrow=`<div class="vrow">${field}</div>
+    <div class="verr" id="editerr" hidden></div>
+    <div class="acts">
+      <button class="btn primary" onclick="saveEdit()">save to ${env.name}</button>
+      <button class="btn" onclick="S.sheet.mode='view';renderSheet()">cancel</button>
+    </div>`;
+  }else{
+    let cur;
+    if(c.value===undefined)cur=`<span class="cur dim">—</span>`;
+    else if(k.secret&&!revealed)cur=`<span class="cur dim">${MASK}</span>`;
+    else{
+      let pv=c.value;
+      if(k.type==='json'){try{pv=JSON.stringify(JSON.parse(pv),null,2)}catch(e){}}
+      cur=`<span class="cur ${k.type==='json'?'json':''} ${c.invalid?'err':''}">${esc(pv)}</span>`;
+    }
+    const revealBtn=k.secret&&c.value!==undefined?
+      (reveal?`<button class="btn" onclick="doReveal('${key}','${envId}')">${revealed?'hide value':'reveal value'}</button>`:'')
+      :'';
+    /* copying a secret out of this env is a disclosure toward the targets —
+       gated on reveal of the SOURCE env (ADR #15 disclosure-by-proxy) */
+    const canCopy=c.value!==undefined&&(!k.secret||reveal);
+    const others=readableEnvs().filter(e=>e.id!==envId);
+    const copyrow=mode==='copy'?`<div class="copyrow">
+        copy this value to:
+        ${others.map(e=>`<label><input type="checkbox" class="cp-env" value="${e.id}"> ${e.id}${e.protected?' ⚠':''}</label>`).join('')}
+        <button class="go" onclick="doCopy()">copy</button>
+        <button onclick="S.sheet.mode='view';renderSheet()" style="opacity:.6">cancel</button>
+      </div>`:'';
+    vrow=`<div class="vrow">${cur}${revealBtn}</div>
+    ${k.secret&&c.value!==undefined&&!reveal?`<div class="noperm">no reveal here for your role — write-only replacement only.</div>`:''}
+    ${copyrow}
+    <div class="acts">
+      <button class="btn primary" onclick="S.sheet.mode='edit';renderSheet();setTimeout(()=>document.getElementById('editval').focus(),50)">${c.state==='set'?'edit value':'set value'}</button>
+      ${canCopy&&mode!=='copy'?`<button class="btn" onclick="S.sheet.mode='copy';renderSheet()">copy to…</button>`:''}
+      ${c.state==='set'?`<button class="btn danger" onclick="clearValue()">clear value</button>`:''}
+    </div>`;
+  }
+
+  const reqTxt=k.required==='all'?'all environments':k.required==='none'?'nowhere':k.required.join(', ');
+  const cn=k.constraints||{};
+  const cnSummary=[cn.pattern?'pattern':null,
+    cn.minLength!==undefined||cn.maxLength!==undefined?'length':null,
+    cn.min!==undefined||cn.max!==undefined?'range':null,
+    cn.schemes?'schemes':null,k.schema?'json schema':null].filter(Boolean).join(' · ');
+  const schemaLbl=`schema · ${cnSummary?cnSummary+' · ':''}required in ${esc(reqTxt)}`;
+  /* changing a value-dependent rule on a secret is a disclosure oracle (ADR #12):
+     publish outcomes leak the value bit by bit — requires reveal everywhere it's set */
+  const ruleGate=k.secret&&readableEnvs().some(e=>k.values[e.id]!==undefined&&!canReveal(e.id));
+  const dis=ruleGate?'disabled':'';
+  const cfield=(id,ph,v,w)=>`<input class="editor" id="${id}" placeholder="${ph}" value="${v??''}" style="min-width:0;flex:1 1 ${w||'160px'};padding:8px 10px;font-size:12px" ${dis}>`;
+  let cnFields='';
+  if(k.type==='string')cnFields=cfield('cn-pattern','pattern (anchored), e.g. debug|info',cn.pattern)
+    +cfield('cn-minlen','min length',cn.minLength,'70px')+cfield('cn-maxlen','max length',cn.maxLength,'70px');
+  if(k.type==='int')cnFields=cfield('cn-min','min',cn.min,'70px')+cfield('cn-max','max',cn.max,'70px');
+  if(k.type==='url')cnFields=cfield('cn-schemes','allowed schemes, e.g. https',cn.schemes?.join(', '));
+  if(k.type==='json')cnFields=`<textarea class="editor" id="cn-jschema" rows="6" spellcheck="false"
+    placeholder='JSON Schema for values, e.g. {"type":"object"}' ${dis}>${k.schema?esc(JSON.stringify(k.schema,null,2)):''}</textarea>`;
+  const schemaBlock=mode!=='view'?'':S.sheet.schemaOpen
+    ?`<button class="schemarow open" onclick="S.sheet.schemaOpen=false;renderSheet()"><span class="tri">▸</span>${schemaLbl}</button>
+      <div class="copyrow">required in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="rq-env" value="${e.id}" ${isRequired(k,e.id)?'checked':''} onchange="setRequired('${k.name}')"> ${e.id}</label>`).join('')}
+      </div>
+      ${cnFields?`<div class="copyrow" style="align-items:stretch">constraints:
+        ${cnFields}
+        <button class="go" onclick="applyConstraints('${k.name}')" ${dis}>apply</button>
+      </div>
+      <div class="verr" id="cn-err" hidden></div>`:''}
+      ${ruleGate?`<div class="noperm">value rules on a secret only change with reveal everywhere it’s set — otherwise publish outcomes would leak the value (ADR #12).</div>`:''}
+      <div class="sub" style="margin-top:8px">rule changes are schema drafts — they ride the same publish and re-validate every environment.</div>`
+    :`<button class="schemarow" onclick="S.sheet.schemaOpen=true;renderSheet()"><span class="tri">▸</span>${schemaLbl}</button>`;
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>${k.secret?'<span class="lock">🔒</span>':''}${esc(k.name)}
+      <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${k.folder}/ · ${k.type} · ${k.secret?'secret':'config'}</span></h2>
+    <div class="sub">${env.name}${env.protected?' · <b>protected</b>':''} — ${stateLine}${c.changed?' · <b>Δ changed</b>':''}</div>
+    ${k.desc?`<div class="sub" style="font-style:italic">${esc(k.desc)}</div>`:''}
+    ${vrow}
+    ${schemaBlock}`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function doReveal(key,envId){
+  const id=key+':'+envId;
+  if(S.revealed.has(id)){S.revealed.delete(id);render();return}
+  if(envById(envId).protected&&!confirm(`Reveal the production value of ${key}?\n\nRe-authentication would be required here (prototype stand-in — ticket #21).`))return;
+  S.revealed.add(id);render();
+  setTimeout(()=>{if(S.revealed.delete(id))render()},8000);
+}
+function saveEdit(){
+  const{key,envId}=S.sheet;
+  const k=KEYS.find(x=>x.name===key);
+  const val=document.getElementById('editval').value;
+  if(!val){S.sheet.mode='view';renderSheet();return}
+  const err=validateEdit(k,val);
+  if(err){const e=document.getElementById('editerr');e.textContent='✕ '+err+' — saved as a draft; publish stays blocked until fixed';e.hidden=false}
+  k.values[envId]=val;
+  delete k.invalid[envId];
+  if(err)k.invalid[envId]=err;
+  S.drafts.add(key+':'+envId);
+  S.sheet.mode='view';
+  render();
+}
+function clearValue(){
+  const{key,envId}=S.sheet;
+  const k=KEYS.find(x=>x.name===key);
+  delete k.values[envId];delete k.invalid[envId];
+  S.drafts.add(key+':'+envId);
+  render();
+}
+function doCopy(){
+  const{key,envId}=S.sheet;
+  const k=KEYS.find(x=>x.name===key);
+  const targets=[...document.querySelectorAll('.cp-env:checked')].map(i=>i.value);
+  if(!targets.length){S.sheet.mode='view';renderSheet();return}
+  const prot=targets.filter(id=>envById(id).protected);
+  if(prot.length&&!confirm(`Copy this value into ${prot.join(', ')} (protected)?\n\nRe-authentication would be required (prototype stand-in).`))return;
+  for(const t of targets){
+    k.values[t]=k.values[envId];
+    delete k.invalid[t];
+    S.drafts.add(key+':'+t);
+  }
+  S.sheet.mode='view';
+  render();
+}
+/* ---------------- publish (review → confirm; revision ADR #11) ---------------- */
+function envBlocked(envId){
+  return KEYS.some(k=>{const c=cellInfo(k,envId);return c.invalid||c.missing});
+}
+function renderPublishSheet(){
+  const valueDrafts=[...S.drafts].filter(d=>!d.endsWith(':schema'));
+  const schemaDrafts=[...S.drafts].filter(d=>d.endsWith(':schema')).map(d=>d.slice(0,-7));
+  const byEnv={};
+  for(const d of valueDrafts){const i=d.lastIndexOf(':');const key=d.slice(0,i),env=d.slice(i+1);
+    (byEnv[env]??=[]).push(key)}
+  const envs=readableEnvs().filter(e=>byEnv[e.id]?.length||schemaDrafts.length);
+  const secs=envs.map(e=>{
+    const blocked=envBlocked(e.id);
+    const items=(byEnv[e.id]||[]).map(key=>{
+      const k=KEYS.find(x=>x.name===key);const c=cellInfo(k,e.id);
+      const v=c.value===undefined?'(cleared)':k.secret?MASK:c.value;
+      return`<li>${k.secret?'🔒 ':''}${esc(key)}<span class="nv">${esc(v)}</span></li>`;
+    }).join('');
+    return`<div class="pubenv ${blocked?'blocked':''}">
+      <label class="ph">
+        <input type="checkbox" class="pb-env" value="${e.id}" ${blocked?'disabled':'checked'}>
+        <b>${e.name}</b>${e.protected?'<span class="pp">PROTECTED — confirms before publish</span>':''}
+        <span class="rev">r${REV[e.id]} → r${REV[e.id]+1}</span>
+      </label>
+      <ul>${items}${schemaDrafts.map(n=>`<li>schema: ${esc(n)} required-in changed</li>`).join('')}</ul>
+      ${blocked?`<div class="blockmsg">✕ this environment has violations or missing required keys — publish blocked until fixed</div>`:''}
+    </div>`;
+  }).join('');
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>review &amp; publish</h2>
+    <div class="sub">each environment publishes as its own atomic revision — untick any you want to hold back</div>
+    ${secs||'<div class="sub" style="margin-top:14px">nothing to publish</div>'}
+    <div class="acts">
+      ${secs?`<button class="btn primary" onclick="doPublish()">publish selected</button>`:''}
+      <button class="btn" onclick="closeSheet()">close</button>
+    </div>
+    <div class="sub" style="margin-top:12px">invalid environments cannot publish — delivery only sees valid revisions.</div>`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function doPublish(){
+  const targets=[...document.querySelectorAll('.pb-env:checked')].map(i=>i.value);
+  if(!targets.length)return;
+  const prot=targets.filter(id=>envById(id).protected);
+  if(prot.length&&!confirm(`Publish a new revision to ${prot.join(', ')} (protected)?\n\nRe-authentication would be required (prototype stand-in — ticket #21).`))return;
+  for(const env of targets){
+    REV[env]++;
+    for(const d of[...S.drafts]){
+      if(d.endsWith(':'+env)){
+        S.drafts.delete(d);
+        const k=KEYS.find(x=>x.name===d.slice(0,d.lastIndexOf(':')));
+        if(k&&!k.changed.includes(env))k.changed.push(env);
+      }
+    }
+  }
+  for(const d of[...S.drafts])if(d.endsWith(':schema'))S.drafts.delete(d);
+  closeSheet();render();
+}
+/* ---------------- required-in (schema ADR #12 presence per env) ---------------- */
+function setRequired(name){
+  const k=KEYS.find(x=>x.name===name);
+  const ids=[...document.querySelectorAll('.rq-env:checked')].map(i=>i.value);
+  k.required=ids.length===ENVS.length?'all':ids.length?ids:'none';
+  S.drafts.add(name+':schema');
+  if(S.sheet)S.sheet.schemaOpen=true;
+  render();
+}
+/* re-check every stored value against the key's current rules */
+function revalidate(k){
+  for(const e of ENVS){
+    const v=k.values[e.id];
+    if(v===undefined){delete k.invalid[e.id];continue}
+    const er=validateEdit(k,v);
+    if(er)k.invalid[e.id]=er;else delete k.invalid[e.id];
+  }
+}
+function applyConstraints(name){
+  const k=KEYS.find(x=>x.name===name);
+  const err=m=>{const e=document.getElementById('cn-err');e.textContent='✕ '+m;e.hidden=false};
+  const num=id=>{const v=document.getElementById(id)?.value.trim();
+    if(v===undefined||v==='')return undefined;
+    if(!/^-?\d+$/.test(v))return NaN;
+    return Number(v)};
+  const cn={};
+  if(k.type==='string'){
+    const p=document.getElementById('cn-pattern').value.trim();
+    if(p){try{new RegExp('^(?:'+p+')$')}catch(e){return err('pattern does not compile: '+e.message)}cn.pattern=p}
+    cn.minLength=num('cn-minlen');cn.maxLength=num('cn-maxlen');
+    if(Number.isNaN(cn.minLength)||Number.isNaN(cn.maxLength))return err('lengths must be whole numbers');
+    if(cn.minLength!==undefined&&cn.maxLength!==undefined&&cn.minLength>cn.maxLength)return err('min length exceeds max length');
+  }
+  if(k.type==='int'){
+    cn.min=num('cn-min');cn.max=num('cn-max');
+    if(Number.isNaN(cn.min)||Number.isNaN(cn.max))return err('bounds must be whole numbers');
+    if(cn.min!==undefined&&cn.max!==undefined&&cn.min>cn.max)return err('min exceeds max');
+  }
+  if(k.type==='url'){
+    const s=document.getElementById('cn-schemes').value.trim();
+    if(s)cn.schemes=s.split(',').map(x=>x.trim().toLowerCase()).filter(Boolean);
+  }
+  if(k.type==='json'){
+    const t=document.getElementById('cn-jschema').value.trim();
+    if(t){try{k.schema=JSON.parse(t)}catch(e){return err('schema is not valid JSON — '+String(e.message))}}
+    else delete k.schema;
+  }
+  for(const key in cn)if(cn[key]===undefined)delete cn[key];
+  if(Object.keys(cn).length)k.constraints=cn;else delete k.constraints;
+  S.drafts.add(name+':schema');
+  revalidate(k);
+  if(S.sheet)S.sheet.schemaOpen=true;
+  render();
+}
+function renderCreateSheet(){
+  const{folder}=S.sheet;
+  const folderField=folder?'':`<div class="vrow">
+      <input class="editor" id="nk-folder" type="text" placeholder="group (e.g. app)"
+        onkeydown="if(event.key==='Escape')closeSheet()">
+    </div>`;
+  document.getElementById('sheet').innerHTML=`
+    <div class="grab"></div>
+    <h2>new key
+      <span style="font-family:var(--sans);font-size:11px;color:var(--tx-faint);font-weight:400">${folder?folder+'/':''}</span></h2>
+    ${folderField.replace('<div class="vrow">','<div class="vrow" style="margin-top:14px">')}
+    <div class="sub">declared into the environments you pick — no inheritance, each gets its own copy</div>
+    <div class="vrow">
+      <input class="editor" id="nk-name" type="text" placeholder="KEY_NAME"
+        onkeydown="if(event.key==='Enter')addKey();if(event.key==='Escape')closeSheet()">
+    </div>
+    <div class="vrow">
+      <select id="nk-type" class="fsel"
+        onchange="const j=this.value==='json';const v=document.getElementById('nk-val');v.rows=j?5:1;v.placeholder=j?'first value (json — multiline)':'first value (optional)';document.getElementById('nk-schemarow').hidden=!j"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--tx-dim)"><input type="checkbox" id="nk-sec"> 🔒 secret</label>
+    </div>
+    <div class="vrow">
+      <textarea class="editor" id="nk-val" rows="1" placeholder="first value (optional)"
+        onkeydown="if(event.key==='Enter'&&(this.rows===1||event.metaKey||event.ctrlKey)){event.preventDefault();addKey()}if(event.key==='Escape')closeSheet()"></textarea>
+    </div>
+    <div class="vrow" id="nk-schemarow" hidden>
+      <textarea class="editor" id="nk-schema" rows="3" spellcheck="false"
+        placeholder='optional JSON Schema for values, e.g. {"type":"object"}'
+        onkeydown="if(event.key==='Escape')closeSheet()"></textarea>
+    </div>
+    <div class="copyrow">
+      set that value in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-env" value="${e.id}" ${e.protected?'':'checked'}> ${e.id}${e.protected?' ⚠':''}</label>`).join('')}
+    </div>
+    <div class="copyrow">
+      required in:
+      ${readableEnvs().map(e=>`<label><input type="checkbox" class="nk-req" value="${e.id}"> ${e.id}</label>`).join('')}
+    </div>
+    <div class="verr" id="nk-err" hidden></div>
+    <div class="acts">
+      <button class="btn primary" onclick="addKey()">declare</button>
+      <button class="btn" onclick="closeSheet()">cancel</button>
+    </div>
+    <div class="sub" style="margin-top:12px"><b>secret</b> is permanent: values hidden and reveal-gated everywhere.</div>`;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+}
+function addKey(){
+  let{folder}=S.sheet;
+  const err=m=>{const e=document.getElementById('nk-err');e.textContent='✕ '+m;e.hidden=false};
+  if(!folder){
+    folder=(document.getElementById('nk-folder')?.value||'').trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');
+    if(!folder)return err('group required, e.g. app');
+  }
+  const raw=document.getElementById('nk-name').value.trim();
+  if(!raw)return err('key name required');
+  const name=raw.toUpperCase().replace(/[^A-Z0-9_]/g,'_');
+  if(KEYS.some(k=>k.name===name))return err(name+' already exists');
+  const type=document.getElementById('nk-type').value;
+  const val=document.getElementById('nk-val').value;
+  const envs=[...document.querySelectorAll('.nk-env:checked')].map(i=>i.value);
+  let schema;
+  if(type==='json'){
+    const t=document.getElementById('nk-schema').value.trim();
+    if(t){try{schema=JSON.parse(t)}catch(e){return err('schema is not valid JSON — '+String(e.message))}}
+  }
+  if(val){
+    const v=validateEdit({type,schema},val);
+    if(v)return err(v);
+    if(!envs.length)return err('pick at least one environment for the value');
+  }
+  const req=[...document.querySelectorAll('.nk-req:checked')].map(i=>i.value);
+  const k=K(folder,name,type,document.getElementById('nk-sec').checked,
+    req.length===ENVS.length?'all':req.length?req:'none',{});
+  if(schema)k.schema=schema;
+  k.draft=true;
+  if(val)for(const e of envs){k.values[e]=val;S.drafts.add(k.name+':'+e)}
+  const last=KEYS.map(x=>x.folder).lastIndexOf(folder);
+  KEYS.splice(last+1,0,k);
+  closeSheet();render();
+}
+
+/* ============================ chrome ============================ */
+document.getElementById('role').onchange=e=>{
+  S.role=e.target.value;S.revealed.clear();closeSheet();
+  if(visibleEnvs().length===0)S.hiddenEnvs.clear();
+  render();
+};
+document.getElementById('themebtn').onclick=()=>{
+  S.theme=S.theme==='dark'?'light':'dark';
+  document.body.dataset.theme=S.theme;
+};
+document.getElementById('scrim').onclick=closeSheet;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeSheet();setSide(false)}});
+if(matchMedia('(prefers-color-scheme: light)').matches){S.theme='light';document.body.dataset.theme='light'}
+render();
+</script>
+</body>
+</html>

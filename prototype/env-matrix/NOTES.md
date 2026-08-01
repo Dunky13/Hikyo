@@ -69,6 +69,28 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 24 — schema defined where the key lives (Marc: A & C)
+
+Marc's question "how/where is schema defined?" exposed that iteration 23
+showed schemas read-only with no visible origin. Per ADR #12 the schema IS
+the key catalogue — rules live inline on each key — so the sheet's schema
+disclosure is now the editor:
+
+- per-type constraint fields: string → anchored pattern + min/max length;
+  int → min/max; url → scheme allowlist; json → JSON Schema textarea
+  (replaces the read-only pre). bool has no constraints row.
+- "apply" validates well-formedness (pattern must compile, bounds sane,
+  schema must parse), stores the rules on the key, marks a `:schema` draft
+  riding the existing publish flow, and **re-validates every environment**
+  — tightening LOG_LEVEL's pattern flips dev's `debug` invalid live.
+- create sheet gains an optional JSON Schema field when type=json.
+- seeded constraints: PORT 1–65535, LOG_LEVEL pattern
+  `debug|info|warn|error`.
+- **secret rule gate**: value-dependent rules on a secret are disabled
+  unless the viewer holds reveal on every env where it's set — ADR #12's
+  disclosure oracle (publish outcomes would leak the value bit by bit).
+  Presence (required-in) stays exempt, per the ADR.
+
 ## Iteration 23 — json keys: multiline editor + schema validator
 
 Marc flagged the gap: the json type from the schema grilling (#12, locked
