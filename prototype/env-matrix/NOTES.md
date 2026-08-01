@@ -69,6 +69,13 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 22 — pencil affordance locked (Marc)
+
+Decision: **pencil** — every editable slot (values, secret dots, absent)
+carries a faint trailing ✎, accent on hover. The switcher, the ?cell=
+param and the underline/well/baseline options are removed. Exception
+states keep their exclusive border chrome.
+
 ## Iteration 21 — cell-affordance options (Marc: underline too subtle)
 
 Four selectable strengths, cycle with the bottom-right "cell:" pill or
