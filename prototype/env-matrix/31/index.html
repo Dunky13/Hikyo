@@ -854,7 +854,7 @@ function renderShell(){
     <button class="srow" style="color:var(--tx-faint)" onclick="openCreate(null)">+ group</button>
     <div class="stitle">views</div>
     <button class="srow ${S.filter==='problems'?'act':''}" onclick="toggleProblemFilter()"
-      title="${S.filter==='problems'?'back to all keys':'show only keys with problems'}">⚠ problems${totalProblems()?`<span class="pb">${totalProblems()}</span>`:''}${S.filter==='problems'?'<span style="margin-left:auto;font-size:11px">✕</span>':''}</button>
+      title="${S.filter==='problems'?'back to all keys':'show only keys with problems'}">⚠ problems${S.filter==='problems'?'<span style="margin-left:auto;font-size:11px">✕</span>':''}${totalProblems()?`<span class="pb" ${S.filter==='problems'?'style="margin-left:8px"':''}>${totalProblems()}</span>`:''}</button>
     <button class="srow" ${S.drafts.size?'onclick="openPublish()"':'disabled style="opacity:.45;cursor:default" title="no unpublished edits"'}>Δ drafts${S.drafts.size?`<span class="cnt">${S.drafts.size}</span>`:''}</button>
     ${VAR==='c'?`<div class="stitle">project</div>
     <button class="srow" onclick="alert('prototype: project settings (icon, access, metadata) — to be prototyped later')">⚙ settings</button>`:''}`;
