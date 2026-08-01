@@ -69,6 +69,16 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 21 — cell-affordance options (Marc: underline too subtle)
+
+Four selectable strengths, cycle with the bottom-right "cell:" pill or
+?cell= (composes with ?variant=):
+- underline — iteration 20's dotted underline
+- well — filled input-slot background
+- baseline — solid bottom edge, spreadsheet feel
+- pencil — trailing ✎ glyph
+Winner becomes the fixed style in the next iteration.
+
 ## Iteration 20 — editable-slot underline (Marc)
 
 Iteration 14's plain text stopped reading as input fields. Values carry
