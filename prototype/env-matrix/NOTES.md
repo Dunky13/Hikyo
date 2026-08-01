@@ -69,6 +69,21 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 27 — bottom sheet vs centered modal (Marc: compare)
+
+Two presentations of the same create/edit surface, toggleable live via
+the bottom-right "sheet:" pill or ?sheet=bottom|modal (persists in the
+URL; switching works while a sheet is open, so the same content can be
+compared in place):
+
+- **bottom** — the existing sheet: slides from the bottom edge, grab
+  handle with drag-to-dismiss (iteration 26).
+- **modal** — centered, scale+fade in, ✕ close button top-right (grab
+  hidden — no drag), 560px max, full border. Backdrop + Escape close
+  both. Closed modal is visibility:hidden so it can't block clicks.
+
+Winner becomes the fixed presentation next iteration.
+
 ## Iteration 26 — sheet grab handle drags for real (Marc)
 
 The pill atop every bottom sheet implied drag-to-dismiss but was inert —
