@@ -69,6 +69,32 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 23 — json keys: multiline editor + schema validator
+
+Marc flagged the gap: the json type from the schema grilling (#12, locked
+ADR) was absent — the create sheet listed it but nothing implemented it.
+Now per ADR #12's "binding on #20/#21" list:
+
+- two demo keys: `FEATURE_FLAGS` (config json, schema: flags → booleans,
+  staging invalid) and `GCP_SERVICE_ACCOUNT` (secret json, required props +
+  additionalProperties:false, dev invalid via a pasted extra property);
+- JSON Schema lives inline on the key; the sheet's schema disclosure shows
+  it pretty-printed;
+- cells render a compact one-line preview (whitespace collapsed, 42-char
+  cap); the sheet view pretty-prints; edit mode is a multiline textarea
+  (⌘/Ctrl+↵ saves, Enter stays newline) — same in the create sheet, which
+  grows the value field when type=json;
+- validator: JSON.parse first, then a tiny checker over the demo profile
+  (type/required/properties/additionalProperties/enum). Config errors name
+  the instance path (`/beta: expected boolean, got string`); secret errors
+  redact instance-derived data — schema-keyword info only ("unexpected
+  property — instance details redacted"), per #12's disclosure rule that
+  errors never echo a secret, including through paths.
+
+Not prototyped (noted, not forgotten): union editor (`any_of`), visible
+trim, near-miss warning — smaller #12 bindings, fold into #21 or a later
+iteration on demand.
+
 ## Iteration 22 — pencil affordance locked (Marc)
 
 Decision: **pencil** — every editable slot (values, secret dots, absent)
