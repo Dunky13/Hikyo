@@ -69,6 +69,22 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 30 — problems view no longer traps you (tester feedback)
+
+External tester (via Marc): "going to the problems view locks you in."
+Diagnosis: in problems view every other nav row went silently dead —
+group links scrolled to nodes the filter had removed from the DOM, and
+the drafts row's click was guarded to do nothing at zero drafts. The
+only exits (re-clicking the active row; the show-all CTA that appears
+only when zero problems exist) were undiscoverable. Fix:
+
+- jumpGroup clears the filter before jumping — navigating to a group
+  always leaves the problems view;
+- drafts row is a real disabled button at zero drafts (dim, title),
+  live otherwise;
+- the active problems row shows an explicit ✕ and a "back to all keys"
+  title.
+
 ## Iteration 29 — group creation everywhere (Marc)
 
 Marc: "how do you create a new group? Only in empty state." True — the
