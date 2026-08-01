@@ -69,6 +69,21 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 31 — filter survives navigation, visibly (Marc)
+
+Marc on iteration 30: keep the ✕-on-active-row, but a group jump should
+NOT drop the filter — instead make the active filter state visible.
+
+- iteration 30's filter-clear in jumpGroup reverted: navigating to a
+  group keeps the problems filter;
+- **filter bar** above the matrix whenever a filter is active:
+  "⚠ filter active: problems — showing n of m keys" + "✕ show all keys"
+  (worded for multiple filters later);
+- groups the filter hides render **dimmed and inert** in the panel
+  (title: "hidden by the problems filter") instead of looking clickable
+  and doing nothing — the iteration 30 dead-button diagnosis holds, the
+  cure moved from clearing the filter to showing it.
+
 ## Iteration 30 — problems view no longer traps you (tester feedback)
 
 External tester (via Marc): "going to the problems view locks you in."
