@@ -69,6 +69,14 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 20 — editable-slot underline (Marc)
+
+Iteration 14's plain text stopped reading as input fields. Values carry
+the inline-edit convention now: 1px dotted underline in faint text color
+(accent on hover), same treatment on a widened absent slot — visible on
+mobile where hover does not exist. Border chrome stays reserved for
+missing/invalid.
+
 ## Iteration 19 — normalize (critique issue 5)
 
 One .btn vocabulary (sheet actions, reveal, empty-state CTAs — three
