@@ -40,8 +40,12 @@
   <h1>environment matrix <span>/</span> iterations</h1>
   <p class="q">Question (ticket #20): does a side-by-side environment matrix communicate inheritance, overrides, gaps, validation, and drift legibly? Newest first; each earlier iteration is kept runnable.</p>
   <ul>
+    <li><a href="25/">
+      <span class="num">25</span><span class="name">Schema builder — no JSON Schema knowledge needed</span><span class="latest">LATEST</span>
+      <span class="desc">json keys get a structured "value shape" builder: property rows (name · type · required), an "other properties" rule, and one-click "infer from current value". Raw JSON Schema moves behind an advanced disclosure; schemas beyond the builder subset fall back to it automatically.</span>
+    </a></li>
     <li><a href="24/">
-      <span class="num">24</span><span class="name">Schema defined where the key lives</span><span class="latest">LATEST</span>
+      <span class="num">24</span><span class="name">Schema defined where the key lives</span>
       <span class="desc">The sheet's schema disclosure is an editor now: per-type constraints (pattern · length · int range · url schemes · JSON Schema textarea) applied as schema drafts that re-validate every environment. Create sheet takes an optional JSON Schema. Value rules on secrets stay reveal-gated (ADR #12 oracle).</span>
     </a></li>
     <li><a href="23/">

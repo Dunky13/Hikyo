@@ -69,6 +69,32 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 25 — schema builder (Marc: option C)
+
+"Not everyone knows JSON Schema." The raw textarea is no longer the
+primary UI for json keys:
+
+- **"value shape" builder**: property rows (name · type dropdown ·
+  required checkbox · remove), "+ property", and an "other properties"
+  select (allowed any / not allowed / allowed, must be <type>) covering
+  the additionalProperties cases.
+- **infer from current value**: one click parses the cell's value into
+  rows (all present properties, typed, required, others not allowed).
+  Shown only when the value is visible to the viewer — inferring from a
+  hidden secret would display value-derived data (same #15/#12 logic as
+  copy-to and rule edits).
+- **advanced disclosure**: raw JSON Schema textarea for those who want
+  it; while open, apply saves the JSON, not the rows. Schemas using
+  features beyond the builder subset (GCP's enum) auto-fall back to
+  advanced with an explanatory note — builder covers
+  {type:object, required, properties:{n:{type}}, additionalProperties}.
+- create sheet's raw schema field removed; a hint points at the key's
+  schema section (declare → infer) instead.
+
+Not done (flagged as an option, no verdict): plain-language helpers for
+string pattern constraints (preset chips like "one of a|b|c"). Raw regex
+field stays.
+
 ## Iteration 24 — schema defined where the key lives (Marc: A & C)
 
 Marc's question "how/where is schema defined?" exposed that iteration 23
