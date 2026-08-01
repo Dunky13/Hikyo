@@ -69,6 +69,19 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 29 — group creation everywhere (Marc)
+
+Marc: "how do you create a new group? Only in empty state." True — the
+group input only rendered when no folder was preset. Now:
+
+- panel gains a **"+ group"** row under the groups list (opens the create
+  modal with an empty, focused group field);
+- the create modal's group field is **always live**: prefilled when
+  arriving via a group's "+ key", editable, with a datalist of existing
+  groups; typing an unseen name creates that group;
+- a key declared into a new group lands at the end of the matrix (was:
+  silently spliced to the front).
+
 ## Iteration 28 — modal locked (Marc)
 
 Decision: **centered modal** for create/edit/publish. Bottom sheet
