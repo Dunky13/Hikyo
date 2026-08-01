@@ -69,6 +69,15 @@ hamburger drawer on mobile:
 
 Projects list is demo-only (switching changes the crumb, not the data).
 
+## Iteration 26 — sheet grab handle drags for real (Marc)
+
+The pill atop every bottom sheet implied drag-to-dismiss but was inert —
+affordance without behavior. Now: pointer-capture drag delegated on the
+sheet (survives re-renders), full-width hit zone around the visual bar
+(cursor grab/grabbing, touch-action none), sheet follows the finger,
+snaps back under 110px, dismisses beyond. Applies to all three sheets
+(cell / create / publish).
+
 ## Iteration 25 — schema builder (Marc: option C)
 
 "Not everyone knows JSON Schema." The raw textarea is no longer the
