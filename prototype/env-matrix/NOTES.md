@@ -3,13 +3,12 @@
 **Question:** does a side-by-side environment matrix communicate inheritance,
 overrides, gaps, validation, and drift legibly?
 
-**Run:** `./prototype/serve.sh` then open `/env-matrix/` — an iteration index
-(works on phones via LAN). Each iteration is frozen at `env-matrix/<n>/`,
-newest is LATEST; `/4/` is current. New iteration = copy the current top into
-`env-matrix/<n+1>/index.html`, add an `<li>` to `index.html`.
+**Status: LOCKED** (ticket #20 resolved 2026-08-02). Kept in the repo by
+Marc's decision — all 31 iterations stay runnable; `/31/` is the reference
+design. Frozen: no further edits to any iteration directory.
 
-Throwaway code — delete this directory once the ticket resolves; the answer
-lives in the ticket's resolution comment and the map.
+**Run:** `./prototype/serve.sh` then open `/env-matrix/` — an iteration index
+(works on phones via LAN).
 
 ## Iteration 2 (current)
 
@@ -386,13 +385,38 @@ prototypes.
 - **Sticky header row + sticky group headers** while scrolling (the matrix
   scrolls inside a fixed-height container now; key column sticky as before).
 
-## Verdict
+## Verdict (locked 2026-08-02, Marc — 31 iterations)
 
-_(fill in when the ticket resolves)_
+**Kept, not deleted** (Marc): all iterations stay runnable under
+`env-matrix/<n>/`; iteration 31 is the reference design for the UI spec.
 
-- Cell-state visual language:
-- Origin explanation mechanism:
-- Density at 58 keys × 4 envs (desktop + phone):
-- Add-key flow:
-- Mask-vs-secret presentation:
-- "Required satisfied only by inheritance" as a distinct signal?
+- **Cell-state visual language:** plain mono value + trailing ✎ pencil
+  (accent on hover); border chrome reserved for the two exceptional
+  states — `! required · unset` and `✕ invalid` (violation line under the
+  pill); absent = faint dot; secrets = dim masked dots, 🔒 on the key
+  column only; Δ changed-since-publish + draft dot; zebra rows reset per
+  group; state never color-only.
+- **Origin explanation mechanism:** dissolved. The model went sharp rule
+  → opaque grid → **no inheritance at all** (flat: every value explicit
+  per env, `set | absent`). Provenance UI deleted; copy-to / declare-into
+  replace it. **The formal amendment ADR superseding #10 (+ #7's base
+  pointer & defaults layer) + cross-model grill is still outstanding** —
+  synthesis (#27) must not consume #10 as written.
+- **Density at ~60 keys × 4 envs:** works on desktop and phone — sticky
+  key column + env header + group headers, env show/hide popover,
+  collapsible groups (comma key list), problems filter with visible
+  filter bar.
+- **Add-key flow:** centered modal, same language as editing; group field
+  always live (+ group entry point, datalist, new name = new group);
+  declare-into-env checkboxes; required-in; type + first value; json
+  shape declared post-hoc via builder/infer.
+- **Mask-vs-secret presentation:** renamed "excluded", then dissolved
+  with the flat model. Secret stayed a key classification: dots,
+  reveal-gated, write-only replacement without reveal.
+- **"Required satisfied only by inheritance":** moot under the flat
+  model — required + absent = missing pill, publish veto.
+- **Surfaces:** shell = rail + panel (C); create/edit/publish = centered
+  modal (bottom sheet retired); schema lives on the key and is edited in
+  the sheet (per-type constraints; json = value-shape builder, infer
+  from current value, raw JSON Schema behind advanced); secret rule
+  changes reveal-gated (ADR #12 oracle).
