@@ -81,6 +81,15 @@ progress bar, not a pulse.
 The winner (or the steal-list across them) updates DESIGN.md and becomes
 the reference for the UI spec.
 
+## Iteration 5 — style switch
+
+2/3/4 folded into one file for side-by-side judging: floating bottom bar,
+`←`/`→` arrow keys, `?style=instrument|layered|console` (shareable,
+reload-stable). Style deltas live as `body[data-style]`-scoped CSS over
+the Instrument base; interactions identical in all three. The switcher
+bar is deliberately styled outside the design system — prototype chrome,
+not part of what's being evaluated.
+
 ## Verdict
 
-_(pending — Marc flips through 2/3/4, picks or mixes, then lock.)_
+_(pending — Marc flips styles in 5, picks or mixes, then lock.)_
