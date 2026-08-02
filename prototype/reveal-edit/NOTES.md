@@ -55,6 +55,32 @@ ADR bindings made feelable (timings compressed and labeled in-UI):
 - **Clipboard microcopy keeps the honest caveat** ("cleared in 45s if this
   tab stays focused — the OS may keep clipboard history").
 
+## Iterations 2-4 — style directions (Marc: "1 feels non-professional")
+
+Three deliberately different surface languages over the SAME interaction
+set, modeled on reference dev-tool design schools. Interactions and the
+locked #20 structure (rail+panel, matrix, centered modal, pencil) are
+identical in all three — only the design language varies. Common to all
+(fixed in 2, inherited by 3/4): color emoji replaced by currentColor SVG
+icons + masked SVG pencil; UI copy stripped of ADR citations and lecture,
+one styled "prototype" footnote carries demo caveats; TOTP placeholder no
+longer letter-spaced; toasts bottom-right, compact; passkey wait is a
+progress bar, not a pulse.
+
+- **2 "Instrument" — Geist/Vercel school**: flat precision. 4-6px rect
+  chips, uppercase state labels, hairline borders, 36px button scale
+  (44px touch on mobile), teal accent kept from DESIGN.md.
+- **3 "Layered" — Linear school**: violet-slate 3-step elevation ladder,
+  iris accent, hover-row highlight replaces zebra, blurred scrim + one
+  deep soft shadow, 16px overlay radius, `kbd` caps for shortcuts.
+- **4 "Ops console" — Doppler/HashiCorp school**: full table semantics
+  (row gridlines, faint column separators, 2px header rule), ~30px rows,
+  uppercase env headers, filled PROTECTED chip, neutral console grays,
+  sober blue accent, 2-4px radii.
+
+The winner (or the steal-list across them) updates DESIGN.md and becomes
+the reference for the UI spec.
+
 ## Verdict
 
-_(pending — Marc flips through iteration 1, then lock or iterate.)_
+_(pending — Marc flips through 2/3/4, picks or mixes, then lock.)_
