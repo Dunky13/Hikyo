@@ -82,7 +82,21 @@ modal in every mode; permission checks identical.
   countdowns and per-key hide, one "end session" re-masks everything.
   Protected values still take their own per-reveal ceremony.
 
-## Verdict
+## Verdict (locked 2026-08-02, Marc — ticket #21 resolved)
 
-_(pending — Marc flips approaches in 6 (a/b/c/d), picks or mixes, then
-lock; theming questions return to the frozen env-matrix-31 language.)_
+**Approach a — the ceremony modal — wins.** Inline popover (b),
+hold-to-reveal (c) and the session drawer (d) rejected. Full interaction
+notes in the ticket's resolution comment. Kept runnable: `1/` (baseline
+interactions) and `6/` (approach comparison); theming stays the frozen
+env-matrix-31 language.
+
+Decided set: purpose-bound ceremony modal (passkey/TOTP, enumerated key
+set, disclosure-vs-account-step-up distinction); sliding reveal window
+with visible countdown (window gates the prompt, never the check);
+protected environments cap the window at 0 ⇒ passkey per disclosure, no
+TOTP; short auto-remask with visible countdown (value = project
+setting); clipboard = audited disclosure incl. copy-without-display,
+best-effort clear + honest OS caveat; row editor for one-key-across-envs
+(empty field = unchanged); live inline validation; publish and
+copy-into-protected run the same enumerated-key ceremony; one audit
+event per disclosed key.
