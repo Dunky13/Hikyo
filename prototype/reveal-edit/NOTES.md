@@ -46,6 +46,15 @@ ADR bindings made feelable (timings compressed and labeled in-UI):
 - **Per-key audit toasts** (ADR #15: one event per disclosed key, never
   "revealed 40 secrets") — every reveal / copy / copy-into emits one.
 
+## Decisions confirmed (Marc, 2026-08-02)
+
+- **Remask default stays short** (10s-class): the exact value becomes a
+  project setting later (ops-spec fog owns the default).
+- **Row editor: empty field = unchanged** — no per-row clear affordance;
+  clearing a value stays a per-cell action.
+- **Clipboard microcopy keeps the honest caveat** ("cleared in 45s if this
+  tab stays focused — the OS may keep clipboard history").
+
 ## Verdict
 
-_(pending — Marc reacts, iterate.)_
+_(pending — Marc flips through iteration 1, then lock or iterate.)_
