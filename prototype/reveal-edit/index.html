@@ -40,21 +40,9 @@
   <h1>reveal &amp; multi-env editing <span>/</span> iterations</h1>
   <p class="q">How do reveal, masking, clipboard, and editing-across-environments actually behave? Sibling of the frozen env-matrix reference (iteration 31, ticket #20). Wayfinder ticket #21.</p>
   <ul>
-    <li><a href="5/">
-      <span class="num">5</span><span class="name">Style switch — 2/3/4 in one file</span><span class="latest">LATEST</span>
-      <span class="desc">The three style directions folded into one page, live-switchable: floating bottom bar / ← → arrow keys / <code>?style=instrument|layered|console</code>. Same interactions everywhere; deltas as <code>data-style</code>-scoped CSS.</span>
-    </a></li>
-    <li><a href="4/">
-      <span class="num">4</span><span class="name">Ops console — Doppler / HashiCorp school</span>
-      <span class="desc">Full table semantics: row gridlines + faint column separators, 2px header rule, ~30px rows, uppercase env headers, filled PROTECTED chip, neutral console grays with a sober blue accent, 2-4px radii. Maximum information density.</span>
-    </a></li>
-    <li><a href="3/">
-      <span class="num">3</span><span class="name">Layered — Linear school</span>
-      <span class="desc">Violet-slate elevation ladder, iris accent, hover-row highlight instead of zebra, blurred scrim + one deep soft shadow on overlays, 16px overlay radius, kbd caps for shortcuts, tightened type.</span>
-    </a></li>
-    <li><a href="2/">
-      <span class="num">2</span><span class="name">Instrument — Geist / Vercel school</span>
-      <span class="desc">Iteration 1's interactions, de-sloppified: color emoji → currentColor SVG icons + masked SVG pencil, 4-6px rect chips (uppercase states), 36px button scale, toasts bottom-right, passkey progress bar instead of pulse, UI copy stripped of ADR citations with one styled prototype footnote.</span>
+    <li><a href="6/">
+      <span class="num">6</span><span class="name">Reveal approaches — four structural shapes</span><span class="latest">LATEST</span>
+      <span class="desc">Original theming. Four structurally different reveal interactions, switchable via bottom bar / ← → / <code>?reveal=</code>: <b>a</b> ceremony modal (baseline) · <b>b</b> inline popover anchored at the reveal button · <b>c</b> hold-to-reveal (value visible only while pressed, release = instant remask) · <b>d</b> disclosure-session drawer (authenticate once, every open value listed with countdowns, one end-session kill switch). Iterations 2-5 (theming-only variations) dropped by verdict.</span>
     </a></li>
     <li><a href="1/">
       <span class="num">1</span><span class="name">Ceremony, window, clipboard, row edit</span>

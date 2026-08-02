@@ -55,41 +55,34 @@ ADR bindings made feelable (timings compressed and labeled in-UI):
 - **Clipboard microcopy keeps the honest caveat** ("cleared in 45s if this
   tab stays focused — the OS may keep clipboard history").
 
-## Iterations 2-4 — style directions (Marc: "1 feels non-professional")
+## Iterations 2-5 — DROPPED (Marc, 2026-08-02)
 
-Three deliberately different surface languages over the SAME interaction
-set, modeled on reference dev-tool design schools. Interactions and the
-locked #20 structure (rail+panel, matrix, centered modal, pencil) are
-identical in all three — only the design language varies. Common to all
-(fixed in 2, inherited by 3/4): color emoji replaced by currentColor SVG
-icons + masked SVG pencil; UI copy stripped of ADR citations and lecture,
-one styled "prototype" footnote carries demo caveats; TOTP placeholder no
-longer letter-spaced; toasts bottom-right, compact; passkey wait is a
-progress bar, not a pulse.
+Style-direction exploration (Geist/Linear/Doppler theming + a style
+switcher). Verdict: **wrong axis** — "that's just theming; I was looking
+for unique approaches in the reveal modal." Dirs deleted (live in git
+history before d9695e6); original env-matrix-31 theming restored.
+Numbering continues at 6 so ticket comments referencing 2-5 stay
+meaningful.
 
-- **2 "Instrument" — Geist/Vercel school**: flat precision. 4-6px rect
-  chips, uppercase state labels, hairline borders, 36px button scale
-  (44px touch on mobile), teal accent kept from DESIGN.md.
-- **3 "Layered" — Linear school**: violet-slate 3-step elevation ladder,
-  iris accent, hover-row highlight replaces zebra, blurred scrim + one
-  deep soft shadow, 16px overlay radius, `kbd` caps for shortcuts.
-- **4 "Ops console" — Doppler/HashiCorp school**: full table semantics
-  (row gridlines, faint column separators, 2px header rule), ~30px rows,
-  uppercase env headers, filled PROTECTED chip, neutral console grays,
-  sober blue accent, 2-4px radii.
+## Iteration 6 — reveal approaches (structural, original theming)
 
-The winner (or the steal-list across them) updates DESIGN.md and becomes
-the reference for the UI spec.
+Four structurally different shapes for the reveal interaction, switchable
+live (`?reveal=`, floating bar, arrow keys). Publish/copy ceremonies stay
+modal in every mode; permission checks identical.
 
-## Iteration 5 — style switch
-
-2/3/4 folded into one file for side-by-side judging: floating bottom bar,
-`←`/`→` arrow keys, `?style=instrument|layered|console` (shareable,
-reload-stable). Style deltas live as `body[data-style]`-scoped CSS over
-the Instrument base; interactions identical in all three. The switcher
-bar is deliberately styled outside the design system — prototype chrome,
-not part of what's being evaluated.
+- **a · ceremony modal** — iteration 1 baseline: centered purpose-bound
+  modal, window on success, protected = passkey-only.
+- **b · inline popover** — the same ceremony as a small card anchored at
+  the reveal button; no scrim, the value appears where you're looking.
+- **c · hold-to-reveal** — press-and-hold a masked cell: value visible
+  only while held, release = instant remask (no timer at all). Ceremony
+  precedes the first hold; protected grants one 10s hold per ceremony.
+- **d · session drawer** — an explicit "disclosure session": authenticate
+  once in a right-side drawer, every revealed value is listed there with
+  countdowns and per-key hide, one "end session" re-masks everything.
+  Protected values still take their own per-reveal ceremony.
 
 ## Verdict
 
-_(pending — Marc flips styles in 5, picks or mixes, then lock.)_
+_(pending — Marc flips approaches in 6 (a/b/c/d), picks or mixes, then
+lock; theming questions return to the frozen env-matrix-31 language.)_
