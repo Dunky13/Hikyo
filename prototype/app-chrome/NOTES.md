@@ -177,8 +177,30 @@ only while the account view is open (sections identical across all five):
 - **e — tiles + drill-in**: overview grid of summary tiles, tap to focus a
   single section, back out.
 
+## Iteration 7 — account layout locked; shape treatments (Marc)
+
+**Decided: account layout c — jump index** (one scroll, sticky chip index).
+Other four layouts and their switcher removed.
+
+**New question: rounded corners & pills are overused.** Impeccable pass;
+what's being reopened is DESIGN.md's Shape line ("Radius: 6px controls,
+999px pills"). Four app-wide treatments via bottom bar / ← → / `?shape=`:
+
+- **a — baseline**: current skin (8-14px radii, 999px pills everywhere).
+- **b — squared 2px**: one geometry, every radius collapses to 2px, pills
+  become small rectangles, rail avatars included. Terminal/hairline feel.
+- **c — role scale**: radius carries a role — containers 6px, controls 4px,
+  badges 3px; the 999px pill is *reserved* for org identity circles, count
+  badges and the matrix cell-state vocabulary, nothing else.
+- **d — flat, de-carded**: sections separated by hairline rules instead of
+  card boxes (uppercase ruled labels), tags become colored mono text with no
+  border, radius 0 everywhere except overlays (8px).
+
+DESIGN.md amendment + (if the verdict touches cell pills) an env-matrix
+reference note land only after the verdict.
+
 ## Verdict
 
-_Org placement and instance-surface decided (iteration 4); grant modal
-decided (iteration 5). Open: account layout a–e verdict; then account /
-project settings / members confirmation resolves the ticket._
+_Decided: org placement (it4), instance parity (it4), grant checklist (it5),
+account layout c (it7). Open: shape treatment a–d verdict; then the final
+confirmation pass resolves the ticket._
