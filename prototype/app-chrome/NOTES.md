@@ -143,8 +143,18 @@ reachable/unreachable states, connect button) purely to react to; the
 decision (what "manage" means, credential model, tenancy/threat-model
 consequences, v1 or not) belongs to that ticket and the MVP boundary.
 
+## Iteration 5 — grant checklist (Marc)
+
+"New grant, do we want checkbox instead of select, if you want multiple at
+once?" — yes, and it stays ADR-consistent: the new-grant modal now shows a
+**capability checklist**; each checked capability becomes its **own
+revocable grant line** at the chosen scope (exactly what role templates do
+with a preset checklist — batch creation, never a bundle). Empty selection
+refused; the org-scope blast warning enumerates the checked capabilities and
+states they are N separate lines.
+
 ## Verdict
 
-_Org placement and instance-surface questions decided (see iteration 4).
-Remaining for resolution: account/profile, project settings, membership
-surfaces confirmation on iteration 4._
+_Org placement and instance-surface questions decided (iteration 4); grant
+modal shape decided (iteration 5). Remaining for resolution: account/profile,
+project settings, membership surfaces confirmation._
