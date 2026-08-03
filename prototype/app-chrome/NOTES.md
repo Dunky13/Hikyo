@@ -70,7 +70,40 @@ Surfaces (same across variants):
 Matrix itself is a stub linking to the frozen env-matrix/31 reference — this
 prototype owns everything around it.
 
+## Iteration 2 — round-1 feedback (Marc)
+
+Marc on iteration 1:
+
+1. The matrix has its own sidebar — a chrome designed without it risks a
+   double sidebar.
+2. Org switching broken on mobile: variant b's popover got an offset and
+   didn't render; a and c barely differ on mobile; no way to switch org at
+   all on a phone.
+3. Member list too long — one row per grant. Group by (member, scope).
+4. No way to create/invite members.
+
+Changes:
+
+- **One sidebar, merged.** The matrix view is now a real condensed matrix
+  (subset of env-matrix/31's data: groups, secret dots, protected header,
+  problem cell) and the side panel is the env-matrix-31 panel — group rows
+  with problem badges + problems view, indented under "Environment matrix",
+  with Members & access / Project settings / org section in the same panel.
+- **Mobile org switching.** The drawer now opens with an *organizations*
+  section in every variant (the rail is hidden on mobile, so a/b/c converge
+  there — the org-placement question is desktop-only, stated in-file).
+  Variant b's crumb popover renders as a full-width sheet under the header
+  on ≤700px instead of an offset popover.
+- **Members grouped.** One row per (member, scope); capabilities are chips
+  in that row, each chip individually revocable — the grant stays the atom,
+  only the presentation groups.
+- **Invite flow.** Org-level "invite member": email (labelled *delivery
+  only*), role template, scope. Modal states the ADR #16 rule: the
+  invitation binds to the capability set and to whoever redeems it — never
+  an email comparison. Pending invitations render in the member list with a
+  dashed chip + revoke.
+
 ## Verdict
 
-_Pending Marc's pass — record per-surface decisions here, then fold into the
-ticket resolution._
+_Pending Marc's pass on iteration 2 — record per-surface decisions here,
+then fold into the ticket resolution._
