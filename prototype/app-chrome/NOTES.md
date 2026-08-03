@@ -199,8 +199,62 @@ what's being reopened is DESIGN.md's Shape line ("Radius: 6px controls,
 DESIGN.md amendment + (if the verdict touches cell pills) an env-matrix
 reference note land only after the verdict.
 
+## Iteration 8 — shape c baked in; Codex placement audit (Marc)
+
+**Decided: shape treatment c — role scale**, now the only skin (switcher and
+a/b/d removed; DESIGN.md Shape section amended in the same commit):
+
+- containers/cards **6px** · controls **4px** · badges/tags/chips **3px**
+- **999px pill reserved** for org identity circles, count badges, and the
+  matrix cell-state vocabulary — nothing else.
+
+Then a **Codex placement audit** (gpt-5.6-sol, high effort, read-only):
+17 findings (2 high / 11 med / 4 low). Disposition:
+
+**Implemented (13):**
+
+1. *(med, the load-bearing one)* CSS order defeated the role-scale override
+   block — `.modal-box` computed 14px, `.capgrid` 8px, `.answerbox` 10px,
+   `.scopechip` 6px. Fixed by **baking the role radii into every base rule**
+   and deleting the override block: one source of truth, no order fragility.
+2. `.pav` project tiles + rail buttons are controls → 4px (were 6/10px).
+3. `.bigav` 6px; `.hue` swatches lose the forbidden circle → 4px; `.glyph` 4px.
+4. `.atab` jump chips are interactive controls → 4px, not badge 3px.
+5. Stale `999px`/`50%` base declarations removed (baking made them real).
+6. `.codes code` are boxed content, not inputs → 6px.
+7. *(high)* Mobile touch targets: 44px min-height for buttons/tabs/selects/
+   checkbox labels, 44px swatches, 34px chip-revoke — `≤700px` media only,
+   desktop keeps DESIGN.md's density.
+8. *(high)* `.capchip .rm` revoke was ~9×12px → 26×26px hit area (34px
+   mobile), kept **inside** the chip: grouped rows are a decided shape,
+   relocation rejected.
+9. Checkbox labels get `cursor:pointer` + min-height.
+10. `Escape` now also closes the drawer; scrims marked `aria-hidden`
+    (pointer convenience, keyboard path is explicit controls + Esc).
+11. Condensed-matrix pen no longer lights up on hover (cells are
+    illustration here; interactive implication removed, static affordance
+    stays).
+12. `.grants` row hover highlight removed (rows carry no action).
+13. Panel group rows now do something on desktop: scroll the matrix to the
+    group anchor; problems row scrolls to the violation cell.
+14. Tag vocabulary: `.tag` = categorical status only; instance values
+    (`envweave.went.io`, `90d`) and CLI refs are now unbordered
+    `code.val` / `code.cliv` text.
+
+**Rejected / deferred (3):**
+
+- `#side .srow` → 4px + inset: rejected — full-bleed list rows, radius roles
+  apply to discrete controls; flat panel rows are the reference design.
+- Custom-drawn checkboxes: out of prototype scope; recorded as a UI-spec
+  note (control-radius consistency for form elements).
+- Relocating chip revokes to row-end `.xbtn`s: rejected, see 8.
+
+DESIGN.md reserved-pill wording widened to "identity circles (org and
+account avatars)" — the account avatar was always a circle; now the rule
+says so.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
-account layout c (it7). Open: shape treatment a–d verdict; then the final
-confirmation pass resolves the ticket._
+account layout c (it7), shape role-scale (it8). Open: final confirmation
+pass on iteration 8 resolves the ticket._

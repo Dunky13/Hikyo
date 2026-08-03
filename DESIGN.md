@@ -38,7 +38,8 @@ State vocabulary (always paired with a glyph, never color-only):
 
 ## Shape & Space
 
-- Radius: 6px controls, 999px pills (cell states are pills).
+- **Radius carries a role** (decided app-chrome iteration 8, ticket #29): containers/cards 6px; controls (buttons, inputs, selects) 4px; badges/tags/chips 3px.
+- **The 999px pill is reserved** for exactly three things: identity circles (org and account avatars), count badges, and the matrix cell-state vocabulary. Nothing else is a pill.
 - Hairline borders (1px) over shadows; shadows only on overlays (bottom sheet).
 - Density: matrix rows ~36px desktop, ~44px touch targets mobile.
 
