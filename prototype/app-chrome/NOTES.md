@@ -103,7 +103,48 @@ Changes:
   an email comparison. Pending invitations render in the member list with a
   dashed chip + revoke.
 
+## Iteration 3 — round-2 feedback (Marc)
+
+"Still no difference between a and c on mobile, and b doesn't render well on
+my phone." Product is mobile-first, so the org-placement variants must differ
+*on the phone*, not just desktop:
+
+- **a** mobile: drawer opens with an organizations section (drawer owns orgs).
+- **b** mobile: compact crumb (`envweave /` prefix hidden ≤700px), org
+  segment opens a full-width sheet under the header with scrim; drawer has
+  no org section.
+- **c** mobile: org monogram button in the header opens the switcher
+  full-screen; drawer has no org section.
+
+Plus mobile header fixed to a single row (was stacking 4 rows tall).
+
+## Iteration 4 — round-3 verdicts (Marc)
+
+**Decided:**
+
+- **Org placement: A — the rail owns orgs.** Monograms above the project
+  squares; mobile drawer opens with the organizations section. Variants b/c
+  and the switcher deleted.
+- **Instance surface: in the v1 UI, full CLI ↔ UI feature parity** for
+  instance management (#25's parity principle extended to instance scope).
+  Reason: envweave may run locally / VPS / k8s / docker while managing orgs
+  and projects hosted elsewhere — the CLI is not always the convenient
+  surface. The instance page now shows org create, editable instance-config
+  values, and keys & crypto (master-key / token-key rotation, reencrypt
+  status), each row carrying its CLI-verb twin. **Parity exception stays
+  locked:** the SystemProof local set (init, migrate, restore
+  reconciliation, break-glass) is local host authority (#23/#25) and has no
+  UI or network surface.
+
+**New exploration (own wayfinder ticket, NOT decided here):** Portainer-style
+multi-instance management — one MAIN instance connects to and manages other
+envweave instances. Sketched as a "Connected instances" card (main badge,
+reachable/unreachable states, connect button) purely to react to; the
+decision (what "manage" means, credential model, tenancy/threat-model
+consequences, v1 or not) belongs to that ticket and the MVP boundary.
+
 ## Verdict
 
-_Pending Marc's pass on iteration 2 — record per-surface decisions here,
-then fold into the ticket resolution._
+_Org placement and instance-surface questions decided (see iteration 4).
+Remaining for resolution: account/profile, project settings, membership
+surfaces confirmation on iteration 4._
