@@ -153,8 +153,32 @@ with a preset checklist — batch creation, never a bundle). Empty selection
 refused; the org-scope blast warning enumerates the checked capabilities and
 states they are N separate lines.
 
+## Iteration 6 — account layouts (Marc)
+
+"Account & security is missing account-related settings, and it's too many
+cards — scrolling is tedious. 3-5 approaches."
+
+**Content added:** Profile (display name, email labelled *delivery only* —
+never identity, never links, #16) and Preferences (theme; credential-expiry
+warnings in-product always-on with email as optional added transport, #17;
+security alerts always-on, not disableable).
+
+**Five structural layouts**, switchable via bottom bar / ← → / `?account=`
+only while the account view is open (sections identical across all five):
+
+- **a — tabs**: chip-tab row, one section visible, zero scroll.
+- **b — panel nav**: the side panel owns the account sections; the account
+  surface navigates exactly like a project.
+- **c — jump index**: one scroll retained, sticky chip index with smooth
+  anchor jumps.
+- **d — accordion**: collapsed cards with live summary lines
+  ("2 passkeys · TOTP · password", "codes ✗ · passkey-only off"), one open
+  at a time.
+- **e — tiles + drill-in**: overview grid of summary tiles, tap to focus a
+  single section, back out.
+
 ## Verdict
 
-_Org placement and instance-surface questions decided (iteration 4); grant
-modal shape decided (iteration 5). Remaining for resolution: account/profile,
-project settings, membership surfaces confirmation._
+_Org placement and instance-surface decided (iteration 4); grant modal
+decided (iteration 5). Open: account layout a–e verdict; then account /
+project settings / members confirmation resolves the ticket._
