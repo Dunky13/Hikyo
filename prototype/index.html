@@ -24,8 +24,12 @@
     border:1px solid var(--line);border-radius:10px;background:var(--bg2);
     transition:border-color .15s}
   li a:hover{border-color:var(--accent)}
-  .name{font-size:17px;font-weight:600}
-  .name .tkt{font-family:var(--mono);font-size:11px;color:var(--tx-faint);font-weight:400;margin-left:10px}
+  .name{font-size:17px;font-weight:600;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .name .tkt{font-family:var(--mono);font-size:11px;color:var(--tx-faint);font-weight:400}
+  .st{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;font-weight:700;border-radius:999px;
+    padding:2.5px 9px;margin-left:auto;white-space:nowrap}
+  .st.locked{color:var(--bg);background:var(--accent)}
+  .st.wip{color:var(--tx-dim);border:1px solid var(--line)}
   .desc{font-size:12.5px;color:var(--tx-dim);margin-top:6px;line-height:1.55;max-width:58ch}
   footer{margin-top:40px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
   footer code{color:var(--tx-dim)}
@@ -36,16 +40,16 @@
   <p class="lede">Throwaway UI explorations from the wayfinder map. Each answers one open design question; deleted once its ticket resolves.</p>
   <ul>
     <li><a href="env-matrix/">
-      <div class="name">Environment matrix<span class="tkt">#20 · locked (31 iterations)</span></div>
-      <div class="desc">Cascade: dark default + light theme, mobile-first, tap-to-edit bottom sheet, permission-gated reveal, env show/hide chips, collapsible groups. Opens the iteration list (latest + history).</div>
+      <div class="name">Environment matrix<span class="tkt">#20 · 31 iterations</span><span class="st locked">LOCKED</span></div>
+      <div class="desc">Cascade: dark default + light theme, mobile-first, tap-to-edit bottom sheet, permission-gated reveal, env show/hide chips, collapsible groups. Iteration 31 is the frozen reference design.</div>
     </a></li>
     <li><a href="reveal-edit/">
-      <div class="name">Reveal &amp; multi-env editing<span class="tkt">#21</span></div>
-      <div class="desc">Sibling of the frozen matrix reference: reauth ceremony (passkey/TOTP, enumerated key set), sliding reveal window with protected zero-cap, auto-remask countdown, clipboard as audited disclosure, row edit across all environments in one motion.</div>
+      <div class="name">Reveal &amp; multi-env editing<span class="tkt">#21</span><span class="st locked">LOCKED</span></div>
+      <div class="desc">Ceremony modal won: reauth (passkey/TOTP, enumerated key set), sliding reveal window with protected zero-cap, auto-remask countdown, clipboard as audited disclosure, row edit across all environments in one motion.</div>
     </a></li>
     <li><a href="app-chrome/">
-      <div class="name">App chrome<span class="tkt">#29</span></div>
-      <div class="desc">The surfaces around the matrix: three org-placement shapes (rail / crumb / overlay), account &amp; security (sessions, factors, display-once recovery codes, step-up distinct from reveal), membership &amp; grants with who-can inspection and org-scope blast warning, project settings, instance admin.</div>
+      <div class="name">App chrome<span class="tkt">#29</span><span class="st wip">IN PROGRESS</span></div>
+      <div class="desc">The surfaces around the matrix. Decided: rail owns orgs; instance surface in the v1 UI with CLI↔UI parity. Open: confirmation pass on account &amp; security, project settings, membership &amp; grants; connected-instances exploration feeds ticket #35.</div>
     </a></li>
   </ul>
   <footer>
