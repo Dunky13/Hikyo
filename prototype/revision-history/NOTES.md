@@ -91,6 +91,39 @@ sentence behind the tooltip; restore preview gained a summary chip line
 (n set / n clear / n blocked) with prose only on problem rows; diff footer
 one line. Diff/restore/pin/publish/ceremony mechanics identical to it-1.
 
+## Iteration 3 — panes wins + pin clarity
+
+Marc's iteration-2 verdicts: **view b (list + detail panes) wins** — it is now
+the single history surface (switcher and views a/c/d retired with it-2, which
+stays frozen for reference). Second ask: **clarify what pinning does and how
+it affects the values a workload receives.** Pin clarity is *visible text*,
+never tooltip-only:
+
+- **Pins section** carries a one-line definition: "a pinned workload stops
+  following latest — it keeps receiving exactly the pinned revision's values,
+  restarts included, until the pin is released or expires."
+- **Each pin row** states the gap in a plain sentence: "api-server (k8s)
+  still runs on r27's values — 2 publishes behind latest (r29). New publishes
+  don't reach it." (Pinned-at-latest gets the forward-looking phrasing.)
+- **Detail pane** of a pinned revision names its consumers: "⚲ api-server
+  receives this revision's values instead of latest (r29) — until the pin is
+  released or expires."
+- **Pin-create sheet** leads with a "what pinning does" list (keeps exactly
+  rN's values across restarts · new publishes stop reaching the workload ·
+  values kept from retention clean-up · release/expiry resumes latest on
+  next fetch, loudly) followed by a **"compared to latest" value summary**
+  phrased from the workload's point of view — config keys show both values
+  ("stays at true — latest: false"), secret keys show comparison only under
+  reveal-history ("stays at an older value than latest"), write-presence
+  otherwise; added/removed keys phrased as "won't have" / "keeps".
+- `TIP.pin` tooltip rewritten user-first (freeze semantics before the
+  durable-resource machinery).
+
+Observed while testing: the 640px panes drawer covers the header's role
+select at ~1200px viewports — fine in the prototype (the role picker is demo
+chrome), but the real chrome (#29) should treat the history drawer's width
+as a layout constraint. Carried to the UI spec notes.
+
 ## Verdict
 
-_(pending — Marc flips through iteration 2's four views)_
+_(pending — Marc reacts to iteration 3)_
