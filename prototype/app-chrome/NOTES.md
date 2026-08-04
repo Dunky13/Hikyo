@@ -414,3 +414,22 @@ reference chrome (15 stays the frozen base; this extends it):
 - Changes audited (#24 registry: retention-policy change). Concrete
   defaults → ops spec #32. Semantics decided in
   `prototype/revision-history/5/` (#30).
+
+## Iteration 17 — sidebar hierarchy variants
+
+Marc's nitpick on the panel: with the small indentation, top-level section
+labels (`.stitle`) and sub-items (`.srow`) blur together at first glance.
+Four CSS-only treatments on top of iteration 16, switchable via `?side=` +
+floating bar (arrow keys cycle):
+
+- **a — baseline**: iteration 16 untouched, for comparison.
+- **b — breathing room**: inter-section padding 16 → 30px, nothing else.
+  Marc's first idea; separation by whitespace alone.
+- **c — mild separator**: a dull 1px bar, half the column wide, centered,
+  above each section label (first section excluded). Marc's own sketch.
+- **d — structural indent**: sub-items indented onto a hairline left rule
+  (accent-colored on the active row); section labels stay flush left.
+  Hierarchy by geometry instead of spacing — the one treatment that also
+  scales when a section gets long.
+
+All variants theme-safe (derive from `--line`/`--accent`). Verdict pending.
