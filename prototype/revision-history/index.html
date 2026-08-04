@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Version history &amp; rollback — iterations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:oklch(0.19 0.012 220);--bg2:oklch(0.225 0.014 220);--line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);--tx-dim:oklch(0.76 0.01 210);--tx-faint:oklch(0.6 0.012 215);
+    --accent:oklch(0.82 0.09 195);--mono:"IBM Plex Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--tx);font-family:"Archivo",system-ui,sans-serif;
+    min-height:100vh;padding:clamp(24px,6vw,72px) clamp(18px,6vw,72px)}
+  h1{font-size:clamp(20px,4vw,28px);font-weight:700}
+  h1 span{color:var(--accent)}
+  .lede{font-size:13px;color:var(--tx-dim);margin:10px 0 30px;max-width:58ch;line-height:1.6}
+  ul{list-style:none;display:grid;gap:10px;max-width:680px}
+  li a{display:block;text-decoration:none;color:inherit;padding:16px 18px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg2)}
+  li a:hover{border-color:var(--accent)}
+  .name{font-size:15px;font-weight:600;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .name .n{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .desc{font-size:12.5px;color:var(--tx-dim);margin-top:5px;line-height:1.55}
+  footer{margin-top:36px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
+</style>
+</head>
+<body>
+  <h1>version history <span>&amp;</span> rollback</h1>
+  <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
+  <ul>
+    <li><a href="1/">
+      <div class="name"><span class="n">1</span>History drawer</div>
+      <div class="desc">Right-side per-env timeline drawer (entry: env-header rev badge, key names filter per key). Diff + restore preview + pin as centered modals; restore stages drafts, publish runs the #21 ceremony. Retention: lineage permanent, payloads last 6 + pinned; auditor role shows the reveal/reveal-history split.</div>
+    </a></li>
+  </ul>
+  <footer>../serve.sh then open /revision-history/ · notes in NOTES.md</footer>
+</body>
+</html>
