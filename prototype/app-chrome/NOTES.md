@@ -293,10 +293,43 @@ capability row is single-line again with a 24px **(?)** at its end: tap
 toggles the explanation inline under that row (`aria-expanded` tracked),
 `title` supplies desktop hover. Checkbox untouched by the toggle.
 
+## Iteration 13 — /impeccable critique fixes
+
+Critique ran as two isolated assessments (design-director review in its own
+browser tab + the impeccable deterministic detector with the [Human]
+overlay tab). Score: **25/40**; verdict: not AI slop, held back by error
+handling and undo. All five priority issues + minors fixed here:
+
+1. **Contrast (P1)**: `--tx-faint` lifted 0.60→0.71 dark / 0.52→0.46 light
+   (was 4.35:1 at 10-11px on an AAA-leaning product).
+2. **Color-only validation (P1)**: zero-capability grant and empty invite
+   email now show a text error with `role=alert` (border color stays as the
+   secondary signal). "State is never color-only" honoured at the moment of
+   confusion.
+3. **Dangerous default (P1)**: new-grant scope reordered narrow→wide with
+   **staging preselected**; protected production is never the default.
+4. **Blast-cancel (P2)**: the org-scope warning gains "back, change scope",
+   restoring the full composition (capabilities, principal, scope).
+5. **Revoke asymmetry (P2, Marc's call)**: revoke stays one-click (absence
+   is the only denial, removal is safe) but every revoke/grant/invite now
+   fires an **undo toast** (8s, aria-live) — which also closes the
+   silent-table-update feedback gap after granting.
+
+Minors: modal headings h4→h3 (no h2→h4 skip), sticky modal footer ≤700px
+(grant button was below the fold on phones), org-members crumb reads
+"org members", matrix first/last column breathing room, **em dashes swept
+from all UI copy** (detector counted 8; copy law).
+
+Recorded, not changed: ADR refs (#16, #25…) stay in prototype copy as
+scaffolding for spec synthesis — the UI spec strips them for the product.
+Emoji icon set + `alert()` stubs are prototype-grade by design.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
 surfaces (it9), identity custom hue + image (it10), grant explanations
-behind (?) (it11-12). Open: final confirmation pass on iteration 12
-resolves the ticket._
+behind (?) (it11-12), critique fixes incl. undo toasts + safe scope default
+(it13). Open: final confirmation pass on iteration 13 resolves the ticket.
+Separate thread: org-settings shape brief awaiting confirmation → becomes
+iteration 14._
