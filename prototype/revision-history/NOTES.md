@@ -158,6 +158,47 @@ Feed into the UI spec + #31 (workload surfaces); if the synthesis ticket
 (#27) finds this contradicts a locked text, it reopens #11 rather than
 silently resolving.
 
+## Iteration 5 — retention inheritance (org → project)
+
+Marc's ask: revision retention configurable **per org and per project**, with:
+
+- new projects **inherit** the org default;
+- a project that overrides **detaches** — later org changes don't rewrite it;
+- projects still inheriting **follow** org changes;
+- a project may **never exceed** the org value — refused at set time
+  (inline error + disabled apply), and an org *lowering* **caps** existing
+  overrides loudly ("custom 10 — capped to 8 by org ⚠") rather than
+  rewriting or silently ignoring them.
+
+Made feelable via the **⚙ retention sheet** (entry: the drawer head's
+"values kept: last N revisions + pinned" line, which also badges
+inherits-org vs custom):
+
+- org stepper + per-project state list (inherits → N / custom n / capped),
+  previewed live against the *staged* org value so propagation is visible
+  before apply;
+- this-project inherit/custom radio with the cap rule stated in place;
+- apply re-renders the timeline so "collected" tags move live; widening
+  gets the honest toast — **nothing comes back**, collected values are gone
+  (ADR #11), the wider window applies from now on;
+- retention changes audited (#24 registry: retention-policy change);
+- read-only for non-admin roles (org default = org admin; project value
+  rides `project-settings`, ADR #15).
+
+Verified in-browser: org 6→8 → inherited projects follow to 8, custom 4
+stays, custom 10 re-caps to 8, effective window widens (5 → 3 collected
+rows); custom 12 > org 8 refused inline with apply disabled.
+
+**Domain consequence for the ADRs/spec:** #15 already places #11's payload
+policy under `project-settings` at project scope, and #32 owns the concrete
+defaults. NEW here: the **org-level default**, **inherit-until-modified**
+semantics, and the **org cap** (a project may never out-retain its org).
+The cap is a real authority hierarchy consistent with #15's org→project
+scope order. Feeds the UI spec, #32 (defaults + GC cadence) and #27; org
+settings surface (#29's org policy section) gains the default-retention
+entry. If synthesis finds locked text contradicting the cap, that reopens
+the relevant ticket rather than resolving silently.
+
 ## Verdict
 
-_(pending — Marc reacts to iteration 4)_
+_(pending — Marc reacts to iteration 5)_

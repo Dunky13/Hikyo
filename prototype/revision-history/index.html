@@ -33,6 +33,10 @@
   <h1>version history <span>&amp;</span> rollback</h1>
   <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
   <ul>
+    <li><a href="5/">
+      <div class="name"><span class="n">5</span>Retention inheritance</div>
+      <div class="desc">Revision retention per org + per project: new projects inherit the org default, an override detaches (org changes no longer touch it), inheriting projects follow, and a project may never exceed the org value — refused at set time, capped loudly when the org lowers. ⚙ retention sheet from the drawer head; timeline "collected" tags move live on apply; changes audited.</div>
+    </a></li>
     <li><a href="4/">
       <div class="name"><span class="n">4</span>Pin = workload binding</div>
       <div class="desc">It-3 findings fixed: "holds payload" jargon → "sole keeper" with plain consequence text, and releasing such a pin now confirms with "this permanently deletes rN's values". Pin model made explicit: one pin per (workload, environment) — the sheet gains a workload picker, re-pinning a bound workload becomes a move (r27 → r25), pinning the same rev twice is a refused no-op.</div>
