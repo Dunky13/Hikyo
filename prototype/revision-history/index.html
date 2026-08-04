@@ -33,6 +33,10 @@
   <h1>version history <span>&amp;</span> rollback</h1>
   <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
   <ul>
+    <li><a href="6/">
+      <div class="name"><span class="n">6</span>Retention moves out</div>
+      <div class="desc">Marc's it-5 verdict: retention settings belong in the settings surfaces, not the history drawer. Editing moved to app-chrome iteration 16 (project settings › Policy + org settings › Policy); the drawer keeps a read-only line — effective window, inherits-org/custom badge, "→ project settings" pointer. Semantics unchanged.</div>
+    </a></li>
     <li><a href="5/">
       <div class="name"><span class="n">5</span>Retention inheritance</div>
       <div class="desc">Revision retention per org + per project: new projects inherit the org default, an override detaches (org changes no longer touch it), inheriting projects follow, and a project may never exceed the org value — refused at set time, capped loudly when the org lowers. ⚙ retention sheet from the drawer head; timeline "collected" tags move live on apply; changes audited.</div>

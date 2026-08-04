@@ -395,3 +395,22 @@ Carried out of the ticket: multi-instance management → #35 (blocks #26);
 org-settings capability atom absent from locked #15 → synthesis (#27) must
 route it. Cross-model passes: Codex placement audit (it8) + two-assessment
 critique (it13).
+
+## Iteration 16 — revision retention in settings (wayfinder #30 spillover)
+
+Marc (during the revision-history prototype, #30): retention settings belong
+here, not in the history drawer. Added on top of the locked iteration-15
+reference chrome (15 stays the frozen base; this extends it):
+
+- **Project settings › Policy › Revision retention**: inherit org default
+  (follows org changes) or custom ≤ org — a custom value above the org is
+  refused at set time (toast + revert); if the org later lowers its
+  default, the custom value is shown "capped to N by the org" (red input),
+  never rewritten.
+- **Org settings › Policy** (new card, jump index updated): default
+  revision retention ("new projects start here; projects still inheriting
+  follow this value when it changes") + per-project state list
+  (inherits → N / custom n / custom n — capped ⚠).
+- Changes audited (#24 registry: retention-policy change). Concrete
+  defaults → ops spec #32. Semantics decided in
+  `prototype/revision-history/5/` (#30).

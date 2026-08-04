@@ -199,6 +199,29 @@ settings surface (#29's org policy section) gains the default-retention
 entry. If synthesis finds locked text contradicting the cap, that reopens
 the relevant ticket rather than resolving silently.
 
+## Iteration 6 — retention moves to the settings surfaces
+
+Marc's iteration-5 verdict: **retention settings belong in app-chrome's
+settings surfaces, not the history drawer.** Applied:
+
+- **Editing moved to `prototype/app-chrome/16/`** (a new iteration of the
+  locked chrome family — published iterations stay frozen, 15 remains the
+  base reference): project settings › Policy gains a **Revision retention**
+  row (inherit org default / custom ≤ org, set-time refusal with toast +
+  revert, capped-by-org state with red input border), and org settings
+  gains a **Policy** card (default retention stepper — "new projects start
+  here; inheriting projects follow" — plus the per-project state list:
+  inherits → N / custom n / capped ⚠). Verified in-browser: org 6→8
+  propagates to inheriting projects, custom stays, cap re-computes,
+  custom 12 > org 8 refused with revert.
+- **This drawer keeps a read-only line** — effective window, inherits-org /
+  custom badge, "→ project settings" pointer — the history surface reports
+  the policy, never edits it.
+
+Placement rationale: the retention knob is `project-settings` /
+org-policy authority (#15), same family as the reveal window and
+`definitions_source`, which already live on those surfaces (#29 it-15).
+
 ## Verdict
 
-_(pending — Marc reacts to iteration 5)_
+_(pending — Marc reacts to iteration 6 + app-chrome 16)_
