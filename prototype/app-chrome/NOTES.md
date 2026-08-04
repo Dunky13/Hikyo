@@ -324,12 +324,41 @@ Recorded, not changed: ADR refs (#16, #25…) stay in prototype copy as
 scaffolding for spec synthesis — the UI spec strips them for the product.
 Emoji icon set + `alert()` stubs are prototype-grade by design.
 
+## Iteration 14 — org settings (confirmed shape brief)
+
+New surface per the confirmed brief. Entry: **"Org settings"** row in the
+panel organization section, org admins only (dana/sam see nothing:
+unauthorized ≡ nonexistent). Jump index, three sections:
+
+- **Identity**: name, preset hues, custom-hue slider (live), image upload —
+  all propagating to the rail org circles, drawer rows and panel head. The
+  org avatar stays a **circle** (reserved identity shape); rail org circles
+  now carry the org hue/image (they were neutral before).
+- **Members**: entry-point card only → Org members & grants.
+- **Danger zone** (red-hairline card, last): rename slug with the URL
+  warning; **delete organization** behind typed-name confirmation, inline,
+  no browser confirm. Deleting really deletes in the demo: you land in your
+  remaining org.
+- **Zero-org empty state** (found by testing the delete): a persona whose
+  last org disappears gets a "No organizations" surface (invitation hint,
+  instance-admin shortcut to create one) instead of a crash — the brief's
+  "delete your only org" open question, answered by construction.
+
+Bug found & fixed in 13+14: `#toast{display:flex}` overrode the `hidden`
+attribute — the toast was always visible (empty). `#toast[hidden]` rule
+added.
+
+Open questions carried to the map/spec (recorded, not decided here):
+**the authorization atom for org settings** — locked #15's capability table
+has no `org-settings`; the prototype gates on org admin; synthesis must
+route the real atom (new capability vs manage-members) without silently
+amending #15.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
 surfaces (it9), identity custom hue + image (it10), grant explanations
-behind (?) (it11-12), critique fixes incl. undo toasts + safe scope default
-(it13). Open: final confirmation pass on iteration 13 resolves the ticket.
-Separate thread: org-settings shape brief awaiting confirmation → becomes
-iteration 14._
+behind (?) (it11-12), critique fixes (it13), org settings + zero-org empty
+state (it14). Open: final confirmation pass on iteration 14 resolves the
+ticket._

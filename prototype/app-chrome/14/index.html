@@ -5,7 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PROTOTYPE — Envweave app chrome (ticket #29)</title>
 <!--
-  THROWAWAY PROTOTYPE — wayfinder ticket #29, iteration 13.
+  THROWAWAY PROTOTYPE — wayfinder ticket #29, iteration 14.
+
+  Iteration 14: ORG SETTINGS surface (confirmed shape brief). Panel entry
+  "Org settings" beside "Org members & grants", org admins only (dana/sam
+  see nothing: unauthorized = nonexistent). Jump index, three sections:
+  Identity (name, preset hues, custom-hue slider, image upload; org avatar
+  stays a CIRCLE, propagates live to rail circles and panel head) ·
+  Members (entry-point card only) · Danger zone (rename slug with URL
+  warning; delete organization behind typed-name confirmation, inline, no
+  browser confirm — deleting really removes the org in the demo, landing
+  you in your remaining org). Authorization atom for org settings is NOT in
+  locked #15 — flagged for spec synthesis, prototype gates on org admin.
+
 
   Iteration 13: fixes from the /impeccable critique (two isolated
   assessments: design-director review + deterministic detector, 25/40):
@@ -312,6 +324,12 @@
   .capgrid label:hover{background:var(--bg3)}
   .capgrid input{accent-color:var(--accent)}
 
+  /* org settings */
+  .bigav-o{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:17px;color:var(--on-accent);background-size:cover;background-position:center;flex:none}
+  .dangerc{border-color:color-mix(in oklch,var(--bad) 45%,var(--line))}
+  .dangerc h3{color:var(--bad)}
+
   /* icon picker */
   .iconrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
   .bigav{width:56px;height:56px;border-radius:6px;display:flex;align-items:center;justify-content:center;
@@ -542,12 +560,12 @@
 <script>
 /* ============================ demo data ============================ */
 const ORGS=[
-  {id:'acme',name:'acme',hue:195,projects:[
+  {id:'acme',name:'acme',hue:195,img:null,projects:[
     {id:'demo',name:'demo',hue:195},
     {id:'website',name:'website',hue:280},
     {id:'mobile',name:'mobile-app',hue:60},
   ]},
-  {id:'went',name:'went-io',hue:280,projects:[
+  {id:'went',name:'went-io',hue:280,img:null,projects:[
     {id:'homelab',name:'homelab',hue:140},
     {id:'poke',name:'poketracker',hue:20},
   ]},
@@ -627,23 +645,51 @@ const isOrgAdmin=()=>me().orgAdmin.includes(S.org);
 
 /* ============================ shell render ============================ */
 function ensureValidContext(){
-  if(!me().orgs.includes(S.org)) S.org=me().orgs[0];
+  /* membership list can reference a deleted org — validate against ORGS */
+  const valid=me().orgs.filter(id=>ORGS.some(o=>o.id===id));
+  if(!valid.includes(S.org)) S.org=valid[0]??null;
+  if(!curOrg()){
+    /* zero orgs: the empty state (deleted last org, or revoked membership) */
+    if(!['account','instance'].includes(S.view)) S.view='noorg';
+    S.project=null;
+    return;
+  }
   const vp=visProjects(curOrg());
   if(!vp.some(p=>p.id===S.project)) S.project=vp[0]?.id;
   if(!me().instanceAdmin&&S.view==='instance') S.view='matrix';
-  if(!isOrgAdmin()&&S.view==='orgmembers') S.view='matrix';
+  if(!isOrgAdmin()&&(S.view==='orgmembers'||S.view==='orgsettings')) S.view='matrix';
+  if(S.view==='noorg') S.view='matrix';
 }
+
+const orgFace=o=>o.img?{bg:`url(${o.img}) center/cover`,txt:''}:{bg:hueBg(o.hue),txt:mono(o.name)};
 
 function renderRail(){
   const r=$('rail');r.innerHTML='';
+  if(!curOrg()){
+    r.insertAdjacentHTML('beforeend','<div class="spacer"></div>');
+    if(me().instanceAdmin){
+      const g=document.createElement('button');
+      g.className='railbtn'+(S.view==='instance'?' act':'');
+      g.title='instance administration';g.textContent='⚙';
+      g.onclick=()=>{S.view='instance';update();};
+      r.appendChild(g);
+    }
+    const a=document.createElement('button');
+    a.className='railbtn me'+(S.view==='account'?' act':'');
+    a.title='account & security';a.textContent=mono(me().label);
+    a.onclick=()=>{S.view='account';update();};
+    r.appendChild(a);
+    return;
+  }
   const multiOrg=myOrgs().length>1;
   if(multiOrg){
     for(const o of myOrgs()){
       const b=document.createElement('button');
       b.className='pav orgav'+(o.id===S.org?' act':'');
-      b.style.background=o.id===S.org?'':'transparent';
+      const f=orgFace(o);
+      b.style.background=f.bg;b.style.color='var(--on-accent)';
       b.style.borderColor='var(--line)';
-      b.title=`organization ${o.name}`;b.textContent=mono(o.name);
+      b.title=`organization ${o.name}`;b.textContent=f.txt;
       b.onclick=()=>{S.org=o.id;S.project=null;S.view='matrix';update();};
       r.appendChild(b);
     }
@@ -676,9 +722,14 @@ function renderRail(){
 function renderSide(){
   const s=$('side');s.innerHTML='';
   const o=curOrg();
+  if(!o){
+    s.insertAdjacentHTML('beforeend',
+      '<div class="orghead"><div><div class="oname">no organization</div><div class="orole">ask for an invitation</div></div></div>');
+    return;
+  }
   const role=me().orgAdmin.includes(o.id)?'org admin':me().roleIn(o);
   s.insertAdjacentHTML('beforeend',
-    `<div class="orghead"><span class="oav" style="background:${hueBg(o.hue)}">${mono(o.name)}</span>
+    `<div class="orghead"><span class="oav" id="orghead-av" style="background:${orgFace(o).bg}">${orgFace(o).txt}</span>
      <div><div class="oname">${o.name}</div><div class="orole">${role}</div></div></div>`);
   /* mobile: the rail is hidden, so the drawer opens with the org section */
   if(myOrgs().length>1){
@@ -686,7 +737,7 @@ function renderSide(){
     for(const oo of myOrgs()){
       const b=document.createElement('button');
       b.className='srow mobileonly'+(oo.id===S.org?' act':'');
-      b.innerHTML=`<span class="oav" style="background:${hueBg(oo.hue)};width:22px;height:22px;font-size:9px">${mono(oo.name)}</span> ${oo.name}`
+      b.innerHTML=`<span class="oav" style="background:${orgFace(oo).bg};width:22px;height:22px;font-size:9px">${orgFace(oo).txt&&mono(oo.name)}</span> ${oo.name}`
         +(oo.id===S.org?'<span class="cnt">✓</span>':'');
       b.onclick=()=>{S.org=oo.id;S.project=null;S.view='matrix';update();toggleSide(false);};
       s.appendChild(b);
@@ -730,6 +781,10 @@ function renderSide(){
     b.className='srow'+(S.view==='orgmembers'?' act':'');b.textContent='Org members & grants';
     b.onclick=()=>{S.view='orgmembers';update();toggleSide(false);};
     s.appendChild(b);
+    const os=document.createElement('button');
+    os.className='srow'+(S.view==='orgsettings'?' act':'');os.textContent='Org settings';
+    os.onclick=()=>{S.view='orgsettings';update();toggleSide(false);};
+    s.appendChild(os);
   }
   /* mobile-only: projects list + account/instance (rail is hidden) */
   s.insertAdjacentHTML('beforeend','<div class="stitle mobileonly" style="margin-top:8px">projects</div>');
@@ -756,6 +811,7 @@ function renderSide(){
 function renderCrumb(){
   const c=$('crumb');c.innerHTML='';
   const o=curOrg();
+  if(!o){c.innerHTML='<span>envweave</span>';return;}
   const seg=[];
   seg.push('<span class="hidemobile">envweave</span>');
   seg.push('<span class="sep hidemobile">/</span>');
@@ -768,6 +824,8 @@ function renderCrumb(){
     seg.push('<span class="sep">/</span><span>account</span>');
   }else if(S.view==='instance'){
     seg.push('<span class="sep">/</span><span>instance</span>');
+  }else if(S.view==='orgsettings'){
+    seg.push('<span class="sep">/</span><span>org settings</span>');
   }else if(S.view==='orgmembers'){
     seg.push('<span class="sep">/</span><span>org members</span>');
   }
@@ -909,6 +967,93 @@ function coveredBy(target,grantScope){
   if(grantScope.startsWith('org:'))return true;                     /* org covers everything below (demo simplification) */
   if(grantScope==='project:demo'&&target.startsWith('env:'))return true;
   return false;
+}
+
+function orgHueLive(v){
+  curOrg().hue=+v;
+  document.getElementById('ohuedeg').textContent=v;
+  if(!curOrg().img)document.getElementById('bigav-org').style.background=hueBg(+v);
+}
+function setOrgImg(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{curOrg().img=r.result;update();};
+  r.readAsDataURL(f);
+}
+function orgDeleteCheck(inp){
+  document.getElementById('org-del-btn').disabled=inp.value!==curOrg().name;
+}
+function orgDelete(){
+  const o=curOrg();
+  const i=ORGS.indexOf(o);ORGS.splice(i,1);
+  showToast(`organization ${o.name} deleted`);
+  S.org=null;S.view='matrix';update();
+}
+
+function pageNoOrg(){
+  return `<div class="page">
+    <h2>No organizations</h2>
+    <div class="card"><h3>You are not a member of any organization</h3>
+      <div class="note" style="margin-top:0">Membership comes from an invitation. Ask an organization admin to invite you${me().instanceAdmin?', or create an organization from instance administration':''}.
+      </div>
+      ${me().instanceAdmin?`<div style="margin-top:12px"><button class="btn primary" onclick="S.view='instance';update()">open instance administration</button></div>`:''}
+    </div>
+  </div>`;
+}
+
+function pageOrgSettings(){
+  const o=curOrg();
+  const hues=[195,280,60,140,20,320];
+  const f=orgFace(o);
+  const orgGrants=GRANTS.filter(g=>g.scope.startsWith('org:')).length;
+  return `<div class="page">
+    <h2>Org settings · ${o.name}</h2>
+    <p class="sub">Organization identity and lifecycle. Access lives on its own surface; the danger zone is deliberately last.</p>
+    ${jump([['sec-oident','Identity'],['sec-omembers','Members'],['sec-odanger','Danger zone']])}
+    <div class="card" id="sec-oident"><h3>Identity</h3>
+      <div class="iconrow">
+        <span class="bigav-o" id="bigav-org" style="background:${f.bg}">${f.txt}</span>
+        <div style="display:grid;gap:10px">
+          <div class="hues">${hues.map(h=>`<button class="hue${h===o.hue?' act':''}" style="background:${hueBg(h)}" title="hue ${h}" onclick="curOrg().hue=${h};update()"></button>`).join('')}</div>
+          <div class="field" style="max-width:280px"><label>custom hue · <span id="ohuedeg">${o.hue}</span>°</label>
+            <input type="range" class="huerange" min="0" max="359" value="${o.hue}" aria-label="custom org hue"
+              oninput="orgHueLive(this.value)" onchange="update()"></div>
+        </div>
+      </div>
+      <div class="fgrid" style="margin-top:14px">
+        <div class="field"><label>name</label>
+          <input type="text" value="${o.name}" onchange="curOrg().name=this.value;update()"></div>
+      </div>
+      <div class="rowline" style="margin-top:6px"><div class="main"><span class="t">Image</span>
+        <span class="d">${o.img?'custom image, shown on every org circle':'PNG / SVG / JPG, replaces the monogram'}</span></div>
+        <span class="grow"></span>
+        <input type="file" id="oimg" accept="image/*" hidden onchange="setOrgImg(this)">
+        <button class="btn" onclick="document.getElementById('oimg').click()">${o.img?'replace…':'upload…'}</button>
+        ${o.img?'<button class="xbtn" title="remove image" onclick="curOrg().img=null;update()">✕</button>':''}
+      </div>
+      <div class="note">The org avatar stays a circle: identity circles are one of the three reserved pill shapes.</div>
+    </div>
+    <div class="card" id="sec-omembers"><h3>Members</h3>
+      <div class="rowline"><div class="main"><span class="t">Org members & grants</span>
+        <span class="d">${orgGrants} org-scoped grant lines</span></div>
+        <span class="grow"></span>
+        <button class="btn" onclick="S.view='orgmembers';update()">open members →</button></div>
+      <div class="note">Entry point only: granting, revoking and inspection live on the members surface.</div>
+    </div>
+    <div class="card dangerc" id="sec-odanger"><h3>Danger zone</h3>
+      <div class="rowline"><div class="main"><span class="t">Rename slug</span>
+        <span class="d">Changing the slug changes every URL under it.</span></div>
+        <span class="grow"></span>
+        <input type="text" value="${o.id}" aria-label="organization slug" style="background:var(--bg);border:1px solid var(--line);color:var(--tx);padding:8px 10px;border-radius:4px;font-family:var(--mono);font-size:12.5px;width:130px">
+        <button class="btn" onclick="showToast('slug renamed (demo)')">rename</button></div>
+      <div class="rowline"><div class="main"><span class="t">Delete organization</span>
+        <span class="d">Deletes every project, environment and value in it. Grants and audit history follow the retention policy.</span></div>
+        <span class="grow"></span>
+        <input type="text" placeholder="type ${o.name} to confirm" aria-label="type the organization name to confirm deletion"
+          oninput="orgDeleteCheck(this)" style="background:var(--bg);border:1px solid var(--line);color:var(--tx);padding:8px 10px;border-radius:4px;font-family:var(--mono);font-size:12.5px;width:180px">
+        <button class="btn danger" id="org-del-btn" disabled onclick="orgDelete()">delete</button></div>
+    </div>
+  </div>`;
 }
 
 /* ---------------- account sections (shared across layout variants) ---------------- */
@@ -1211,7 +1356,7 @@ function update(){
   ensureValidContext();
   renderRail();renderSide();renderCrumb();
   const views={matrix:pageMatrix,settings:pageSettings,members:()=>pageMembers(false),
-    orgmembers:()=>pageMembers(true),account:pageAccount,instance:pageInstance};
+    orgmembers:()=>pageMembers(true),orgsettings:pageOrgSettings,noorg:pageNoOrg,account:pageAccount,instance:pageInstance};
   $('content').innerHTML=(views[S.view]||pageMatrix)();
 }
 
