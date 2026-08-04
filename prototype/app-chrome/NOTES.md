@@ -286,9 +286,17 @@ product, hover is dead weight on touch. The checklist is now rendered from
 one `CAPDESC` map (single source); member-table capability chips carry the
 same text as their `title`.
 
+## Iteration 12 — explanations behind (?) (Marc)
+
+"Hide it behind (?) so it doesn't take more space than it should." Each
+capability row is single-line again with a 24px **(?)** at its end: tap
+toggles the explanation inline under that row (`aria-expanded` tracked),
+`title` supplies desktop hover. Checkbox untouched by the toggle.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
 surfaces (it9), identity custom hue + image (it10), grant explanations
-(it11). Open: final confirmation pass on iteration 11 resolves the ticket._
+behind (?) (it11-12). Open: final confirmation pass on iteration 12
+resolves the ticket._
