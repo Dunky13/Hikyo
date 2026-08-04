@@ -354,11 +354,30 @@ has no `org-settings`; the prototype gates on org admin; synthesis must
 route the real atom (new capability vs manage-members) without silently
 amending #15.
 
+## Iteration 15 — project policy + danger zone (Marc)
+
+"Project should also have danger zone, maybe other shared settings with
+org?" The "other shared settings" turn out to be ADR-backed and were
+missing: the **project-settings capability's actual contents** (#15).
+Project settings now has five sections (Identity · Metadata · Policy ·
+Access · Danger zone), symmetric with org settings:
+
+- **Policy** (gated on the project-settings stand-in; dana sees neither
+  Policy nor Danger zone): per-environment **protected flag** as toggle
+  chips — protecting staging updates the matrix header live; **reveal
+  reauth window** (protected always caps at 0: passkey per disclosure,
+  #15/#16); **definitions_source db|git** with the read-only-UI
+  consequence stated when git (#13).
+- **Danger zone**: slug rename with URL warning; **delete project** behind
+  typed-name confirmation. Deleting really deletes; deleting the last
+  project lands on a **zero-project empty state** with a create shortcut
+  for org admins (parallel to it14's zero-org state).
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
 surfaces (it9), identity custom hue + image (it10), grant explanations
-behind (?) (it11-12), critique fixes (it13), org settings + zero-org empty
-state (it14). Open: final confirmation pass on iteration 14 resolves the
-ticket._
+behind (?) (it11-12), critique fixes (it13), org settings + zero-org state
+(it14), project policy + danger zone + zero-project state (it15). Open:
+final confirmation pass on iteration 15 resolves the ticket._
