@@ -33,6 +33,10 @@
   <h1>version history <span>&amp;</span> rollback</h1>
   <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
   <ul>
+    <li><a href="4/">
+      <div class="name"><span class="n">4</span>Pin = workload binding</div>
+      <div class="desc">It-3 findings fixed: "holds payload" jargon → "sole keeper" with plain consequence text, and releasing such a pin now confirms with "this permanently deletes rN's values". Pin model made explicit: one pin per (workload, environment) — the sheet gains a workload picker, re-pinning a bound workload becomes a move (r27 → r25), pinning the same rev twice is a refused no-op.</div>
+    </a></li>
     <li><a href="3/">
       <div class="name"><span class="n">3</span>Panes + pin clarity</div>
       <div class="desc">Verdict on it-2: view b (list + detail panes) wins — now the single surface, switcher retired. Pinning explained in visible plain language: pins-section definition line, per-pin gap sentence ("still runs on r27's values — 2 publishes behind latest"), pinned-rev callout in the detail pane, and a pin-create sheet leading with "what pinning does" + a vs-latest value summary under the disclosure rules.</div>

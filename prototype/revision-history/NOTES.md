@@ -124,6 +124,40 @@ select at ~1200px viewports — fine in the prototype (the role picker is demo
 chrome), but the real chrome (#29) should treat the history drawer's width
 as a layout constraint. Carried to the UI spec notes.
 
+## Iteration 4 — pin = workload binding
+
+Marc's iteration-3 findings:
+
+1. **"holds payload" is jargon.** Replaced everywhere with consequence
+   language: badge → `⚠ sole keeper` (tooltip: past normal retention, values
+   exist only because of this pin, releasing deletes them permanently); the
+   pin row's gap sentence gains "r21 is past normal retention: its values
+   survive only because of this pin"; and **releasing a sole-keeper pin now
+   opens a confirm sheet** — "this permanently deletes r21's values" with
+   the three consequences spelled out (only keeper · collected means no
+   diff/restore/reveal, lineage stays · workload resumes latest) and a
+   danger-labeled button ("release — delete r21's values"). Non-sole
+   releases stay one-click with an outcome toast.
+2. **Pinning the same revision twice makes no sense.** Root cause: the model
+   never said what a pin binds. Now explicit — **a pin is a workload
+   binding: at most one pin per (workload, environment)**. The pin sheet
+   gains a workload picker (each option shows its current state: "pinned to
+   r27" / "follows latest"); choosing an already-bound workload turns the
+   sheet into a **move** ("api-server is currently pinned to r27 — this
+   moves it to r25", button relabels, old pin replaced atomically, with a
+   sole-keeper consequence note when the move collects the old revision);
+   same-revision re-pin is a refused no-op with the reason ("a workload
+   fetches exactly one revision"). Two *different* workloads pinning the
+   same revision stays legal — separate rows. Quota counts pins, so a move
+   never trips it.
+
+**Domain consequence for the ADRs/spec:** ADR #11 defines a pin as "a stored
+record with an owner, quota, expiry" but never fixes its uniqueness. This
+iteration asserts `(workload, environment) → at most one pin`, re-pin = move.
+Feed into the UI spec + #31 (workload surfaces); if the synthesis ticket
+(#27) finds this contradicts a locked text, it reopens #11 rather than
+silently resolving.
+
 ## Verdict
 
-_(pending — Marc reacts to iteration 3)_
+_(pending — Marc reacts to iteration 4)_
