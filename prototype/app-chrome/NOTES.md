@@ -277,9 +277,18 @@ smooth anchor scroll):
   header avatar *and* the active rail tile; removable ✕ restores
   monogram+hue. Priority: image > glyph > monogram.
 
+## Iteration 11 — grant explanations (Marc)
+
+"On grant show a tooltip explaining each Grant." Every capability in the
+new-grant checklist carries its explanation (permission-ADR wording) as an
+**always-visible sub-line** rather than a hover tooltip: mobile-first
+product, hover is dead weight on touch. The checklist is now rendered from
+one `CAPDESC` map (single source); member-table capability chips carry the
+same text as their `title`.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
-surfaces (it9), identity custom hue + image (it10). Open: final
-confirmation pass on iteration 10 resolves the ticket._
+surfaces (it9), identity custom hue + image (it10), grant explanations
+(it11). Open: final confirmation pass on iteration 11 resolves the ticket._
