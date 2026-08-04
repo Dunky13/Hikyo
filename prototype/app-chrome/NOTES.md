@@ -253,8 +253,21 @@ DESIGN.md reserved-pill wording widened to "identity circles (org and
 account avatars)" — the account avatar was always a circle; now the rule
 says so.
 
+## Iteration 9 — jump index everywhere (Marc)
+
+"Apply same tabs/sticky to all settings, not just Account & security." The
+sticky jump index is now the pattern for **every sectioned settings
+surface**, via one shared `jump()` helper (`.secjump`, same chips, same
+smooth anchor scroll):
+
+- Account & security — 6 sections (unchanged)
+- Project settings — Identity · Metadata · Access
+- Members (project and org level) — Who can…? · Members
+- Instance administration — Organizations · Settings · Keys & crypto · Instances
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
-account layout c (it7), shape role-scale (it8). Open: final confirmation
-pass on iteration 8 resolves the ticket._
+account layout c (it7), shape role-scale (it8), jump index on all settings
+surfaces (it9). Open: final confirmation pass on iteration 9 resolves the
+ticket._
