@@ -5,6 +5,10 @@ active organization lives in the chrome, the account/profile surface, project
 settings, membership & role management, and whether instance administration is
 in the v1 UI at all.
 
+**Status: LOCKED** (ticket #29 resolved 2026-08-04). Iteration 15 is the
+reference chrome. All iterations stay runnable; no further edits to any
+iteration directory.
+
 Sibling of `prototype/env-matrix/` (frozen at iteration 31, the reference
 design) and `prototype/reveal-edit/` (#21). Design language unchanged; this
 prototype varies **structure**, not skin.
@@ -373,11 +377,21 @@ Access · Danger zone), symmetric with org settings:
   project lands on a **zero-project empty state** with a create shortcut
   for org admins (parallel to it14's zero-org state).
 
-## Verdict
+## Verdict — LOCKED (Marc, 2026-08-04)
 
-_Decided: org placement (it4), instance parity (it4), grant checklist (it5),
-account layout c (it7), shape role-scale (it8), jump index on all settings
-surfaces (it9), identity custom hue + image (it10), grant explanations
-behind (?) (it11-12), critique fixes (it13), org settings + zero-org state
-(it14), project policy + danger zone + zero-project state (it15). Open:
-final confirmation pass on iteration 15 resolves the ticket._
+Iteration 15 is the reference chrome for the UI spec. Decided across the
+run: rail owns orgs (it4); instance surface in the v1 UI with CLI↔UI parity
+(it4); grant modal = capability checklist (it5) with (?) explanations
+(it11-12); account layout = sticky jump index (it7), generalized to every
+sectioned settings surface (it9); shape = role scale, DESIGN.md amended
+(it8, supersedes env-matrix-31's skin for the spec); project identity
+custom hue + image (it10); critique fixes incl. AA+ faint tier, text+aria
+errors, safe scope default, undo toasts (it13); org settings + zero-org
+state (it14); project policy (the project-settings capability's contents)
++ danger zones + zero-project state (it15). definitions_source stays v1
+(two locked ADRs bind the pipeline; formal confirmation at #26).
+
+Carried out of the ticket: multi-instance management → #35 (blocks #26);
+org-settings capability atom absent from locked #15 → synthesis (#27) must
+route it. Cross-model passes: Codex placement audit (it8) + two-assessment
+critique (it13).
