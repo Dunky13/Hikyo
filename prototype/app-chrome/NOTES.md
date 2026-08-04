@@ -265,9 +265,21 @@ smooth anchor scroll):
 - Members (project and org level) — Who can…? · Members
 - Instance administration — Organizations · Settings · Keys & crypto · Instances
 
+## Iteration 10 — project identity: custom hue + image (Marc)
+
+"Allow custom color, and upload of image, as well as current settings."
+
+- **Custom hue slider** (native range, 0-359°): live preview without
+  rerender, pinned to the brand formula — `oklch(0.62 0.11 <hue>)`, same
+  lightness/chroma always, so any custom choice stays on-palette. Preset
+  swatches remain as shortcuts.
+- **Image upload** (native file input → FileReader dataURL): shown in the
+  header avatar *and* the active rail tile; removable ✕ restores
+  monogram+hue. Priority: image > glyph > monogram.
+
 ## Verdict
 
 _Decided: org placement (it4), instance parity (it4), grant checklist (it5),
 account layout c (it7), shape role-scale (it8), jump index on all settings
-surfaces (it9). Open: final confirmation pass on iteration 9 resolves the
-ticket._
+surfaces (it9), identity custom hue + image (it10). Open: final
+confirmation pass on iteration 10 resolves the ticket._
