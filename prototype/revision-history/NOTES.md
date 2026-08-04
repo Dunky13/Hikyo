@@ -65,6 +65,32 @@ Demo compressions labeled in-UI: retention 6, pin expiry 30d, reveal window
 4. Pin creation: worth a workload picker, or is pinning always done from the
    workload/integration side (#31's surface)?
 
+## Iteration 2 — four structural approaches to digestibility
+
+Marc's iteration-1 verdict: **information too dense**. Iteration 2 keeps every
+ADR binding and varies the *presentation structure* — four views in one file,
+switchable via `?view=` + floating bottom bar (arrow keys cycle):
+
+- **a `?view=collapse` — collapsed timeline.** One line per revision
+  (rev · actor · n keys · tags · age); keys, schema rev and actions appear
+  only on the expanded row. Current revision starts expanded.
+- **b `?view=panes` — list + detail.** Wider drawer split into a slim rev
+  list and a detail pane for the selected revision; per-row buttons are gone
+  entirely, changed keys become kind-tagged rows.
+- **c `?view=story` — activity story.** Plain-language sentences ("marc
+  rotated 🔒SESSION_SECRET"), grouped under today/this week/this month;
+  actions revealed only on an opened card. Secret edits phrase as "rotated"
+  (write-presence in words). Optimizes read-aloud-ability over density.
+- **d `?view=page` — full-page history.** The matrix steps aside; roomy
+  table (rev / who / when / what) with a detail band on the selected row.
+  Directly answers iteration 1's drawer-vs-page open question.
+
+Shared in all four: long ADR prose demoted to `(?)` tooltips (`TIP` map);
+pin warnings shrunk to badges (⚠ holds payload / Δ drift) with the full
+sentence behind the tooltip; restore preview gained a summary chip line
+(n set / n clear / n blocked) with prose only on problem rows; diff footer
+one line. Diff/restore/pin/publish/ceremony mechanics identical to it-1.
+
 ## Verdict
 
-_(pending — Marc reacts to iteration 1)_
+_(pending — Marc flips through iteration 2's four views)_
