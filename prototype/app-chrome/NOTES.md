@@ -433,3 +433,10 @@ floating bar (arrow keys cycle):
   scales when a section gets long.
 
 All variants theme-safe (derive from `--line`/`--accent`). Verdict pending.
+
+## Iteration 18 — variant e: b + d combined
+
+Marc likes b (breathing room) and d (structural indent) both. Variant e
+combines them: 30px inter-section spacing AND sub-items on the hairline
+left rule with the accent active-row marker. Default view in iteration 18;
+a–d kept in the switcher for side-by-side comparison. Verdict pending.
