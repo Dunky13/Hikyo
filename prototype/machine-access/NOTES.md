@@ -42,6 +42,15 @@ new numbered iteration — published ones never mutate.
   designation-missing, adoption refusal, target conflict — reading the same in
   `kubectl` and the UI.
 
+## Iteration 2 — structure decided: a + b's journey on expansion
+
+Marc's it-1 verdict: **variant a wins, with b's journey rail as the row
+expansion.** Iteration 2 bakes it in: the tabbed inventory is the surface;
+expanding a service-account row shows the five-step journey (left, CLI or
+CR-condition voice per delivery mode) beside credentials / federated
+bindings / delivery targets (right). Variant switcher removed; c discarded.
+Everything else (ceremonies, scenarios, tabs) unchanged from iteration 1.
+
 ## Iteration 1 — baseline
 
 Three **structural variants** of the Machine access surface, switchable via the
