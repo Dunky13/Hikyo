@@ -227,5 +227,10 @@ org-policy authority (#15), same family as the reveal window and
 - **Retention UI + semantics LOCKED**: settings placement (app-chrome 16),
   inherit-until-modified, org cap both directions, audited changes,
   read-only drawer line (iteration 6). Spec input recorded above.
-- Still open on this ticket: overall verdict on the history surfaces
-  themselves (panes drawer, secret-safe diffs, restore flow, pin binding).
+- **History surfaces LOCKED** (Marc, 2026-08-05): panes drawer (it-2
+  verdict b), secret-safe diffs (write-presence vs reveal-history +
+  per-key audited ceremony), restore-as-publish flow (current-schema
+  re-validation, explicit inline resolution, reveal-history gate,
+  #21 ceremony for protected), pin = workload binding with sole-keeper
+  consequence language and release confirm. Ticket #30 resolved —
+  iteration 6 + app-chrome 16/18 are the reference for the UI spec.
