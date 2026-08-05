@@ -25,6 +25,8 @@
   li a:hover{border-color:var(--accent)}
   .name{font-size:15px;font-weight:600;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
   .name .n{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .latest{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:oklch(0.2 0.02 220);
+    background:var(--accent);border-radius:999px;padding:2px 9px}
   .desc{font-size:12.5px;color:var(--tx-dim);margin-top:5px;line-height:1.55}
   footer{margin-top:36px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
 </style>
@@ -34,7 +36,7 @@
   <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
   <ul>
     <li><a href="6/">
-      <div class="name"><span class="n">6</span>Retention moves out</div>
+      <div class="name"><span class="n">6</span>Retention moves out<span class="latest">LOCKED</span></div>
       <div class="desc">Marc's it-5 verdict: retention settings belong in the settings surfaces, not the history drawer. Editing moved to app-chrome iteration 16 (project settings › Policy + org settings › Policy); the drawer keeps a read-only line — effective window, inherits-org/custom badge, "→ project settings" pointer. Semantics unchanged.</div>
     </a></li>
     <li><a href="5/">

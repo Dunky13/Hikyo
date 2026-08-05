@@ -5,7 +5,11 @@ screens look and behave — against the locked machine-identity (#17), Compose (
 and Kubernetes (#19) ADRs, in the env-matrix-31 design language with the
 app-chrome 15/16/18 reference chrome and the #21 ceremony vocabulary.
 
-**Status: WIP.** Sibling of `prototype/env-matrix/` (frozen 31), `prototype/reveal-edit/`
+**Status: LOCKED** (Marc, 2026-08-05; ticket #31 resolved). **Iteration 3 is
+the reference.** All iterations stay runnable; no further edits to any
+iteration directory.
+
+Sibling of `prototype/env-matrix/` (frozen 31), `prototype/reveal-edit/`
 (#21), `prototype/revision-history/` (#30) and `prototype/app-chrome/` (#29).
 Design language locked; this prototype varies **structure**, not skin.
 

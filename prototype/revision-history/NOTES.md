@@ -3,6 +3,10 @@
 **Question:** how do per-environment revision history, diffs, pins, and
 rollback actually look and behave?
 
+**Status: LOCKED** (Marc, 2026-08-05; ticket #30 resolved 2026-08-05).
+**Iteration 6 is the reference.** All iterations stay runnable; no further
+edits to any iteration directory.
+
 Sibling of `prototype/env-matrix/` (frozen, flat model) and
 `prototype/reveal-edit/` (ceremony modal, #21 verdict). Same shell; only the
 history surfaces this ticket owns are new.
