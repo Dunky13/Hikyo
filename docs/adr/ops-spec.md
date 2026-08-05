@@ -80,7 +80,7 @@ Login-transport values (delegated by the [API/CLI ADR](./api-cli-surface.md)):
 
 Pre-auth admission (instance-wide — per-account/per-IP alone never trips on a distributed attempt burning `m` MiB per verification):
 
-- **Concurrency is derived, not fixed: `concurrent verifications = clamp(floor(admission_budget / m), 1, 8)`**, with **`admission_budget` default 256 MiB** and Argon2id `m` as configured. At the locked floor (`m=64 MiB`) that yields 4. Raising `m` lowers concurrency automatically instead of silently doubling the RAM bill. **Boot invariant (fail fast): the server refuses to start unless `admission_budget ≥ m + 16 MiB` implementation headroom** — the clamp's lower bound of 1 must never *exceed* the budget; a configuration where one verification cannot fit its own budget is a config error, not a runtime surprise. The budget is instance-config with the floor-hardware warning attached.
+- **Concurrency is derived, not fixed — global-headroom model: `concurrent verifications = clamp(floor((admission_budget − 16 MiB) / m), 1, 8)`**, with **`admission_budget` default 272 MiB** (256 MiB of verification work + 16 MiB global implementation headroom, reserved once, not per worker) and Argon2id `m` as configured. At the locked floor (`m=64 MiB`) that yields 4. Raising `m` lowers concurrency automatically instead of silently doubling the RAM bill. **Boot invariant (fail fast): the server refuses to start unless `admission_budget ≥ m + 16 MiB`** — with the invariant held, the formula's lower bound of 1 always fits inside the budget; a configuration where one verification cannot fit is a config error, not a runtime surprise. The budget is instance-config with the floor-hardware warning attached.
 - **Queue depth 16**; overflow ⇒ uniform `429 + Retry-After` on **every** pre-auth path — same body, same timing (enumeration-uniform, one layer earlier than #15's unauthorized-≡-nonexistent).
 - **Per-IP: 10 auth attempts/min** (sliding). **Per-account throttle, defined exactly: after 5 consecutive failures, delay = `min(2^(failures−5), 60) s`**, applied before verification begins, shared across concurrent attempts on the account (they queue behind the same delay), reset on success. **No hard lockout** — lockout is a free DoS lever against a known username.
 - **Argon2id `m=64MiB, t=3, p=2` — locked #16 as the boot-verified floor; parameters may be raised, never lowered below the floor.** Restated here only for completeness; not a fresh decision.
@@ -233,7 +233,7 @@ Tightening a lifetime ceiling enumerates affected credentials before clamping (l
 | 5 | Reveal window / cap / remask | 15 min / 4 h / 30 s (protected fixed 0) |
 | 6 | Sessions | browser 7 d/30 d · CLI 30 d/90 d |
 | 7 | Flow tokens | bootstrap 24 h · invite 7 d · reset 1 h · establishment 15 min · 10 codes · authz code 10 min · device 15 min/5 s poll |
-| 8 | Admission | budget 256 MiB derived concurrency (4 @ floor) · boot refuses `m+16 MiB > budget` · queue 16 · 429 uniform · 10/min/IP · `min(2^(f−5),60)s` · no lockout |
+| 8 | Admission | budget 272 MiB, concurrency `floor((budget−16 MiB)/m)` (4 @ floor) · boot refuses `m+16 MiB > budget` · queue 16 · 429 uniform · 10/min/IP · `min(2^(f−5),60)s` · no lockout |
 | 9 | Machine credentials | 90 d/365 d · indefinite opt-in · 5 per SA · warn 30/7/1 d |
 | 10 | Federated tokens | exp−iat ≤ 24 h · age ≤ 24 h · skew 60 s · JWKS 1 h/24 h/1-min-kid · fetch 30/min burst 60 per SA principal |
 | 11 | Compose | snapshot 7 d · sync 5 min · gens current+3 · keys not backed up · flush-before-fetch · ARG_MAX preflight |
