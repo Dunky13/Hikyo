@@ -42,6 +42,13 @@ new numbered iteration — published ones never mutate.
   designation-missing, adoption refusal, target conflict — reading the same in
   `kubectl` and the UI.
 
+## Iteration 3 — journey below
+
+Marc's it-2 verdict: **journey moves below, not top of the expansion.** The
+row expansion now leads with credentials / federated bindings (left) and
+delivery targets + actions (right); the five-step journey rail sits
+underneath, full-width, under a "setup journey" section header.
+
 ## Iteration 2 — structure decided: a + b's journey on expansion
 
 Marc's it-1 verdict: **variant a wins, with b's journey rail as the row
