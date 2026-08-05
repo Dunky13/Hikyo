@@ -222,6 +222,10 @@ Placement rationale: the retention knob is `project-settings` /
 org-policy authority (#15), same family as the reveal window and
 `definitions_source`, which already live on those surfaces (#29 it-15).
 
-## Verdict
+## Verdict (partial locks, 2026-08-05)
 
-_(pending — Marc reacts to iteration 6 + app-chrome 16)_
+- **Retention UI + semantics LOCKED**: settings placement (app-chrome 16),
+  inherit-until-modified, org cap both directions, audited changes,
+  read-only drawer line (iteration 6). Spec input recorded above.
+- Still open on this ticket: overall verdict on the history surfaces
+  themselves (panes drawer, secret-safe diffs, restore flow, pin binding).

@@ -440,3 +440,23 @@ Marc likes b (breathing room) and d (structural indent) both. Variant e
 combines them: 30px inter-section spacing AND sub-items on the hairline
 left rule with the accent active-row marker. Default view in iteration 18;
 a–d kept in the switcher for side-by-side comparison. Verdict pending.
+
+## LOCKED (2026-08-05): sidebar treatment e + retention UI
+
+Marc's verdicts:
+
+- **Sidebar hierarchy: variant e locked** (iteration 18) — 30px
+  inter-section breathing room + sub-items on a hairline left rule with
+  the accent active-row marker. This is the reference sidebar treatment,
+  amending the iteration-15 reference chrome. UI-spec input: section
+  labels flush; items `margin-left 19px · padding-left 13px · 1px rule at
+  line/.75 · accent rule on active`; inter-section 30px (16px first).
+- **Revision retention UI locked** (iteration 16) — project settings ›
+  Policy › Revision retention (inherit org default / custom ≤ org,
+  set-time refusal, capped-by-org state) + org settings › Policy card
+  (org default stepper, per-project state list). Semantics per
+  revision-history it-5: inherit-until-modified, org cap both ways,
+  audited. The history drawer stays read-only (revision-history it-6).
+
+Reference chrome for the UI spec = iteration 15 + the 16 retention
+surfaces + the 18 sidebar treatment.
