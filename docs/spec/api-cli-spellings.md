@@ -4,7 +4,7 @@
 
 ## 1. SCIM administration ([scim-provisioning.md](../adr/scim-provisioning.md))
 
-Human-session verbs (UI↔CLI parity, ordinary stdout; the *wire* endpoints under `/api/v1/orgs/{org}/scim/v2/{binding}/…` are fixed in the ADR and are parity-exempt protocol paths):
+Human-session verbs (full UI↔CLI parity: binding CRUD, mapping-table administration, credential mint/rotate/revoke, provisioned directory views; the *wire* endpoints under `/api/v1/orgs/{org}/scim/v2/{binding}/…` are fixed in the ADR and are parity-exempt protocol paths):
 
 ```
 envweave scim binding create --org <org> --provider <provider>
@@ -17,58 +17,88 @@ envweave scim mapping update <binding> --group <idp-group-id> --template <templa
 envweave scim mapping remove <binding> --group <idp-group-id>
 envweave scim mapping list   <binding>
 
-envweave scim credential mint   <binding>          # display-once, print triad; manage-members(org) ∧ reauth
-envweave scim credential show   <binding>          # metadata only, never the token
-envweave scim credential revoke <binding>
+envweave scim credential mint   <binding>                    # a NEW credential; several may be live
+envweave scim credential list   <binding>                    # ids + metadata, never token material
+envweave scim credential show   <binding> <credential-id>
+envweave scim credential revoke <binding> <credential-id>
 
-envweave scim directory users  <binding>
-envweave scim directory groups <binding>
+envweave scim user  list <binding>                           # provisioned directory views
+envweave scim group list <binding>
 ```
 
-Admin REST resources (ordinary `/api/v1` grammar, proof-carrying): `/api/v1/orgs/{org}/scim-bindings`, `…/scim-bindings/{binding}`, `…/scim-bindings/{binding}/mappings`, `…/scim-bindings/{binding}/credential`, `…/scim-bindings/{binding}/directory/users|groups`. All formulas per the ADR (`manage-members` at org scope; credential mint additionally reauth).
+Credentials are **plural and id-addressable**: overlap rotation is mint-new → update IdP → revoke-old, identical authority throughout, per the machine-identity credential model the ADR inherits. `mint` is display-once under the print triad; formula `manage-members(org)` ∧ reauth.
+
+Admin REST resources (ordinary `/api/v1` grammar, proof-carrying): `/api/v1/orgs/{org}/scim-bindings`, `…/{binding}`, `…/{binding}/mappings`, `…/{binding}/credentials`, `…/{binding}/credentials/{id}`, `…/{binding}/directory/users|groups`.
 
 ## 2. SAML provider configuration ([saml-sp.md](../adr/saml-sp.md))
 
-Joins the **existing** instance-config provider surface — no new verb family:
+Joins the **existing `instance-config` verb surface** — no new top-level verb family. Identity providers are a resource under that family (OIDC providers administer identically; `--kind` selects):
 
 ```
-envweave provider create --kind saml --name <name> …   # metadata by --metadata-file or fetch-with-fingerprint ceremony
-envweave provider list | show <name> | update <name> | disable <name> | remove <name>
-envweave provider refresh-metadata <name>              # diff-and-confirm ceremony, instance-config
+envweave instance-config provider create --kind saml --name <name> \
+    (--metadata-file <xml> | --metadata-url <url>)    # URL fetch runs the fingerprint ceremony
+envweave instance-config provider list
+envweave instance-config provider show    <name>
+envweave instance-config provider update  <name> …
+envweave instance-config provider disable <name>
+envweave instance-config provider remove  <name>
+envweave instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
 ```
+
+All under `instance-config` capability, grant-evaluated `InstanceProof`, network path — never the local-admin class. `refresh-metadata` is the ADR's "action on the provider resource".
 
 Identity-protocol endpoints (exception class, per-provider, parity-exempt):
 
 - ACS: `POST /api/v1/auth/saml/{provider}/acs`
-- SP metadata: `GET /api/v1/auth/saml/{provider}/metadata`
+- SP metadata: `GET /api/v1/auth/saml/{provider}/metadata` (unauthenticated, documentation-class, pre-auth admission)
 
 Per-provider ACS paths satisfy the validation algorithm's per-provider `Destination`/ACS binding. The initiator cookie is path-scoped to `/api/v1/auth/saml/{provider}/acs`.
 
 ## 3. Import ([import-paths.md](../adr/import-paths.md))
 
-Top-level human-only verb `import`; one connector per source; phase 1 authors artifacts and stops.
+One top-level human-only verb `import`; the ADR fixes **three entry modes** — the spellings:
 
 ```
-envweave import k8s       --project <p> [--file <manifest.yaml> | --live [--namespace <ns>…]] [flags]
-envweave import sops      --project <p> --file <file> [flags]
-envweave import vault     --project <p> [--file <capture.jsonl> | --live --mount <m> [--path <prefix>]] [flags]
-envweave import infisical --project <p> --file <export.json> [flags]
+envweave import                                   # wizard: TTY, no source arguments
+envweave import --from <k8s|sops|vault|infisical> --project <p> --environment <e> [selectors]
+envweave import --mapping <mapping.json>          # replay, non-interactive
 ```
 
-Common flags: `--out-dir <dir>` (artifact destination, `O_EXCL`/`0600` discipline for values files); wizard is the default on a TTY; **flag mode** = `--no-wizard --environment <env>` (exactly one `(project, environment)`, everything typed `string`). Phase 2 is the existing pipeline: `definitions plan/apply`, then `values import --manifest <run-manifest.json> [--overwrite KEY,…]` (`--overwrite` names an enumerated list of `set`-bucket keys; skip-by-default otherwise).
+`import` without a TTY and without `--from`/`--mapping` is a hard error. Flag-mode selectors per connector: `--file <path>` (file mode, all connectors); live mode: `--live --namespace <ns> [--name <secret>]` (k8s), `--live --mount <m> [--path <prefix>]` (vault); SOPS and Infisical are file-only in v1. Flag mode targets exactly one `(project, environment)` and declares every value `string`. Common: `--out-dir <dir>` for the emitted artifacts (values files under the secret-file discipline: dirfd-parent-checked `O_EXCL`, `0600`).
 
-**Mapping template** (`mapping.json`, versioned): `{"version": 1, "source": "<connector>", "project": "<id>", "renames": [{"from": "<source-name>", "to": "<KEY>", "transform": "auto|manual"}], "classifications": [{"key": "<KEY>", "class": "secret|config", "downgraded": bool}], "trim_acknowledgements": ["<KEY>", …], "types": [{"key": "<KEY>", "type": "<primitive>", "accepted": bool}]}` — every rename, every explicit downgrade, every trim acknowledgement is recorded here; unknown fields reject loudly naming a version mismatch.
+Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → `definitions apply --plan`, then `values import --manifest <run-manifest.json> [--overwrite KEY,…]` (the one declared additive input: the run-manifest expected-state precondition; `--overwrite` names an enumerated list of `set`-bucket keys, skip-by-default otherwise).
 
-**Run manifest** (`run-manifest.json`, versioned): `{"version": 1, "project": "<id>", "source": "<connector>", "occurrences": [{"key": "<KEY>", "environment": "<env-id>", "token": "<server-minted opaque>"}]}` — the phase-2 precondition; `values import` verifies each occurrence token in-transaction; a key movement rejects by name. Tokens are single-run, server-minted during phase-1 reads (which require `read(E)` per consulted environment, never `reveal`).
+**Wizard interaction states** (closed enumeration; the wizard is an authoring frontend for the mapping template):
 
-Connector test fixtures (adversarial parsers, hostile-provider errors, per-source captures) are **implementation artifacts** pinned when the connectors are built, per the ADR's fixture language; the contract they must satisfy is fixed in the ADR. Recorded in [open-items.md](./open-items.md).
+1. Source select + mode (file/live) and credential-presence check (ambient only, never prompted for storage)
+2. Source scope walk (connector selectors, bounded per the ops catalogue)
+3. Environment mapping — including environments the session will create, declared up front
+4. Folder mapping
+5. Key review — renames (transform surfaced per rename; hard-stop names require explicit rename), classification (secret default; downgrades explicit per key), types (deterministic suggestions, applied only on accept)
+6. Cross-environment reconciliation — one canonical identity/type/classification per key project-wide; conflicts resolved interactively (flag mode fails instead)
+7. Collision review — `new | set` buckets; overwrite selection enumerated
+8. Trim acknowledgements (values altered by TrimSpace refused unless acknowledged; recorded in the template)
+9. Artifact emission + the plaintext-still-on-disk warning
+
+**Mapping template** (`mapping.json`) — versioned `{format_version, connector_contract_version}`; records every *choice*: source scope, environment mapping, folder mapping, renames (`from`/`to`/`transform: auto|manual`), classification decisions (with explicit-downgrade markers), type declarations, overwrite selections, trim acknowledgements. Names/paths/types only — **never values**. Committable, replayable. Unknown fields reject loudly naming a version mismatch.
+
+**Run manifest** (`run-manifest.json`) — versioned likewise; the bound record of one *run* and the phase-2 **precondition**: template reference (digest), non-secret source identity as far as the connector can state it (cluster/context name, `VAULT_ADDR` origin, export-file digest), per-record source version identifiers where provided (K8s `resourceVersion`, Vault v2 `secret_version`), the target's immutable ids (project, environments, key ids where they exist), the definitions revision observed, the per-`(key, environment)` server-minted opaque **occurrence token**, and the **phase-completion marker** (`authored | applied | imported` per environment). Value-free, committable. `values import` verifies each occurrence token in-transaction; key movement rejects by name.
+
+**Connector fixture contracts** (fixed here; byte content pinned when each connector is built): per connector, (a) true-positive mapping fixtures for its named capture format, (b) adversarial-parser fixtures (malformed/oversized/decompression-bomb inputs failing loudly at the named bound), (c) hostile-provider-error fixtures (errors sanitized structurally: keys/paths/bounds/codes, never content). Recorded in [open-items.md](./open-items.md) as an implementation-pinned moment.
 
 ## 4. Multi-instance ([multi-instance.md](../adr/multi-instance.md))
 
-Verb spellings already fixed by that ADR's declared #25 amendment: `remote add|list|show|remove`, `remote-credential create|list|show|revoke`. Remaining delegated serializations:
+Verb spellings already fixed by that ADR's declared #25 amendment: `remote add|list|show|remove`, `remote-credential create|list|show|revoke`. The delegated handoff serialization, restating the locked **three-leg flow** exactly:
 
-- **Handoff transaction** (cross-origin UI handoff, exception-class endpoints on the remote): popup opens `GET {remote}/api/v1/auth/handoff/start?tx=<id>&code_challenge=<S256>&origin=<requesting-origin>`; completion posts `POST /api/v1/auth/handoff/complete` with `{"tx": "<id>", "code_verifier": "<pkce>"}` returning the workspace-session bearer in the response body (never a redirect fragment, never a cookie). Transaction is server-side, single-use, purpose-bound, expiring per [ops-catalogue.md](./ops-catalogue.md).
-- **CORS**: remote allows exactly its configured requesting origins (no wildcard, no `null`), methods `GET POST PUT DELETE`, headers `Authorization, Content-Type`, `Access-Control-Allow-Credentials: false` (bearer rides the Authorization header; cookies never cross this channel).
+1. **Start** — the viewing UI opens the remote's authorization page in a popup with `noopener`: `GET {remote}/api/v1/auth/handoff/start?state=<opaque>&code_challenge=<S256>&redirect_uri=<exact pre-registered callback>&purpose=<establishment|step-up>`. The remote creates a short-lived server-side **transaction** binding state, the exact callback URI, the requesting origin, the PKCE challenge, the purpose, and — once authenticated — the target human. A step-up transaction additionally binds the initiating workspace-session id, the exact operation elevated, and (where key-scoped) the environment and enumerated key set; these bindings are server-side transaction state, never URL parameters. The human authenticates with the remote's own ceremonies.
+2. **Callback** — on approval the remote redirects **code + state only** to the exact pre-registered callback (the allowlist entry is the `redirect_uri` authority) — a same-origin page of the viewing UI, which hands the result to the shell over a **nonce-named `BroadcastChannel`** and closes. The front channel never carries the artifact.
+3. **Redemption** — the shell redeems cross-origin: `POST {remote}/api/v1/auth/handoff/token` with `{"code": "<code>", "code_verifier": "<pkce>"}` → the **workspace session** bearer in the response body (never a redirect fragment, never a cookie; JS memory only).
+
+Transactions are single-use, atomically consumed, expiring per [ops-catalogue.md](./ops-catalogue.md); every handoff path (start, callback, redemption) is classified pre-authentication under the remote's admission limits.
+
+**CORS** (remote side): allowed origins = exactly its configured requesting origins (no wildcard, no `null`); methods `GET POST PUT DELETE`; headers `Authorization, Content-Type`; `Access-Control-Allow-Credentials: false` — the bearer rides the Authorization header, cookies never cross this channel, CSRF posture untouched.
+
+Directory and workspace **UI states** are specified in [ui-spec.md](./ui-spec.md) § Multi-instance.
 
 ## 5. Canonical key grammar
 

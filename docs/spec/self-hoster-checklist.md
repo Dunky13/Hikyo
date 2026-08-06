@@ -2,7 +2,7 @@
 
 [mvp-boundary.md](../adr/mvp-boundary.md) §3 binds 1.0 wholesale to the oss-mechanics **decidable self-hoster test**: every capability in the spec set must be fully exercisable by a self-hoster — policy, API shape, recovery path, tenancy behavior, data transformation. Any capability failing is a **synthesis-blocking defect**. This checklist runs the instrument over the §1.2 capability list plus the four promotions. It is re-asserted against the release candidate's capability list at 1.0 (§6 item 4).
 
-Verdict legend: **PASS** = fully exercisable on a self-hosted single-node install (sqlite or postgres, no external service beyond what the self-hoster operates).
+Verdict legend: **PASS** = the capability meets the oss-mechanics test verbatim: *every functional and administrative outcome must be achievable by a self-hoster using only released open-source artifacts and documented public interfaces.*
 
 | Capability | Verdict | Evidence |
 |---|---|---|
@@ -23,7 +23,7 @@ Verdict legend: **PASS** = fully exercisable on a self-hosted single-node instal
 | M1 machine identities & federation | PASS | Bearer path needs nothing external; OIDC federation works against self-hosted CI (Forgejo Actions) and static-JWKS air-gap alternative exists |
 | M2 Compose delivery | PASS | exec wrapper + dotenv, systemd timer |
 | M3 K8s operator | PASS | Own minimal operator, K3s floor documented, Pi-class footprint |
-| M4 deployment adapters | PASS with note | Forgejo adapter: self-hostable end to end. GitHub adapter: the *counterparty* is GitHub (github.com or self-hosted GHES best-effort) — the capability itself carries no Envweave-side gate; a self-hoster without GitHub simply has no use for it, which the test permits (it gates paywalls and SaaS coupling, not integrations with third parties) |
+| M4 deployment adapters | PASS | Forgejo adapter: self-hostable end to end. GitHub adapter: every functional and administrative outcome (configure, plan, sync, adopt, scrub) is achievable using only the released binary and GitHub's documented public REST API — no Envweave-side gate, no undocumented interface; the counterparty being a third-party platform (github.com, or self-hosted GHES best-effort) is the capability's subject, not a barrier the test measures |
 | M5 import | PASS | All connectors read local files or self-hosted sources; ambient credentials only |
 | M6 multi-instance | PASS | Symmetric, no "main"; zero remotes = zero outbound |
 | O1 single binary & migrations | PASS | `--dev` sqlite; prod explicit datastore |

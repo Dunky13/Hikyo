@@ -2,9 +2,9 @@
 
 [ops-spec.md](../adr/ops-spec.md) owns every concrete operational value; several post-lock ADRs declared **categories** into its composable-maxima catalogue and delegated the **values** to synthesis. This document lands those values under ops-spec's rules: every bound is a named user-visible refusal; every default is overridable at the stated scope unless marked fixed; all values are sane at the Pi-4/4 GB calibration floor. These rows join the ops-spec decision inventory; contradictions reopen the owning ticket.
 
-## Row numbering correction
+## Row numbering collision (reported, not corrected)
 
-The ops-spec inventory carries **two rows numbered 15** (the secret-scanning post-lock insertion collided with plans/pins/grants). Corrected numbering: secret scanning = **row 15a**, plans/pins/grants = **row 15b**. No values change; references by name stay valid.
+The ops-spec inventory carries **two rows numbered 15** (the secret-scanning post-lock insertion collided with plans/pins/grants). Rows are referenced by *name* throughout the corpus, so no reference is ambiguous; renumbering the locked ADR's inventory is an editorial amendment under the oss-mechanics procedure, not a synthesis act — recorded here and in [open-items.md](./open-items.md), values untouched.
 
 ## SAML (defaults fixed in [saml-sp.md](../adr/saml-sp.md); catalogued here as tunable entries)
 
@@ -53,6 +53,21 @@ The ops-spec inventory carries **two rows numbered 15** (the secret-scanning pos
 | Whole-run deadline | 10 min | instance-config |
 | Page/request cap (live pagination) | 1 000 pages | fixed |
 | Wizard session aggregate (wall clock / decoded bytes) | 30 min / 100 MiB | fixed |
+
+## GitHub adapter ([github-adapter.md](../adr/github-adapter.md) ops delegation)
+
+GitHub's own headers drive runtime pacing (the ADR's decision tree); these values size the defaults and bounds around it, composable with the adapter-outbox rows (row 19: outbox 30 s → 1 h jittered, depth 1000/target, concurrency 1/target · 4/org):
+
+| Entry | Default | Scope |
+|---|---|---|
+| Mutation spacing | serial per credential, ≥ 1 s (fixed in the ADR) | fixed |
+| Converge retry/backoff | 30 s → 1 h jittered, 8 attempts, then `failed` naming the step | instance-config |
+| Headerless 403/429 wait | ≥ 1 min exponential, capped at 1 h | fixed |
+| Single-converge wall-clock bound | 1 h; expiry = the ADR's named non-terminal (plaintext already discarded before any wait; resume re-authorizes) | instance-config |
+| Pagination page size | 100 (GitHub's `per_page` maximum; partial list = fail closed by name) | fixed |
+| Provider response size cap | 1 MiB (shared adapter row) | fixed |
+
+Pi-4 fit: one serial pacer per credential at ≥ 1 s spacing bounds adapter CPU to negligible; memory rides the existing outbox depth and response-cap rows; no new resource class.
 
 ## Key-name bound (grammar restated in [domain-model.md](./domain-model.md))
 

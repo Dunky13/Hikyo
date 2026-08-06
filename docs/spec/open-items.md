@@ -17,7 +17,8 @@ The map's fog sweep, discharged: everything still unspecified at synthesis is re
 
 1. **UI polish for key-declaration/schema-editing refinements** — behaviors are specified textually in [ui-spec.md](./ui-spec.md) § Key declaration; **no visual prototype was run for them** (the map's remaining-prototypes fog; all five foundational surfaces have locked references, this batch is dialog-level refinement on #20/#21's surfaces). If visual iteration is wanted, run it against the frozen prototypes before the S3 flow registry is enumerated; otherwise implementation designs within DESIGN.md.
 2. **ops-spec §13/§14 supersession hygiene** — oss-mechanics's release-range key validity supersedes ops-spec's earlier one-release-overlap sketch, and release cadence/support window now live in oss-mechanics; ops-spec's banner records this, no value conflict remains. Purely editorial follow-up if ops-spec is ever re-issued as a standalone operator handbook.
-3. **Docs site** — deferred artifact, ships with 1.0 ([oss-mechanics.md](../adr/oss-mechanics.md)); its information architecture is unconstrained by this spec beyond carrying O4–O6 artifacts.
+3. **Docs site** — deferred artifact, ships with 1.0 ([oss-mechanics.md](../adr/oss-mechanics.md)); its information architecture is unconstrained by this spec beyond carrying O4–O6 artifacts and opening the Forgejo adapter docs with the federation-vs-push gradient sentence (carried in [product-requirements.md](./product-requirements.md) § Delivery overview).
+4. **ops-spec inventory row-numbering collision** (two rows numbered 15) — reported in [ops-catalogue.md](./ops-catalogue.md); renumbering is an editorial amendment under the oss-mechanics procedure whenever ops-spec is next reopened. Rows are referenced by name; nothing is ambiguous meanwhile.
 
 ## Accepted residuals (restated once, not open)
 

@@ -22,6 +22,8 @@ Binds the design system ([DESIGN.md](../../DESIGN.md) — dual theme dark-defaul
 
 **SAML** ([saml-sp.md](../adr/saml-sp.md)) — provider configuration on the existing instance-config surface; metadata fingerprint ceremony at trust establishment; diff-and-confirm on metadata refresh.
 
+**Multi-instance** ([multi-instance.md](../adr/multi-instance.md)) — the delegated UI states. *Directory entries*: reachable (version, org/project names + counts) · unreachable (last-known snapshot shown with its staleness timestamp, marked stale, never silently fresh) · pin-mismatch (marked, not served) · duplicate instance identity (both entries marked, neither served) · self-connection (refused at add, by instance identity). *Workspace*: connect = the popup ceremony on the remote's origin (never embedded); "session expired — reconnect" as a one-click state re-opening the popup; step-up re-opens the popup and runs the remote's own ceremonies (the workspace session never substitutes); origin-removal and every locked invalidation trigger surface as the expired state. Live updates in a workspace degrade to polling — no push affordance is promised.
+
 ## Git-mode definitions state ([source-of-truth.md](../adr/source-of-truth.md))
 
 When `definitions_source: git`, definition-editing surfaces are read-only with a persistent banner: **"Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`."** A blocked edit explains itself with that sentence plus the last-applied provenance labels (commit/ref/actor) when present — labels are display-only, never trusted. Envweave stores no repository URL (it never reads a repository), so the banner names the mechanism, not a repo link.

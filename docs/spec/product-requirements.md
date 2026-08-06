@@ -19,8 +19,8 @@ Every surveyed competitor (Infisical, Phase, Vault/OpenBao, SOPS, ESO — [compe
 
 Envweave's wedge is structural, not promotional:
 
-- **MPL 2.0** file-level copyleft fork-proofs the core — no future `/ee` capture (the BUSL→OpenBao case study is the standing argument). See [oss-mechanics.md](../adr/oss-mechanics.md) and #9.
-- **The no-`/ee` pledge** is published governance (GOVERNANCE.md full text + README sentence): audit, rollback, RBAC, SAML, SCIM, secret scanning ship free.
+- **MPL 2.0**: file-level copyleft keeps every existing file open in any fork, and DCO means no entity holds the rights to relicense the core (the BUSL→OpenBao capture lever). What the license does *not* do is legally prevent new proprietary code beside old open code — that boundary is held by governance, not law. See [oss-mechanics.md](../adr/oss-mechanics.md) and #9.
+- **The no-`/ee` pledge** is published governance (GOVERNANCE.md full text + README sentence), amendable only through the locked-decision procedure: audit, rollback, RBAC, SAML, SCIM, secret scanning ship free.
 - **Four classic paywall items are promoted into 1.0** as wedge proof: GitHub Actions adapter, SAML SP, SCIM provisioning, secret scanning ([mvp-boundary.md](../adr/mvp-boundary.md) §2).
 
 ## Product principles (settled; reopen only on serious contradiction)
@@ -31,6 +31,10 @@ Envweave's wedge is structural, not promotional:
 - Deterministic, explainable values: every value is explicit per environment ([flat-model.md](../adr/flat-model.md)); schema validation before delivery ([schema-model.md](../adr/schema-model.md)).
 - Multi-tenant single installation; changes apply on restart (no live process mutation in v1).
 - Fail fast, fail loud: every bound is a named refusal, never silent truncation.
+
+## Delivery overview
+
+Envweave delivers values three ways, presented as a gradient: **fetch-based delivery** under the workload's own identity (`envweave run` / rendered dotenv on Compose, the K8s operator, CI federation fetching at runtime) is the first-class path; **push adapters** (Forgejo, GitHub Actions) exist for destinations whose workflows need standing values before the first fetch. The gradient sentence, carried from [deployment-adapter.md](../adr/deployment-adapter.md) as positioning: ***if your job can fetch, federate; push what must exist before the first fetch.***
 
 ## Scale envelope (v1 designed-for)
 
