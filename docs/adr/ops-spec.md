@@ -1,5 +1,7 @@
 # Envweave v1 operational & deployment spec (ADR, locked 2026-08-05)
 
+> **Amended by the flat-model ADR ([flat-model.md](./flat-model.md), 2026-08-06, [#40](https://github.com/Dunky13/envweave/issues/40), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the § 8 chain-depth tombstone resolves to a deleted bound and § 13 re-anchors to that ADR; § 14's outstanding-amendment note is discharged. Environment-count cap and publish-work cap stand with their values.
+
 > **Declared amendment (2026-08-06, [multi-instance.md](./multi-instance.md), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the composable-maxima catalogue gains the multi-instance entries — directory outbound client bounds (per-remote deadline, response cap, remote count, parallel fan-out, coalescing window, per-viewer and instance-wide aggregate trigger rates) and workspace-session lifetime values (idle/absolute, handoff transaction expiry). Air-gap statement extended: an instance with zero configured remotes performs zero outbound directory connections — behavior unchanged by construction. Details in [multi-instance.md](./multi-instance.md).
 
 Context: every locked ADR delegated its concrete operational values here — bounds, defaults, cadences, and runbook obligations that are policy, not architecture. This ADR consolidates all of them ([#32](https://github.com/Dunky13/envweave/issues/32)). It decides values; it re-derives no mechanism. Where a mechanism is named, the owning ADR is linked and its text governs. The synthesis ticket ([#27](https://github.com/Dunky13/envweave/issues/27)) assembles; contradictions found here reopen the owning ticket, never get silently patched.
@@ -131,9 +133,9 @@ Tightening a lifetime ceiling enumerates affected credentials before clamping (l
 
 ## 8. Structural bounds
 
-### Environments & publish ([inheritance ADR](./inheritance-model.md) — see tombstone, § 13)
+### Environments & publish ([flat-model ADR](./flat-model.md))
 
-- **Base-chain depth: N/A — superseded by the flat-model amendment** (adopted in #20; amendment ADR outstanding). This entry is a named tombstone: if the amendment retains any layering, it supplies its own depth bound.
+- **Base-chain depth: deleted** — the flat-model ADR ([flat-model.md](./flat-model.md), #40) retains no layering; the tombstone is resolved, no depth bound exists.
 - **Max environments per project: 50**, loud refusal. The matrix UI is legible to ~15; 50 is 5× headroom over any real matrix at the envelope while stopping runaway env-minting scripts.
 - **Publish fan-out cap = the env cap.** Publish materializes all affected envs atomically (locked); with envs bounded, fan-out needs no second number.
 - **Composability, enforced at configuration time, not discovered at publish:** a project carries a **resolved-cell budget: environments × declared keys ≤ 100 000** — the operation that would exceed it (creating the env, declaring the key) is refused loud, naming the budget. This makes the maxima compose by construction: the per-publish ceiling below can always be met by a legal configuration. Work budgets: **per-environment 10 000 validations / 5 s, per-publish 100 000 validations / 30 s hard deadline**, abort loud. **Storage: per-project payload high-water warning at 1 GiB** (doctor + metric + UI banner) and a **hard refusal of new publishes at 4 GiB** — retention policy (§ 2) is the governing control; the hard stop exists so a pin-heavy or unlimited-retention project cannot exhaust the shared disk, and the refusal names the pins/retention setting holding the space.
@@ -210,7 +212,6 @@ Tightening a lifetime ceiling enumerates affected credentials before clamping (l
 
 ## 14. Boundary notes
 
-- **Flat-model amendment ADR outstanding** (adopted in #20; supersedes the inheritance ADR): § 8's chain-depth tombstone anchors it. It blocks synthesis (#27), not this spec.
 - **Deferred to #33:** release cadence/support window; signing-ceremony human process; both cross-referenced above.
 
 ## 15. CI-enforced invariants added by this spec
