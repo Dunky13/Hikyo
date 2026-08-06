@@ -2,7 +2,11 @@
 
 [mvp-boundary.md](../adr/mvp-boundary.md) §3 binds 1.0 wholesale to the oss-mechanics **decidable self-hoster test**: every capability in the spec set must be fully exercisable by a self-hoster — policy, API shape, recovery path, tenancy behavior, data transformation. Any capability failing is a **synthesis-blocking defect**. This checklist runs the instrument over the §1.2 capability list plus the four promotions. It is re-asserted against the release candidate's capability list at 1.0 (§6 item 4).
 
-Verdict legend: **PASS** = the capability meets the oss-mechanics test verbatim: *every functional and administrative outcome must be achievable by a self-hoster using only released open-source artifacts and documented public interfaces.*
+Verdict legend: **PASS** = the capability meets the oss-mechanics test, quoted in full:
+
+> **The self-hoster test:** every functional and administrative outcome — running, configuring, backing up, restoring, upgrading, and operating Envweave, including everything a hosted tenant can see or do — must be achievable by a self-hoster using only released open-source artifacts and documented public interfaces. Hosted-side code may *schedule and operate* those public interfaces; it may never contain an exclusive capability, policy engine, API, recovery mechanism, tenancy control, or data transformation.
+
+(The hosted-tenant clause and hosted-side-code restriction are vacuously satisfied at 1.0 — no hosted offering exists — and become load-bearing at the follow-on SaaS map's non-preclusion gate; the checklist asserts the 1.0 half: no capability requires anything beyond released artifacts and documented public interfaces.)
 
 | Capability | Verdict | Evidence |
 |---|---|---|

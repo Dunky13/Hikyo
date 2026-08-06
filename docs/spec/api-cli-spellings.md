@@ -64,7 +64,7 @@ envweave import --from <k8s|sops|vault|infisical> --project <p> --environment <e
 envweave import --mapping <mapping.json>          # replay, non-interactive
 ```
 
-`import` without a TTY and without `--from`/`--mapping` is a hard error. Flag-mode selectors per connector: `--file <path>` (file mode, all connectors); live mode: `--live --namespace <ns> [--name <secret>]` (k8s), `--live --mount <m> [--path <prefix>]` (vault); SOPS and Infisical are file-only in v1. Flag mode targets exactly one `(project, environment)` and declares every value `string`. Common: `--out-dir <dir>` for the emitted artifacts (values files under the secret-file discipline: dirfd-parent-checked `O_EXCL`, `0600`).
+`import` without a TTY and without `--from`/`--mapping` is a hard error. Flag-mode selectors per connector: `--file <path>` (file mode, all connectors); live mode: `--live --namespace <ns> [--name <secret>]` (k8s), `--live --mount <m> [--path <prefix>] [--kv-version <1|2>]` (vault; version auto-detected from the mount when omitted); `--env <slug>` selects the source environment inside an Infisical export; SOPS and Infisical are file-only in v1. Flag mode targets exactly one `(project, environment)` and declares every value `string`. Common: `--out-dir <dir>` for the emitted artifacts (values files under the secret-file discipline: dirfd-parent-checked `O_EXCL`, `0600`).
 
 Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → `definitions apply --plan`, then `values import --manifest <run-manifest.json> [--overwrite KEY,…]` (the one declared additive input: the run-manifest expected-state precondition; `--overwrite` names an enumerated list of `set`-bucket keys, skip-by-default otherwise).
 
@@ -80,9 +80,44 @@ Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → 
 8. Trim acknowledgements (values altered by TrimSpace refused unless acknowledged; recorded in the template)
 9. Artifact emission + the plaintext-still-on-disk warning
 
-**Mapping template** (`mapping.json`) — versioned `{format_version, connector_contract_version}`; records every *choice*: source scope, environment mapping, folder mapping, renames (`from`/`to`/`transform: auto|manual`), classification decisions (with explicit-downgrade markers), type declarations, overwrite selections, trim acknowledgements. Names/paths/types only — **never values**. Committable, replayable. Unknown fields reject loudly naming a version mismatch.
+**Mapping template** (`mapping.json`) — the portable record of every *choice*; names/paths/types only, **never values**; committable, replayable. Exact serialization (unknown fields reject loudly naming a version mismatch):
 
-**Run manifest** (`run-manifest.json`) — versioned likewise; the bound record of one *run* and the phase-2 **precondition**: template reference (digest), non-secret source identity as far as the connector can state it (cluster/context name, `VAULT_ADDR` origin, export-file digest), per-record source version identifiers where provided (K8s `resourceVersion`, Vault v2 `secret_version`), the target's immutable ids (project, environments, key ids where they exist), the definitions revision observed, the per-`(key, environment)` server-minted opaque **occurrence token**, and the **phase-completion marker** (`authored | applied | imported` per environment). Value-free, committable. `values import` verifies each occurrence token in-transaction; key movement rejects by name.
+```json
+{
+  "format_version": 1,
+  "connector_contract_version": 1,
+  "source": "k8s | sops | vault | infisical",
+  "scope": { "namespace": "…", "names": ["…"] },
+  "project": "<project-id>",
+  "environments": [ { "source": "<source-env-or-null>", "target": "<environment-id>", "create": false } ],
+  "folders": [ { "source_path": "…", "target_path": "…" } ],
+  "renames": [ { "from": "<source-name>", "to": "<KEY>", "transform": "auto | manual" } ],
+  "classifications": [ { "key": "<KEY>", "class": "secret | config", "downgraded": false } ],
+  "types": [ { "key": "<KEY>", "type": "string | integer | boolean | enum | url | json", "accepted": true } ],
+  "overwrites": [ { "key": "<KEY>", "environment": "<environment-id>" } ],
+  "trim_acknowledgements": [ { "key": "<KEY>", "environment": "<environment-id>" } ]
+}
+```
+
+`scope` is connector-shaped: k8s `{namespace, names[]}` · vault `{mount, path_prefix, kv_version}` · sops/infisical `{file_digest}` (+ infisical `{env_slug}`).
+
+**Run manifest** (`run-manifest.json`) — the bound record of one *run* and the phase-2 **precondition**; value-free, committable. `values import` verifies each occurrence token in-transaction; key movement rejects by name. Exact serialization:
+
+```json
+{
+  "format_version": 1,
+  "template": { "digest": "sha256:…" },
+  "source_identity": { "kind": "k8s | sops | vault | infisical",
+                       "context": "<cluster/context name | VAULT_ADDR origin | export-file digest>" },
+  "source_versions": [ { "key": "<KEY>", "environment": "<environment-id>",
+                         "version": "<resourceVersion | secret_version>" } ],
+  "target": { "project": "<project-id>", "environments": ["<environment-id>"],
+              "keys": [ { "name": "<KEY>", "id": "<key-id-or-null>" } ] },
+  "definitions_revision": 0,
+  "occurrences": [ { "key": "<KEY>", "environment": "<environment-id>", "token": "<server-minted opaque>" } ],
+  "phase_completion": { "authored": true, "applied": false, "imported": { "<environment-id>": false } }
+}
+```
 
 **Connector fixture contracts** (fixed here; byte content pinned when each connector is built): per connector, (a) true-positive mapping fixtures for its named capture format, (b) adversarial-parser fixtures (malformed/oversized/decompression-bomb inputs failing loudly at the named bound), (c) hostile-provider-error fixtures (errors sanitized structurally: keys/paths/bounds/codes, never content). Recorded in [open-items.md](./open-items.md) as an implementation-pinned moment.
 
@@ -90,7 +125,7 @@ Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → 
 
 Verb spellings already fixed by that ADR's declared #25 amendment: `remote add|list|show|remove`, `remote-credential create|list|show|revoke`. The delegated handoff serialization, restating the locked **three-leg flow** exactly:
 
-1. **Start** — the viewing UI opens the remote's authorization page in a popup with `noopener`: `GET {remote}/api/v1/auth/handoff/start?state=<opaque>&code_challenge=<S256>&redirect_uri=<exact pre-registered callback>&purpose=<establishment|step-up>`. The remote creates a short-lived server-side **transaction** binding state, the exact callback URI, the requesting origin, the PKCE challenge, the purpose, and — once authenticated — the target human. A step-up transaction additionally binds the initiating workspace-session id, the exact operation elevated, and (where key-scoped) the environment and enumerated key set; these bindings are server-side transaction state, never URL parameters. The human authenticates with the remote's own ceremonies.
+1. **Start** — the viewing UI opens the remote's authorization page in a popup with `noopener`: `GET {remote}/api/v1/auth/handoff/start?state=<opaque>&code_challenge=<S256>&redirect_uri=<exact pre-registered callback>&purpose=<establishment|step-up>`. The remote creates a short-lived server-side **transaction** binding state, the exact callback URI, the requesting origin, the PKCE challenge, the purpose, and — once authenticated — the target human. An **establishment** transaction additionally records that no prior session exists (purpose alone licenses issuance); a **step-up** transaction binds the initiating workspace-session id, the exact operation elevated, and (where key-scoped) the environment and enumerated key set. These bindings are server-side transaction state, never URL parameters. The human authenticates with the remote's own ceremonies.
 2. **Callback** — on approval the remote redirects **code + state only** to the exact pre-registered callback (the allowlist entry is the `redirect_uri` authority) — a same-origin page of the viewing UI, which hands the result to the shell over a **nonce-named `BroadcastChannel`** and closes. The front channel never carries the artifact.
 3. **Redemption** — the shell redeems cross-origin: `POST {remote}/api/v1/auth/handoff/token` with `{"code": "<code>", "code_verifier": "<pkce>"}` → the **workspace session** bearer in the response body (never a redirect fragment, never a cookie; JS memory only).
 
