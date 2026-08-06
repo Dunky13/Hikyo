@@ -2,6 +2,8 @@
 
 > **Amended by the flat-model ADR ([flat-model.md](./flat-model.md), 2026-08-06, [#40](https://github.com/Dunky13/wenv/issues/40)):** the inheritance-model interim state recorded below is discharged — #40 is locked; C1 and C2 carry their final criterion text (per that ADR's Propagations).
 
+> **Amended 2026-08-07 ([#22](https://github.com/Dunky13/wenv/issues/22) reopened per the [oss-mechanics](./oss-mechanics.md) governance procedure):** S1's "spec-first OpenAPI 3.0.3" reads **OpenAPI 3.1**; S1's [CI] negative-fixture set exercises the 3.1 semantic profile bound in [system-architecture.md](./system-architecture.md)'s operative banner (nullable prohibition, dialect fail-closed, webhooks prohibition, oasdiff 3.1 breakage fixtures). The criterion is otherwise unchanged.
+
 Context: this ADR fixes what the first stable release (1.0) contains, what is explicitly out, how "done" is verified, and in what order the implementing team should build ([#26](https://github.com/Dunky13/wenv/issues/26)). Per the [OSS mechanics ADR](./oss-mechanics.md), **1.0 is defined by this document's criteria and is the same act as the API/CLI freeze** ([api-cli-surface.md](./api-cli-surface.md)): prerelease `0.x` tags freeze nothing and ship throughout development; the freeze happens once, at 1.0, as late as possible.
 
 This ADR decides scope and verification. It re-derives no mechanism: where a capability is named, its locked ADR or prototype governs. Contradictions found downstream reopen the owning ticket ([synthesis rule, #27](https://github.com/Dunky13/wenv/issues/27)).
