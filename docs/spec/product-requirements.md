@@ -19,7 +19,7 @@ Every surveyed competitor (Infisical, Phase, Vault/OpenBao, SOPS, ESO — [compe
 
 Envweave's wedge is structural, not promotional:
 
-- **MPL 2.0**: file-level copyleft keeps every existing file open in any fork, and DCO means contributors keep their copyright — so no one can unilaterally relicense *contributed* work (the specific lever a BUSL-style pivot needs). What this does *not* do is legally prevent new proprietary code beside old open code — that boundary is held by governance, not law. See [oss-mechanics.md](../adr/oss-mechanics.md) and #9.
+- **MPL 2.0**: file-level copyleft keeps every existing file open in any fork, and DCO means contributors keep their copyright — so the maintainer cannot unilaterally relicense *contributed* work (the specific lever a BUSL-style pivot needs). What this does *not* do is legally prevent new proprietary code beside old open code — that boundary is held by governance, not law. See [oss-mechanics.md](../adr/oss-mechanics.md) and #9.
 - **The no-`/ee` pledge** is published governance (GOVERNANCE.md full text + README sentence), amendable only through the locked-decision procedure: audit, rollback, RBAC, SAML, SCIM, secret scanning ship free.
 - **Four classic paywall items are promoted into 1.0** as wedge proof: GitHub Actions adapter, SAML SP, SCIM provisioning, secret scanning ([mvp-boundary.md](../adr/mvp-boundary.md) §2).
 

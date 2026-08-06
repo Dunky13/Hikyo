@@ -106,6 +106,7 @@ Phase 2 is the existing pipeline, no new grammar: `definitions plan --file` → 
 ```json
 {
   "format_version": 1,
+  "connector_contract_version": 1,
   "template": { "digest": "sha256:…" },
   "source_identity": { "kind": "k8s | sops | vault | infisical",
                        "context": "<cluster/context name | VAULT_ADDR origin | export-file digest>" },
