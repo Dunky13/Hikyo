@@ -1,5 +1,7 @@
 # Envweave v1 operational & deployment spec (ADR, locked 2026-08-05)
 
+> **Declared amendment (2026-08-06, [multi-instance.md](./multi-instance.md), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the composable-maxima catalogue gains the multi-instance entries — directory outbound client bounds (per-remote deadline, response cap, remote count, parallel fan-out, coalescing window, per-viewer and instance-wide aggregate trigger rates) and workspace-session lifetime values (idle/absolute, handoff transaction expiry). Air-gap statement extended: an instance with zero configured remotes performs zero outbound directory connections — behavior unchanged by construction. Details in [multi-instance.md](./multi-instance.md).
+
 Context: every locked ADR delegated its concrete operational values here — bounds, defaults, cadences, and runbook obligations that are policy, not architecture. This ADR consolidates all of them ([#32](https://github.com/Dunky13/envweave/issues/32)). It decides values; it re-derives no mechanism. Where a mechanism is named, the owning ADR is linked and its text governs. The synthesis ticket ([#27](https://github.com/Dunky13/envweave/issues/27)) assembles; contradictions found here reopen the owning ticket, never get silently patched.
 
 Every bound in this document is **loud**: hitting it is a named, user-visible refusal (per-surface error naming the bound), never a silent truncation or a silent degradation. All defaults are overridable at the stated scope unless marked fixed.
