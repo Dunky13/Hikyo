@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<title>PROTOTYPE — Wenv environment matrix (ticket #20)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 9.
   Refines iteration 8's variant C after Marc's feedback: the rail owns
@@ -357,7 +357,7 @@
 <div id="main">
 <header>
   <button class="iconbtn" id="menubtn" onclick="document.getElementById('side').classList.toggle('open')" title="menu">☰</button>
-  <span class="crumb">envweave <span>/</span> acme <span>/</span> <span id="projname" style="color:var(--tx)">demo</span></span>
+  <span class="crumb">wenv <span>/</span> acme <span>/</span> <span id="projname" style="color:var(--tx)">demo</span></span>
   <span class="grow"></span>
   <button class="drafts" id="drafts" hidden onclick="openPublish()" title="review and publish"></button>
   <span class="ctl"><span class="lbl">acting as</span>
@@ -404,9 +404,9 @@ const K=(folder,name,type,secret,required,values,invalid,changed,desc)=>(
 const all=v=>({dev:v,stg:v,prd:v,pre:v});
 
 const KEYS=[
-  K('app','APP_NAME','string',false,'all',all('Envweave Demo')),
+  K('app','APP_NAME','string',false,'all',all('Wenv Demo')),
   K('app','APP_URL','url',false,'all',
-    {dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.envweave.dev'},{},['prd']),
+    {dev:'http://localhost:8080',stg:'https://stg.wenv.dev',prd:'https://wenv.dev',pre:'https://pr-{n}.preview.wenv.dev'},{},['prd']),
   K('app','PORT','int',false,'all',all('8080')),
   K('app','LOG_LEVEL','string',false,'all',{dev:'debug',stg:'info',prd:'info',pre:'info'}),
   K('app','FEATURE_MATRIX_V2','bool',false,'none',{dev:'false',stg:'false',prd:'false',pre:'true'},{},['pre']),
@@ -600,7 +600,7 @@ function render(){
 }
 
 /* ============================ app shell (variants) ============================ */
-const PROJECTS=['envweave-demo','adhd-kanban','poketracker','initiative-tracker'];
+const PROJECTS=['wenv-demo','adhd-kanban','poketracker','initiative-tracker'];
 let PROJ=PROJECTS[0];
 const SHELLS=[{key:'a',name:'Sidebar'},{key:'b',name:'Centered + jump bar'},{key:'c',name:'Rail + panel'}];
 let VAR=(()=>{try{return new URLSearchParams(location.search).get('variant')||'a'}catch(_){return'a'}})();
@@ -610,7 +610,7 @@ function jumpGroup(f){
   document.getElementById('grp-'+f)?.scrollIntoView({behavior:'smooth',block:'start'});
   document.getElementById('side').classList.remove('open');
 }
-function pickProject(p){PROJ=p;document.getElementById('projname').textContent=p.replace('envweave-','');renderShell();
+function pickProject(p){PROJ=p;document.getElementById('projname').textContent=p.replace('wenv-','');renderShell();
   document.getElementById('side').classList.remove('open')}
 const monogram=p=>p.split(/[-_]/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const projHue=p=>[...p].reduce((a,c)=>a+c.charCodeAt(0),0)%360;

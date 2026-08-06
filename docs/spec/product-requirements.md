@@ -1,6 +1,6 @@
-# Envweave — Product Requirements (synthesis, 2026-08-06)
+# Wenv — Product Requirements (synthesis, 2026-08-06)
 
-Synthesized from the positioning decision ([#3](https://github.com/Dunky13/envweave/issues/3)), the competitive research ([competitive-landscape.md](../research/competitive-landscape.md)), the license decision ([#9](https://github.com/Dunky13/envweave/issues/9)), the MVP boundary ([mvp-boundary.md](../adr/mvp-boundary.md)), and the product register at the repo root ([PRODUCT.md](../../PRODUCT.md)). This document restates locked decisions; it decides nothing. On any divergence, the owning ADR or ticket resolution wins and the contradiction reopens that ticket.
+Synthesized from the positioning decision ([#3](https://github.com/Dunky13/wenv/issues/3)), the competitive research ([competitive-landscape.md](../research/competitive-landscape.md)), the license decision ([#9](https://github.com/Dunky13/wenv/issues/9)), the MVP boundary ([mvp-boundary.md](../adr/mvp-boundary.md)), and the product register at the repo root ([PRODUCT.md](../../PRODUCT.md)). This document restates locked decisions; it decides nothing. On any divergence, the owning ADR or ticket resolution wins and the contradiction reopens that ticket.
 
 ## One-liner
 
@@ -17,7 +17,7 @@ Synthesized from the positioning decision ([#3](https://github.com/Dunky13/envwe
 
 Every surveyed competitor (Infisical, Phase, Vault/OpenBao, SOPS, ESO — [competitive-landscape.md](../research/competitive-landscape.md)) either paywalls the operational core (audit, RBAC, SSO, SCIM, secret scanning — the classic `/ee` lineup) or lacks the environment-matrix + schema-validation combination entirely. No surveyed product combines explicit multi-environment values + schema validation + fully-open licensing.
 
-Envweave's wedge is structural, not promotional:
+Wenv's wedge is structural, not promotional:
 
 - **MPL 2.0**: file-level copyleft keeps every existing file open in any fork, and DCO means contributors keep their copyright — so the maintainer cannot unilaterally relicense *contributed* work (the specific lever a BUSL-style pivot needs). What this does *not* do is legally prevent new proprietary code beside old open code — that boundary is held by governance, not law. See [oss-mechanics.md](../adr/oss-mechanics.md) and #9.
 - **The no-`/ee` pledge** is published governance (GOVERNANCE.md full text + README sentence), amendable only through the locked-decision procedure: audit, rollback, RBAC, SAML, SCIM, secret scanning ship free.
@@ -34,7 +34,7 @@ Envweave's wedge is structural, not promotional:
 
 ## Delivery overview
 
-Envweave delivers values three ways, presented as a gradient: **fetch-based delivery** under the workload's own identity (`envweave run` / rendered dotenv on Compose, the K8s operator, CI federation fetching at runtime) is the first-class path; **push adapters** (Forgejo, GitHub Actions) exist for destinations whose workflows need standing values before the first fetch. The gradient sentence, carried from [deployment-adapter.md](../adr/deployment-adapter.md) as positioning: ***if your job can fetch, federate; push what must exist before the first fetch.***
+Wenv delivers values three ways, presented as a gradient: **fetch-based delivery** under the workload's own identity (`wenv run` / rendered dotenv on Compose, the K8s operator, CI federation fetching at runtime) is the first-class path; **push adapters** (Forgejo, GitHub Actions) exist for destinations whose workflows need standing values before the first fetch. The gradient sentence, carried from [deployment-adapter.md](../adr/deployment-adapter.md) as positioning: ***if your job can fetch, federate; push what must exist before the first fetch.***
 
 ## Scale envelope (v1 designed-for)
 
@@ -42,7 +42,7 @@ Envweave delivers values three ways, presented as a gradient: **fetch-based deli
 
 ## Success criteria
 
-- An operator trusts Envweave enough to manage production secrets in it.
+- An operator trusts Wenv enough to manage production secrets in it.
 - Every resolved value's origin is understandable without reading docs.
 - The 1.0 gate ([mvp-boundary.md](../adr/mvp-boundary.md) §1.2, §6) is green on sqlite **and** postgres, and the [self-hoster checklist](./self-hoster-checklist.md) passes wholesale.
 

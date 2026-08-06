@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<title>PROTOTYPE — Wenv environment matrix (ticket #20)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 2.
   Variant C (Cascade) won round 1; editorial style dropped project-wide.
@@ -281,7 +281,7 @@
 </head>
 <body data-theme="dark">
 <header>
-  <span class="crumb">envweave <span>/</span> acme <span>/</span> demo</span>
+  <span class="crumb">wenv <span>/</span> acme <span>/</span> demo</span>
   <span class="grow"></span>
   <span class="drafts" id="drafts" hidden></span>
   <span class="ctl"><span class="lbl">acting as</span>
@@ -316,9 +316,9 @@ const K=(folder,name,type,secret,required,defaults,layers,invalid,changed,desc)=
   {folder,name,type,secret,required,defaults,layers:layers||{},invalid:invalid||{},changed:changed||[],desc});
 
 const KEYS=[
-  K('app','APP_NAME','string',false,'all','Envweave Demo',{},{},[]),
+  K('app','APP_NAME','string',false,'all','Wenv Demo',{},{},[]),
   K('app','APP_URL','url',false,'all','http://localhost:8080',
-    {stg:{v:'https://stg.envweave.dev'},prd:{v:'https://envweave.dev'},pre:{v:'https://pr-{n}.preview.envweave.dev'}},{},['prd']),
+    {stg:{v:'https://stg.wenv.dev'},prd:{v:'https://wenv.dev'},pre:{v:'https://pr-{n}.preview.wenv.dev'}},{},['prd']),
   K('app','PORT','int',false,'all','8080',{},{},[]),
   K('app','LOG_LEVEL','string',false,'all','info',{dev:{v:'debug'}},{},[]),
   K('app','FEATURE_MATRIX_V2','bool',false,'none','false',{pre:{v:'true'}},{},['pre']),

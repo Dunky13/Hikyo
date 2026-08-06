@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave machine access (ticket #31)</title>
+<title>PROTOTYPE — Wenv machine access (ticket #31)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #31, iteration 2.
 
@@ -359,8 +359,8 @@ const SAS = [
   {id:'k3s-cluster', kind:'workload', created:'2026-05-30', read:['production','staging'], reveal:['production'],
    creds:[],
    bindings:[{issuer:'https://kubernetes.default.svc.cluster.local',
-              subject:'system:serviceaccount:envweave-system:envweave-fetch',
-              audience:'envweave.went.io/main', expiry:'2026-11-30', days:117}],
+              subject:'system:serviceaccount:wenv-system:wenv-fetch',
+              audience:'wenv.went.io/main', expiry:'2026-11-30', days:117}],
    targets:[
      {name:'apps/api-env', ns:'apps', envK:'production',
       conds:[{t:'Synced', s:'ok', reason:'converged@rev41'},{t:'RolloutRequested', s:'ok', reason:'Completed'}]},
@@ -377,7 +377,7 @@ const SAS = [
    creds:[{pfx:'ew_1_au_m3Wb5k', created:'2026-06-01', expiry:'2026-09-01', days:27, last:'3 h ago'}],
    bindings:[{issuer:'https://token.actions.githubusercontent.com',
               subject:'repo:Dunky13/dbugit:ref:refs/heads/main',
-              audience:'envweave.went.io/main', expiry:'2026-08-07', days:2}],
+              audience:'wenv.went.io/main', expiry:'2026-08-07', days:2}],
    targets:[]},
 ];
 const CONDS = { // CR-condition vocabulary (#19) — kubectl YAML + the same sentence as UI copy
@@ -397,7 +397,7 @@ const CONDS = { // CR-condition vocabulary (#19) — kubectl YAML + the same sen
       k3s-cluster.`},
   'LoaderControlAckRequired':{sev:'bad', ui:()=>`The mapping delivers <code>PATH</code>, a key on the loader-control baseline. The refusal is enforced at delivery, consumption-agnostic — even a volume-mount-only Secret needs the acknowledgement, because delivery time cannot know how a key is consumed.`,
     keys:['PATH'],
-    fix:`Add the acknowledgement to the <code>EnvweaveSecret</code> listing exactly these keys. The acknowledged list is carried on the fetch and recorded in Envweave's audit event (#24) — regardless of cluster audit posture.`,
+    fix:`Add the acknowledgement to the <code>WenvSecret</code> listing exactly these keys. The acknowledged list is carried on the fetch and recorded in Wenv's audit event (#24) — regardless of cluster audit posture.`,
     yaml:()=>`status:
   conditions:
   - type: <span class="k">SyncRefused</span>
@@ -420,17 +420,17 @@ const CONDS = { // CR-condition vocabulary (#19) — kubectl YAML + the same sen
       apps/api-canary is paused; rollout has not completed.
       completion is claimed only from the workload
       controller's own status.`},
-  'DesignationMissing':{sev:'bad', ui:()=>`The referenced bootstrap Secret is not designated for Envweave delivery use. Designation is an act by someone holding <b>write</b> on that Secret — a strictly greater right than reading it — and must name the <code>EnvweaveInstance</code> it may be presented to.`,
-    keys:[], fix:`Label the bootstrap Secret with the designation naming <code>EnvweaveInstance/main</code> (spelling per #25), applied by a principal with write on the Secret.`,
+  'DesignationMissing':{sev:'bad', ui:()=>`The referenced bootstrap Secret is not designated for Wenv delivery use. Designation is an act by someone holding <b>write</b> on that Secret — a strictly greater right than reading it — and must name the <code>WenvInstance</code> it may be presented to.`,
+    keys:[], fix:`Label the bootstrap Secret with the designation naming <code>WenvInstance/main</code> (spelling per #25), applied by a principal with write on the Secret.`,
     yaml:()=>`status:
   conditions:
   - type: <span class="k">NotReconciled</span>
     status: "True"
     reason: <span class="bad">DesignationMissing</span>
     message: >-
-      referenced Secret legacy/envweave-bootstrap is not
-      designated for envweave delivery use, or its designation
-      does not name EnvweaveInstance/main. designate it with
+      referenced Secret legacy/wenv-bootstrap is not
+      designated for wenv delivery use, or its designation
+      does not name WenvInstance/main. designate it with
       write authority on the Secret.`},
 };
 
@@ -452,13 +452,13 @@ function journey(sa){ // five-step journey state (#18)
   const missing=sa.read.filter(e=>!sa.reveal.includes(e));
   const failing=missing.length&&sa.kind==='workload';
   s.push({t:failing?`Delivery fails, naming what it could not deliver`:`First delivery succeeded`, st:failing?'fail':'done',
-    err:failing?(sa.targets.length?`EnvweaveSecret apps/worker-env — SyncRefused
+    err:failing?(sa.targets.length?`WenvSecret apps/worker-env — SyncRefused
 <b>reason:</b> UndeliverableKeys
 manifest contains secret occurrences this principal
 cannot reveal: ${ENV_SECRETS[missing[0]].join(', ')}
 delivery is all-or-nothing; nothing was synced.
 required: reveal(${missing[0]}) on ${sa.id}`
-:`$ envweave run --project dbugit --env ${missing[0]} -- node worker.js
+:`$ wenv run --project dbugit --env ${missing[0]} -- node worker.js
 <b>refused:</b> manifest contains secret occurrences this principal
 cannot reveal: ${ENV_SECRETS[missing[0]].join(', ')}
 delivery is all-or-nothing; nothing was started.
@@ -559,8 +559,8 @@ function renderA(){
   }
   const trows=SAS.flatMap(sa=>sa.targets.map(t=>({sa,t})));
   return tabs+`<div class="shead"><h2>Kubernetes delivery targets</h2></div>
-    <p class="note" style="margin-bottom:14px">One <code>EnvweaveSecret</code> per managed Secret. Conditions read the same here and in <code>kubectl describe</code> — click one for both voices.</p>
-    <table class="inv" aria-label="Kubernetes targets"><thead><tr><th>envweavesecret</th><th>service account</th><th>environment</th><th>conditions</th></tr></thead>
+    <p class="note" style="margin-bottom:14px">One <code>WenvSecret</code> per managed Secret. Conditions read the same here and in <code>kubectl describe</code> — click one for both voices.</p>
+    <table class="inv" aria-label="Kubernetes targets"><thead><tr><th>wenvsecret</th><th>service account</th><th>environment</th><th>conditions</th></tr></thead>
     <tbody>${trows.map(({sa,t})=>`<tr><td><code>${t.name}</code></td><td><code style="font-size:11.5px">${sa.id}</code></td>
       <td><span class="envchip">${t.envK}</span></td><td style="display:flex;gap:5px;flex-wrap:wrap">${condChips(sa,t)}</td></tr>`).join('')}</tbody></table>`;
 }
@@ -570,7 +570,7 @@ function policyStrip(){
     <div class="ptx"><div class="t">Machine secret delivery (per-project opt-in)</div>
     <div class="note">${state.revealOptIn
       ?'Acknowledged: workload credentials granted <code>reveal</code> are a standing decryption capability. Fresh service accounts still deliver config + secret-presence only until <code>reveal</code> is granted per account.'
-      :'Off: every workload delivery on this project is config + secret-presence only. <b>envweave run on a fresh service account delivers no secrets</b> — this is step 4 of the setup journey.'}</div></div>
+      :'Off: every workload delivery on this project is config + secret-presence only. <b>wenv run on a fresh service account delivers no secrets</b> — this is step 4 of the setup journey.'}</div></div>
   </div>`;
 }
 
@@ -684,7 +684,7 @@ function openBinding(said){
     </div>
     <div class="field"><label>issuer</label><input class="mono" id="fiss" placeholder="https://…" oninput="fedCheck()"></div>
     <div class="field"><label>subject (matched byte-for-byte)</label><input class="mono" id="fsub" placeholder="system:serviceaccount:ns:name" oninput="fedCheck()"></div>
-    <div class="field"><label>audience</label><input class="mono" id="faud" value="envweave.went.io/main" oninput="fedCheck()"></div>
+    <div class="field"><label>audience</label><input class="mono" id="faud" value="wenv.went.io/main" oninput="fedCheck()"></div>
     <div class="field"><label>binding lifetime</label><select id="flt"><option>90 days (instance default)</option><option>180 days</option><option disabled>indefinite — requires allow_indefinite (off)</option></select></div>
     <div id="fedwarn"></div>
     <p class="note faint">No wildcards, no namespace patterns, no case folding — canonicalization merges distinct external identities. An unbound identity is not a login. Renewal is a mint; expiry warnings follow the in-product-first path.</p>
@@ -694,7 +694,7 @@ function openBinding(said){
 }
 function fedPreset(k){
   const iss=$('#fiss'),sub=$('#fsub');
-  if(k==='k8s'){iss.value='https://kubernetes.default.svc.cluster.local';sub.value='system:serviceaccount:envweave-system:envweave-fetch'}
+  if(k==='k8s'){iss.value='https://kubernetes.default.svc.cluster.local';sub.value='system:serviceaccount:wenv-system:wenv-fetch'}
   if(k==='forgejo'){iss.value='https://git.went.io';sub.value='repo:Projects/dbugit:ref:refs/heads/main'}
   if(k==='gha'){iss.value='https://token.actions.githubusercontent.com';sub.value='repo:Dunky13/dbugit:pull_request'}
   fedCheck();
@@ -727,7 +727,7 @@ function openCond(said,tname,key){
   <div class="mb">
     <div class="callout ${c.sev==='warn'?'warn':'bad'}">${c.ui(said,tname)}
       ${c.keys.length?`<span class="keyset">${c.keys.map(k=>`<code>${k}</code>`).join('')}</span>`:''}</div>
-    <div><div class="note faint" style="margin-bottom:6px">kubectl describe envweavesecret ${tname.split('/').pop()}</div>
+    <div><div class="note faint" style="margin-bottom:6px">kubectl describe wenvsecret ${tname.split('/').pop()}</div>
     <div class="yaml">${c.yaml(tname)}</div></div>
     <div class="callout"><b>Next step:</b> ${c.fix}</div>
   </div>

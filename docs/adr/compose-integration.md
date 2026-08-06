@@ -1,32 +1,32 @@
-# Envweave Docker Compose integration (ADR, locked 2026-07-31)
+# Wenv Docker Compose integration (ADR, locked 2026-07-31)
 
-Context: the v1 persona ([#3](https://github.com/Dunky13/envweave/issues/3)) is a self-hosting developer running Docker Compose on a single box, and Compose-first delivery is part of the wedge. The Compose research ([#6](https://github.com/Dunky13/envweave/issues/6), [compose-delivery.md](../research/compose-delivery.md)) surveyed five mechanisms — exec wrapper, rendered dotenv, local agent daemon, Compose-native secrets, deploy-time CI injection — plus systemd credentials as a hardening path, and left five questions open for this ticket: offline fallback, merge/override policy, token shape on the box, export staleness, and restart ergonomics. Every authorization question is fixed upstream: the permission ADR ([#15](https://github.com/Dunky13/envweave/issues/15)) fixes the workload allowlist, the disclosure-by-proxy rule and the `values export` formula; the machine-identity ADR ([#17](https://github.com/Dunky13/envweave/issues/17)) fixes the token format, the two delivery channels, conditional fetch and per-key audit. This ADR fixes **which delivery paths ship, how a value change reaches a running stack, what happens on disk, what happens offline, and how a stack is adopted**.
+Context: the v1 persona ([#3](https://github.com/Dunky13/wenv/issues/3)) is a self-hosting developer running Docker Compose on a single box, and Compose-first delivery is part of the wedge. The Compose research ([#6](https://github.com/Dunky13/wenv/issues/6), [compose-delivery.md](../research/compose-delivery.md)) surveyed five mechanisms — exec wrapper, rendered dotenv, local agent daemon, Compose-native secrets, deploy-time CI injection — plus systemd credentials as a hardening path, and left five questions open for this ticket: offline fallback, merge/override policy, token shape on the box, export staleness, and restart ergonomics. Every authorization question is fixed upstream: the permission ADR ([#15](https://github.com/Dunky13/wenv/issues/15)) fixes the workload allowlist, the disclosure-by-proxy rule and the `values export` formula; the machine-identity ADR ([#17](https://github.com/Dunky13/wenv/issues/17)) fixes the token format, the two delivery channels, conditional fetch and per-key audit. This ADR fixes **which delivery paths ship, how a value change reaches a running stack, what happens on disk, what happens offline, and how a stack is adopted**.
 
 ## Declared amendments
 
 Five, stated up front. This ADR does not claim conformance anywhere it changes locked text.
 
-> **1. Amends the threat model ([threat-model.md](./threat-model.md), [#8](https://github.com/Dunky13/envweave/issues/8)) — environment-variable delivery is an integrity capability, not only a disclosure one.** Environment variables are interpreted by the consuming runtime, and some of them redirect what it executes: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `BASH_ENV`, `NODE_OPTIONS`, `PYTHONSTARTUP`, `PERL5OPT`, `PATH`. It follows that a principal holding **`edit` ∧ `publish`** on an environment — the pair needed to author a value and commit it, not `publish` alone — can obtain **code execution inside every workload that consumes those variables as environment**, without holding `reveal` and without touching the compose file. § *Loader-control keys* fixes a defence-in-depth mitigation; it is explicitly **not** a boundary, and the residual — hostile values in the application's *own* configuration keys, which no name list can catch — belongs to the permission model as a workload-integrity risk rather than to a deny-list here.
+> **1. Amends the threat model ([threat-model.md](./threat-model.md), [#8](https://github.com/Dunky13/wenv/issues/8)) — environment-variable delivery is an integrity capability, not only a disclosure one.** Environment variables are interpreted by the consuming runtime, and some of them redirect what it executes: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `BASH_ENV`, `NODE_OPTIONS`, `PYTHONSTARTUP`, `PERL5OPT`, `PATH`. It follows that a principal holding **`edit` ∧ `publish`** on an environment — the pair needed to author a value and commit it, not `publish` alone — can obtain **code execution inside every workload that consumes those variables as environment**, without holding `reveal` and without touching the compose file. § *Loader-control keys* fixes a defence-in-depth mitigation; it is explicitly **not** a boundary, and the residual — hostile values in the application's *own* configuration keys, which no name list can catch — belongs to the permission model as a workload-integrity risk rather than to a deny-list here.
 
-> **2. Amends the machine-identity ADR ([machine-identities.md § Lifetime](./machine-identities.md), [#17](https://github.com/Dunky13/envweave/issues/17)) — revocation timing.** That ADR states *"revocation bites at the next fetch, never at expiry."* The offline snapshot (§ *Offline behaviour*) **weakens** it on this path: a revoked workload keeps receiving the last delivered values from local ciphertext until the box reaches the server again. The snapshot's hard maximum age is the only thing that makes revocation eventually bite, which is why an unbounded snapshot is rejected. The guarantee becomes: *revocation bites at the next fetch, and at latest at snapshot expiry* — with the honest caveat in § *Offline behaviour* that expiry rests on a clock the client does not fully control.
+> **2. Amends the machine-identity ADR ([machine-identities.md § Lifetime](./machine-identities.md), [#17](https://github.com/Dunky13/wenv/issues/17)) — revocation timing.** That ADR states *"revocation bites at the next fetch, never at expiry."* The offline snapshot (§ *Offline behaviour*) **weakens** it on this path: a revoked workload keeps receiving the last delivered values from local ciphertext until the box reaches the server again. The snapshot's hard maximum age is the only thing that makes revocation eventually bite, which is why an unbounded snapshot is rejected. The guarantee becomes: *revocation bites at the next fetch, and at latest at snapshot expiry* — with the honest caveat in § *Offline behaviour* that expiry rests on a clock the client does not fully control.
 
-> **3. Amends the threat model ([#8](https://github.com/Dunky13/envweave/issues/8)) again — audit durability during offline serve.** That ADR requires a durable audit record **before** a fetch completes, and #15 requires one immutable event per disclosed key. An offline serve reaches the server for neither. This ADR does not pretend otherwise: it moves the obligation client-side (§ *Offline behaviour*), requiring one durable, immutable, per-key local record fsynced **before** plaintext is released, and authenticated reconciliation on reconnect. A box that never reconnects has disclosure with no server-side record, and that is the accepted cost of the fallback.
+> **3. Amends the threat model ([#8](https://github.com/Dunky13/wenv/issues/8)) again — audit durability during offline serve.** That ADR requires a durable audit record **before** a fetch completes, and #15 requires one immutable event per disclosed key. An offline serve reaches the server for neither. This ADR does not pretend otherwise: it moves the obligation client-side (§ *Offline behaviour*), requiring one durable, immutable, per-key local record fsynced **before** plaintext is released, and authenticated reconciliation on reconnect. A box that never reconnects has disclosure with no server-side record, and that is the accepted cost of the fallback.
 
-> **4. Amends the source-of-truth ADR ([source-of-truth.md § Non-goals](./source-of-truth.md), [#13](https://github.com/Dunky13/envweave/issues/13)) — the no-restart sentence.** That ADR states *"Compose has no reconciler at all… no Envweave publish causes a Compose service to restart"*, while the same document delegates *"restart and reconciliation behaviour → Compose (#18)"* and says Compose *"owns restart/watch semantics"*. This ADR exercises that delegation and therefore **narrows the sentence**: `envweave compose sync`, when the operator installs its timer, does cause a Compose service to restart after a publish. What #13 rules out and this ADR **inherits unchanged** is *Compose GitOps reconciliation* — no Git watching, no Git↔DB convergence, no bidirectional controller. `sync` reconciles delivered values against running containers; it never reconciles a repository against anything.
+> **4. Amends the source-of-truth ADR ([source-of-truth.md § Non-goals](./source-of-truth.md), [#13](https://github.com/Dunky13/wenv/issues/13)) — the no-restart sentence.** That ADR states *"Compose has no reconciler at all… no Wenv publish causes a Compose service to restart"*, while the same document delegates *"restart and reconciliation behaviour → Compose (#18)"* and says Compose *"owns restart/watch semantics"*. This ADR exercises that delegation and therefore **narrows the sentence**: `wenv compose sync`, when the operator installs its timer, does cause a Compose service to restart after a publish. What #13 rules out and this ADR **inherits unchanged** is *Compose GitOps reconciliation* — no Git watching, no Git↔DB convergence, no bidirectional controller. `sync` reconciles delivered values against running containers; it never reconciles a repository against anything.
 
-> **5. Extends the encryption ADR ([encryption-model.md](./encryption-model.md), [#14](https://github.com/Dunky13/envweave/issues/14)) — a client-side key it does not currently cover.** That ADR fixes the server key hierarchy and the AEAD used at every layer. The offline snapshot and the stamp key are **client-side** artifacts outside that hierarchy, but they are not exempt from its rules: § *Offline behaviour* fixes a versioned XChaCha20-Poly1305 container with a domain-separated HKDF and a normative AAD tuple, matching #14's primitive choice rather than inventing one.
+> **5. Extends the encryption ADR ([encryption-model.md](./encryption-model.md), [#14](https://github.com/Dunky13/wenv/issues/14)) — a client-side key it does not currently cover.** That ADR fixes the server key hierarchy and the AEAD used at every layer. The offline snapshot and the stamp key are **client-side** artifacts outside that hierarchy, but they are not exempt from its rules: § *Offline behaviour* fixes a versioned XChaCha20-Poly1305 container with a domain-separated HKDF and a normative AAD tuple, matching #14's primitive choice rather than inventing one.
 
-Granularity note: this is the wayfinding-level Compose ADR. It fixes the delivery paths, the change-propagation mechanism, on-disk behaviour, offline behaviour, the merge rules and the adoption flow. Mechanism-level detail is delegated: concrete verb names, flags, exit codes and the complete per-verb authorization formulas → API & CLI ([#25](https://github.com/Dunky13/envweave/issues/25)); event shapes → audit ([#24](https://github.com/Dunky13/envweave/issues/24)); snapshot maximum age, sync interval defaults, runtime-directory conventions and generation-retention counts → operations spec (fog); the resident-process question → architecture ([#22](https://github.com/Dunky13/envweave/issues/22)). Each delegated ticket MUST satisfy the constraints stated here; a delegation satisfied in letter but violating an intent stated here reopens this ADR.
+Granularity note: this is the wayfinding-level Compose ADR. It fixes the delivery paths, the change-propagation mechanism, on-disk behaviour, offline behaviour, the merge rules and the adoption flow. Mechanism-level detail is delegated: concrete verb names, flags, exit codes and the complete per-verb authorization formulas → API & CLI ([#25](https://github.com/Dunky13/wenv/issues/25)); event shapes → audit ([#24](https://github.com/Dunky13/wenv/issues/24)); snapshot maximum age, sync interval defaults, runtime-directory conventions and generation-retention counts → operations spec (fog); the resident-process question → architecture ([#22](https://github.com/Dunky13/wenv/issues/22)). Each delegated ticket MUST satisfy the constraints stated here; a delegation satisfied in letter but violating an intent stated here reopens this ADR.
 
 ## Two delivery paths, both supported
 
-**1. `envweave run -- <command>`** — fetches, merges into the child environment, `exec`s. Zero plaintext on disk in the happy path.
+**1. `wenv run -- <command>`** — fetches, merges into the child environment, `exec`s. Zero plaintext on disk in the happy path.
 
-**2. Rendered env file consumed by `env_file:`** — Envweave renders a dotenv file; Compose injects its contents into the container. This is the path that removes per-variable plumbing.
+**2. Rendered env file consumed by `env_file:`** — Wenv renders a dotenv file; Compose injects its contents into the container. This is the path that removes per-variable plumbing.
 
 The distinction that must lead the documentation is mechanism, not preference:
 
-- `run` populates the *host* environment, which Compose uses for **interpolation only**. A variable present in `run`'s environment is **invisible to containers** unless the compose file references it — `${VAR}`, or an `environment: VAR` pass-through. This is the single most common way a user concludes Envweave does not work.
+- `run` populates the *host* environment, which Compose uses for **interpolation only**. A variable present in `run`'s environment is **invisible to containers** unless the compose file references it — `${VAR}`, or an `environment: VAR` pass-through. This is the single most common way a user concludes Wenv does not work.
 - `env_file:` injects file contents **directly into the container**. Paths resolve relative to the compose file, so managed targets are referenced by **absolute path** (§ *Where plaintext lives*).
 
 *Rejected: `run` as the only supported deploy path.* It fails on its own terms: the rendered path without `env_file:` — i.e. `--env-file`, which also feeds interpolation only — imposes exactly the same per-variable plumbing as `run` while adding plaintext on disk. The rendered path earns its place **only** through `env_file:`.
@@ -45,7 +45,7 @@ Normative here, not deferred, because it is a correctness property of path 2 rat
 
 Consequently:
 
-1. **Every Envweave-rendered `env_file:` entry MUST use `format: raw`**, which passes values as-is including quotes and `$`.
+1. **Every Wenv-rendered `env_file:` entry MUST use `format: raw`**, which passes values as-is including quotes and `$`.
 2. **The minimum supported Compose version for path 2 is 2.30.0**, the release that introduced `format: raw` ([docker/compose#12179](https://github.com/docker/compose/pull/12179)). `doctor` detects the running Compose version and **refuses path 2 below the floor**, naming the version, rather than delivering mangled secrets.
 3. **`run` (path 1) has no such floor** — it never goes through dotenv parsing — and is the documented answer for older Compose.
 4. **The canonical rendered encoding is normative and MUST be round-trip tested in CI** against the full value domain the schema admits: every UTF-8 sequence except NUL, which #12 already rejects for the `execve` path. The test asserts *stored bytes equal delivered bytes* for `$`, quotes, backslashes, leading and trailing whitespace, and embedded newlines. Where `raw` cannot represent a value — embedded newlines are the candidate — the renderer **refuses that key by name** rather than delivering a truncated or altered value, and the refusal is reported as a delivery failure, not a warning.
@@ -54,7 +54,7 @@ The exact byte-level grammar is #25's to write down; the properties above bind i
 
 ## No Docker socket
 
-**Envweave never mounts, reads or connects to the Docker socket.** No component — server, CLI, or any future agent — is configured with `docker.sock`.
+**Wenv never mounts, reads or connects to the Docker socket.** No component — server, CLI, or any future agent — is configured with `docker.sock`.
 
 Three independent grounds:
 
@@ -68,7 +68,7 @@ Three independent grounds:
 
 ## Change propagation — render generations and the stamp
 
-**`envweave compose sync`** is a **one-shot** host process invoked from a systemd timer. It performs a conditional fetch carrying the authorization-bound cursor (#17), and on a change writes a new render generation and invokes `docker compose up -d`. Compose performs the recreate.
+**`wenv compose sync`** is a **one-shot** host process invoked from a systemd timer. It performs a conditional fetch carrying the authorization-bound cursor (#17), and on a change writes a new render generation and invokes `docker compose up -d`. Compose performs the recreate.
 
 **There is no `--watch` and no resident client process.** An earlier draft offered one; it is withdrawn, because #22 is told not to introduce a resident Compose agent and a long-lived watcher is exactly that under another name.
 
@@ -80,9 +80,9 @@ Delivery correctness must not depend on `sync` being installed, because users ty
 
 A bare content digest is forbidden, and not merely inadvisable: the revision ADR fixes the change token as keyed precisely because *"a bare digest over content is a function of secret plaintexts, so a low-entropy secret is brute-forceable offline by anyone holding the digest"* — and it fixed that for the Kubernetes annotation case, which is this case with a different label key. An earlier draft of this ADR used a bare content hash and additionally proposed committing it, which would have published the oracle. Both are withdrawn.
 
-- **The local stamp key is random per installation**, 256 bits, generated on first use, stored `0600` in the Envweave state directory beside the snapshot key, and **domain-separated by HKDF from the same local key material** (§ *Offline behaviour*) so there is one local secret to protect, not two.
+- **The local stamp key is random per installation**, 256 bits, generated on first use, stored `0600` in the Wenv state directory beside the snapshot key, and **domain-separated by HKDF from the same local key material** (§ *Offline behaviour*) so there is one local secret to protect, not two.
 - **The key is deliberately local, not server-issued.** The server's change token is per `(org, project, environment)` and cannot be sliced per render target without a server-side per-key token, which #11 does not define and this ticket may not invent. A local key gives per-target granularity with the same unforgeability property, and its blast radius is nil: whoever reads the state directory also holds the token and the snapshot, so they can read the values outright.
-- **Stamps are consequently box-local and are never committed.** The managed stamp block is generated locally and `adopt` adds it to `.gitignore`. A fresh clone has no stamps and fails loudly (below) until `envweave compose render` runs — which is correct: an unprovisioned checkout has no values either.
+- **Stamps are consequently box-local and are never committed.** The managed stamp block is generated locally and `adopt` adds it to `.gitignore`. A fresh clone has no stamps and fails loudly (below) until `wenv compose render` runs — which is correct: an unprovisioned checkout has no values either.
 
 ### The stamp is the generation id, and it appears in the path
 
@@ -92,15 +92,15 @@ A bare content digest is forbidden, and not merely inadvisable: the revision ADR
 services:
   api:
     env_file:
-      - path: /run/envweave/acme-web-production/${ENVWEAVE_GEN_API:?run 'envweave compose render' first}/api.env
+      - path: /run/wenv/acme-web-production/${WENV_GEN_API:?run 'wenv compose render' first}/api.env
         format: raw
     labels:
-      envweave.stamp: "${ENVWEAVE_GEN_API:?run 'envweave compose render' first}"
+      wenv.stamp: "${WENV_GEN_API:?run 'wenv compose render' first}"
 ```
 
-`ENVWEAVE_GEN_API` is defined in a managed block of a **generated, gitignored** env file that Compose auto-loads for interpolation. The Compose specification fixes that *"any values in a Compose file can be interpolated with variable substitution"*, so a path is an ordinary interpolation site.
+`WENV_GEN_API` is defined in a managed block of a **generated, gitignored** env file that Compose auto-loads for interpolation. The Compose specification fixes that *"any values in a Compose file can be interpolated with variable substitution"*, so a path is an ordinary interpolation site.
 
-**The label is the load-bearing carrier of the stamp. The path is not.** An earlier draft claimed the reverse and was wrong: Compose resolves `env_file` entries into the service's `environment` map and, on the CLI's path, **discards `EnvFiles` before hashing the service**, so the path is absent from the config hash on at least Compose 2.30. A label is an ordinary service field that no stage discards, so it is the one placement whose participation in the hash does not depend on loader internals. Envweave therefore requires the label, and treats the path's contribution — where a version happens to retain it — as incidental.
+**The label is the load-bearing carrier of the stamp. The path is not.** An earlier draft claimed the reverse and was wrong: Compose resolves `env_file` entries into the service's `environment` map and, on the CLI's path, **discards `EnvFiles` before hashing the service**, so the path is absent from the config hash on at least Compose 2.30. A label is an ordinary service field that no stage discards, so it is the one placement whose participation in the hash does not depend on loader internals. Wenv therefore requires the label, and treats the path's contribution — where a version happens to retain it — as incidental.
 
 This is deliberately belt-and-braces across three independent mechanisms, because each one alone is version-fragile: the label always moves the hash; the resolved contents move it wherever they are folded into `environment`; the path moves it wherever `EnvFiles` survives. The ADR depends only on the first.
 
@@ -136,7 +136,7 @@ A fixed render path updated in place cannot be made crash-safe: rendering before
 
 ### Missing or stale stamps are errors
 
-`envweave compose doctor` reads the resolved project and **fails loudly** when any of the following holds: a service consumes an Envweave-rendered target without the generation variable in its `env_file` path; any use of that variable omits the `:?` form; the generation the resolved config interpolates to is not the one named by the current stamp file; that generation directory is absent, incomplete, or lacks its completion marker; the stamp does not correspond to the server's current manifest for that target; the running Compose version is below the path-2 floor; `format: raw` is missing; the token file is readable beyond its owner; or target membership has drifted from the recorded key ids. **Agreement on one side and disagreement on another is a failure, not a pass** — the check is that config, stamp file, generation on disk and server manifest all name the same generation. `sync` runs the same checks before its first render.
+`wenv compose doctor` reads the resolved project and **fails loudly** when any of the following holds: a service consumes an Wenv-rendered target without the generation variable in its `env_file` path; any use of that variable omits the `:?` form; the generation the resolved config interpolates to is not the one named by the current stamp file; that generation directory is absent, incomplete, or lacks its completion marker; the stamp does not correspond to the server's current manifest for that target; the running Compose version is below the path-2 floor; `format: raw` is missing; the token file is readable beyond its owner; or target membership has drifted from the recorded key ids. **Agreement on one side and disagreement on another is a failure, not a pass** — the check is that config, stamp file, generation on disk and server manifest all name the same generation. `sync` runs the same checks before its first render.
 
 This closes the research doc's open question on export staleness: **staleness is a check, not a documentation matter.**
 
@@ -147,13 +147,13 @@ This closes the research doc's open question on export staleness: **staleness is
 - **`run` writes nothing.** Values exist only in the child's environment.
 - **The stamp block and the project config file are non-secret** and live on persistent disk. The stamp block is gitignored anyway, because it is box-local.
 
-Honest limit: the child environment is readable at `/proc/<pid>/environ` and via `ps e`, both gated by `PTRACE_MODE_READ_FSCREDS` — same-UID or root. The softer paths are real and must be documented: the environment propagates to every child process, crash reporters capture it, and variables set via `environment:` are stored in the container's config where anyone in the `docker` group can read them with `docker inspect`. Envweave does not claim to defend against a same-UID or `docker`-group adversary on the box.
+Honest limit: the child environment is readable at `/proc/<pid>/environ` and via `ps e`, both gated by `PTRACE_MODE_READ_FSCREDS` — same-UID or root. The softer paths are real and must be documented: the environment propagates to every child process, crash reporters capture it, and variables set via `environment:` are stored in the container's config where anyone in the `docker` group can read them with `docker inspect`. Wenv does not claim to defend against a same-UID or `docker`-group adversary on the box.
 
 ## Offline behaviour
 
 **Every successful delivering fetch writes a ciphertext snapshot** to persistent disk. Serving from it is **opt-in per stack**, prints `serving stale from <timestamp>, generation <id>` on stderr on every serve, and is **refused past a hard maximum age** (value: operations spec). Plaintext derived from a snapshot renders to tmpfs like any other render.
 
-The case this exists for is not convenience. On the target deployment **Envweave is itself a container in the same compose stack**, so at boot nothing can fetch — the server is not up yet. Pure fail-closed turns a power cut into a manual recovery on every box, to protect against an outage already in progress. The house principle is fail *fast* and no *silent* fallback; a loud, opt-in, timestamped, age-bounded stale serve is neither silent nor a default.
+The case this exists for is not convenience. On the target deployment **Wenv is itself a container in the same compose stack**, so at boot nothing can fetch — the server is not up yet. Pure fail-closed turns a power cut into a manual recovery on every box, to protect against an outage already in progress. The house principle is fail *fast* and no *silent* fallback; a loud, opt-in, timestamped, age-bounded stale serve is neither silent nor a default.
 
 ### Snapshot cryptography
 
@@ -188,11 +188,11 @@ Per amendment 3, the obligation moves client-side and does not evaporate:
 
 ## The token on the box
 
-Locked upstream and restated: the token reaches the CLI through **exactly two channels, `--token-file <path>` and `ENVWEAVE_TOKEN`**; `--token-file` wins and the collision warns loudly; **no `--token` flag exists**.
+Locked upstream and restated: the token reaches the CLI through **exactly two channels, `--token-file <path>` and `WENV_TOKEN`**; `--token-file` wins and the collision warns loudly; **no `--token` flag exists**.
 
-**systemd credentials are the documented default for server deployments.** A wrapper unit uses `LoadCredentialEncrypted=` and passes `--token-file ${CREDENTIALS_DIRECTORY}/envweave-token`; the plaintext is visible only to that unit, backed by non-swappable ramfs, access-checked per open, not inherited down the process tree by default. The snapshot and stamp keys are loadable the same way.
+**systemd credentials are the documented default for server deployments.** A wrapper unit uses `LoadCredentialEncrypted=` and passes `--token-file ${CREDENTIALS_DIRECTORY}/wenv-token`; the plaintext is visible only to that unit, backed by non-swappable ramfs, access-checked per open, not inherited down the process tree by default. The snapshot and stamp keys are loadable the same way.
 
-**Envweave ships no unit-file generator.** A generated unit is a thing the project then owns across systemd versions, to save a one-time copy-paste. `doctor` changes outcomes instead: it **errors** on a token file readable beyond its owner and **warns** when a systemd-managed stack passes the token as a plain file rather than a credential.
+**Wenv ships no unit-file generator.** A generated unit is a thing the project then owns across systemd versions, to save a one-time copy-paste. `doctor` changes outcomes instead: it **errors** on a token file readable beyond its owner and **warns** when a systemd-managed stack passes the token as a plain file rather than a credential.
 
 The fallback ladder is documented explicitly: TPM2-sealed → `/var/lib/systemd/credential.secret` → plain `0600` file. `LoadCredentialEncrypted=` requires systemd ≥ 250 and the sealed variant requires a TPM; `doctor` MUST NOT error on a box that has neither.
 
@@ -212,7 +212,7 @@ Per amendment 1, both delivery paths refuse by default to deliver a key whose na
 
 **Refusal is overridable per target, explicitly.** A blanket delivery-time refusal on a name list turns a successfully published, schema-valid state into an undeployable one — a reliable denial of service, and a wall for the legitimate case of a `config` key genuinely named `PATH`. The project config file therefore carries a per-target acknowledgement naming each such key; without it, delivery fails loudly naming the key. Acknowledging is an operator act recorded in the config, not a flag buried in a command line, and never a silent drop — a silent drop is a delivery that quietly did not happen.
 
-Refusal is enforced at **delivery**, not at **declaration**: a `config` key legitimately named `PATH` for a non-container consumer is not Envweave's to forbid, and #12 is locked. The UI SHOULD warn at declaration time; that is an affordance.
+Refusal is enforced at **delivery**, not at **declaration**: a `config` key legitimately named `PATH` for a non-container consumer is not Wenv's to forbid, and #12 is locked. The UI SHOULD warn at declaration time; that is an affordance.
 
 ## Authorization, and what an unrevealed workload gets
 
@@ -224,13 +224,13 @@ Nothing here is a new authorization path. **Rendering an env file is a `values e
 
 Every fetch re-authorizes in-transaction against current policy, uncached.
 
-A workload service account holds `read` at explicit `(project, environment)` scope, delivering `config` values and **secret presence only**. Secret plaintext requires the explicit per-project operator opt-in. Therefore, stated plainly because it surprises every first-time user: **`envweave run` on a fresh service account delivers no secrets.**
+A workload service account holds `read` at explicit `(project, environment)` scope, delivering `config` values and **secret presence only**. Secret plaintext requires the explicit per-project operator opt-in. Therefore, stated plainly because it surprises every first-time user: **`wenv run` on a fresh service account delivers no secrets.**
 
 **Delivery is all-or-nothing against the resolved delivery manifest.** If the manifest contains secret occurrences the principal cannot reveal, `run` and the renderer **exit non-zero before starting anything**, naming the undelivered keys and printing the required opt-in. The error leaks nothing: `read` already confers knowledge that those keys exist.
 
 `--config-only` is the explicit escape hatch for workloads wanting configuration and no secrets. It is **a distinct authorized projection, not a client-side filter** — the server delivers the config projection and the request is recorded in the fetch audit, so "this workload deliberately takes no secrets" is a visible fact rather than an absence, and the mode cannot be used to probe for the existence of material the principal could not otherwise see.
 
-*Rejected: deliver what is authorized and omit the rest.* Silent partial delivery — the symptom surfaces inside the application's own connection error and the operator debugs Postgres instead of Envweave.
+*Rejected: deliver what is authorized and omit the rest.* Silent partial delivery — the symptom surfaces inside the application's own connection error and the operator debugs Postgres instead of Wenv.
 
 *Rejected: refusing to mint a workload credential until the opt-in is on.* Front-loads a decision the operator cannot yet evaluate, and breaks the config-only workload outright.
 
@@ -247,7 +247,7 @@ The conditional cursor is local state and can desynchronize from local delivery 
 
 ## Credential separation on the box
 
-Adoption **writes** — `values import` needs `edit` and `publish`, which no workload credential may hold. A box running an adopted stack therefore holds two credential artifacts with different authority: the **human CLI session** from `envweave login` (a distinct artifact type per #16) and the **workload service-account token**.
+Adoption **writes** — `values import` needs `edit` and `publish`, which no workload credential may hold. A box running an adopted stack therefore holds two credential artifacts with different authority: the **human CLI session** from `wenv login` (a distinct artifact type per #16) and the **workload service-account token**.
 
 **They never substitute for each other.**
 
@@ -265,12 +265,12 @@ The hazard being closed is precise: a systemd unit silently executing with a dev
 
 ## Adoption
 
-**`envweave compose adopt` rewrites the compose file in place**, after writing a backup. Order is normative, because it is a correctness property rather than a workflow preference:
+**`wenv compose adopt` rewrites the compose file in place**, after writing a backup. Order is normative, because it is a correctness property rather than a workflow preference:
 
 1. **Scaffold first.** `adopt` runs the definitions flow against the *untouched* `.env` — offline `scaffold --from .env` producing all-`config` keys marked `# TODO: classify`, then review, `apply`, and strict `values import`, exactly as #13 fixes. No auto-classification: deciding what is secret is a human act.
 2. **Only then** does it insert `env_file:` entries (with `format: raw`) and stamp labels into the selected services, create the generated stamp file, and add it to `.gitignore`.
 
-Reversing that order imports `ENVWEAVE_STAMP_*` as application configuration, because `scaffold` reads the file `adopt` just wrote into. The managed block is **normatively excluded** from `scaffold` input regardless, as belt and braces.
+Reversing that order imports `WENV_STAMP_*` as application configuration, because `scaffold` reads the file `adopt` just wrote into. The managed block is **normatively excluded** from `scaffold` input regardless, as belt and braces.
 
 **No claim is made that any `.env` is safe to commit.** An existing project `.env` routinely holds plaintext values; adding a non-secret block to it changes nothing about that. Only the *generated stamp file* is non-secret, and it is gitignored anyway because stamps are box-local.
 
@@ -278,35 +278,35 @@ The YAML round-trip MUST preserve comments, key order and formatting. Mangling a
 
 ### Recipes
 
-- **`_FILE`-convention images**: `envweave run -- docker compose up -d` with `secrets: { db_password: { environment: DB_PASSWORD } }`. The value travels wrapper environment → in-container file at `/run/secrets/<name>`, never touching host disk, and `uid`/`gid`/`mode` are honoured because the source is `environment:` rather than `file:`.
-- **Restart on boot**: a systemd unit with `LoadCredentialEncrypted=` and `ExecStart=envweave run -- docker compose up -d`, re-fetching on every start.
+- **`_FILE`-convention images**: `wenv run -- docker compose up -d` with `secrets: { db_password: { environment: DB_PASSWORD } }`. The value travels wrapper environment → in-container file at `/run/secrets/<name>`, never touching host disk, and `uid`/`gid`/`mode` are honoured because the source is `environment:` rather than `file:`.
+- **Restart on boot**: a systemd unit with `LoadCredentialEncrypted=` and `ExecStart=wenv run -- docker compose up -d`, re-fetching on every start.
 
 ## Project configuration
 
 A **committed, non-secret** per-project configuration file names the server URL, org, project, environment, and the render targets — each target's runtime path, its **key id set**, the services consuming it, and any per-target loader-control acknowledgements.
 
-**It holds no credential, and the specification says so explicitly**, because a file that *could* hold a token eventually does. The token's only channels remain `--token-file` and `ENVWEAVE_TOKEN`.
+**It holds no credential, and the specification says so explicitly**, because a file that *could* hold a token eventually does. The token's only channels remain `--token-file` and `WENV_TOKEN`.
 
 ## Reconciliation with upstream ADRs
 
-- **Threat model ([#8](https://github.com/Dunky13/envweave/issues/8))** — read-only workload credentials scoped to `(project, environment)`; per-fetch audit with credential identity; no plaintext at rest beyond the tmpfs render. **Amended twice**: environment delivery as an integrity capability, and audit durability during offline serve.
-- **Revisions ([#11](https://github.com/Dunky13/envweave/issues/11))** — changes apply on restart, never by live process mutation. The stamp honours the keyed-token rule: no bare content digest reaches a label, an annotation, or a file.
-- **Schema ([#12](https://github.com/Dunky13/envweave/issues/12))** — validation is authoritative at publish; delivery does not re-validate. Folder path stays non-semantic: target membership is by immutable key id, so folder movement changes no delivery. NUL exclusion is inherited by the dotenv encoding rules.
-- **Source of truth ([#13](https://github.com/Dunky13/envweave/issues/13))** — `adopt` funnels into `scaffold` → review → `apply` → `values import`, scaffold-first, with no auto-declare or auto-classification; Envweave never reads a repository. **Amended** on the no-restart sentence; the Compose-GitOps non-goal is inherited unchanged.
-- **Encryption ([#14](https://github.com/Dunky13/envweave/issues/14))** — **extended** with a client-side keyed container using the same primitive; the snapshot is not a backup and never substitutes for `backup-export`.
-- **Permissions ([#15](https://github.com/Dunky13/envweave/issues/15))** — rendering is a `values export` carrying the full formula including `read(E)` in both the current and historical cases; workload allowlist and per-project machine-`reveal` opt-in enforced as written; no machine credential performs any adoption verb.
-- **Human auth ([#16](https://github.com/Dunky13/envweave/issues/16))** — CLI sessions never authenticate an unattended workload; the human-session exception carries an enumerated protected unit and the reauthentication ceremony.
-- **Machine identities ([#17](https://github.com/Dunky13/envweave/issues/17))** — `--token-file` and `ENVWEAVE_TOKEN` only; conditional fetch presents the authorization-bound cursor and a "current" answer delivers no plaintext; per-key disclosure events never collapsed. **Amended** on revocation timing.
+- **Threat model ([#8](https://github.com/Dunky13/wenv/issues/8))** — read-only workload credentials scoped to `(project, environment)`; per-fetch audit with credential identity; no plaintext at rest beyond the tmpfs render. **Amended twice**: environment delivery as an integrity capability, and audit durability during offline serve.
+- **Revisions ([#11](https://github.com/Dunky13/wenv/issues/11))** — changes apply on restart, never by live process mutation. The stamp honours the keyed-token rule: no bare content digest reaches a label, an annotation, or a file.
+- **Schema ([#12](https://github.com/Dunky13/wenv/issues/12))** — validation is authoritative at publish; delivery does not re-validate. Folder path stays non-semantic: target membership is by immutable key id, so folder movement changes no delivery. NUL exclusion is inherited by the dotenv encoding rules.
+- **Source of truth ([#13](https://github.com/Dunky13/wenv/issues/13))** — `adopt` funnels into `scaffold` → review → `apply` → `values import`, scaffold-first, with no auto-declare or auto-classification; Wenv never reads a repository. **Amended** on the no-restart sentence; the Compose-GitOps non-goal is inherited unchanged.
+- **Encryption ([#14](https://github.com/Dunky13/wenv/issues/14))** — **extended** with a client-side keyed container using the same primitive; the snapshot is not a backup and never substitutes for `backup-export`.
+- **Permissions ([#15](https://github.com/Dunky13/wenv/issues/15))** — rendering is a `values export` carrying the full formula including `read(E)` in both the current and historical cases; workload allowlist and per-project machine-`reveal` opt-in enforced as written; no machine credential performs any adoption verb.
+- **Human auth ([#16](https://github.com/Dunky13/wenv/issues/16))** — CLI sessions never authenticate an unattended workload; the human-session exception carries an enumerated protected unit and the reauthentication ceremony.
+- **Machine identities ([#17](https://github.com/Dunky13/wenv/issues/17))** — `--token-file` and `WENV_TOKEN` only; conditional fetch presents the authorization-bound cursor and a "current" answer delivers no plaintext; per-key disclosure events never collapsed. **Amended** on revocation timing.
 
 ## Propagations (binding on downstream tickets)
 
-- **Kubernetes ([#19](https://github.com/Dunky13/envweave/issues/19))** — inherits the integrity amendment **only for environment-variable delivery**; a Secret projected as files carries a different, narrower risk that #19 must state separately. Inherits the loader-control baseline for env delivery, and MUST reconcile its restart mechanism with the stamp concept — annotation there, label here, one explanation for both, and neither a bare content digest.
-- **Architecture ([#22](https://github.com/Dunky13/envweave/issues/22))** — MUST NOT introduce a resident client-side agent for Compose; `sync` is one-shot, timer-invoked. MUST provide the local state directory's protection model.
-- **Audit ([#24](https://github.com/Dunky13/envweave/issues/24))** — MUST define event shapes for a delivering fetch, a conditional fetch that delivered nothing, a `--config-only` fetch, a refused loader-control key, an **offline per-key local record**, and its **authenticated reconnect reconciliation** including records served by a since-revoked credential.
-- **API & CLI ([#25](https://github.com/Dunky13/envweave/issues/25))** — MUST specify the canonical rendered encoding and its CI round-trip test; MUST pin and verify the Compose version floor; MAY extend but MUST NOT shrink the loader-control baseline; MUST document complete authorization formulas for `run`, render, `sync`, `doctor`, `adopt`; MUST specify the CLI login flow, which **cannot be a plain terminal password prompt** — #16 requires WebAuthn wherever the effective reveal window is `0`, and WebAuthn needs a browser origin, so remote `envweave login` is browser-delegated with a loopback redirect, with a terminal prompt viable only for local-account-plus-TOTP.
-- **MVP boundary ([#26](https://github.com/Dunky13/envweave/issues/26))** — MUST record explicit in/out decisions for the deferrals below.
+- **Kubernetes ([#19](https://github.com/Dunky13/wenv/issues/19))** — inherits the integrity amendment **only for environment-variable delivery**; a Secret projected as files carries a different, narrower risk that #19 must state separately. Inherits the loader-control baseline for env delivery, and MUST reconcile its restart mechanism with the stamp concept — annotation there, label here, one explanation for both, and neither a bare content digest.
+- **Architecture ([#22](https://github.com/Dunky13/wenv/issues/22))** — MUST NOT introduce a resident client-side agent for Compose; `sync` is one-shot, timer-invoked. MUST provide the local state directory's protection model.
+- **Audit ([#24](https://github.com/Dunky13/wenv/issues/24))** — MUST define event shapes for a delivering fetch, a conditional fetch that delivered nothing, a `--config-only` fetch, a refused loader-control key, an **offline per-key local record**, and its **authenticated reconnect reconciliation** including records served by a since-revoked credential.
+- **API & CLI ([#25](https://github.com/Dunky13/wenv/issues/25))** — MUST specify the canonical rendered encoding and its CI round-trip test; MUST pin and verify the Compose version floor; MAY extend but MUST NOT shrink the loader-control baseline; MUST document complete authorization formulas for `run`, render, `sync`, `doctor`, `adopt`; MUST specify the CLI login flow, which **cannot be a plain terminal password prompt** — #16 requires WebAuthn wherever the effective reveal window is `0`, and WebAuthn needs a browser origin, so remote `wenv login` is browser-delegated with a loopback redirect, with a terminal prompt viable only for local-account-plus-TOTP.
+- **MVP boundary ([#26](https://github.com/Dunky13/wenv/issues/26))** — MUST record explicit in/out decisions for the deferrals below.
 - **Operations spec (fog)** — snapshot maximum age; sync interval defaults; runtime-directory conventions per init system; generation retention count; state-directory protection and backup guidance for the local stamp and snapshot keys; per-principal fetch rate limits as they apply to `sync`; the reconnect reconciliation window.
-- **Workload refresh (fog)** — narrowed: Compose restart-triggering is `sync` invoking `docker compose up -d`, with correctness resting on the stamp rather than on `sync` being installed. What remains fog is whether Envweave ever triggers restarts it was not invoked for.
+- **Workload refresh (fog)** — narrowed: Compose restart-triggering is `sync` invoking `docker compose up -d`, with correctness resting on the stamp rather than on `sync` being installed. What remains fog is whether Wenv ever triggers restarts it was not invoked for.
 
 ## Deferred (recorded, not dropped)
 

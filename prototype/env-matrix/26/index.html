@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<title>PROTOTYPE — Wenv environment matrix (ticket #20)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 22.
   Cell affordance decided: PENCIL — every editable slot carries a faint
@@ -402,7 +402,7 @@
 <div id="main">
 <header>
   <button class="iconbtn" id="menubtn" onclick="setSide(!document.getElementById('side').classList.contains('open'))" title="menu" aria-label="open navigation">☰</button>
-  <span class="crumb">envweave <span>/</span> acme <span>/</span> <span id="projname" style="color:var(--tx)">demo</span></span>
+  <span class="crumb">wenv <span>/</span> acme <span>/</span> <span id="projname" style="color:var(--tx)">demo</span></span>
   <span class="grow"></span>
   <button class="drafts" id="drafts" hidden onclick="openPublish()" title="review and publish"></button>
   <span class="ctl"><span class="lbl">acting as</span>
@@ -447,9 +447,9 @@ const K=(folder,name,type,secret,required,values,invalid,changed,desc)=>(
 const all=v=>({dev:v,stg:v,prd:v,pre:v});
 
 const KEYS=[
-  K('app','APP_NAME','string',false,'all',all('Envweave Demo')),
+  K('app','APP_NAME','string',false,'all',all('Wenv Demo')),
   K('app','APP_URL','url',false,'all',
-    {dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.envweave.dev'},{},['prd']),
+    {dev:'http://localhost:8080',stg:'https://stg.wenv.dev',prd:'https://wenv.dev',pre:'https://pr-{n}.preview.wenv.dev'},{},['prd']),
   K('app','PORT','int',false,'all',all('8080')),
   K('app','LOG_LEVEL','string',false,'all',{dev:'debug',stg:'info',prd:'info',pre:'info'}),
   K('app','FEATURE_MATRIX_V2','bool',false,'none',{dev:'false',stg:'false',prd:'false',pre:'true'},{},['pre']),
@@ -526,7 +526,7 @@ KEYS.find(k=>k.name==='LOG_LEVEL').constraints={pattern:'debug|info|warn|error'}
 })();
 const folders=()=>[...new Set(KEYS.map(k=>k.folder))];
 /* per-project key store: the demo project is seeded, others start empty */
-const PDATA={'envweave-demo':KEYS.slice()};
+const PDATA={'wenv-demo':KEYS.slice()};
 /* per-env published revision number (revision ADR #11: per-env monotonic) */
 const REV={dev:41,stg:38,prd:29,pre:12};
 
@@ -701,7 +701,7 @@ function renderEmpty(kind){
     <p>declare a key once, give each environment its own value — the matrix shows the whole configuration surface at a glance.</p>
     <div class="ecta">
       <button class="btn primary" onclick="openCreate(null)">declare first key</button>
-      <button class="btn" onclick="alert('imports run through the CLI:\n\n  envweave scaffold --from .env\n\nreview the generated definitions, apply, then import values (source-of-truth flow, ticket #13). Out of scope for this prototype.')">import from .env</button>
+      <button class="btn" onclick="alert('imports run through the CLI:\n\n  wenv scaffold --from .env\n\nreview the generated definitions, apply, then import values (source-of-truth flow, ticket #13). Out of scope for this prototype.')">import from .env</button>
     </div>`;
   else el.innerHTML=`${EMPTY_ICON}
     <h3>no problems</h3>
@@ -776,7 +776,7 @@ function render(){
 }
 
 /* ============================ app shell (variants) ============================ */
-const PROJECTS=['envweave-demo','adhd-kanban','poketracker','initiative-tracker'];
+const PROJECTS=['wenv-demo','adhd-kanban','poketracker','initiative-tracker'];
 let PROJ=PROJECTS[0];
 const VAR='c'; /* shell settled: rail + panel */
 function setSide(open){
@@ -794,7 +794,7 @@ function pickProject(p){
   KEYS.length=0;KEYS.push(...(PDATA[p]||[]));
   PROJ=p;
   S.drafts.clear();S.revealed.clear();S.collapsed.clear();S.filter=null;closeSheet();
-  document.getElementById('projname').textContent=p.replace('envweave-','');
+  document.getElementById('projname').textContent=p.replace('wenv-','');
   render();
   setSide(false);
 }

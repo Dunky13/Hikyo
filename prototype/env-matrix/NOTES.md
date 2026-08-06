@@ -259,7 +259,7 @@ active state, matrix reduced to problem keys (empty groups skipped),
 
 ## Iteration 18 — empty state + real projects (critique issue 2)
 
-Per-project key store: envweave-demo is seeded, the other projects start
+Per-project key store: wenv-demo is seeded, the other projects start
 empty and keep whatever you declare (drafts/reveals clear on switch).
 Empty project shows a first-run state: what the matrix is, a primary
 "declare first key" (the create sheet gains a group field when no groups

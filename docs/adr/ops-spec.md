@@ -1,10 +1,10 @@
-# Envweave v1 operational & deployment spec (ADR, locked 2026-08-05)
+# Wenv v1 operational & deployment spec (ADR, locked 2026-08-05)
 
-> **Amended by the flat-model ADR ([flat-model.md](./flat-model.md), 2026-08-06, [#40](https://github.com/Dunky13/envweave/issues/40), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the § 8 chain-depth tombstone resolves to a deleted bound and § 13 re-anchors to that ADR; § 14's outstanding-amendment note is discharged. Environment-count cap and publish-work cap stand with their values.
+> **Amended by the flat-model ADR ([flat-model.md](./flat-model.md), 2026-08-06, [#40](https://github.com/Dunky13/wenv/issues/40), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the § 8 chain-depth tombstone resolves to a deleted bound and § 13 re-anchors to that ADR; § 14's outstanding-amendment note is discharged. Environment-count cap and publish-work cap stand with their values.
 
 > **Declared amendment (2026-08-06, [multi-instance.md](./multi-instance.md), per the [oss-mechanics.md](./oss-mechanics.md) amendment procedure):** the composable-maxima catalogue gains the multi-instance entries — directory outbound client bounds (per-remote deadline, response cap, remote count, parallel fan-out, coalescing window, per-viewer and instance-wide aggregate trigger rates) and workspace-session lifetime values (idle/absolute, handoff transaction expiry). Air-gap statement extended: an instance with zero configured remotes performs zero outbound directory connections — behavior unchanged by construction. Details in [multi-instance.md](./multi-instance.md).
 
-Context: every locked ADR delegated its concrete operational values here — bounds, defaults, cadences, and runbook obligations that are policy, not architecture. This ADR consolidates all of them ([#32](https://github.com/Dunky13/envweave/issues/32)). It decides values; it re-derives no mechanism. Where a mechanism is named, the owning ADR is linked and its text governs. The synthesis ticket ([#27](https://github.com/Dunky13/envweave/issues/27)) assembles; contradictions found here reopen the owning ticket, never get silently patched.
+Context: every locked ADR delegated its concrete operational values here — bounds, defaults, cadences, and runbook obligations that are policy, not architecture. This ADR consolidates all of them ([#32](https://github.com/Dunky13/wenv/issues/32)). It decides values; it re-derives no mechanism. Where a mechanism is named, the owning ADR is linked and its text governs. The synthesis ticket ([#27](https://github.com/Dunky13/wenv/issues/27)) assembles; contradictions found here reopen the owning ticket, never get silently patched.
 
 Every bound in this document is **loud**: hitting it is a named, user-visible refusal (per-surface error naming the bound), never a silent truncation or a silent degradation. All defaults are overridable at the stated scope unless marked fixed.
 
@@ -27,7 +27,7 @@ No shipped profiles; one set of defaults. Bigger hardware buys headroom, not dif
 
 ### Backups ([encryption ADR](./encryption-model.md) — retention bound mandatory)
 
-- **Backup retention: 180 days. No `unlimited` option exists.** Crypto-erasure was removed because the key hierarchy travels in every backup; an immortal backup is an immortal ciphertext archive. The bound is enforced by runbook + shipped timer defaults, since Envweave cannot reach off-box files — **erasure is therefore operator-conditional**: the shipped prune rule only governs copies the operator's tooling manages, and any off-box copy outside it extends the window. The shipped pruner deletes exports where `age > 180 d`, reports its last successful prune (doctor + metric), and pre-migration auto-exports additionally prune on `count > 3` (§ 11).
+- **Backup retention: 180 days. No `unlimited` option exists.** Crypto-erasure was removed because the key hierarchy travels in every backup; an immortal backup is an immortal ciphertext archive. The bound is enforced by runbook + shipped timer defaults, since Wenv cannot reach off-box files — **erasure is therefore operator-conditional**: the shipped prune rule only governs copies the operator's tooling manages, and any off-box copy outside it extends the window. The shipped pruner deletes exports where `age > 180 d`, reports its last successful prune (doctor + metric), and pre-migration auto-exports additionally prune on `count > 3` (§ 11).
 - **Honest erasure formula, stated in operator docs, scoped precisely:** true erasure = **time to GC eligibility + up to 180 days of backup aging**. GC eligibility is activity-dependent: a payload must age past 90 days **and** be displaced from its environment's last 10 revisions **and** be neither pinned nor current nor under `unlimited` retention. For an actively-publishing environment at defaults that lands at **≈ 270 days**; a quiet environment retains its last 10 **indefinitely** — the keep-if-either rule guarantees rollback material at the deliberate cost of an unbounded erasure clock for those payloads. Pins are visible retention exceptions (§ 8).
 - **Recipient hygiene: exactly one age identity per retention class** (one for backups; one for optional long-term escrow if the operator opts in). Retiring a class = destroying its identity **and** every decrypted copy; one survivor of either kind defeats erasure (locked #14).
 
@@ -96,7 +96,7 @@ Proxy trust & WebAuthn deployment guidance (runbook): default = no trusted proxi
 
 | Value | Default |
 |---|---|
-| `envweave-token` lifetime | **90 d** default · **365 d** instance ceiling |
+| `wenv-token` lifetime | **90 d** default · **365 d** instance ceiling |
 | Federation binding lifetime | **same terms: 90 d / 365 d** (locked "same terms"; these are the numbers) |
 | `indefinite` | distinct value behind `allow_indefinite`, **default off** (locked); covers **both** credential lifetimes and federation bindings; flipping the flag is itself audited. Homelab opts in deliberately. |
 | Concurrent live credentials per SA | **5** — rotation overlap needs 2; the cap kills mint-spray |
@@ -113,10 +113,10 @@ Tightening a lifetime ceiling enumerates affected credentials before clamping (l
 
 ## 6. Docker Compose client values ([compose ADR](./compose-integration.md))
 
-- **Offline snapshot max age: 7 d**, server-asserted expiry, per-target overridable **downward only**. Rationale: snapshots exist for boot-ordering (Envweave is a container in the same stack) and short outages; 7 d bounds revocation for a box that never fetches without bricking stacks over a vacation-length outage. Clock-rollback residual stays as #18 stated it.
+- **Offline snapshot max age: 7 d**, server-asserted expiry, per-target overridable **downward only**. Rationale: snapshots exist for boot-ordering (Wenv is a container in the same stack) and short outages; 7 d bounds revocation for a box that never fetches without bricking stacks over a vacation-length outage. Clock-rollback residual stays as #18 stated it.
 - **Sync timer: conditional fetch every 5 min** (shipped systemd timer example); cursor makes steady state cheap; well under the per-principal server cap.
 - **Render-generation retention: current stamped generation + previous 3.** The stamped generation is never collected (locked).
-- **Runtime directories:** plaintext only ever on tmpfs — `/run/envweave/<target>/` (system) or `$XDG_RUNTIME_DIR/envweave/` (user). Durable state (stamps, generations, snapshots) under `/var/lib/envweave/` or `$XDG_STATE_HOME/envweave/`, `0700` dirs / `0600` files (matches #22's client local-state rule, doctor-verified). Reference systemd unit + timer ship; OpenRC/cron documented.
+- **Runtime directories:** plaintext only ever on tmpfs — `/run/wenv/<target>/` (system) or `$XDG_RUNTIME_DIR/wenv/` (user). Durable state (stamps, generations, snapshots) under `/var/lib/wenv/` or `$XDG_STATE_HOME/wenv/`, `0700` dirs / `0600` files (matches #22's client local-state rule, doctor-verified). Reference systemd unit + timer ship; OpenRC/cron documented.
 - **Stamp key and snapshot key are deliberately not backed up.** Both are local-random cache keys: loss = harmless full re-render / re-fetch when next online. Backing them up widens the offline-disclosure surface for zero recovery value. Stated so nobody "fixes" it.
 - **Reconnect reconciliation is an ordering rule, not a window:** offline per-key audit records flush to the server **before** the next fetch proceeds. A box that can fetch can reconcile. The never-reconnecting box remains #18's stated residual: disclosure with no server-side record.
 - **`run --` preflight (the `execve` composite bound):** before exec, the client sums the rendered environment (`name=value\0` bytes), the inherited environment, and argv against the runtime limit (`sysconf(_SC_ARG_MAX)` minus a 64 KiB safety margin) and **refuses loud pre-exec** naming the overage — the per-value cap (§ 8) bounds one string, not the composite, and `E2BIG` at exec time is the wrong layer to discover it.
@@ -200,14 +200,14 @@ Tightening a lifetime ceiling enumerates affected credentials before clamping (l
 | Outbox concurrency | **1 per target** (the exclusive per-target lease is locked; this states it as the concurrency), **4 targets in flight per org** (§ 10 budget) |
 | Provider response body cap | **1 MiB** read limit on every Forgejo API response |
 | Ledger bound | **≤ 10 000 rows per target**, loud refusal (mirrors the key envelope) |
-| Breadcrumb sentinel | exact string **`MANAGED_BY_ENVWEAVE`** on both surfaces (locked name; this fixes the value as the literal, no interpolation — the *ledger* is authority, the breadcrumb is a human hint, locked) |
+| Breadcrumb sentinel | exact string **`MANAGED_BY_WENV`** on both surfaces (locked name; this fixes the value as the literal, no interpolation — the *ledger* is authority, the breadcrumb is a human hint, locked) |
 | Minimal-token recipe | runbook: Forgejo **scoped PAT, write-only, `write:repository` + `write:organization` only as the target scope requires**, floor ≈ v1.21 verified by `TestConnection` (locked refuse-by-name below floor) |
 
 ## 13. Cross-cutting posture
 
 - **Air-gap: first-class documented mode, free by construction** — every egress dependency was already rejected by locked decisions (hosted IdPs killed on egress-as-boot-requirement #16; static JWKS exists for exactly this #17; no telemetry; release signatures verified client-side at install). The runbook lists the three things that change: static JWKS file, offline install artifacts, manual update cadence. **CI invariant: the server boots and serves with outbound network denied.**
 - **HA: none in v1, said plainly.** Single server replica; sqlite is single-writer; the operator's leader election is failover for the operator, not the server. Scale-out is a post-v1 trigger recorded at the MVP boundary (#26).
-- **Signing re-key/revocation** (existence required by #22): offline cosign key custody; re-key and revocation mechanics are fixed by the [OSS mechanics ADR](oss-mechanics.md) (#33), which this spec delegates to — release-range key validity (cutoff/activation, **no overlapping signing window** — this supersedes an earlier one-release-overlap sketch here), recovery-root-signed revocation, monotonic trust metadata. The human ceremony (custody, steps, ownership) is governance → [OSS project mechanics #33](https://github.com/Dunky13/envweave/issues/33).
+- **Signing re-key/revocation** (existence required by #22): offline cosign key custody; re-key and revocation mechanics are fixed by the [OSS mechanics ADR](oss-mechanics.md) (#33), which this spec delegates to — release-range key validity (cutoff/activation, **no overlapping signing window** — this supersedes an earlier one-release-overlap sketch here), recovery-root-signed revocation, monotonic trust metadata. The human ceremony (custody, steps, ownership) is governance → [OSS project mechanics #33](https://github.com/Dunky13/wenv/issues/33).
 - **Release support policy → #33** (cadence, versioning, support window are governance). This spec keeps only upgrade *mechanics* (§ 11).
 
 ## 14. Boundary notes

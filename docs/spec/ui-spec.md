@@ -1,4 +1,4 @@
-# Envweave — UI & Interaction Specification (synthesis, 2026-08-06)
+# Wenv — UI & Interaction Specification (synthesis, 2026-08-06)
 
 Binds the design system ([DESIGN.md](../../DESIGN.md) — dual theme dark-default, OKLCH tokens, AAA-leaning accessibility, state-never-color-only), the five locked reference prototypes, and the UI obligations the ADRs delegated to synthesis. The prototypes are the reference for structure and interaction shape; DESIGN.md is the reference for visual language; the owning ADR is the reference for semantics. The 1.0 gate's S3 criterion ([mvp-boundary.md](../adr/mvp-boundary.md)) requires a closed flow registry with one Playwright flow each and the pinned assertion set (axe-core serious/critical = 0, ARIA text with color stripped, focus indicators, contrast ≥ 4.5:1, touch ≥ 44 px, computed styles vs DESIGN.md tokens).
 
@@ -6,11 +6,11 @@ Binds the design system ([DESIGN.md](../../DESIGN.md) — dual theme dark-defaul
 
 | Surface | Reference | Ticket |
 |---|---|---|
-| Environment matrix (signature surface; flat model trialed and adopted here) | `prototype/env-matrix/` iteration 31 | [#20](https://github.com/Dunky13/envweave/issues/20) |
-| Secret reveal, masking & multi-env editing — **ceremony modal**; validation-error presentation; write-only replacement; change review & confirm | `prototype/reveal-edit/` iteration 6 | [#21](https://github.com/Dunky13/envweave/issues/21) |
-| App chrome — organisation, account & access surfaces (incl. `definitions_source` select + read-only consequence) | `prototype/app-chrome/` iteration 15 | [#29](https://github.com/Dunky13/envweave/issues/29) |
-| Version history & rollback — list + detail, write-presence-only secret signals, others'-pending markers, least-blast restore preview, pins | `prototype/revision-history/` iteration 6 | [#30](https://github.com/Dunky13/envweave/issues/30) |
-| Workload integration & machine-identity surfaces — write-only credential list, display-once mint, grant-mutation warning, federation management, restore reconciliation, K8s CR-condition vocabulary | `prototype/machine-access/` iteration 3 | [#31](https://github.com/Dunky13/envweave/issues/31) |
+| Environment matrix (signature surface; flat model trialed and adopted here) | `prototype/env-matrix/` iteration 31 | [#20](https://github.com/Dunky13/wenv/issues/20) |
+| Secret reveal, masking & multi-env editing — **ceremony modal**; validation-error presentation; write-only replacement; change review & confirm | `prototype/reveal-edit/` iteration 6 | [#21](https://github.com/Dunky13/wenv/issues/21) |
+| App chrome — organisation, account & access surfaces (incl. `definitions_source` select + read-only consequence) | `prototype/app-chrome/` iteration 15 | [#29](https://github.com/Dunky13/wenv/issues/29) |
+| Version history & rollback — list + detail, write-presence-only secret signals, others'-pending markers, least-blast restore preview, pins | `prototype/revision-history/` iteration 6 | [#30](https://github.com/Dunky13/wenv/issues/30) |
+| Workload integration & machine-identity surfaces — write-only credential list, display-once mint, grant-mutation warning, federation management, restore reconciliation, K8s CR-condition vocabulary | `prototype/machine-access/` iteration 3 | [#31](https://github.com/Dunky13/wenv/issues/31) |
 
 ## ADR-delegated UI deltas (carried by synthesis)
 
@@ -26,7 +26,7 @@ Binds the design system ([DESIGN.md](../../DESIGN.md) — dual theme dark-defaul
 
 ## Git-mode definitions state ([source-of-truth.md](../adr/source-of-truth.md))
 
-When `definitions_source: git`, definition-editing surfaces are read-only with a persistent banner: **"Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`."** A blocked edit explains itself with that sentence plus the last-applied provenance labels (commit/ref/actor) when present — labels are display-only, never trusted. Envweave stores no repository URL (it never reads a repository), so the banner names the mechanism, not a repo link.
+When `definitions_source: git`, definition-editing surfaces are read-only with a persistent banner: **"Definitions for this project are managed in Git — changes arrive through `definitions plan` / `definitions apply`."** A blocked edit explains itself with that sentence plus the last-applied provenance labels (commit/ref/actor) when present — labels are display-only, never trusted. Wenv stores no repository URL (it never reads a repository), so the banner names the mechanism, not a repo link.
 
 **Declaration authoring statement** (every declaration ingress, both modes): free-text declaration fields (descriptions, enum labels, schema annotations) are **exported to Git in definitions bundles and are to be treated as public — never paste secret values**. This is the UI restatement of the bundle's documentation-class guarantee; the structural backstop is S2 scanning.
 

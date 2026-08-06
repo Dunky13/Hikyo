@@ -1,10 +1,10 @@
-# Envweave — Self-hoster checklist (synthesis deliverable, 2026-08-06)
+# Wenv — Self-hoster checklist (synthesis deliverable, 2026-08-06)
 
 [mvp-boundary.md](../adr/mvp-boundary.md) §3 binds 1.0 wholesale to the oss-mechanics **decidable self-hoster test**: every capability in the spec set must be fully exercisable by a self-hoster — policy, API shape, recovery path, tenancy behavior, data transformation. Any capability failing is a **synthesis-blocking defect**. This checklist runs the instrument over the §1.2 capability list plus the four promotions. It is re-asserted against the release candidate's capability list at 1.0 (§6 item 4).
 
 Verdict legend: **PASS** = the capability meets the oss-mechanics test, quoted in full:
 
-> **The self-hoster test:** every functional and administrative outcome — running, configuring, backing up, restoring, upgrading, and operating Envweave, including everything a hosted tenant can see or do — must be achievable by a self-hoster using only released open-source artifacts and documented public interfaces. Hosted-side code may *schedule and operate* those public interfaces; it may never contain an exclusive capability, policy engine, API, recovery mechanism, tenancy control, or data transformation.
+> **The self-hoster test:** every functional and administrative outcome — running, configuring, backing up, restoring, upgrading, and operating Wenv, including everything a hosted tenant can see or do — must be achievable by a self-hoster using only released open-source artifacts and documented public interfaces. Hosted-side code may *schedule and operate* those public interfaces; it may never contain an exclusive capability, policy engine, API, recovery mechanism, tenancy control, or data transformation.
 
 (The hosted-tenant clause and hosted-side-code restriction are vacuously satisfied at 1.0 — no hosted offering exists — and become load-bearing at the follow-on SaaS map's non-preclusion gate; the checklist asserts the 1.0 half: no capability requires anything beyond released artifacts and documented public interfaces.)
 
@@ -23,11 +23,11 @@ Verdict legend: **PASS** = the capability meets the oss-mechanics test, quoted i
 | K1–K3 encryption, backup/restore, headline guarantee | PASS | Root key operator-held; age backups to operator-owned identities; restore drill on floor hardware |
 | S1 API / S2 CLI | PASS | One `/api/v1` surface; CLI local |
 | S3 Web UI | PASS | embed.FS, no CDN |
-| S4 definitions Git flow | PASS | Envweave never reads a repository; any Git host (or none) works |
+| S4 definitions Git flow | PASS | Wenv never reads a repository; any Git host (or none) works |
 | M1 machine identities & federation | PASS | Bearer path needs nothing external; OIDC federation works against self-hosted CI (Forgejo Actions) and static-JWKS air-gap alternative exists |
 | M2 Compose delivery | PASS | exec wrapper + dotenv, systemd timer |
 | M3 K8s operator | PASS | Own minimal operator, K3s floor documented, Pi-class footprint |
-| M4 deployment adapters | PASS | Forgejo adapter: self-hostable end to end. GitHub adapter: every functional and administrative outcome (configure, plan, sync, adopt, scrub) is achievable using only the released binary and GitHub's documented public REST API — no Envweave-side gate, no undocumented interface; the counterparty being a third-party platform (github.com, or self-hosted GHES best-effort) is the capability's subject, not a barrier the test measures |
+| M4 deployment adapters | PASS | Forgejo adapter: self-hostable end to end. GitHub adapter: every functional and administrative outcome (configure, plan, sync, adopt, scrub) is achievable using only the released binary and GitHub's documented public REST API — no Wenv-side gate, no undocumented interface; the counterparty being a third-party platform (github.com, or self-hosted GHES best-effort) is the capability's subject, not a barrier the test measures |
 | M5 import | PASS | All connectors read local files or self-hosted sources; ambient credentials only |
 | M6 multi-instance | PASS | Symmetric, no "main"; zero remotes = zero outbound |
 | O1 single binary & migrations | PASS | `--dev` sqlite; prod explicit datastore |

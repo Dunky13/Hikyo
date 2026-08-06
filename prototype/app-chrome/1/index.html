@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave app chrome (ticket #29)</title>
+<title>PROTOTYPE — Wenv app chrome (ticket #29)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #29, iteration 1.
   Question: how do the surfaces AROUND the matrix hang together — org
@@ -348,7 +348,7 @@
 
 <div class="modal-box" id="codesmodal" role="dialog" aria-modal="true" aria-label="recovery codes">
   <h4>Recovery codes</h4>
-  <div class="oncewarn"><b>Shown once.</b> Envweave stores only hashes — after this dialog closes these codes
+  <div class="oncewarn"><b>Shown once.</b> Wenv stores only hashes — after this dialog closes these codes
     cannot be displayed again, only replaced.</div>
   <div class="codes" id="codesgrid"></div>
   <label style="display:flex;gap:9px;align-items:center;font-size:13px;margin-top:6px;cursor:pointer">
@@ -438,8 +438,8 @@ let GRANTS=[
 const SESSIONS=[
   {type:'browser',label:'Safari · macOS',detail:'193.28.x.x · Amsterdam',last:'now',current:true},
   {type:'browser',label:'Firefox · Fedora',detail:'193.28.x.x · Amsterdam',last:'2 days ago'},
-  {type:'cli',label:'envweave CLI',detail:'macbook.tail-net · device authorization',last:'25 min ago'},
-  {type:'cli',label:'envweave CLI',detail:'pi-cluster-0 · device authorization',last:'6 days ago'},
+  {type:'cli',label:'wenv CLI',detail:'macbook.tail-net · device authorization',last:'25 min ago'},
+  {type:'cli',label:'wenv CLI',detail:'pi-cluster-0 · device authorization',last:'6 days ago'},
 ];
 let FACTORS={passkeys:[{n:'MacBook Touch ID',added:'2026-05-12'},{n:'YubiKey 5C',added:'2026-05-12'}],
   totp:true,password:true,codesGenerated:false,passkeyOnly:false};
@@ -573,7 +573,7 @@ function renderCrumb(){
   const c=$('crumb');c.innerHTML='';
   const o=curOrg();const multi=myOrgs().length>1;
   const seg=[];
-  seg.push('<span>envweave</span>');
+  seg.push('<span>wenv</span>');
   seg.push('<span class="sep">/</span>');
   if(S.v==='b'&&multi){
     seg.push(`<button class="orgbtn" onclick="toggleOrgPop(event)" aria-haspopup="true">${o.name} <span class="car">▾</span></button>`);
@@ -798,14 +798,14 @@ function pageInstance(){
       <div style="margin-top:12px"><button class="btn primary" onclick="alert('org created (demo)')">+ create organization</button></div>
     </div>
     <div class="card"><h3>Instance settings</h3>
-      <div class="rowline"><div class="main"><span class="t">Server URL / RP ID</span><span class="d">immutable after install — shown, not editable</span></div><span class="grow"></span><span class="tag mono">envweave.went.io</span></div>
+      <div class="rowline"><div class="main"><span class="t">Server URL / RP ID</span><span class="d">immutable after install — shown, not editable</span></div><span class="grow"></span><span class="tag mono">wenv.went.io</span></div>
       <div class="rowline"><div class="main"><span class="t">Audit retention</span><span class="d">instance-scoped policy (audit ADR)</span></div><span class="grow"></span><span class="tag mono">security: unlimited</span></div>
       <div class="rowline"><div class="main"><span class="t">Machine-credential ceiling</span><span class="d">instance ceiling clamps org values</span></div><span class="grow"></span><span class="tag mono">90d</span></div>
     </div>
     <div class="card qcard"><h3>Open question for this ticket</h3>
       <div class="note" style="margin-top:0">How much of this exists in the v1 UI at all?<br><br>
       <b>Option A</b> — this page as shown: org create + read-mostly instance settings in the UI; bootstrap, crypto rotation, backup/restore stay CLI-only.<br>
-      <b>Option B</b> — no instance surface in the v1 UI: everything via <span class="mini">envweave admin …</span> / <span class="mini">instance-config</span> CLI; the UI starts at the organization.<br><br>
+      <b>Option B</b> — no instance surface in the v1 UI: everything via <span class="mini">wenv admin …</span> / <span class="mini">instance-config</span> CLI; the UI starts at the organization.<br><br>
       Everything below org creation (root-key ops, migrate, restore, break-glass) is locked CLI-side regardless (API/CLI ADR).</div>
     </div>
   </div>`;

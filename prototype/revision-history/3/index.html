@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave version history &amp; rollback (ticket #30)</title>
+<title>PROTOTYPE — Wenv version history &amp; rollback (ticket #30)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #30, iteration 3 "PANES + PIN CLARITY".
   Marc's iteration-2 verdict: view b (list + detail panes) wins — it is now
@@ -528,7 +528,7 @@
 <div id="main">
 <header>
   <button class="iconbtn" id="menubtn" onclick="setSide(!document.getElementById('side').classList.contains('open'))" title="menu" aria-label="open navigation">☰</button>
-  <span class="crumb">envweave <span>/</span> acme <span>/</span> <span style="color:var(--tx)">demo</span></span>
+  <span class="crumb">wenv <span>/</span> acme <span>/</span> <span style="color:var(--tx)">demo</span></span>
   <span class="grow"></span>
   <button class="drafts" id="drafts" hidden onclick="openPublish()" title="review and publish"></button>
   <span class="ctl"><span class="lbl">acting as</span>
@@ -567,8 +567,8 @@ const envById=id=>ENVS.find(e=>e.id===id);
 const K=(folder,name,type,secret,values,desc)=>({folder,name,type,secret,values:values||{},desc});
 const all=v=>({dev:v,stg:v,prd:v,pre:v});
 const KEYS=[
-  K('app','APP_NAME','string',false,all('Envweave Demo')),
-  K('app','APP_URL','url',false,{dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.envweave.dev'}),
+  K('app','APP_NAME','string',false,all('Wenv Demo')),
+  K('app','APP_URL','url',false,{dev:'http://localhost:8080',stg:'https://stg.wenv.dev',prd:'https://wenv.dev',pre:'https://pr-{n}.preview.wenv.dev'}),
   K('app','PORT','int',false,all('8080')),
   K('app','LOG_LEVEL','string',false,{dev:'debug',stg:'info',prd:'info',pre:'info'}),
   K('app','FEATURE_MATRIX_V2','bool',false,{dev:'true',stg:'true',prd:'false',pre:'true'}),
@@ -614,7 +614,7 @@ const HIST={
     h(22,'sam',33,'s10',[{key:'SENTRY_DSN',kind:'added',old:undefined,new:'https://s2@sentry.io/12'},{key:'LOG_LEVEL',kind:'edited',old:'warn',new:'info'}]),
     h(21,'marc',41,'s10',[{key:'DATABASE_URL',kind:'edited',old:'postgres://ew@db-old.prd:5432/ew',new:'postgres://ew@db.prd:5432/ew'}]),
     h(20,'marc',50,'s9',[{key:'TRACE_SAMPLE_RATE',kind:'added',old:undefined,new:'0.5'}]),
-    h(19,'sam',58,'s9',[{key:'APP_URL',kind:'edited',old:'https://old.envweave.dev',new:'https://envweave.dev'}]),
+    h(19,'sam',58,'s9',[{key:'APP_URL',kind:'edited',old:'https://old.wenv.dev',new:'https://wenv.dev'}]),
     h(18,'marc',66,'s8',[{key:'SESSION_SECRET',kind:'edited',old:'s3cr3t-prd-ancient',new:'s3cr3t-prd-old66'}]),
   ],
   stg:[
@@ -813,7 +813,7 @@ function toggleGroup(f){
 }
 
 /* ============================ shell ============================ */
-const PROJECTS=['envweave-demo','adhd-kanban','poketracker','initiative-tracker'];
+const PROJECTS=['wenv-demo','adhd-kanban','poketracker','initiative-tracker'];
 const monogram=p=>p.split(/[-_]/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const projHue=p=>(PROJECTS.indexOf(p)*137.5)%360;
 function setSide(open){
@@ -827,7 +827,7 @@ function jumpGroup(f){
 }
 function renderShell(){
   document.getElementById('side').innerHTML=`
-    <div class="stitle" style="padding-top:14px">envweave-demo</div>
+    <div class="stitle" style="padding-top:14px">wenv-demo</div>
     <div class="stitle">groups</div>
     ${folders().map(f=>`<button class="srow" onclick="jumpGroup('${f}')"><span class="mono">${f}/</span>
       <span class="cnt">${KEYS.filter(k=>k.folder===f).length}</span></button>`).join('')}
@@ -837,7 +837,7 @@ function renderShell(){
   document.getElementById('rail').innerHTML=
     PROJECTS.map((p,i)=>`<button class="pav ${i===0?'act':''}" title="${p}"
       style="${i===0?'':`background:oklch(0.32 0.04 ${projHue(p)});color:oklch(0.85 0.05 ${projHue(p)})`}"
-      ${i===0?'':`onclick="toast('prototype: only envweave-demo is populated')"`}>${monogram(p)}</button>`).join('');
+      ${i===0?'':`onclick="toast('prototype: only wenv-demo is populated')"`}>${monogram(p)}</button>`).join('');
   const dr=document.getElementById('drafts');
   dr.hidden=S.drafts.size===0;
   dr.textContent=`${S.drafts.size} staged restore${S.drafts.size>1?'s':''} · review & publish…`;

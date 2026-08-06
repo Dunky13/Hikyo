@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<title>PROTOTYPE — Wenv environment matrix (ticket #20)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #20.
   Question: does a side-by-side environment matrix communicate inheritance,
@@ -346,9 +346,9 @@ const K=(folder,name,type,secret,required,defaults,layers,invalid,changed,desc)=
   {folder,name,type,secret,required,defaults,layers:layers||{},invalid:invalid||{},changed:changed||[],desc});
 
 const KEYS=[
-  K('app','APP_NAME','string',false,'all','Envweave Demo',{},{},[],'Display name, shared everywhere.'),
+  K('app','APP_NAME','string',false,'all','Wenv Demo',{},{},[],'Display name, shared everywhere.'),
   K('app','APP_URL','url',false,'all','http://localhost:8080',
-    {stg:{v:'https://stg.envweave.dev'},prd:{v:'https://envweave.dev'},pre:{v:'https://pr-{n}.preview.envweave.dev'}},{},['prd'],
+    {stg:{v:'https://stg.wenv.dev'},prd:{v:'https://wenv.dev'},pre:{v:'https://pr-{n}.preview.wenv.dev'}},{},['prd'],
     'Public base URL. Overridden per deployed environment.'),
   K('app','PORT','int',false,'all','8080',{},{},[]),
   K('app','LOG_LEVEL','string',false,'all','info',{dev:{v:'debug'}},{},[]),
@@ -524,7 +524,7 @@ function renderA(){
   const fn=S.footnote?footnoteA(S.footnote):`<span>hover a cell for its provenance — where the value resolves from, layer by layer.</span>`;
   return `
   <div class="masthead">
-    <h1>acme / <em>envweave-demo</em> — configuration ledger</h1>
+    <h1>acme / <em>wenv-demo</em> — configuration ledger</h1>
     <div class="tally"><b>${KEYS.length}</b> keys · <b>4</b> environments ·
       <b class="bad">${p.inv}</b> violations · <b class="bad">${p.miss}</b> required unset</div>
   </div>
@@ -624,7 +624,7 @@ function renderB(){
   }
   return `
   <header>
-    <h1>envweave<span>/</span>acme<span>/</span>envweave-demo</h1>
+    <h1>wenv<span>/</span>acme<span>/</span>wenv-demo</h1>
     <span class="env-tags">${ENVS.map(e=>`<i class="${e.protected?'prot':''}">${e.id}${e.base?'←'+e.base:''}</i>`).join('')}</span>
     <span class="grow"></span>
     <input class="search" placeholder="filter keys…" value="${esc(S.search)}" oninput="S.search=this.value;render();this.focus();this.setSelectionRange(this.value.length,this.value.length)">
@@ -685,7 +685,7 @@ function renderC(){
   }
   return `
   <div class="top">
-    <div><h1>envweave-demo <span class="w">— the weave</span></h1>
+    <div><h1>wenv-demo <span class="w">— the weave</span></h1>
     <div class="sub">Values flow left to right along each environment's base chain. A filled pill is set in that lane; a ghost pill points back at where it comes from.</div></div>
     <div class="legend">
       <span><span class="pill own">value</span>set here</span>

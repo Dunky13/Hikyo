@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave environment matrix (ticket #20)</title>
+<title>PROTOTYPE — Wenv environment matrix (ticket #20)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #20, iteration 6.
   NO INHERITANCE (trial, supersedes ADR #10 pending formal amendment +
@@ -278,7 +278,7 @@
 </head>
 <body data-theme="dark">
 <header>
-  <span class="crumb">envweave <span>/</span> acme <span>/</span> demo</span>
+  <span class="crumb">wenv <span>/</span> acme <span>/</span> demo</span>
   <span class="grow"></span>
   <span class="drafts" id="drafts" hidden></span>
   <span class="ctl"><span class="lbl">acting as</span>
@@ -317,9 +317,9 @@ const K=(folder,name,type,secret,required,values,invalid,changed,desc)=>(
 const all=v=>({dev:v,stg:v,prd:v,pre:v});
 
 const KEYS=[
-  K('app','APP_NAME','string',false,'all',all('Envweave Demo')),
+  K('app','APP_NAME','string',false,'all',all('Wenv Demo')),
   K('app','APP_URL','url',false,'all',
-    {dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.envweave.dev'},{},['prd']),
+    {dev:'http://localhost:8080',stg:'https://stg.wenv.dev',prd:'https://wenv.dev',pre:'https://pr-{n}.preview.wenv.dev'},{},['prd']),
   K('app','PORT','int',false,'all',all('8080')),
   K('app','LOG_LEVEL','string',false,'all',{dev:'debug',stg:'info',prd:'info',pre:'info'}),
   K('app','FEATURE_MATRIX_V2','bool',false,'none',{dev:'false',stg:'false',prd:'false',pre:'true'},{},['pre']),

@@ -114,7 +114,7 @@ my phone." Product is mobile-first, so the org-placement variants must differ
 *on the phone*, not just desktop:
 
 - **a** mobile: drawer opens with an organizations section (drawer owns orgs).
-- **b** mobile: compact crumb (`envweave /` prefix hidden ≤700px), org
+- **b** mobile: compact crumb (`wenv /` prefix hidden ≤700px), org
   segment opens a full-width sheet under the header with scrim; drawer has
   no org section.
 - **c** mobile: org monogram button in the header opens the switcher
@@ -131,7 +131,7 @@ Plus mobile header fixed to a single row (was stacking 4 rows tall).
   and the switcher deleted.
 - **Instance surface: in the v1 UI, full CLI ↔ UI feature parity** for
   instance management (#25's parity principle extended to instance scope).
-  Reason: envweave may run locally / VPS / k8s / docker while managing orgs
+  Reason: wenv may run locally / VPS / k8s / docker while managing orgs
   and projects hosted elsewhere — the CLI is not always the convenient
   surface. The instance page now shows org create, editable instance-config
   values, and keys & crypto (master-key / token-key rotation, reencrypt
@@ -142,7 +142,7 @@ Plus mobile header fixed to a single row (was stacking 4 rows tall).
 
 **New exploration (own wayfinder ticket, NOT decided here):** Portainer-style
 multi-instance management — one MAIN instance connects to and manages other
-envweave instances. Sketched as a "Connected instances" card (main badge,
+wenv instances. Sketched as a "Connected instances" card (main badge,
 reachable/unreachable states, connect button) purely to react to; the
 decision (what "manage" means, credential model, tenancy/threat-model
 consequences, v1 or not) belongs to that ticket and the MVP boundary.
@@ -242,7 +242,7 @@ Then a **Codex placement audit** (gpt-5.6-sol, high effort, read-only):
 13. Panel group rows now do something on desktop: scroll the matrix to the
     group anchor; problems row scrolls to the violation cell.
 14. Tag vocabulary: `.tag` = categorical status only; instance values
-    (`envweave.went.io`, `90d`) and CLI refs are now unbordered
+    (`wenv.went.io`, `90d`) and CLI refs are now unbordered
     `code.val` / `code.cliv` text.
 
 **Rejected / deferred (3):**

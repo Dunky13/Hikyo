@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PROTOTYPE — Envweave app chrome (ticket #29)</title>
+<title>PROTOTYPE — Wenv app chrome (ticket #29)</title>
 <!--
   THROWAWAY PROTOTYPE — wayfinder ticket #29, iteration 10.
 
@@ -48,14 +48,14 @@
     Variants b/c and the switcher are removed.
   - INSTANCE SURFACE DECIDED IN: full CLI<->UI feature parity for instance
     management (#25's parity principle extended to the instance scope) —
-    envweave may run local/VPS/k8s/docker while managing orgs and projects
+    wenv may run local/VPS/k8s/docker while managing orgs and projects
     hosted elsewhere, so the CLI is not always the convenient surface. The
     one exception stays: the SystemProof local set (init, migrate, restore
     reconciliation, break-glass) is local host authority by locked ADR #23/
     #25 and deliberately has no UI.
   - NEW EXPLORATION (open question, own wayfinder ticket): Portainer-style
     multi-instance management — one MAIN instance connects to and manages
-    other envweave instances. Sketched as a "Connected instances" card on
+    other wenv instances. Sketched as a "Connected instances" card on
     the instance surface to react to; the decision itself is out of this
     ticket's scope.
 
@@ -418,7 +418,7 @@
 
 <div class="modal-box" id="codesmodal" role="dialog" aria-modal="true" aria-label="recovery codes">
   <h4>Recovery codes</h4>
-  <div class="oncewarn"><b>Shown once.</b> Envweave stores only hashes — after this dialog closes these codes
+  <div class="oncewarn"><b>Shown once.</b> Wenv stores only hashes — after this dialog closes these codes
     cannot be displayed again, only replaced.</div>
   <div class="codes" id="codesgrid"></div>
   <label style="display:flex;gap:9px;align-items:center;font-size:13px;margin-top:6px;cursor:pointer;min-height:44px">
@@ -534,8 +534,8 @@ let GRANTS=[
 /* condensed matrix demo data (subset of env-matrix/31's) */
 const MXENVS=[{id:'dev',n:'development'},{id:'stg',n:'staging'},{id:'prd',n:'production',prot:true},{id:'pre',n:'preview'}];
 const MXKEYS=[
-  {g:'app',k:'APP_NAME',v:{dev:'Envweave Demo',stg:'Envweave Demo',prd:'Envweave',pre:'Envweave Demo'}},
-  {g:'app',k:'APP_URL',v:{dev:'http://localhost:8080',stg:'https://stg.envweave.dev',prd:'https://envweave.dev',pre:'https://pr-{n}.preview.dev'}},
+  {g:'app',k:'APP_NAME',v:{dev:'Wenv Demo',stg:'Wenv Demo',prd:'Wenv',pre:'Wenv Demo'}},
+  {g:'app',k:'APP_URL',v:{dev:'http://localhost:8080',stg:'https://stg.wenv.dev',prd:'https://wenv.dev',pre:'https://pr-{n}.preview.dev'}},
   {g:'app',k:'PORT',v:{dev:'8080',stg:'8080',prd:'8080',pre:'8080'}},
   {g:'db',k:'DATABASE_URL',sec:true,v:{dev:'•',stg:'•',prd:'•',pre:'•'}},
   {g:'db',k:'DB_POOL_SIZE',v:{dev:'5',stg:'10',prd:'25',pre:'5'}},
@@ -546,8 +546,8 @@ let INVITES=[];
 const SESSIONS=[
   {type:'browser',label:'Safari · macOS',detail:'193.28.x.x · Amsterdam',last:'now',current:true},
   {type:'browser',label:'Firefox · Fedora',detail:'193.28.x.x · Amsterdam',last:'2 days ago'},
-  {type:'cli',label:'envweave CLI',detail:'macbook.tail-net · device authorization',last:'25 min ago'},
-  {type:'cli',label:'envweave CLI',detail:'pi-cluster-0 · device authorization',last:'6 days ago'},
+  {type:'cli',label:'wenv CLI',detail:'macbook.tail-net · device authorization',last:'25 min ago'},
+  {type:'cli',label:'wenv CLI',detail:'pi-cluster-0 · device authorization',last:'6 days ago'},
 ];
 let FACTORS={passkeys:[{n:'MacBook Touch ID',added:'2026-05-12'},{n:'YubiKey 5C',added:'2026-05-12'}],
   totp:true,password:true,codesGenerated:false,passkeyOnly:false};
@@ -703,7 +703,7 @@ function renderCrumb(){
   const c=$('crumb');c.innerHTML='';
   const o=curOrg();
   const seg=[];
-  seg.push('<span class="hidemobile">envweave</span>');
+  seg.push('<span class="hidemobile">wenv</span>');
   seg.push('<span class="sep hidemobile">/</span>');
   seg.push(`<span class="dimseg">${o.name}</span>`);
   const proj=visProjects(o).find(p=>p.id===S.project);
@@ -967,7 +967,7 @@ function pageInstance(){
   const cli=v=>`<code class="cliv" title="same operation on the CLI">$ ${v}</code>`;
   return `<div class="page">
     <h2>Instance administration</h2>
-    <p class="sub">Full CLI ↔ UI parity (decided round 3): envweave may run locally, on a VPS, in k8s or docker while
+    <p class="sub">Full CLI ↔ UI parity (decided round 3): wenv may run locally, on a VPS, in k8s or docker while
       managing orgs and projects hosted elsewhere — the CLI is not always the convenient surface. Every operation here
       is the same grant-evaluated network operation the CLI verb calls; nothing is UI-special (#25).</p>
     ${jump([['sec-iorgs','Organizations'],['sec-iconf','Settings'],['sec-icrypto','Keys & crypto'],['sec-iconn','Instances']])}
@@ -977,23 +977,23 @@ function pageInstance(){
         <span class="grow"></span><span class="tag mono">active</span></div>`).join('')}
       <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" onclick="alert('org created (demo)')">+ create organization</button>
-        ${cli('envweave org create')}</div>
+        ${cli('wenv org create')}</div>
     </div>
 
     <div class="card" id="sec-iconf"><h3>Instance settings <span class="mini" style="text-transform:none;letter-spacing:0">· instance-config</span></h3>
-      <div class="rowline"><div class="main"><span class="t">Server URL / RP ID</span><span class="d">immutable after install — shown, never editable (any surface)</span></div><span class="grow"></span><code class="val">envweave.went.io</code></div>
+      <div class="rowline"><div class="main"><span class="t">Server URL / RP ID</span><span class="d">immutable after install — shown, never editable (any surface)</span></div><span class="grow"></span><code class="val">wenv.went.io</code></div>
       <div class="rowline"><div class="main"><span class="t">Audit retention</span><span class="d">security / access classes (audit ADR)</span></div><span class="grow"></span>
         <code class="val">security: unlimited</code><button class="btn" onclick="alert('edit (demo)')">edit</button></div>
       <div class="rowline"><div class="main"><span class="t">Machine-credential ceiling</span><span class="d">clamps every org value</span></div><span class="grow"></span>
         <code class="val">90d</code><button class="btn" onclick="alert('edit (demo)')">edit</button></div>
-      <div class="note">Same operations as ${'`'}envweave instance-config${'`'} — one permission language, one audit trail.</div>
+      <div class="note">Same operations as ${'`'}wenv instance-config${'`'} — one permission language, one audit trail.</div>
     </div>
 
     <div class="card" id="sec-icrypto"><h3>Keys & crypto</h3>
       <div class="rowline"><div class="main"><span class="t">Master key</span><span class="d">rotated 2026-06-20 · all tier-3 keys wrapped current</span></div>
-        <span class="grow"></span>${cli('envweave rotate-master-key')}<button class="btn" onclick="alert('rotation started (demo)')">rotate</button></div>
+        <span class="grow"></span>${cli('wenv rotate-master-key')}<button class="btn" onclick="alert('rotation started (demo)')">rotate</button></div>
       <div class="rowline"><div class="main"><span class="t">Change-token key</span><span class="d">warned operation: every client cursor invalidates, next fetch is full — no restart wave</span></div>
-        <span class="grow"></span>${cli('envweave rotate-token-key')}<button class="btn" onclick="alert('warned + started (demo)')">rotate</button></div>
+        <span class="grow"></span>${cli('wenv rotate-token-key')}<button class="btn" onclick="alert('warned + started (demo)')">rotate</button></div>
       <div class="rowline"><div class="main"><span class="t">Re-encryption</span><span class="d">background, resumable, per-row</span></div>
         <span class="grow"></span><span class="tag">idle</span></div>
       <div class="note">Root-key rotation, ${'`'}init${'`'}, ${'`'}migrate${'`'}, restore reconciliation and break-glass are
@@ -1003,9 +1003,9 @@ function pageInstance(){
 
     <div class="card qcard" id="sec-iconn"><h3>Connected instances — exploration</h3>
       <div class="rowline"><div class="main"><span class="t">this instance</span>
-        <span class="d">envweave.went.io · v1.0</span></div><span class="grow"></span><span class="tag acc">main</span></div>
+        <span class="d">wenv.went.io · v1.0</span></div><span class="grow"></span><span class="tag acc">main</span></div>
       <div class="rowline"><div class="main"><span class="t">pi-cluster</span>
-        <span class="d">envweave.k3s.internal · v1.0 · reachable · 1 org, 4 projects</span></div>
+        <span class="d">wenv.k3s.internal · v1.0 · reachable · 1 org, 4 projects</span></div>
         <span class="grow"></span><span class="tag mono">connected</span></div>
       <div class="rowline"><div class="main"><span class="t">hetzner-vps</span>
         <span class="d">ew.example.dev · v0.9 · unreachable 2h — last known state shown</span></div>

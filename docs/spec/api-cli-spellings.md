@@ -1,4 +1,4 @@
-# Envweave — API & CLI spellings deferred to synthesis (2026-08-06)
+# Wenv — API & CLI spellings deferred to synthesis (2026-08-06)
 
 [api-cli-surface.md](../adr/api-cli-surface.md) is the API/CLI spec's skeleton; several later ADRs joined its closed grammar at declared join points and delegated their **exact spellings** to this document. Every spelling here is bound by the locked grammar (noun-verb families, output classes, print triad, exit codes, parity rules) and by the delegating ADR's constraints; a spelling that would violate either is a defect here, not a licence to reinterpret the ADR. Nothing here adds a verb class, an output class, or an endpoint outside the declared join points.
 
@@ -7,23 +7,23 @@
 Human-session verbs (full UI↔CLI parity: binding CRUD, mapping-table administration, credential mint/rotate/revoke, provisioned directory views; the *wire* endpoints under `/api/v1/orgs/{org}/scim/v2/{binding}/…` are fixed in the ADR and are parity-exempt protocol paths):
 
 ```
-envweave scim binding create --org <org> --provider <provider>
-envweave scim binding list   [--org <org>]
-envweave scim binding show   <binding>
-envweave scim binding delete <binding>            # runs the ADR's atomic 4-step teardown
+wenv scim binding create --org <org> --provider <provider>
+wenv scim binding list   [--org <org>]
+wenv scim binding show   <binding>
+wenv scim binding delete <binding>            # runs the ADR's atomic 4-step teardown
 
-envweave scim mapping add    <binding> --group <idp-group-id> --template <template>
-envweave scim mapping update <binding> --group <idp-group-id> --template <template>
-envweave scim mapping remove <binding> --group <idp-group-id>
-envweave scim mapping list   <binding>
+wenv scim mapping add    <binding> --group <idp-group-id> --template <template>
+wenv scim mapping update <binding> --group <idp-group-id> --template <template>
+wenv scim mapping remove <binding> --group <idp-group-id>
+wenv scim mapping list   <binding>
 
-envweave scim credential mint   <binding>                    # a NEW credential; several may be live
-envweave scim credential list   <binding>                    # ids + metadata, never token material
-envweave scim credential show   <binding> <credential-id>
-envweave scim credential revoke <binding> <credential-id>
+wenv scim credential mint   <binding>                    # a NEW credential; several may be live
+wenv scim credential list   <binding>                    # ids + metadata, never token material
+wenv scim credential show   <binding> <credential-id>
+wenv scim credential revoke <binding> <credential-id>
 
-envweave scim user  list <binding>                           # provisioned directory views
-envweave scim group list <binding>
+wenv scim user  list <binding>                           # provisioned directory views
+wenv scim group list <binding>
 ```
 
 Credentials are **plural and id-addressable**: overlap rotation is mint-new → update IdP → revoke-old, identical authority throughout, per the machine-identity credential model the ADR inherits. `mint` is display-once under the print triad; formula `manage-members(org)` ∧ reauth.
@@ -35,14 +35,14 @@ Admin REST resources (ordinary `/api/v1` grammar, proof-carrying): `/api/v1/orgs
 Joins the **existing `instance-config` verb surface** — no new top-level verb family. Identity providers are a resource under that family (OIDC providers administer identically; `--kind` selects):
 
 ```
-envweave instance-config provider create --kind saml --name <name> \
+wenv instance-config provider create --kind saml --name <name> \
     (--metadata-file <xml> | --metadata-url <url>)    # URL fetch runs the fingerprint ceremony
-envweave instance-config provider list
-envweave instance-config provider show    <name>
-envweave instance-config provider update  <name> …
-envweave instance-config provider disable <name>
-envweave instance-config provider remove  <name>
-envweave instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
+wenv instance-config provider list
+wenv instance-config provider show    <name>
+wenv instance-config provider update  <name> …
+wenv instance-config provider disable <name>
+wenv instance-config provider remove  <name>
+wenv instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
 ```
 
 All under `instance-config` capability, grant-evaluated `InstanceProof`, network path — never the local-admin class. `refresh-metadata` is the ADR's "action on the provider resource".
@@ -59,9 +59,9 @@ Per-provider ACS paths satisfy the validation algorithm's per-provider `Destinat
 One top-level human-only verb `import`; the ADR fixes **three entry modes** — the spellings:
 
 ```
-envweave import                                   # wizard: TTY, no source arguments
-envweave import --from <k8s|sops|vault|infisical> --project <p> --environment <e> [selectors]
-envweave import --mapping <mapping.json>          # replay, non-interactive
+wenv import                                   # wizard: TTY, no source arguments
+wenv import --from <k8s|sops|vault|infisical> --project <p> --environment <e> [selectors]
+wenv import --mapping <mapping.json>          # replay, non-interactive
 ```
 
 `import` without a TTY and without `--from`/`--mapping` is a hard error. Flag-mode selectors per connector: `--file <path>` (file mode, all connectors); live mode: `--live --namespace <ns> [--name <secret>]` (k8s), `--live --mount <m> [--path <prefix>] [--kv-version <1|2>]` (vault; version auto-detected from the mount when omitted); `--env <slug>` selects the source environment inside an Infisical export; SOPS and Infisical are file-only in v1. Flag mode targets exactly one `(project, environment)` and declares every value `string`. Common: `--out-dir <dir>` for the emitted artifacts (values files under the secret-file discipline: dirfd-parent-checked `O_EXCL`, `0600`).

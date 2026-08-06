@@ -1,6 +1,6 @@
 # GitHub REST API facts for the Actions deployment adapter
 
-Date: 2026-08-06. Scope: verified facts (official GitHub docs only, URL per fact) needed by the Envweave GitHub Actions adapter design — Actions secrets/variables CRUD at repo/org/environment scope, limits, fine-grained PAT gating, rate limits, environments, GHES. Anything the docs do not settle is in the final "Ambiguities / unverified" section, not silently interpolated.
+Date: 2026-08-06. Scope: verified facts (official GitHub docs only, URL per fact) needed by the Wenv GitHub Actions adapter design — Actions secrets/variables CRUD at repo/org/environment scope, limits, fine-grained PAT gating, rate limits, environments, GHES. Anything the docs do not settle is in the final "Ambiguities / unverified" section, not silently interpolated.
 
 All endpoint facts from the versioned REST reference (`apiVersion=2022-11-28`): [secrets](https://docs.github.com/en/rest/actions/secrets?apiVersion=2022-11-28), [variables](https://docs.github.com/en/rest/actions/variables?apiVersion=2022-11-28), [deployment environments](https://docs.github.com/en/rest/deployments/environments?apiVersion=2022-11-28).
 

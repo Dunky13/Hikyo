@@ -1,12 +1,12 @@
-# Envweave — Domain Model (synthesis, 2026-08-06)
+# Wenv — Domain Model (synthesis, 2026-08-06)
 
-The ubiquitous language, as locked in the domain-model grilling ([#7](https://github.com/Dunky13/envweave/issues/7)) and amended by the flat-model ADR ([flat-model.md](../adr/flat-model.md), which supersedes the inheritance model in full). This document is the consolidated current state; the owning ADRs hold the rationale and the full semantics. It decides nothing.
+The ubiquitous language, as locked in the domain-model grilling ([#7](https://github.com/Dunky13/wenv/issues/7)) and amended by the flat-model ADR ([flat-model.md](../adr/flat-model.md), which supersedes the inheritance model in full). This document is the consolidated current state; the owning ADRs hold the rationale and the full semantics. It decides nothing.
 
 ## Hierarchy
 
 **Instance → Organization → Project → Environment → Folder → Key/Value.**
 
-- **Instance** — one Envweave installation. Holds instance configuration, identity providers, remotes, the operator capability set.
+- **Instance** — one Wenv installation. Holds instance configuration, identity providers, remotes, the operator capability set.
 - **Organization** — tenancy boundary. All isolation is application-layer, proof-carrying ([tenant-isolation.md](../adr/tenant-isolation.md)); org admins are trusted within their org ([threat-model.md](../adr/threat-model.md)).
 - **Project** — owns the key catalogue (the schema), environments, service accounts, adapters, per-project DEK ([encryption-model.md](../adr/encryption-model.md)).
 - **Environment** — user-defined per project, display-ordered. **No `base` pointer** (deleted by flat-model); no inheritance of any kind.
@@ -31,7 +31,7 @@ Ergonomics for shared values are three explicit operations with no ongoing relat
 ## Identity & principal vocabulary
 
 - **Human account** — local credential and/or linked external identities `(kind ∈ {oidc, saml}, issuer, subject)`, byte-exact matching ([human-auth.md](../adr/human-auth.md)).
-- **Service account** — machine principal, project-owned, kind `workload | automation`; credentials: `envweave-token` (bearer `ew_…`) or `oidc-federation` ([machine-identities.md](../adr/machine-identities.md)).
+- **Service account** — machine principal, project-owned, kind `workload | automation`; credentials: `wenv-token` (bearer `ew_…`) or `oidc-federation` ([machine-identities.md](../adr/machine-identities.md)).
 - **Provisioning connection** — org-owned machine principal, one per SCIM binding, holds exactly `scim-provision` ([scim-provisioning.md](../adr/scim-provisioning.md)).
 - **Instance connection** — instance-owned machine principal for the multi-instance directory, holds exactly `instance-directory` ([multi-instance.md](../adr/multi-instance.md)).
 - **Grant** — `(principal, capability, scope)` triple with origins (`manual | scim | lockout-retention | structural`); the only authorization input ([permission-model.md](../adr/permission-model.md)).

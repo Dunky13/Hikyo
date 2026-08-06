@@ -1,4 +1,4 @@
-# Envweave — Ops catalogue additions landed at synthesis (2026-08-06)
+# Wenv — Ops catalogue additions landed at synthesis (2026-08-06)
 
 [ops-spec.md](../adr/ops-spec.md) owns every concrete operational value; several post-lock ADRs declared **categories** into its composable-maxima catalogue and delegated the **values** to synthesis. This document lands those values under ops-spec's rules: every bound is a named user-visible refusal; every default is overridable at the stated scope unless marked fixed; all values are sane at the Pi-4/4 GB calibration floor. These rows join the ops-spec decision inventory; contradictions reopen the owning ticket.
 

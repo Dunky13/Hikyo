@@ -10,7 +10,7 @@ Self-hosting developers first (homelab operators, 1-3 orgs, up to ~25 users), pl
 
 ## Product Purpose
 
-Envweave is a fully open-source, self-hosted control plane for validated, inherited secrets and configuration across environments (Docker Compose and Kubernetes first-class). The environment matrix is the product's signature surface. Success: an operator trusts it enough to manage production secrets in it, and understands every resolved value's origin without reading docs.
+Wenv is a fully open-source, self-hosted control plane for validated, inherited secrets and configuration across environments (Docker Compose and Kubernetes first-class). The environment matrix is the product's signature surface. Success: an operator trusts it enough to manage production secrets in it, and understands every resolved value's origin without reading docs.
 
 ## Brand Personality
 
