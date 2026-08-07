@@ -15,6 +15,7 @@ const countOrgs = `-- name: CountOrgs :one
 SELECT COUNT(*) FROM orgs
 `
 
+// wenv:instance-scoped
 func (q *Queries) CountOrgs(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countOrgs)
 	var count int64
@@ -23,6 +24,7 @@ func (q *Queries) CountOrgs(ctx context.Context) (int64, error) {
 }
 
 const createOrg = `-- name: CreateOrg :exec
+
 INSERT INTO orgs (id, name, active, metadata, created_at)
 VALUES ($1, $2, $3, $4, $5)
 `
@@ -35,6 +37,11 @@ type CreateOrgParams struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// The demonstration Org aggregate's statements are instance-scoped
+// operations (org creation/listing is cross-tenant by definition); each is
+// annotated and content-pinned in the allowlist fixture (tenant-isolation
+// ADR invariant 13).
+// wenv:instance-scoped
 func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	_, err := q.db.Exec(ctx, createOrg,
 		arg.ID,
@@ -50,6 +57,7 @@ const getOrg = `-- name: GetOrg :one
 SELECT id, name, active, metadata, created_at FROM orgs WHERE id = $1
 `
 
+// wenv:instance-scoped
 func (q *Queries) GetOrg(ctx context.Context, id string) (Org, error) {
 	row := q.db.QueryRow(ctx, getOrg, id)
 	var i Org
@@ -67,6 +75,7 @@ const listOrgs = `-- name: ListOrgs :many
 SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name
 `
 
+// wenv:instance-scoped
 func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 	rows, err := q.db.Query(ctx, listOrgs)
 	if err != nil {

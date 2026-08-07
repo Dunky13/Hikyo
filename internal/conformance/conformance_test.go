@@ -17,11 +17,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Dunky13/wenv/internal/authz"
+	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/migrate"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
+
+// admin is the corpus's fixture principal: seeded with an instance-scope
+// instance-config grant, so it can drive the instance-scoped Org scaffolding
+// operations. Tenant-scoped scenarios seed their own grants. There is no
+// test-only mint hook — every store call in this suite goes through
+// authorize() exactly as production does.
+const admin = domain.PrincipalID("usr_conformance_admin")
+
+// seed inserts principals and grants with raw SQL: the grant API is #55's,
+// and fixtures are the one place allowed to write these tables directly.
+func seed(t *testing.T, db *store.DB, statements []string) {
+	t.Helper()
+	for _, stmt := range statements {
+		var err error
+		if db.Engine() == store.EnginePostgres {
+			_, err = db.PG().Exec(t.Context(), stmt)
+		} else {
+			_, err = db.SQLiteWrite().ExecContext(t.Context(), stmt)
+		}
+		if err != nil {
+			t.Fatalf("seed %q: %v", stmt, err)
+		}
+	}
+}
+
+func seedAdmin(t *testing.T, db *store.DB) {
+	seed(t, db, []string{
+		`INSERT INTO principals (id, kind, created_at) VALUES ('usr_conformance_admin', 'human', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_conformance_admin', 'usr_conformance_admin', 'instance-config', NULL, NULL, NULL, '2026-01-01T00:00:00Z')`,
+	})
+}
 
 type scenario struct {
 	name string
@@ -37,6 +71,7 @@ var corpus = []scenario{
 	{"duplicate_name_refused", scenarioDuplicate},
 	{"invalid_metadata_refused", scenarioInvalidMetadata},
 	{"missing_org_not_found", scenarioNotFound},
+	{"tenant_chain_roundtrip", scenarioTenantChain},
 	{"concurrent_writes_all_succeed", scenarioConcurrent},
 }
 
@@ -56,6 +91,7 @@ func TestConformanceSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	seedAdmin(t, db)
 	runCorpus(t, db)
 }
 
@@ -98,6 +134,7 @@ func TestConformancePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	seedAdmin(t, db)
 	runCorpus(t, db)
 }
 
@@ -110,8 +147,13 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	// tier3_keys references master_keys: drop order matters.
-	for _, table := range []string{"orgs", "tier3_keys", "master_keys", "key_generations", "goose_db_version"} {
+	// Children before parents: tier3_keys references master_keys, and the
+	// tenant chain is grants -> environments -> projects -> orgs.
+	for _, table := range []string{
+		"grants", "environments", "projects", "principals",
+		"tier3_keys", "master_keys", "key_generations",
+		"orgs", "goose_db_version",
+	} {
 		if _, err := db.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatal(err)
 		}
@@ -124,11 +166,11 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	meta := json.RawMessage(`{"tier":"gold","limits":{"projects":3}}`)
-	created, err := orgs.Create(t.Context(), "roundtrip", true, meta)
+	created, err := orgs.Create(t.Context(), admin, "roundtrip", true, meta)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := orgs.Get(t.Context(), created.ID)
+	got, err := orgs.Get(t.Context(), admin, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +183,11 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	if !got.Active {
 		t.Error("active=true did not round-trip")
 	}
-	inactive, err := orgs.Create(t.Context(), "roundtrip-inactive", false, json.RawMessage(`{}`))
+	inactive, err := orgs.Create(t.Context(), admin, "roundtrip-inactive", false, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotInactive, err := orgs.Get(t.Context(), inactive.ID)
+	gotInactive, err := orgs.Get(t.Context(), admin, inactive.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,11 +209,11 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 func scenarioListOrder(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	for _, name := range []string{"zebra", "alpha", "mango"} {
-		if _, err := orgs.Create(t.Context(), name, false, json.RawMessage(`{}`)); err != nil {
+		if _, err := orgs.Create(t.Context(), admin, name, false, json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	list, err := orgs.List(t.Context())
+	list, err := orgs.List(t.Context(), admin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,13 +228,17 @@ func scenarioListOrder(t *testing.T, db *store.DB) {
 
 func scenarioRollback(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	before, err := orgs.Count(t.Context())
+	before, err := orgs.Count(t.Context(), admin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sentinel := fmt.Errorf("sentinel")
-	err = tx.Write(t.Context(), db, func(ctx context.Context, r store.Repos) error {
-		if err := r.Orgs().Create(ctx, store.Org{
+	err = tx.Write(t.Context(), db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, admin, authz.OpOrgCreate, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		if err := r.Orgs().Create(ctx, p, store.Org{
 			ID: "org_rollback", Name: "rollback-victim",
 			Metadata: json.RawMessage(`{}`), CreatedAt: time.Now(),
 		}); err != nil {
@@ -203,7 +249,7 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 	if err == nil {
 		t.Fatal("closure error must surface")
 	}
-	after, err := orgs.Count(t.Context())
+	after, err := orgs.Count(t.Context(), admin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,26 +260,88 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 
 func scenarioDuplicate(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), "dupe", false, json.RawMessage(`{}`)); err != nil {
+	if _, err := orgs.Create(t.Context(), admin, "dupe", false, json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Create(t.Context(), "dupe", false, json.RawMessage(`{}`)); err == nil {
+	if _, err := orgs.Create(t.Context(), admin, "dupe", false, json.RawMessage(`{}`)); err == nil {
 		t.Fatal("duplicate org name must be refused by the unique constraint")
 	}
 }
 
 func scenarioInvalidMetadata(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), "badjson", false, json.RawMessage(`{not json`)); err == nil {
+	if _, err := orgs.Create(t.Context(), admin, "badjson", false, json.RawMessage(`{not json`)); err == nil {
 		t.Fatal("invalid JSON metadata must be refused at the boundary")
 	}
 }
 
 func scenarioNotFound(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	_, err := orgs.Get(t.Context(), "org_does_not_exist")
+	_, err := orgs.Get(t.Context(), admin, "org_does_not_exist")
 	if err != store.ErrNotFound {
 		t.Fatalf("want store.ErrNotFound, got %v", err)
+	}
+}
+
+// scenarioTenantChain drives the tenant-scoped demonstration aggregates
+// end-to-end — real grants, real proofs — and asserts the canonical
+// cross-engine semantics hold for the new tables too: UTC microsecond
+// timestamps round-trip identically, and the written chain columns are the
+// proof's resolved chain.
+func scenarioTenantChain(t *testing.T, db *store.DB) {
+	orgs := &service.Orgs{DB: db}
+	projects := &service.Projects{DB: db}
+	envs := &service.Environments{DB: db}
+
+	org, err := orgs.Create(t.Context(), admin, "tenant-chain", true, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tenant = domain.PrincipalID("usr_conformance_tenant")
+	seed(t, db, []string{
+		`INSERT INTO principals (id, kind, created_at) VALUES ('usr_conformance_tenant', 'human', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_ct_mp', 'usr_conformance_tenant', 'manage-projects', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_ct_def', 'usr_conformance_tenant', 'definitions-edit', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_ct_read', 'usr_conformance_tenant', 'read', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_ct_edit', 'usr_conformance_tenant', 'edit', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
+	})
+
+	proj, err := projects.Create(t.Context(), tenant, domain.OrgID(org.ID), "conformance-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
+	created, err := envs.Create(t.Context(), tenant, envScope, "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID), Env: domain.EnvID(created.ID)}
+	got, err := envs.Get(t.Context(), tenant, fullScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CreatedAt.Equal(created.CreatedAt) {
+		t.Errorf("environment created_at did not round-trip: stored %v, got %v", created.CreatedAt, got.CreatedAt)
+	}
+	if got.CreatedAt.Location() != time.UTC {
+		t.Errorf("environment created_at not UTC: %v", got.CreatedAt.Location())
+	}
+	if got.OrgID != org.ID || got.ProjectID != proj.ID {
+		t.Errorf("chain columns did not come from the proof: %+v", got)
+	}
+	if err := envs.UpdateNote(t.Context(), tenant, fullScope, "noted"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = envs.Get(t.Context(), tenant, fullScope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Note != "noted" {
+		t.Errorf("note update did not round-trip: %q", got.Note)
 	}
 }
 
@@ -242,7 +350,7 @@ func scenarioNotFound(t *testing.T, db *store.DB) {
 // succeed within the bounded-retry budget.
 func scenarioConcurrent(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	before, err := orgs.Count(t.Context())
+	before, err := orgs.Count(t.Context(), admin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +361,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := orgs.Create(context.Background(), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
+			_, err := orgs.Create(context.Background(), admin, fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
 			errs <- err
 		}()
 	}
@@ -264,7 +372,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 			t.Errorf("concurrent create failed: %v", err)
 		}
 	}
-	after, err := orgs.Count(t.Context())
+	after, err := orgs.Count(t.Context(), admin)
 	if err != nil {
 		t.Fatal(err)
 	}

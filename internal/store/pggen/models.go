@@ -8,6 +8,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Environment struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	Note      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Grant struct {
+	ID          string
+	PrincipalID string
+	Capability  string
+	OrgID       pgtype.Text
+	ProjectID   pgtype.Text
+	EnvID       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+}
+
 type KeyGeneration struct {
 	Scope      string
 	Generation int64
@@ -26,6 +45,19 @@ type Org struct {
 	Name      string
 	Active    bool
 	Metadata  string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Principal struct {
+	ID        string
+	Kind      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
 	CreatedAt pgtype.Timestamptz
 }
 

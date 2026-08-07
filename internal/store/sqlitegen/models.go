@@ -4,6 +4,29 @@
 
 package sqlitegen
 
+import (
+	"database/sql"
+)
+
+type Environment struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	Note      string
+	CreatedAt string
+}
+
+type Grant struct {
+	ID          string
+	PrincipalID string
+	Capability  string
+	OrgID       sql.NullString
+	ProjectID   sql.NullString
+	EnvID       sql.NullString
+	CreatedAt   string
+}
+
 type KeyGeneration struct {
 	Scope      string
 	Generation int64
@@ -22,6 +45,19 @@ type Org struct {
 	Name      string
 	Active    int64
 	Metadata  string
+	CreatedAt string
+}
+
+type Principal struct {
+	ID        string
+	Kind      string
+	CreatedAt string
+}
+
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
 	CreatedAt string
 }
 

@@ -17,6 +17,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
+
+	"github.com/Dunky13/wenv/internal/authz"
+	"github.com/Dunky13/wenv/internal/domain"
 )
 
 type Engine string
@@ -34,7 +37,10 @@ type Config struct {
 	DSN    string
 }
 
-// Org is the demonstration aggregate for the walking skeleton.
+// Org is the demonstration aggregate for the walking skeleton. Its
+// operations are instance-scoped (org administration is cross-tenant by
+// definition), so callers address orgs by id — unlike tenant-owned
+// aggregates, whose addressing comes exclusively from the proof's chain.
 type Org struct {
 	ID        string
 	Name      string
@@ -43,35 +49,108 @@ type Org struct {
 	CreatedAt time.Time
 }
 
-// OrgReader is the read side of the aggregate's repository.
+// Project is a tenant-owned aggregate (chain: org). OrgID appears on reads
+// only; writes bind it from the proof.
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
+	CreatedAt time.Time
+}
+
+// NewProject carries the caller-suppliable fields of a project insert. It
+// deliberately has no chain fields: the org id is bound from the proof by
+// the repository layer, so caller arguments structurally cannot reach the
+// chain columns (tenant-isolation ADR § row shape and lookup discipline).
+type NewProject struct {
+	ID        string
+	Name      string
+	CreatedAt time.Time
+}
+
+// Environment is a tenant-owned aggregate (chain: org, project).
+type Environment struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	Note      string
+	CreatedAt time.Time
+}
+
+// NewEnvironment carries the caller-suppliable fields of an environment
+// insert; chain columns are bound from the proof, as with NewProject.
+type NewEnvironment struct {
+	ID        string
+	Name      string
+	Note      string
+	CreatedAt time.Time
+}
+
+// Every repository method takes a proof as its first argument (after ctx)
+// and verifies it at the store boundary before touching any query — nil,
+// foreign-transaction, ended-transaction and operation-mismatched proofs are
+// rejected fail-closed. Tenant-owned aggregates take no identifiers at all:
+// the addressed chain comes out of the proof, which authorize() resolved
+// in this same transaction.
+
+// OrgReader is the read side of the demonstration aggregate's repository.
 type OrgReader interface {
-	Get(ctx context.Context, id string) (Org, error)
-	List(ctx context.Context) ([]Org, error)
-	Count(ctx context.Context) (int64, error)
+	Get(ctx context.Context, p authz.Proof, id string) (Org, error)
+	List(ctx context.Context, p authz.Proof) ([]Org, error)
+	Count(ctx context.Context, p authz.Proof) (int64, error)
 }
 
 // OrgRepo is the full per-aggregate repository interface. Only transaction
-// closures (internal/store/tx) ever hold one — the read pool hands out
-// OrgReader, so writes cannot bypass the transactional boundary.
+// closures (internal/store/tx) ever hold one.
 type OrgRepo interface {
 	OrgReader
-	Create(ctx context.Context, org Org) error
+	Create(ctx context.Context, p authz.Proof, org Org) error
+}
+
+// ProjectRepo is the projects aggregate (writes only for now; the CRUD
+// surface lands with #48).
+type ProjectRepo interface {
+	Create(ctx context.Context, p authz.Proof, proj NewProject) error
+}
+
+// EnvironmentReader is the read side of the environments aggregate.
+type EnvironmentReader interface {
+	// Get returns the environment addressed by the proof's resolved chain.
+	Get(ctx context.Context, p authz.Proof) (Environment, error)
+}
+
+// EnvironmentRepo is the full environments aggregate.
+type EnvironmentRepo interface {
+	EnvironmentReader
+	Create(ctx context.Context, p authz.Proof, env NewEnvironment) error
+	// UpdateNote mutates the non-chain note column of the environment
+	// addressed by the proof's chain. Chain columns are immutable —
+	// re-parenting is a new row (tenant-isolation ADR).
+	UpdateNote(ctx context.Context, p authz.Proof, note string) error
 }
 
 // Repos bundles the full repositories bound to one write transaction.
 type Repos interface {
 	Orgs() OrgRepo
 	Keys() KeyRepo
+	Projects() ProjectRepo
+	Environments() EnvironmentRepo
 }
 
-// ReadRepos bundles the read-only repositories bound to the read pool.
+// ReadRepos bundles the read-only repositories bound to one read
+// transaction. There is no proof-free read path: authorization is evaluated
+// in-transaction, so reads run under internal/store/tx too.
 type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
+	Environments() EnvironmentReader
 }
 
-// ErrNotFound is the canonical cross-engine "no such row".
-var ErrNotFound = errors.New("not found")
+// ErrNotFound is the canonical cross-engine "no such row" — aliased from
+// domain so every layer shares one sentinel for the unauthorized ≡
+// nonexistent rule without importing the store.
+var ErrNotFound = domain.ErrNotFound
 
 // DB holds the open datastore. SQLite keeps a single write connection
 // (pool of one) and a separate read pool, per the boot-enforced connection
@@ -84,26 +163,37 @@ type DB struct {
 	pool    *pgxpool.Pool
 }
 
-// Engine, SQLiteWrite, and PG are the doors internal/store/tx and the test
-// harness need; Go has no friend packages, so the "service never sees a pgx
-// or sqlite type" rule is carried by the import-boundary test and review,
-// not the type system.
+// Engine, SQLiteWrite, SQLiteRead, and PG are the doors internal/store/tx
+// and the test harness need; Go has no friend packages, so the "service
+// never sees a pgx or sqlite type" rule is carried by the import-boundary
+// test and review, not the type system.
 func (d *DB) Engine() Engine       { return d.engine }
 func (d *DB) SQLiteWrite() *sql.DB { return d.sqWrite }
+func (d *DB) SQLiteRead() *sql.DB  { return d.sqRead }
 func (d *DB) PG() *pgxpool.Pool    { return d.pool }
 
 // sqlitePragmas is the boot-enforced connection policy
 // (system-architecture ADR § Data layer). _pragma parameters apply on every
-// new connection; _txlock=immediate makes write transactions BEGIN IMMEDIATE.
-const sqlitePragmas = "?_txlock=immediate" +
-	"&_pragma=foreign_keys(1)" +
+// new connection.
+const sqlitePragmas = "_pragma=foreign_keys(1)" +
 	"&_pragma=journal_mode(wal)" +
 	"&_pragma=synchronous(FULL)" +
 	"&_pragma=busy_timeout(5000)"
 
-// SQLiteDSN builds the canonical connection string for a database file.
+// SQLiteDSN builds the canonical WRITE connection string for a database
+// file: _txlock=immediate makes write transactions BEGIN IMMEDIATE, so
+// write intent is acquired before any read.
 func SQLiteDSN(path string) string {
-	return "file:" + url.PathEscape(path) + sqlitePragmas
+	return "file:" + url.PathEscape(path) + "?_txlock=immediate&" + sqlitePragmas
+}
+
+// sqliteReadDSN is the read-pool connection string: same enforced pragmas,
+// but NO _txlock=immediate — read transactions open plain deferred BEGINs,
+// and under WAL a reader never blocks the writer. With the write-pool DSN a
+// held read transaction would take sqlite's write intent and starve the
+// single writer through its whole busy_timeout.
+func sqliteReadDSN(path string) string {
+	return "file:" + url.PathEscape(path) + "?" + sqlitePragmas
 }
 
 // Open opens the datastore and, for sqlite, verifies the pragma policy took
@@ -124,13 +214,12 @@ func openSQLite(ctx context.Context, path string) (*DB, error) {
 	if path == "" {
 		return nil, errors.New("store: sqlite path is empty")
 	}
-	dsn := SQLiteDSN(path)
-	write, err := sql.Open("sqlite", dsn)
+	write, err := sql.Open("sqlite", SQLiteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open sqlite write pool: %w", err)
 	}
 	write.SetMaxOpenConns(1)
-	read, err := sql.Open("sqlite", dsn)
+	read, err := sql.Open("sqlite", sqliteReadDSN(path))
 	if err != nil {
 		write.Close()
 		return nil, fmt.Errorf("store: open sqlite read pool: %w", err)
@@ -202,14 +291,4 @@ func (d *DB) Close() error {
 		d.pool.Close()
 	}
 	return errors.Join(errs...)
-}
-
-// Read returns read-only repositories bound to the read side (sqlite read
-// pool / postgres pool), outside any explicit transaction. Writes go through
-// internal/store/tx, which is the only holder of the full Repos.
-func (d *DB) Read() ReadRepos {
-	if d.engine == EnginePostgres {
-		return pgReadRepos{pgRepos{db: d.pool}}
-	}
-	return sqliteReadRepos{sqliteRepos{db: d.sqRead}}
 }

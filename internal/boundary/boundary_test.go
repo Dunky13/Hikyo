@@ -19,18 +19,38 @@ const module = "github.com/Dunky13/wenv"
 var storeImporters = map[string]bool{
 	module + "/internal/service":         true,
 	module + "/internal/app":             true, // construction wiring only
+	module + "/internal/authz":           true, // the resolution surface (store/authn) only — see authnImporters
 	module + "/internal/store":           true,
+	module + "/internal/store/authn":     true,
 	module + "/internal/store/tx":        true,
 	module + "/internal/store/migrate":   true,
 	module + "/internal/store/keyring":   true, // crypto.KeyStore implementation
 	module + "/internal/store/sqlitegen": true,
 	module + "/internal/store/pggen":     true,
 	module + "/internal/conformance":     true, // cross-engine test harness
+	module + "/internal/isolation":       true, // probe harness (#44)
+}
+
+// authnImporters is the stricter allowlist for the authorization package's
+// resolution surface (tenant-isolation ADR § bootstrap carve-out): the reads
+// authorize() needs in order to mint a proof. Only the authorization package
+// consumes it and only the transaction package constructs it (per
+// transaction attempt); the isolation probe harness instruments it in tests.
+var authnImporters = map[string]bool{
+	module + "/internal/authz":       true,
+	module + "/internal/store/authn": true,
+	module + "/internal/store/tx":    true,
+	module + "/internal/isolation":   true, // query-count instrumentation (tests only)
 }
 
 // forbidden direct edges: importer prefix -> banned import prefix.
 var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/server", module + "/internal/store", "handlers cannot reach the datastore directly"},
+	{module + "/internal/server", module + "/internal/authz", "handlers extract artifacts only; authorization happens in the service transaction"},
+	{module + "/internal/authz", module + "/internal/service", "the chokepoint never imports upward"},
+	{module + "/internal/authz", module + "/internal/server", "the chokepoint never imports the HTTP layer"},
+	{module + "/internal/service", module + "/internal/store/pggen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
+	{module + "/internal/service", module + "/internal/store/sqlitegen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
 	{module + "/internal/store", module + "/internal/service", "dependency direction is service→store"},
 	{module + "/internal/store", module + "/internal/server", "store never imports the HTTP layer"},
 	{module + "/cmd/", module + "/internal/store", "main wires through internal/app, not store"},
@@ -135,6 +155,30 @@ func TestForbiddenEdges(t *testing.T) {
 				if strings.HasPrefix(imp, rule.imports) {
 					t.Errorf("%s imports %s: %s", p.ImportPath, imp, rule.why)
 				}
+			}
+		}
+	}
+}
+
+// TestAuthnImportAllowlist enforces the resolution surface's boundary in
+// both directions: only the packages on authnImporters may import it, and it
+// itself builds on generated queries and the domain vocabulary only — never
+// the repository layer (which would create a cycle through authz) and never
+// anything upward.
+func TestAuthnImportAllowlist(t *testing.T) {
+	authn := module + "/internal/store/authn"
+	allowedImports := map[string]bool{
+		module + "/internal/domain":          true,
+		module + "/internal/store/sqlitegen": true,
+		module + "/internal/store/pggen":     true,
+	}
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			if imp == authn && !authnImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: not on the authn-importer allowlist", p.ImportPath, imp)
+			}
+			if p.ImportPath == authn && strings.HasPrefix(imp, module+"/") && !allowedImports[imp] {
+				t.Errorf("%s imports %s: the resolution surface builds on generated queries and domain only", p.ImportPath, imp)
 			}
 		}
 	}

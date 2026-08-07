@@ -14,6 +14,7 @@ import (
 	sqlite "modernc.org/sqlite"
 	sqlitelib "modernc.org/sqlite/lib"
 
+	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/store/pggen"
 	"github.com/Dunky13/wenv/internal/store/sqlitegen"
@@ -29,8 +30,8 @@ type KeyReader interface {
 	// ActiveMasterWrappers returns every active master wrapper (one per
 	// root epoch; two while a root rotation is dual-wrapped; empty at
 	// first boot), newest epoch first.
-	ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error)
-	ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error)
+	ActiveMasterWrappers(ctx context.Context, pf authz.Proof) ([]crypto.WrappedKey, error)
+	ActiveTier3(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error)
 }
 
 // KeyRepo is the transactional keyring repository. InsertTier3 and
@@ -39,10 +40,10 @@ type KeyReader interface {
 // rotation (encryption ADR § Rotation; the rotation operations land later).
 type KeyRepo interface {
 	KeyReader
-	AcquireHierarchyGeneration(ctx context.Context) error
-	InsertMaster(ctx context.Context, k crypto.WrappedKey) error
-	InsertTier3(ctx context.Context, k crypto.WrappedKey) error
-	InsertScopeGeneration(ctx context.Context, p crypto.Purpose, orgID, projectID string) error
+	AcquireHierarchyGeneration(ctx context.Context, pf authz.Proof) error
+	InsertMaster(ctx context.Context, pf authz.Proof, k crypto.WrappedKey) error
+	InsertTier3(ctx context.Context, pf authz.Proof, k crypto.WrappedKey) error
+	InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error
 }
 
 func scopeGenerationKey(p crypto.Purpose, orgID, projectID string) string {
@@ -67,9 +68,12 @@ func parsePurpose(s string) (crypto.Purpose, error) {
 
 // --- sqlite ---
 
-type sqliteKeys struct{ q *sqlitegen.Queries }
+type sqliteKeys struct {
+	q   *sqlitegen.Queries
+	tok *authz.TxToken
+}
 
-func (r sqliteRepos) Keys() KeyRepo { return sqliteKeys{q: sqlitegen.New(r.db)} }
+func (r sqliteRepos) Keys() KeyRepo { return sqliteKeys{q: sqlitegen.New(r.db), tok: r.tok} }
 
 // sqliteUniqueViolation matches exactly the uniqueness extended codes —
 // mirroring postgres 23505. A broader SQLITE_CONSTRAINT match would turn
@@ -80,7 +84,10 @@ func sqliteUniqueViolation(err error) bool {
 		(se.Code() == sqlitelib.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlitelib.SQLITE_CONSTRAINT_PRIMARYKEY)
 }
 
-func (k sqliteKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error) {
+func (k sqliteKeys) ActiveMasterWrappers(ctx context.Context, pf authz.Proof) ([]crypto.WrappedKey, error) {
+	if _, err := authz.Verify(pf, authz.StoreKeysActiveMasterWrappers, k.tok); err != nil {
+		return nil, err
+	}
 	rows, err := k.q.GetActiveMasterKeys(ctx)
 	if err != nil {
 		return nil, err
@@ -109,7 +116,10 @@ func (k sqliteKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedK
 	return out, nil
 }
 
-func (k sqliteKeys) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
+func (k sqliteKeys) ActiveTier3(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
+	if _, err := authz.Verify(pf, authz.StoreKeysActiveTier3, k.tok); err != nil {
+		return crypto.WrappedKey{}, err
+	}
 	row, err := k.q.GetActiveTier3Key(ctx, sqlitegen.GetActiveTier3KeyParams{
 		Purpose: string(p), OrgID: orgID, ProjectID: projectID,
 	})
@@ -151,7 +161,10 @@ func tier3FromSQLite(row sqlitegen.Tier3Key) (crypto.WrappedKey, error) {
 	}, nil
 }
 
-func (k sqliteKeys) AcquireHierarchyGeneration(ctx context.Context) error {
+func (k sqliteKeys) AcquireHierarchyGeneration(ctx context.Context, pf authz.Proof) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysAcquireHierarchyGeneration, k.tok); err != nil {
+		return err
+	}
 	// sqlite: the single write connection plus BEGIN IMMEDIATE already
 	// serializes writers globally; reading the row keeps the call shape (and
 	// proves the row exists) until rotation gives it teeth.
@@ -159,7 +172,10 @@ func (k sqliteKeys) AcquireHierarchyGeneration(ctx context.Context) error {
 	return err
 }
 
-func (k sqliteKeys) InsertMaster(ctx context.Context, key crypto.WrappedKey) error {
+func (k sqliteKeys) InsertMaster(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertMaster, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertMasterKey(ctx, sqlitegen.InsertMasterKeyParams{
 		Version:      int64(key.Version),
 		RootKeyEpoch: int64(key.RootKeyEpoch),
@@ -172,7 +188,10 @@ func (k sqliteKeys) InsertMaster(ctx context.Context, key crypto.WrappedKey) err
 	return err
 }
 
-func (k sqliteKeys) InsertTier3(ctx context.Context, key crypto.WrappedKey) error {
+func (k sqliteKeys) InsertTier3(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertTier3, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertTier3Key(ctx, sqlitegen.InsertTier3KeyParams{
 		ID:               key.ID,
 		Purpose:          string(key.Purpose),
@@ -189,7 +208,10 @@ func (k sqliteKeys) InsertTier3(ctx context.Context, key crypto.WrappedKey) erro
 	return err
 }
 
-func (k sqliteKeys) InsertScopeGeneration(ctx context.Context, p crypto.Purpose, orgID, projectID string) error {
+func (k sqliteKeys) InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertScopeGeneration, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertKeyGeneration(ctx, scopeGenerationKey(p, orgID, projectID))
 	if sqliteUniqueViolation(err) {
 		return crypto.ErrKeyExists
@@ -199,16 +221,22 @@ func (k sqliteKeys) InsertScopeGeneration(ctx context.Context, p crypto.Purpose,
 
 // --- postgres ---
 
-type pgKeys struct{ q *pggen.Queries }
+type pgKeys struct {
+	q   *pggen.Queries
+	tok *authz.TxToken
+}
 
-func (r pgRepos) Keys() KeyRepo { return pgKeys{q: pggen.New(r.db)} }
+func (r pgRepos) Keys() KeyRepo { return pgKeys{q: pggen.New(r.db), tok: r.tok} }
 
 func pgUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func (k pgKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error) {
+func (k pgKeys) ActiveMasterWrappers(ctx context.Context, pf authz.Proof) ([]crypto.WrappedKey, error) {
+	if _, err := authz.Verify(pf, authz.StoreKeysActiveMasterWrappers, k.tok); err != nil {
+		return nil, err
+	}
 	rows, err := k.q.GetActiveMasterKeys(ctx)
 	if err != nil {
 		return nil, err
@@ -236,7 +264,10 @@ func (k pgKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, 
 	return out, nil
 }
 
-func (k pgKeys) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
+func (k pgKeys) ActiveTier3(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
+	if _, err := authz.Verify(pf, authz.StoreKeysActiveTier3, k.tok); err != nil {
+		return crypto.WrappedKey{}, err
+	}
 	row, err := k.q.GetActiveTier3Key(ctx, pggen.GetActiveTier3KeyParams{
 		Purpose: string(p), OrgID: orgID, ProjectID: projectID,
 	})
@@ -277,14 +308,20 @@ func tier3FromPG(row pggen.Tier3Key) (crypto.WrappedKey, error) {
 	}, nil
 }
 
-func (k pgKeys) AcquireHierarchyGeneration(ctx context.Context) error {
+func (k pgKeys) AcquireHierarchyGeneration(ctx context.Context, pf authz.Proof) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysAcquireHierarchyGeneration, k.tok); err != nil {
+		return err
+	}
 	// SELECT ... FOR UPDATE: the row lock serializes tier-3 key creation
 	// against future master/root rotation in the same fence.
 	_, err := k.q.AcquireHierarchyGeneration(ctx)
 	return err
 }
 
-func (k pgKeys) InsertMaster(ctx context.Context, key crypto.WrappedKey) error {
+func (k pgKeys) InsertMaster(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertMaster, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertMasterKey(ctx, pggen.InsertMasterKeyParams{
 		Version:      int64(key.Version),
 		RootKeyEpoch: int64(key.RootKeyEpoch),
@@ -297,7 +334,10 @@ func (k pgKeys) InsertMaster(ctx context.Context, key crypto.WrappedKey) error {
 	return err
 }
 
-func (k pgKeys) InsertTier3(ctx context.Context, key crypto.WrappedKey) error {
+func (k pgKeys) InsertTier3(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertTier3, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertTier3Key(ctx, pggen.InsertTier3KeyParams{
 		ID:               key.ID,
 		Purpose:          string(key.Purpose),
@@ -314,7 +354,10 @@ func (k pgKeys) InsertTier3(ctx context.Context, key crypto.WrappedKey) error {
 	return err
 }
 
-func (k pgKeys) InsertScopeGeneration(ctx context.Context, p crypto.Purpose, orgID, projectID string) error {
+func (k pgKeys) InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysInsertScopeGeneration, k.tok); err != nil {
+		return err
+	}
 	err := k.q.InsertKeyGeneration(ctx, scopeGenerationKey(p, orgID, projectID))
 	if pgUniqueViolation(err) {
 		return crypto.ErrKeyExists

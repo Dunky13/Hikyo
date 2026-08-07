@@ -1,0 +1,58 @@
+[
+  {
+    "operation": "environment.create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "environment.read",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "environment.update-note",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "edit@environment"
+    ]
+  },
+  {
+    "operation": "org.create",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "org.get",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "org.list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "project.create",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-projects@org"
+    ]
+  }
+]

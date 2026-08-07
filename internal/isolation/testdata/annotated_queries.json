@@ -1,0 +1,98 @@
+[
+  {
+    "engine": "postgres",
+    "name": "CountOrgs",
+    "annotation": "instance-scoped",
+    "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
+  },
+  {
+    "engine": "postgres",
+    "name": "CreateOrg",
+    "annotation": "instance-scoped",
+    "hash": "cdff0423a21c54bfd9c34a8cd5d0a1ec1c7b4ca87527082d5b43591bec2403b3"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetOrg",
+    "annotation": "instance-scoped",
+    "hash": "4a4e28b0093acaf4c67487f0e19157cecbee480d5d2bd51e88e88074eb70e47d"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListOrgs",
+    "annotation": "instance-scoped",
+    "hash": "9337bcf28e615461de0c89def036bc4fa7ed06569eea5b7ea6720c117a2c979d"
+  },
+  {
+    "engine": "postgres",
+    "name": "ResolveEnvChain",
+    "annotation": "authn-resolution",
+    "hash": "5943f4da693ec42590ca76214112c8f8088d47f1175824e9c2a03d5a933ed199"
+  },
+  {
+    "engine": "postgres",
+    "name": "ResolveOrgChain",
+    "annotation": "authn-resolution",
+    "hash": "858525baf422152dca9ef3b27517fa18d2ae82dc8515a5439a87cb2523c1e3fe"
+  },
+  {
+    "engine": "postgres",
+    "name": "ResolveProjectChain",
+    "annotation": "authn-resolution",
+    "hash": "5987f3b6b5f15c366598fc6bd4f53aff29afb1bc4f8906e3ea035100b9c8bc7f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CountOrgs",
+    "annotation": "instance-scoped",
+    "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CreateOrg",
+    "annotation": "instance-scoped",
+    "hash": "44fad26ccfb907a29f577de5526304360423c7fc7a3243e816e05e60842572ef"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetOrg",
+    "annotation": "instance-scoped",
+    "hash": "1f5399c8a18f2b8b804f8fcfb4552f19506b2df88063b896f702223ce2423742"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListOrgs",
+    "annotation": "instance-scoped",
+    "hash": "9337bcf28e615461de0c89def036bc4fa7ed06569eea5b7ea6720c117a2c979d"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ResolveEnvChain",
+    "annotation": "authn-resolution",
+    "hash": "0ade92c799a3de304a066e75e4a999229c9f4f7605f734525f7a3aea44dff4c9"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ResolveOrgChain",
+    "annotation": "authn-resolution",
+    "hash": "c412e48568290a58389f66fb232627ade47cd9f39b667f922efe0be97c724085"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ResolveProjectChain",
+    "annotation": "authn-resolution",
+    "hash": "d50ebc48ca5cc932cb252816dc45e15e55619315c99e1593a06e1c07eb216de7"
+  }
+]
