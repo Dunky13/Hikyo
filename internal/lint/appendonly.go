@@ -184,15 +184,17 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers, muta
 		for _, file := range p.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				fn, ok := n.(*ast.FuncDecl)
-				if !ok {
+				if !ok || fn.Body == nil {
 					return true
 				}
+				// Inspect every REFERENCE to a mutating generated query, not
+				// just calls. `x.InsertFoo(...)` and `f := x.InsertFoo` select
+				// the same method; catching only the first let a method value
+				// smuggle the write past the guard (round-2 finding). Naming
+				// the method at all, in any position, must sit inside an
+				// approved writer.
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					sel, ok := call.Fun.(*ast.SelectorExpr)
+					sel, ok := n.(*ast.SelectorExpr)
 					if !ok {
 						return true
 					}
@@ -208,8 +210,8 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers, muta
 						return true
 					}
 					findings = append(findings, fmt.Sprintf(
-						"denialwriter: %s: %s calls the mutating query %s, and %s is not in the pinned enumerated write list — every proof-free writer in the resolution surface must be named there (audit-model ADR amendment part 4, extended by #47)",
-						p.Fset.Position(call.Pos()), fn.Name.Name, f.Name(), fn.Name.Name))
+						"denialwriter: %s: %s names the mutating query %s, and %s is not in the pinned enumerated write list — every proof-free writer in the resolution surface must be named there (audit-model ADR amendment part 4, extended by #47)",
+						p.Fset.Position(sel.Pos()), fn.Name.Name, f.Name(), fn.Name.Name))
 					return true
 				})
 				return false

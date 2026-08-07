@@ -320,6 +320,12 @@ func (l *Limiter) RecordSuccess(presented string) {
 // with no live delay carries only a failure count, and forgetting it forgives
 // an attacker rather than punishing a user — the safe direction when the
 // alternative is a map keyed by every username anyone has ever guessed.
+//
+// If every tracked account still has a live backoff, the stale sweep frees
+// nothing and the map would grow past its bound. So, exactly like the IP
+// eviction, fall back to forgetting the account whose delay expires soonest:
+// it is the one closest to being forgiven anyway, and the instance-wide
+// semaphore still bounds the actual work an admitted attempt can do.
 func (l *Limiter) evictAccounts() {
 	now := l.now()
 	for k := range l.failures {
@@ -327,6 +333,22 @@ func (l *Limiter) evictAccounts() {
 			delete(l.failures, k)
 			delete(l.blocked, k)
 		}
+	}
+	if len(l.failures) < MaxTrackedSubjects {
+		return
+	}
+	var soonestKey [32]byte
+	var soonest time.Time
+	found := false
+	for k := range l.failures {
+		until := l.blocked[k]
+		if !found || until.Before(soonest) {
+			soonestKey, soonest, found = k, until, true
+		}
+	}
+	if found {
+		delete(l.failures, soonestKey)
+		delete(l.blocked, soonestKey)
 	}
 }
 

@@ -382,10 +382,11 @@ func TestDenialWriterCatchesSecondWriter(t *testing.T) {
 	}
 	findings := CheckDenialWriterIn(pkgs, surface, map[string]bool{"WriteDenial": true}, mutating)
 	assertFindings(t, findings, []string{
-		"SecondWriter calls the mutating query InsertTenantAuditEvent, and SecondWriter is not in the pinned enumerated write list",
+		"SecondWriter names the mutating query InsertTenantAuditEvent, and SecondWriter is not in the pinned enumerated write list",
+		"MethodValueWriter names the mutating query InsertTenantAuditEvent, and MethodValueWriter is not in the pinned enumerated write list",
 	})
 	for _, f := range findings {
-		if strings.Contains(f, "WriteDenial calls") || strings.Contains(f, "ReadsAreFine") {
+		if strings.Contains(f, "WriteDenial names") || strings.Contains(f, "ReadsAreFine") {
 			t.Errorf("analyzer flagged a licensed write or a read: %s", f)
 		}
 	}

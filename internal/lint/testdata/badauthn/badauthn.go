@@ -24,3 +24,12 @@ func SecondWriter(ctx context.Context, q *sqlitegen.Queries, p sqlitegen.InsertT
 func ReadsAreFine(ctx context.Context, q *sqlitegen.Queries, id string) (string, error) {
 	return q.GetPrincipalKind(ctx, id)
 }
+
+// MethodValueWriter is the subtler violation the round-2 reviewer named: a
+// mutating generated query is not CALLED directly but taken as a method value
+// and invoked through the variable. Naming the method at all must be caught,
+// or the guard is one indirection away from useless.
+func MethodValueWriter(ctx context.Context, q *sqlitegen.Queries, p sqlitegen.InsertTenantAuditEventParams) error {
+	write := q.InsertTenantAuditEvent
+	return write(ctx, p)
+}

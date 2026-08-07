@@ -100,17 +100,18 @@ func ParseArtifact(value string, want ArtifactType) error {
 	}
 	body, sum := payload[:len(payload)-checksumChars], payload[len(payload)-checksumChars:]
 
-	// The accepted grammar must be exactly what NewArtifact can produce.
-	// Checking only the checksum accepted arbitrary bytes of arbitrary
-	// length, so a scanner or a log filter reasoning about "what a wenv token
-	// looks like" would have been reasoning about a much larger set than the
-	// one that exists — and an oversized body would have reached the hashing
-	// path unbounded.
-	if len(body) < minBodyChars || len(body) > maxBodyChars {
+	// The accepted grammar must be EXACTLY what NewArtifact can produce, and a
+	// character-count bound is not exact: leading zero bytes shorten the body,
+	// so a fixed [min,max] window both admits lengths no mint emits and
+	// rejects the rare short body a real mint does. Decode instead — the body
+	// must be the canonical base62 of exactly bodyBytes — which makes the
+	// accepted set the emittable set with nothing on either side.
+	raw, ok := decodeBase62(body)
+	if !ok || len(raw) != bodyBytes || base62(raw) != body {
 		return ErrMalformedArtifact
 	}
-	for i := range len(body) + checksumChars {
-		if !isBase62(payload[i]) {
+	for i := range checksumChars {
+		if !isBase62(sum[i]) {
 			return ErrMalformedArtifact
 		}
 	}
@@ -120,17 +121,35 @@ func ParseArtifact(value string, want ArtifactType) error {
 	return nil
 }
 
-// The body is base62 of exactly bodyBytes of CSPRNG output. Leading zero
-// bytes render as leading zero digits, so the length varies slightly around
-// ceil(256 / log2(62)) = 43; the bounds admit that variation and nothing
-// else.
-const (
-	maxBodyChars = 44
-	minBodyChars = 40
-)
-
 func isBase62(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+// decodeBase62 is the exact inverse of base62: leading '0' characters become
+// leading zero bytes, the remainder decodes as a big-endian integer. It
+// reports false on any non-alphabet character. Canonicality — that the input
+// is the ONLY encoding of its bytes — is checked by the caller re-encoding
+// the result, so a non-minimal encoding is caught there rather than guessed
+// at here.
+func decodeBase62(sv string) ([]byte, bool) {
+	leadingZeros := 0
+	for leadingZeros < len(sv) && sv[leadingZeros] == '0' {
+		leadingZeros++
+	}
+	n := new(big.Int)
+	radix := big.NewInt(62)
+	for i := 0; i < len(sv); i++ {
+		idx := strings.IndexByte(base62Alphabet, sv[i])
+		if idx < 0 {
+			return nil, false
+		}
+		n.Mul(n, radix)
+		n.Add(n, big.NewInt(int64(idx)))
+	}
+	rest := n.Bytes()
+	out := make([]byte, leadingZeros+len(rest))
+	copy(out[leadingZeros:], rest)
+	return out, true
 }
 
 // checksum is a CRC-32 over the body, base62-encoded to a fixed width. It is

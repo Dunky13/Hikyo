@@ -102,7 +102,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 	t.Run("denial_resolvable_durable_before_response", func(t *testing.T) {
 		before := countTenant("type = 'grant.denied'")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("cross-org probe outcome = %v, want uniform not-found", err)
 		}
@@ -124,7 +124,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 	t.Run("denial_unresolvable_instance_trail", func(t *testing.T) {
 		before := countInstance("type = 'grant.denied'")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: "org_zz", Project: "prj_zz", Env: "env_zz"})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: "org_zz", Project: "prj_zz", Env: "env_zz"})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("unresolvable probe outcome = %v, want uniform not-found", err)
 		}
@@ -149,7 +149,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	})
 
 	t.Run("domain_event_committed_in_transaction", func(t *testing.T) {
-		proj, err := projects.Create(tctx(t), alice, orgA, "audited-project")
+		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,10 +273,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			SourceIP:  "203.0.113.7",
 			Origin:    audit.OriginAPI,
 		})
-		if _, err := envs.Get(wired, bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("resolvable probe = %v", err)
 		}
-		if _, err := envs.Get(wired, bob, domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("unresolvable probe = %v", err)
 		}
 		for _, table := range []string{"audit_tenant_events", "audit_instance_events"} {
@@ -416,10 +416,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := orgsSvc.List(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatal(err)
 		}
-		if err := envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
+		if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
+		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`)); err != nil {
@@ -446,7 +446,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// durable record is what fail-closed forbids.
 		execRaw(t, db, "ALTER TABLE audit_tenant_events RENAME TO audit_tenant_events_broken")
 		defer execRaw(t, db, "ALTER TABLE audit_tenant_events_broken RENAME TO audit_tenant_events")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 		if err == nil {
 			t.Fatal("denied probe answered success under audit-write failure")
 		}

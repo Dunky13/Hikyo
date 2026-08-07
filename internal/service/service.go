@@ -284,13 +284,17 @@ type Projects struct {
 // Create makes a project inside org. The service addresses the scope; the
 // chain the store writes comes from the proof authorize() minted after
 // resolving that scope — never from these arguments.
-func (s *Projects) Create(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, name string) (store.Project, error) {
+func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string) (store.Project, error) {
 	id, err := newID("prj")
 	if err != nil {
 		return store.Project{}, err
 	}
 	proj := store.NewProject{ID: id, Name: name, CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpProjectCreate, domain.Scope{Org: org})
 		if err != nil {
 			return err
@@ -322,13 +326,17 @@ type Environments struct {
 // Create addresses the parent project (Org+Project); Get/UpdateNote address
 // the environment (full chain).
 
-func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, name string) (store.Environment, error) {
+func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (store.Environment, error) {
 	id, err := newID("env")
 	if err != nil {
 		return store.Environment{}, err
 	}
 	env := store.NewEnvironment{ID: id, Name: name, Note: "", CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvCreate, scope)
 		if err != nil {
 			return err
@@ -353,9 +361,13 @@ func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID,
 	}, nil
 }
 
-func (s *Environments) Get(ctx context.Context, principal domain.PrincipalID, scope domain.Scope) (store.Environment, error) {
+func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope) (store.Environment, error) {
 	var out store.Environment
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvRead, scope)
 		if err != nil {
 			return err
@@ -366,8 +378,12 @@ func (s *Environments) Get(ctx context.Context, principal domain.PrincipalID, sc
 	return out, err
 }
 
-func (s *Environments) UpdateNote(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, note string) error {
+func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvUpdateNote, scope)
 		if err != nil {
 			return err

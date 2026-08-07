@@ -321,7 +321,10 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 		refused = nil
 		now := s.now()
 		if cause != "" {
-			refused = s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, cause)
+			if ferr := s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, cause); ferr != nil {
+				return ferr // audit not durable: roll back and fail loud
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		}
 		// Re-read under the write transaction: the credential must not have
@@ -329,7 +332,10 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 		current, err := az.PasswordCredentialFor(ctx, account.ID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = s.failLogin(ctx, az, now, account.ID, true, "credential-removed")
+				if ferr := s.failLogin(ctx, az, now, account.ID, true, "credential-removed"); ferr != nil {
+					return ferr
+				}
+				refused = domain.ErrUnauthenticated
 				return nil
 			}
 			return err
@@ -339,7 +345,10 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 			return err
 		}
 		if current.RowVersion != cred.RowVersion || current.CredentialEpoch != liveEpoch {
-			refused = s.failLogin(ctx, az, now, account.ID, true, "credential-changed")
+			if ferr := s.failLogin(ctx, az, now, account.ID, true, "credential-changed"); ferr != nil {
+				return ferr
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		}
 		if upgrade {
@@ -465,9 +474,14 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 	}, nil
 }
 
-// failLogin records the failure and returns the uniform refusal. The cause is
-// recorded by CLASS in the trail, never returned to the caller: the trail is
-// audit-read gated and may hold the truth, the response may not.
+// failLogin stages the failure event in the caller's transaction. It returns
+// ONLY the audit-write error: nil means the event is staged and the caller
+// may commit it and then refuse; a non-nil return means the record could not
+// be written, and the caller MUST propagate it loudly rather than commit an
+// eventless refusal. A denial without its durable record is exactly what
+// fail-closed forbids. The cause is recorded by CLASS, never returned to the
+// caller — the trail is audit-read gated and may hold the truth, the response
+// may not.
 func (s *Auth) failLogin(ctx context.Context, az *authz.TxAuthorizer, now time.Time, accountID string, resolved bool, cause string) error {
 	payload := audit.Payload{
 		"method": MethodLocalPassword, "artifact": ArtifactCLI,
@@ -482,10 +496,7 @@ func (s *Auth) failLogin(ctx context.Context, az *authz.TxAuthorizer, now time.T
 		return err
 	}
 	e.OccurredAt = now
-	if err := az.RecordAuthEvent(ctx, e); err != nil {
-		return err
-	}
-	return domain.ErrUnauthenticated
+	return az.RecordAuthEvent(ctx, e)
 }
 
 func (s *Auth) recordThrottleCrossing(ctx context.Context, username string) {
@@ -616,7 +627,10 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		live, err := az.AuthorityByValue(ctx, verifier)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				refused = s.refuseAuthorityIn(ctx, az, "unknown")
+				if aerr := s.refuseAuthorityIn(ctx, az, "unknown"); aerr != nil {
+					return aerr
+				}
+				refused = domain.ErrUnauthenticated
 				return nil
 			}
 			return err
@@ -627,13 +641,22 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		}
 		switch {
 		case live.Consumed:
-			refused = s.refuseAuthorityIn(ctx, az, "consumed")
+			if aerr := s.refuseAuthorityIn(ctx, az, "consumed"); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		case !now.Before(live.ExpiresAt):
-			refused = s.refuseAuthorityIn(ctx, az, "expired")
+			if aerr := s.refuseAuthorityIn(ctx, az, "expired"); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		case live.CredentialEpoch != liveEpoch || liveEpoch != epoch:
-			refused = s.refuseAuthorityIn(ctx, az, "epoch-superseded")
+			if aerr := s.refuseAuthorityIn(ctx, az, "epoch-superseded"); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		}
 
@@ -644,7 +667,10 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 			return err
 		}
 		if !claimed {
-			refused = s.refuseAuthorityIn(ctx, az, "consumed")
+			if aerr := s.refuseAuthorityIn(ctx, az, "consumed"); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
 			return nil
 		}
 
@@ -725,21 +751,23 @@ func (s *Auth) sealVerifier(accountID, password string) ([]byte, authz.KDFParams
 }
 
 func (s *Auth) refuseAuthority(ctx context.Context, cause string) error {
-	// The refusal must NOT be the closure's return value: returning it rolls
-	// the transaction back, taking the event with it. Same discipline as the
-	// login path, and the same bug this had before a reviewer caught it.
+	// The event is staged inside the transaction and its write error is the
+	// closure's return value: a failed insert rolls back and surfaces loudly
+	// rather than committing an eventless 401. Only once the write succeeded
+	// do we answer the uniform refusal.
 	if err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		_ = s.refuseAuthorityIn(ctx, az, cause)
-		return nil
+		return s.refuseAuthorityIn(ctx, az, cause)
 	}); err != nil {
 		return err
 	}
 	return domain.ErrUnauthenticated
 }
 
-// refuseAuthorityIn records the refusal and returns the uniform outcome. The
-// caller commits the transaction and then returns what this produced: the
-// event has to survive the refusal it describes.
+// refuseAuthorityIn stages the refusal event in the caller's transaction and
+// returns ONLY the audit-write error, on the same fail-closed contract as
+// failLogin: nil means the event is staged and the caller may refuse, a
+// non-nil return means the record could not be written and must be
+// propagated loudly rather than committed as an eventless 401.
 func (s *Auth) refuseAuthorityIn(ctx context.Context, az *authz.TxAuthorizer, cause string) error {
 	e, err := newAuditEvent(ctx, audit.EventAuthAuthorityRefused, "",
 		audit.Object{Type: "credential_authority"}, audit.OutcomeFailure, "",
@@ -747,10 +775,7 @@ func (s *Auth) refuseAuthorityIn(ctx context.Context, az *authz.TxAuthorizer, ca
 	if err != nil {
 		return err
 	}
-	if err := az.RecordAuthEvent(ctx, e); err != nil {
-		return err
-	}
-	return domain.ErrUnauthenticated
+	return az.RecordAuthEvent(ctx, e)
 }
 
 // Identity resolves a presented session artifact. It is the read half of

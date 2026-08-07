@@ -313,17 +313,17 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		 VALUES ('grt_ct_edit', 'usr_conformance_tenant', 'edit', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
 
-	proj, err := projects.Create(t.Context(), tenant, domain.OrgID(org.ID), "conformance-project")
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project")
 	if err != nil {
 		t.Fatal(err)
 	}
 	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
-	created, err := envs.Create(t.Context(), tenant, envScope, "dev")
+	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fullScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID), Env: domain.EnvID(created.ID)}
-	got, err := envs.Get(t.Context(), tenant, fullScope)
+	got, err := envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,10 +336,10 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if got.OrgID != org.ID || got.ProjectID != proj.ID {
 		t.Errorf("chain columns did not come from the proof: %+v", got)
 	}
-	if err := envs.UpdateNote(t.Context(), tenant, fullScope, "noted"); err != nil {
+	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted"); err != nil {
 		t.Fatal(err)
 	}
-	got, err = envs.Get(t.Context(), tenant, fullScope)
+	got, err = envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}
