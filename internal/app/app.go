@@ -96,17 +96,24 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	}, nil
 }
 
-// Serve blocks until ctx is cancelled, then shuts down gracefully.
-func (s *Server) Serve(ctx context.Context) error {
-	defer s.db.Close()
-	// Baseline slow-client hardening; tuned values belong to the ops spec.
-	srv := &http.Server{
-		Handler:           s.handler,
+// newHTTPServer applies the baseline slow-client hardening: bounded header
+// read, request read, idle keep-alive, and header size. WriteTimeout stays
+// deliberately unset — long-lived streamed responses (SSE) arrive later.
+// Tuned values belong to the ops spec.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    1 << 20,
 	}
+}
+
+// Serve blocks until ctx is cancelled, then shuts down gracefully.
+func (s *Server) Serve(ctx context.Context) error {
+	defer s.db.Close()
+	srv := newHTTPServer(s.handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(s.ln) }()
 	select {

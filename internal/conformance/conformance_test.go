@@ -59,6 +59,27 @@ func TestConformanceSQLite(t *testing.T) {
 	runCorpus(t, db)
 }
 
+// TestSQLiteActiveDomainEnforced proves the CHECK constraint refuses
+// non-boolean integers at the engine, sqlite lacking a boolean type. (The
+// read-side validation in store is defense-in-depth for databases that
+// predate the constraint and cannot be reached through it.)
+func TestSQLiteActiveDomainEnforced(t *testing.T) {
+	cfg := store.Config{Engine: store.EngineSQLite, Path: filepath.Join(t.TempDir(), "check.db")}
+	if err := migrate.Run(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.Open(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	_, err = db.SQLiteWrite().ExecContext(t.Context(),
+		`INSERT INTO orgs (id, name, active, metadata, created_at) VALUES ('org_bad', 'bad', 2, '{}', '2026-01-01T00:00:00Z')`)
+	if err == nil {
+		t.Fatal("active=2 must be refused by the CHECK constraint")
+	}
+}
+
 func TestConformancePostgres(t *testing.T) {
 	dsn := os.Getenv("WENV_TEST_POSTGRES_DSN")
 	if dsn == "" {

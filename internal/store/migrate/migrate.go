@@ -44,7 +44,7 @@ func Run(ctx context.Context, cfg store.Config) (err error) {
 			err = errors.Join(err, fl.Unlock())
 		}()
 	}
-	return withProvider(ctx, cfg, func(p *goose.Provider) error {
+	return withProvider(ctx, cfg, func(p *goose.Provider, _ *sql.DB) error {
 		if _, err := p.Up(ctx); err != nil {
 			return fmt.Errorf("migrate: %w", err)
 		}
@@ -53,12 +53,14 @@ func Run(ctx context.Context, cfg store.Config) (err error) {
 }
 
 // Check verifies the database schema matches this binary exactly: no
-// unapplied embedded migrations (behind) and no applied version newer than
-// this binary knows (ahead — an old binary running against a database a
-// newer binary migrated must refuse, not report ready; goose's HasPending
-// alone cannot see this case). Any mismatch is a refuse-to-serve error.
+// unapplied embedded migrations (behind) and no applied migration this
+// binary does not embed (ahead or diverged — an old binary running against
+// a database a newer binary migrated must refuse, not report ready; goose's
+// HasPending alone cannot see that case, and comparing only maximum
+// versions would miss an unknown version numbered below the embedded
+// maximum). Any mismatch is a refuse-to-serve error.
 func Check(ctx context.Context, cfg store.Config) error {
-	return withProvider(ctx, cfg, func(p *goose.Provider) error {
+	return withProvider(ctx, cfg, func(p *goose.Provider, db *sql.DB) error {
 		pending, err := p.HasPending(ctx)
 		if err != nil {
 			return fmt.Errorf("migrate: %w", err)
@@ -66,30 +68,45 @@ func Check(ctx context.Context, cfg store.Config) error {
 		if pending {
 			return errors.New("migrate: pending migrations — run `wenv migrate` or enable auto-migrate")
 		}
-		dbVersion, err := p.GetDBVersion(ctx)
-		if err != nil {
-			return fmt.Errorf("migrate: %w", err)
-		}
-		var maxEmbedded int64
+		embedded := map[int64]bool{}
 		for _, src := range p.ListSources() {
-			if src.Version > maxEmbedded {
-				maxEmbedded = src.Version
+			embedded[src.Version] = true
+		}
+		// Applied set straight from goose's version table; version 0 is
+		// goose's own bookkeeping row.
+		rows, err := db.QueryContext(ctx, "SELECT DISTINCT version_id FROM goose_db_version WHERE version_id <> 0")
+		if err != nil {
+			return fmt.Errorf("migrate: read applied versions: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v int64
+			if err := rows.Scan(&v); err != nil {
+				return fmt.Errorf("migrate: read applied versions: %w", err)
+			}
+			if !embedded[v] {
+				return fmt.Errorf("migrate: database has applied migration %d unknown to this binary — refusing to serve with an unknown schema", v)
 			}
 		}
-		if dbVersion > maxEmbedded {
-			return fmt.Errorf("migrate: database schema version %d is newer than this binary's %d — refusing to serve with an unknown schema", dbVersion, maxEmbedded)
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("migrate: read applied versions: %w", err)
 		}
 		return nil
 	})
 }
 
 // canonicalPath resolves symlinks and relativity so two spellings of the
-// same database file contend on the same lock file. The database itself may
-// not exist yet, so symlinks are resolved on its directory.
+// same database file contend on the same lock file. The file itself is
+// resolved when it exists; a database that does not exist yet falls back to
+// resolving its directory. Hard links stay distinct — they are not
+// detectable by path canonicalization.
 func canonicalPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
 	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
 	if err != nil {
@@ -98,7 +115,7 @@ func canonicalPath(path string) (string, error) {
 	return filepath.Join(dir, filepath.Base(abs)), nil
 }
 
-func withProvider(ctx context.Context, cfg store.Config, fn func(*goose.Provider) error) error {
+func withProvider(ctx context.Context, cfg store.Config, fn func(*goose.Provider, *sql.DB) error) error {
 	var (
 		db      *sql.DB
 		dialect database.Dialect
@@ -142,5 +159,5 @@ func withProvider(ctx context.Context, cfg store.Config, fn func(*goose.Provider
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	return fn(provider)
+	return fn(provider, db)
 }

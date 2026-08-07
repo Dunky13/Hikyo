@@ -57,6 +57,27 @@ func TestDevBootServesHealthAndReady(t *testing.T) {
 	}
 }
 
+// The slow-client limits are stdlib machinery; what can regress silently is
+// them being unset, so assert the configuration itself.
+func TestHTTPServerSlowClientLimitsConfigured(t *testing.T) {
+	srv := newHTTPServer(nil)
+	if srv.ReadHeaderTimeout <= 0 {
+		t.Error("ReadHeaderTimeout must be bounded")
+	}
+	if srv.ReadTimeout <= 0 {
+		t.Error("ReadTimeout must be bounded")
+	}
+	if srv.IdleTimeout <= 0 {
+		t.Error("IdleTimeout must be bounded")
+	}
+	if srv.MaxHeaderBytes <= 0 {
+		t.Error("MaxHeaderBytes must be bounded")
+	}
+	if srv.WriteTimeout != 0 {
+		t.Error("WriteTimeout must stay unset until SSE decides it")
+	}
+}
+
 func TestPendingMigrationsWithAutoMigrateOffRefusesToServe(t *testing.T) {
 	cfg := devConfig(t)
 	cfg.AutoMigrate = false
@@ -87,8 +108,8 @@ func TestSchemaAheadOfBinaryRefusesToServe(t *testing.T) {
 		srv.Close()
 		t.Fatal("a database migrated by a newer binary must refuse to serve")
 	}
-	if !strings.Contains(err.Error(), "newer than this binary") {
-		t.Fatalf("refusal must name the ahead-schema cause, got: %v", err)
+	if !strings.Contains(err.Error(), "unknown to this binary") {
+		t.Fatalf("refusal must name the unknown-schema cause, got: %v", err)
 	}
 }
 
