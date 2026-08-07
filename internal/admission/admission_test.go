@@ -3,6 +3,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -217,5 +218,35 @@ func TestUnknownAccountGetsABucketExactlyLikeARealOne(t *testing.T) {
 	}
 	if l.AccountDelay("definitely-not-an-account") == 0 {
 		t.Fatal("an unknown identifier got no backoff bucket, which is observable")
+	}
+}
+
+func TestLimiterStateIsBounded(t *testing.T) {
+	// Both maps are keyed by attacker-chosen values — any source address, any
+	// presented username — so an unbounded limiter is the memory-exhaustion
+	// vector it exists to prevent.
+	now := time.Unix(1_800_000_000, 0)
+	l, err := New(Config{BudgetMiB: DefaultBudgetMiB, ArgonMemoryKiB: 64 * 1024, Now: fixedClock(&now)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range MaxTrackedSubjects * 2 {
+		rel, err := l.Enter(context.Background(), fmt.Sprintf("198.51.100.%d", i))
+		if err != nil {
+			t.Fatalf("attempt %d refused: %v", i, err)
+		}
+		rel()
+		l.RecordFailure(fmt.Sprintf("subject-%d", i))
+		// Walk the clock so earlier windows elapse and become reclaimable.
+		now = now.Add(time.Second)
+	}
+	l.mu.Lock()
+	ips, accounts := len(l.ipHits), len(l.failures)
+	l.mu.Unlock()
+	if ips > MaxTrackedSubjects {
+		t.Errorf("tracking %d source IPs, bound is %d", ips, MaxTrackedSubjects)
+	}
+	if accounts > MaxTrackedSubjects {
+		t.Errorf("tracking %d accounts, bound is %d", accounts, MaxTrackedSubjects)
 	}
 }

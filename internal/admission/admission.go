@@ -57,6 +57,15 @@ const (
 	MaxAccountBackoff = 60 * time.Second
 	// RetryAfter is what an overloaded instance advertises.
 	RetryAfter = 5 * time.Second
+	// MaxTrackedSubjects bounds how many source IPs and account buckets the
+	// limiter remembers. Both maps are keyed by attacker-chosen values — any
+	// source address, any presented username — so without a bound the
+	// throttle becomes the memory-exhaustion vector it exists to prevent.
+	// When the bound is hit, entries whose windows have elapsed are dropped
+	// first; only if that frees nothing is the oldest live entry evicted, and
+	// evicting a live bucket only ever forgives an attacker, never a
+	// legitimate user.
+	MaxTrackedSubjects = 4096
 )
 
 // ErrOverloaded is the uniform overload outcome. Every pre-auth path answers
@@ -210,8 +219,49 @@ func (l *Limiter) allowIPIn(bucket map[string][]time.Time, ip string, allowance 
 		bucket[ip] = kept
 		return false
 	}
+	if len(kept) == 0 && len(bucket) >= MaxTrackedSubjects {
+		evictStale(bucket, cutoff)
+	}
 	bucket[ip] = append(kept, now)
 	return true
+}
+
+// evictStale drops buckets whose windows have entirely elapsed. They carry no
+// information — a bucket with no hits inside the window is indistinguishable
+// from one that never existed — so this is pure reclamation.
+func evictStale(bucket map[string][]time.Time, cutoff time.Time) {
+	for k, hits := range bucket {
+		live := false
+		for _, t := range hits {
+			if t.After(cutoff) {
+				live = true
+				break
+			}
+		}
+		if !live {
+			delete(bucket, k)
+		}
+	}
+	// If every tracked subject is live, forget the oldest. Losing a live
+	// bucket forgives whoever it belonged to, which is the safe direction:
+	// the instance-wide semaphore still bounds the work, and the alternative
+	// is unbounded memory.
+	if len(bucket) >= MaxTrackedSubjects {
+		var oldestKey string
+		var oldest time.Time
+		for k, hits := range bucket {
+			if len(hits) == 0 {
+				delete(bucket, k)
+				continue
+			}
+			if oldestKey == "" || hits[0].Before(oldest) {
+				oldestKey, oldest = k, hits[0]
+			}
+		}
+		if oldestKey != "" {
+			delete(bucket, oldestKey)
+		}
+	}
 }
 
 // AccountDelay reports how long this attempt must wait before verification
@@ -243,6 +293,9 @@ func (l *Limiter) RecordFailure(presented string) (crossedThreshold bool) {
 	key := bucketKey(presented)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if _, tracked := l.failures[key]; !tracked && len(l.failures) >= MaxTrackedSubjects {
+		l.evictAccounts()
+	}
 	l.failures[key]++
 	n := l.failures[key]
 	if n <= FailuresBeforeBackoff {
@@ -261,6 +314,20 @@ func (l *Limiter) RecordSuccess(presented string) {
 	defer l.mu.Unlock()
 	delete(l.failures, key)
 	delete(l.blocked, key)
+}
+
+// evictAccounts drops account buckets whose backoff has elapsed. An account
+// with no live delay carries only a failure count, and forgetting it forgives
+// an attacker rather than punishing a user — the safe direction when the
+// alternative is a map keyed by every username anyone has ever guessed.
+func (l *Limiter) evictAccounts() {
+	now := l.now()
+	for k := range l.failures {
+		if until, blocked := l.blocked[k]; !blocked || !until.After(now) {
+			delete(l.failures, k)
+			delete(l.blocked, k)
+		}
+	}
 }
 
 // bucketKey hashes the presented identifier. Storing it raw would put every
