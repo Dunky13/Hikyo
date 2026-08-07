@@ -39,10 +39,12 @@ type Audits struct {
 	SettleHorizon time.Duration
 }
 
-// DefaultSettleHorizon is four times the transaction package's 15 s
-// deadline, leaving room for clock skew between instances writing to one
-// postgres. Ops-spec territory (#32) once it owns the concrete values.
-const DefaultSettleHorizon = 60 * time.Second
+// DefaultSettleHorizon is twice the transaction package's hard 15 s
+// deadline: enough that a write which started before the ceiling has
+// certainly ended, with one deadline's worth of margin for clock skew
+// between instances writing to one postgres. Ops-spec territory (#32) once
+// it owns the concrete values.
+const DefaultSettleHorizon = 30 * time.Second
 
 // ZeroSettleHorizon disables the export ceiling. It exists for tests that
 // export events they just wrote; production paths take the default.
