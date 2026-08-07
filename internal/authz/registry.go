@@ -34,12 +34,12 @@ const (
 	// an org-level audit-read covers all three). The instance trail is read
 	// under an instance-scope audit-read grant — grant-evaluated like every
 	// instance operation, never route-implied.
-	OpAuditQueryOrg      Operation = "audit.query-org"
-	OpAuditQueryProject  Operation = "audit.query-project"
-	OpAuditQueryEnv      Operation = "audit.query-env"
-	OpAuditExportOrg     Operation = "audit.export-org"
-	OpAuditExportProject Operation = "audit.export-project"
-	OpAuditExportEnv     Operation = "audit.export-env"
+	OpAuditQueryOrg       Operation = "audit.query-org"
+	OpAuditQueryProject   Operation = "audit.query-project"
+	OpAuditQueryEnv       Operation = "audit.query-env"
+	OpAuditExportOrg      Operation = "audit.export-org"
+	OpAuditExportProject  Operation = "audit.export-project"
+	OpAuditExportEnv      Operation = "audit.export-env"
 	OpAuditInstanceQuery  Operation = "audit.instance-query"
 	OpAuditInstanceExport Operation = "audit.instance-export"
 )

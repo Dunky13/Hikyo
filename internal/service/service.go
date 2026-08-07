@@ -23,11 +23,13 @@ import (
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
 
-// domainEvent builds one success-outcome domain event for a demonstration
-// operation, committed in-transaction with its write (audit-model ADR
-// durability discipline: an internal operation without its durable audit
-// record does not complete).
-func domainEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, payload audit.Payload) (audit.Event, error) {
+// newAuditEvent is the one event constructor for every service emitter —
+// domain events (committed in-transaction with their write, per the
+// audit-model ADR's durability discipline), the audit.query event, and the
+// export INTENT/OUTCOME pair. It mints the id, stamps occurred_at, and
+// carries the request's wire metadata; the actor class is resolved
+// server-side at the store boundary.
+func newAuditEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, outcome audit.Outcome, correlationID string, payload audit.Payload) (audit.Event, error) {
 	id, err := audit.NewEventID()
 	if err != nil {
 		return audit.Event{}, err
@@ -35,13 +37,19 @@ func domainEvent(ctx context.Context, typ audit.EventType, principal domain.Prin
 	wire := audit.FromContext(ctx)
 	return audit.Event{
 		ID: id, Type: typ, SchemaVersion: 1,
-		OccurredAt: time.Now().UTC(),
-		Actor:      audit.Actor{ID: string(principal)},
-		Object:     obj,
-		Outcome:    audit.OutcomeSuccess,
-		SourceIP:   wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
+		OccurredAt:    time.Now().UTC(),
+		Actor:         audit.Actor{ID: string(principal)},
+		Object:        obj,
+		Outcome:       outcome,
+		CorrelationID: correlationID,
+		SourceIP:      wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
 		Payload: payload,
 	}, nil
+}
+
+// domainEvent is newAuditEvent for the common success-outcome domain event.
+func domainEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, payload audit.Payload) (audit.Event, error) {
+	return newAuditEvent(ctx, typ, principal, obj, audit.OutcomeSuccess, "", payload)
 }
 
 // System answers operational questions for the HTTP layer.

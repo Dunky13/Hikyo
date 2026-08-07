@@ -73,11 +73,13 @@ func merged(a, b Schema) Schema {
 	return out
 }
 
-// Registry is the closed catalogue. Every emitted event type exists here
-// with a payload schema, version and retention class; growth happens only
-// alongside the operation that emits the new type (completeness is CI
-// invariant 2, wired to the probe-classification registry).
-var Registry = map[EventType]TypeSpec{
+// registry is the closed catalogue, unexported so closure holds
+// structurally, not by convention — consumers read through Spec/Types.
+// Every emitted event type exists here with a payload schema, version and
+// retention class; growth happens only alongside the operation that emits
+// the new type (completeness is CI invariant 2, wired to the
+// probe-classification registry).
+var registry = map[EventType]TypeSpec{
 	EventGrantDenied: {
 		SchemaVersion: 1,
 		Retention:     RetentionAccess,
@@ -171,10 +173,17 @@ func (t EventType) Category() string {
 	return cat
 }
 
+// Spec returns a type's registry row, reporting whether the type is
+// registered at all.
+func Spec(t EventType) (TypeSpec, bool) {
+	spec, ok := registry[t]
+	return spec, ok
+}
+
 // Types returns the registered types sorted, for the invariant tests.
 func Types() []EventType {
-	out := make([]EventType, 0, len(Registry))
-	for t := range Registry {
+	out := make([]EventType, 0, len(registry))
+	for t := range registry {
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })

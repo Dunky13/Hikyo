@@ -27,8 +27,6 @@ const (
 	KindInt
 	// KindBool is a boolean fact.
 	KindBool
-	// KindStringList is a list of schema-typed strings.
-	KindStringList
 )
 
 // FieldSpec declares one payload field.
@@ -85,12 +83,6 @@ func checkKind(k FieldKind, v any) error {
 		if _, ok := v.(bool); !ok {
 			return fmt.Errorf("want bool, got %T", v)
 		}
-	case KindStringList:
-		list, ok := v.([]string)
-		if !ok {
-			return fmt.Errorf("want []string, got %T", v)
-		}
-		_ = list
 	default:
 		return fmt.Errorf("unknown field kind %d", k)
 	}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
@@ -224,6 +225,39 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 		// Restore the grant for any later subtest.
 		execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_ar', 'usr_alice', 'audit-read', 'org_a', NULL, NULL, "+ts+")")
+	})
+
+	t.Run("no_token_material_in_trails", func(t *testing.T) {
+		// The dump-grep half of CI invariant 4, extended to both audit
+		// tables: plant a grammar-valid bearer token in every
+		// attacker-influencable field a denial records (user agent, claimed
+		// identifiers), then grep the trails — the marker must be there and
+		// the token must not.
+		token := "ew_1_wl_" + strings.Repeat("Ab3", 15)
+		wired := audit.WithContext(tctx(t), audit.Context{
+			UserAgent: "probe/1.0 " + token,
+			SourceIP:  "203.0.113.7",
+			Origin:    audit.OriginAPI,
+		})
+		if _, err := envs.Get(wired, bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("resolvable probe = %v", err)
+		}
+		if _, err := envs.Get(wired, bob, domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("unresolvable probe = %v", err)
+		}
+		for _, table := range []string{"audit_tenant_events", "audit_instance_events"} {
+			for _, col := range []string{"user_agent", "payload", "source_ip", "object_id", "correlation_id"} {
+				if n := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE "+col+" LIKE '%"+token+"%'"); n != 0 {
+					t.Errorf("%s.%s holds raw token material (%d rows)", table, col, n)
+				}
+			}
+			if n := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE user_agent LIKE '%"+audit.RedactionMarker+"%'"); n == 0 {
+				t.Errorf("%s: no redaction marker found — the filter did not run", table)
+			}
+		}
+		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE payload LIKE '%"+audit.RedactionMarker+"%'"); n == 0 {
+			t.Error("claimed identifiers were not token-filtered")
+		}
 	})
 
 	t.Run("denial_durability_under_induced_commit_failure", func(t *testing.T) {

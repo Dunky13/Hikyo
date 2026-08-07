@@ -43,9 +43,9 @@ var sensitiveOwner = Module + "/internal/crypto"
 // auditContentTypes carry audit-event content. Logging one is mirroring the
 // trail into a weaker store.
 var auditContentTypes = map[string]bool{
-	Module + "/internal/audit.Event":   true,
-	Module + "/internal/audit.Payload": true,
-	Module + "/internal/audit.Row":     true,
+	Module + "/internal/audit.Event":      true,
+	Module + "/internal/audit.Payload":    true,
+	Module + "/internal/audit.Row":        true,
 	Module + "/internal/store.AuditEvent": true,
 }
 
@@ -142,7 +142,7 @@ func CheckSensitiveFormatting(pkgs []*packages.Package) []string {
 						if name := mentionsNamed(tv.Type, auditContentTypes, map[types.Type]bool{}); name != "" {
 							findings = append(findings, fmt.Sprintf(
 								"redaction: %s: %s logs audit content %s — audit events are never mirrored to the ops log (audit-model ADR)",
-								p.Fset.Position(arg.Pos()), base, name, ))
+								p.Fset.Position(arg.Pos()), base, name))
 						}
 					}
 				}

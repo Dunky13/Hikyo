@@ -74,8 +74,14 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 		filepath.Join(repoRoot, "internal", "store"),
 	}
 	for _, root := range roots {
-		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil || info.IsDir() {
+		// Walk and read errors surface as findings: an analyzer that
+		// silently skips what it cannot read is fail-open.
+		werr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				findings = append(findings, fmt.Sprintf("appendonly: walk %s: %v", path, err))
+				return nil
+			}
+			if info.IsDir() {
 				return nil
 			}
 			if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".sql") {
@@ -83,6 +89,7 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 			}
 			b, rerr := os.ReadFile(path)
 			if rerr != nil {
+				findings = append(findings, fmt.Sprintf("appendonly: read %s: %v", path, rerr))
 				return nil
 			}
 			if syncCommitRe.Match(b) {
@@ -92,6 +99,9 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 			}
 			return nil
 		})
+		if werr != nil {
+			findings = append(findings, fmt.Sprintf("appendonly: walk %s: %v", root, werr))
+		}
 	}
 	return findings
 }

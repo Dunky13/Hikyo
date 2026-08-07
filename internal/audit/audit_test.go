@@ -66,7 +66,7 @@ func TestSanitizeFreeText(t *testing.T) {
 
 func TestRegistryWellFormed(t *testing.T) {
 	for _, typ := range Types() {
-		spec := Registry[typ]
+		spec, _ := Spec(typ)
 		cat, action, ok := strings.Cut(string(typ), ".")
 		if !ok || cat == "" || action == "" {
 			t.Errorf("%s: not category.action shaped", typ)
@@ -108,7 +108,7 @@ func TestRegistryForbiddenPayloadContent(t *testing.T) {
 		"verifier", "mfa", "seed", "recovery_code", "json_path", "path",
 	}
 	for _, typ := range Types() {
-		for field := range Registry[typ].Schema {
+		for field := range mustSpec(typ).Schema {
 			lower := strings.ToLower(field)
 			for _, bad := range forbidden {
 				if lower == bad || strings.HasSuffix(lower, "_"+bad) || strings.HasPrefix(lower, bad+"_") {
@@ -123,7 +123,7 @@ func TestRegistryForbiddenPayloadContent(t *testing.T) {
 // outcome (invariant 12).
 func TestRegistryNoOutcomeShadow(t *testing.T) {
 	for _, typ := range Types() {
-		for field := range Registry[typ].Schema {
+		for field := range mustSpec(typ).Schema {
 			if strings.EqualFold(field, "outcome") {
 				t.Errorf("%s: payload field %q shadows the envelope outcome", typ, field)
 			}
@@ -225,4 +225,12 @@ func TestScopeClass(t *testing.T) {
 	if _, err := ScopeClass(TrailTenant, domain.Scope{}); err == nil {
 		t.Error("empty tenant scope accepted")
 	}
+}
+
+func mustSpec(t EventType) TypeSpec {
+	spec, ok := Spec(t)
+	if !ok {
+		panic("unregistered type in test: " + string(t))
+	}
+	return spec
 }

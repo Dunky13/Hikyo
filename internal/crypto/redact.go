@@ -25,9 +25,9 @@ const Redacted = "[REDACTED:wenv-key-material]"
 // value and the pointer form redact.
 type redactor struct{}
 
-func (redactor) String() string             { return Redacted }
-func (redactor) GoString() string           { return Redacted }
-func (redactor) LogValue() slog.Value       { return slog.StringValue(Redacted) }
+func (redactor) String() string               { return Redacted }
+func (redactor) GoString() string             { return Redacted }
+func (redactor) LogValue() slog.Value         { return slog.StringValue(Redacted) }
 func (redactor) MarshalText() ([]byte, error) { return []byte(Redacted), nil }
 func (redactor) MarshalJSON() ([]byte, error) { return []byte(`"` + Redacted + `"`), nil }
 

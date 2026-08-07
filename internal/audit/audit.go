@@ -150,7 +150,7 @@ func NewEventID() (string, error) {
 // trusted-layer-bound chain: proof-resolved for tenant events, empty for
 // instance events.
 func Validate(e Event, trail Trail, scope domain.Scope) error {
-	spec, ok := Registry[e.Type]
+	spec, ok := registry[e.Type]
 	if !ok {
 		return fmt.Errorf("audit: event type %q is not in the closed registry", e.Type)
 	}

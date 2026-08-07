@@ -12,6 +12,7 @@ import (
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/store/auditrow"
 	"github.com/Dunky13/wenv/internal/store/pggen"
 	"github.com/Dunky13/wenv/internal/store/sqlitegen"
 )
@@ -121,53 +122,32 @@ func (a sqliteAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Ev
 	if err != nil {
 		return err
 	}
-	e.Actor = resolveActorClass(ctx, e.Actor, func(id string) (string, error) {
-		return a.q.GetPrincipalKind(ctx, id)
-	})
+	e.Actor, err = auditrow.ResolveActorClass(ctx, a.q.GetPrincipalKind, e.Actor)
+	if err != nil {
+		return err
+	}
 	// Chain columns: proof-bound, never caller input.
 	row, err := audit.BuildRow(e, audit.TrailTenant, chain, time.Now())
 	if err != nil {
 		return err
 	}
-	return a.q.InsertTenantAuditEvent(ctx, sqlitegen.InsertTenantAuditEventParams{
-		ID: row.ID, Type: row.Type, SchemaVersion: row.SchemaVersion,
-		OccurredAt:       audit.FormatTime(row.OccurredAt),
-		OccurredAsserted: boolToInt(row.OccurredAsserted),
-		RecordedAt:       audit.FormatTime(row.RecordedAt),
-		ActorID:          nullString(row.ActorID), ActorClass: row.ActorClass,
-		ActorCredentialID: nullString(row.ActorCredentialID), AuthorityID: nullString(row.AuthorityID),
-		ScopeClass: row.ScopeClass, OrgID: row.OrgID,
-		ProjectID: nullString(row.ProjectID), EnvID: nullString(row.EnvID),
-		ObjectType: nullString(row.ObjectType), ObjectID: nullString(row.ObjectID),
-		Outcome: row.Outcome, CorrelationID: nullString(row.CorrelationID),
-		SourceIp: nullString(row.SourceIP), UserAgent: nullString(row.UserAgent),
-		Origin: row.Origin, Payload: row.Payload,
-	})
+	return a.q.InsertTenantAuditEvent(ctx, auditrow.SQLiteTenant(row))
 }
 
 func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error {
 	if _, err := authz.Verify(p, authz.StoreAuditInstanceInsert, a.tok); err != nil {
 		return err
 	}
-	e.Actor = resolveActorClass(ctx, e.Actor, func(id string) (string, error) {
-		return a.q.GetPrincipalKind(ctx, id)
-	})
+	var err error
+	e.Actor, err = auditrow.ResolveActorClass(ctx, a.q.GetPrincipalKind, e.Actor)
+	if err != nil {
+		return err
+	}
 	row, err := audit.BuildRow(e, audit.TrailInstance, domain.Scope{}, time.Now())
 	if err != nil {
 		return err
 	}
-	return a.q.InsertInstanceAuditEvent(ctx, sqlitegen.InsertInstanceAuditEventParams{
-		ID: row.ID, Type: row.Type, SchemaVersion: row.SchemaVersion,
-		OccurredAt:       audit.FormatTime(row.OccurredAt),
-		OccurredAsserted: boolToInt(row.OccurredAsserted),
-		RecordedAt:       audit.FormatTime(row.RecordedAt),
-		ActorID:          nullString(row.ActorID), ActorClass: row.ActorClass,
-		ActorCredentialID: nullString(row.ActorCredentialID), AuthorityID: nullString(row.AuthorityID),
-		ObjectType: nullString(row.ObjectType), ObjectID: nullString(row.ObjectID),
-		Outcome: row.Outcome, CorrelationID: nullString(row.CorrelationID),
-		SourceIp: nullString(row.SourceIP), UserAgent: nullString(row.UserAgent),
-		Origin: row.Origin, Payload: row.Payload,
-	})
+	return a.q.InsertInstanceAuditEvent(ctx, auditrow.SQLiteInstance(row))
 }
 
 func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
@@ -193,14 +173,14 @@ func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilte
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, sqlitegen.PageTenantAuditProjectParams{
-			OrgID: string(chain.Org), ProjectID: nullString(strPtr(string(chain.Project))), Seq: f.AfterSeq,
+			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true}, Seq: f.AfterSeq,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, sqlitegen.PageTenantAuditEnvParams{
-			OrgID: string(chain.Org), ProjectID: nullString(strPtr(string(chain.Project))),
-			EnvID: nullString(strPtr(string(chain.Env))), Seq: f.AfterSeq,
+			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true},
+			EnvID: sql.NullString{String: string(chain.Env), Valid: true}, Seq: f.AfterSeq,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
@@ -262,53 +242,32 @@ func (a pgAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Event)
 	if err != nil {
 		return err
 	}
-	e.Actor = resolveActorClass(ctx, e.Actor, func(id string) (string, error) {
-		return a.q.GetPrincipalKind(ctx, id)
-	})
+	e.Actor, err = auditrow.ResolveActorClass(ctx, a.q.GetPrincipalKind, e.Actor)
+	if err != nil {
+		return err
+	}
 	// Chain columns: proof-bound, never caller input.
 	row, err := audit.BuildRow(e, audit.TrailTenant, chain, time.Now())
 	if err != nil {
 		return err
 	}
-	return a.q.InsertTenantAuditEvent(ctx, pggen.InsertTenantAuditEventParams{
-		ID: row.ID, Type: row.Type, SchemaVersion: int32(row.SchemaVersion),
-		OccurredAt:       pgtype.Timestamptz{Time: row.OccurredAt, Valid: true},
-		OccurredAsserted: row.OccurredAsserted,
-		RecordedAt:       pgtype.Timestamptz{Time: row.RecordedAt, Valid: true},
-		ActorID:          pgText(row.ActorID), ActorClass: row.ActorClass,
-		ActorCredentialID: pgText(row.ActorCredentialID), AuthorityID: pgText(row.AuthorityID),
-		ScopeClass: row.ScopeClass, ChainOrgID: row.OrgID,
-		ProjectID: pgText(row.ProjectID), EnvID: pgText(row.EnvID),
-		ObjectType: pgText(row.ObjectType), ObjectID: pgText(row.ObjectID),
-		Outcome: row.Outcome, CorrelationID: pgText(row.CorrelationID),
-		SourceIp: pgText(row.SourceIP), UserAgent: pgText(row.UserAgent),
-		Origin: row.Origin, Payload: row.Payload,
-	})
+	return a.q.InsertTenantAuditEvent(ctx, auditrow.PGTenant(row))
 }
 
 func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error {
 	if _, err := authz.Verify(p, authz.StoreAuditInstanceInsert, a.tok); err != nil {
 		return err
 	}
-	e.Actor = resolveActorClass(ctx, e.Actor, func(id string) (string, error) {
-		return a.q.GetPrincipalKind(ctx, id)
-	})
+	var err error
+	e.Actor, err = auditrow.ResolveActorClass(ctx, a.q.GetPrincipalKind, e.Actor)
+	if err != nil {
+		return err
+	}
 	row, err := audit.BuildRow(e, audit.TrailInstance, domain.Scope{}, time.Now())
 	if err != nil {
 		return err
 	}
-	return a.q.InsertInstanceAuditEvent(ctx, pggen.InsertInstanceAuditEventParams{
-		ID: row.ID, Type: row.Type, SchemaVersion: int32(row.SchemaVersion),
-		OccurredAt:       pgtype.Timestamptz{Time: row.OccurredAt, Valid: true},
-		OccurredAsserted: row.OccurredAsserted,
-		RecordedAt:       pgtype.Timestamptz{Time: row.RecordedAt, Valid: true},
-		ActorID:          pgText(row.ActorID), ActorClass: row.ActorClass,
-		ActorCredentialID: pgText(row.ActorCredentialID), AuthorityID: pgText(row.AuthorityID),
-		ObjectType: pgText(row.ObjectType), ObjectID: pgText(row.ObjectID),
-		Outcome: row.Outcome, CorrelationID: pgText(row.CorrelationID),
-		SourceIp: pgText(row.SourceIP), UserAgent: pgText(row.UserAgent),
-		Origin: row.Origin, Payload: row.Payload,
-	})
+	return a.q.InsertInstanceAuditEvent(ctx, auditrow.PGInstance(row))
 }
 
 func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
@@ -335,13 +294,13 @@ func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) (
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, pggen.PageTenantAuditProjectParams{
-			ChainOrgID: string(chain.Org), ChainProjectID: pgText(strPtr(string(chain.Project))),
+			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
 			AfterSeq: f.AfterSeq, FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, pggen.PageTenantAuditEnvParams{
-			ChainOrgID: string(chain.Org), ChainProjectID: pgText(strPtr(string(chain.Project))),
-			ChainEnvID: pgText(strPtr(string(chain.Env))),
+			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
+			ChainEnvID: pgtype.Text{String: string(chain.Env), Valid: true},
 			AfterSeq:   f.AfterSeq, FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	default:
@@ -370,9 +329,9 @@ func (a pgAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter)
 		return nil, err
 	}
 	rows, err := a.q.PageInstanceAudit(ctx, pggen.PageInstanceAuditParams{
-		AfterSeq: f.AfterSeq,
-		FromTime: pgtype.Timestamptz{Time: from, Valid: true},
-		ToTime:   pgtype.Timestamptz{Time: to, Valid: true},
+		AfterSeq:  f.AfterSeq,
+		FromTime:  pgtype.Timestamptz{Time: from, Valid: true},
+		ToTime:    pgtype.Timestamptz{Time: to, Valid: true},
 		PageLimit: int32(f.Limit),
 	})
 	if err != nil {
@@ -387,58 +346,6 @@ func (a pgAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter)
 		out = append(out, ev)
 	}
 	return out, nil
-}
-
-// --- shared mapping helpers ---
-
-// resolveActorClass fills a principal actor's class from principals.kind
-// when the emitter left it empty — the server-side truth, not a caller
-// claim. An explicitly set class (system, break-glass, unauthenticated)
-// passes through untouched.
-func resolveActorClass(_ context.Context, a audit.Actor, kindOf func(string) (string, error)) audit.Actor {
-	if a.Class != "" || a.ID == "" {
-		return a
-	}
-	kind, err := kindOf(a.ID)
-	switch {
-	case err == nil && kind == "human":
-		a.Class = audit.ActorHuman
-	case err == nil && kind == "machine":
-		a.Class = audit.ActorMachine
-	default:
-		// Unknown principal or lookup failure: structured absence. BuildRow
-		// validation keeps the enum closed either way.
-		return audit.Actor{Class: audit.ActorUnauthenticated}
-	}
-	return a
-}
-
-func nullString(p *string) sql.NullString {
-	if p == nil {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: *p, Valid: true}
-}
-
-func pgText(p *string) pgtype.Text {
-	if p == nil {
-		return pgtype.Text{}
-	}
-	return pgtype.Text{String: *p, Valid: true}
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func boolToInt(b bool) int64 {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 func auditEventFromSQLiteTenant(r sqlitegen.AuditTenantEvent) (AuditEvent, error) {

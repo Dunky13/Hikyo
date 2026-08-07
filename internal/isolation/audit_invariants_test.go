@@ -109,7 +109,7 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 func TestInvariantAuditRegistryClosure(t *testing.T) {
 	for op, m := range facts.AuditMappings() {
 		for _, et := range m.Events {
-			if _, ok := audit.Registry[et]; !ok {
+			if _, ok := audit.Spec(et); !ok {
 				t.Errorf("%s claims event type %q which is not in the closed registry", op, et)
 			}
 		}

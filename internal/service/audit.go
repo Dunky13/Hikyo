@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
@@ -61,21 +60,9 @@ func auditExportOp(scope domain.Scope) (authz.Operation, error) {
 // queryEvent builds the audit.query event: normalized filters plus the
 // materialized page's row count — one event per query, never one per row.
 func queryEvent(ctx context.Context, principal domain.PrincipalID, f store.AuditFilter, rows int) (audit.Event, error) {
-	id, err := audit.NewEventID()
-	if err != nil {
-		return audit.Event{}, err
-	}
-	wire := audit.FromContext(ctx)
 	payload := f.Normalized()
 	payload["row_count"] = rows
-	return audit.Event{
-		ID: id, Type: audit.EventAuditQuery, SchemaVersion: 1,
-		OccurredAt: time.Now().UTC(),
-		Actor:      audit.Actor{ID: string(principal)},
-		Outcome:    audit.OutcomeSuccess,
-		SourceIP:   wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
-		Payload: payload,
-	}, nil
+	return newAuditEvent(ctx, audit.EventAuditQuery, principal, audit.Object{}, audit.OutcomeSuccess, "", payload)
 }
 
 // Query returns one bounded page of the tenant trail addressed by scope. The
@@ -244,8 +231,7 @@ func (s *Audits) export(
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
 ) error {
-	wire := audit.FromContext(ctx)
-	startedID, err := audit.NewEventID()
+	started, err := newAuditEvent(ctx, audit.EventAuditExportStarted, principal, audit.Object{}, audit.OutcomeIntent, "", f.Normalized())
 	if err != nil {
 		return err
 	}
@@ -256,41 +242,33 @@ func (s *Audits) export(
 		if err != nil {
 			return err
 		}
-		return insert(ctx, r, p, audit.Event{
-			ID: startedID, Type: audit.EventAuditExportStarted, SchemaVersion: 1,
-			OccurredAt: time.Now().UTC(),
-			Actor:      audit.Actor{ID: string(principal)},
-			Outcome:    audit.OutcomeIntent,
-			SourceIP:   wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
-			Payload: f.Normalized(),
-		})
+		return insert(ctx, r, p, started)
 	})
 	if err != nil {
 		return err
 	}
 
+	// The terminal OUTCOME must be able to commit even when the request
+	// context is already dead — a client disconnect cancels ctx, and the
+	// `disconnected` outcome exists precisely for that case. WithoutCancel
+	// keeps the request's values (wire metadata) but drops its cancellation;
+	// the transaction layer applies its own bounded deadline.
+	terminalCtx := context.WithoutCancel(ctx)
 	completed := func(outcome audit.Outcome, cause string, rows int) error {
-		id, err := audit.NewEventID()
-		if err != nil {
-			return err
-		}
 		payload := audit.Payload{"rows_streamed": rows}
 		if cause != "" {
 			payload["cause"] = cause
 		}
-		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		ev, err := newAuditEvent(terminalCtx, audit.EventAuditExportCompleted, principal, audit.Object{}, outcome, started.ID, payload)
+		if err != nil {
+			return err
+		}
+		return tx.Write(terminalCtx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 			p, err := az.Authorize(ctx, principal, op, scope)
 			if err != nil {
 				return err
 			}
-			return insert(ctx, r, p, audit.Event{
-				ID: id, Type: audit.EventAuditExportCompleted, SchemaVersion: 1,
-				OccurredAt: time.Now().UTC(),
-				Actor:      audit.Actor{ID: string(principal)},
-				Outcome:    outcome, CorrelationID: startedID,
-				SourceIP: wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
-				Payload: payload,
-			})
+			return insert(ctx, r, p, ev)
 		})
 	}
 
