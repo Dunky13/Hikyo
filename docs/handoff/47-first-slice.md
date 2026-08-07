@@ -208,7 +208,10 @@ Full suite green on sqlite **and** postgres 18 (local container).
    this ticket did not do. `service.TestCommonListIsAKnownPlaceholder` fails
    the day the file grows past the placeholder bound, so the two cannot be
    confused, and its failure message names what else to update. This is the
-   one acceptance-adjacent item this slice leaves short.
+   one acceptance-adjacent item this slice leaves short. **Disposition
+   (human): follow-up ticket, not this PR** — the full list needs sourcing
+   and a licence review; the starter set ships here behind the placeholder
+   guard.
 
 6. **The freeze gate is fixture-proven, not yet armed.** No freeze tag exists,
    so there is no immutable base to diff the live contract against. The
