@@ -20,6 +20,16 @@ import (
 func SQLiteTxRepos(tx *sql.Tx) Repos { return sqliteRepos{db: tx} }
 func PGTxRepos(tx pgx.Tx) Repos      { return pgRepos{db: tx} }
 
+// sqliteReadRepos / pgReadRepos narrow the full repos to their read side, so
+// the compiler — not convention — keeps autocommit writes off the read pool.
+type sqliteReadRepos struct{ r sqliteRepos }
+
+func (s sqliteReadRepos) Orgs() OrgReader { return s.r.Orgs() }
+
+type pgReadRepos struct{ r pgRepos }
+
+func (p pgReadRepos) Orgs() OrgReader { return p.r.Orgs() }
+
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
 // microsecond precision (postgres timestamptz cannot hold more; sqlite text
 // stores the same so both engines round-trip identically). Callers producing
@@ -96,6 +106,11 @@ func orgFromSQLite(row sqlitegen.Org) (Org, error) {
 	if err != nil {
 		return Org{}, fmt.Errorf("store: org %s created_at %q: %w", row.ID, row.CreatedAt, err)
 	}
+	// The CHECK constraint enforces 0/1 at write time; parse-don't-cast on
+	// the way out too rather than coercing unknown integers to true.
+	if row.Active != 0 && row.Active != 1 {
+		return Org{}, fmt.Errorf("store: org %s: active = %d, not a boolean", row.ID, row.Active)
+	}
 	metadata := json.RawMessage(row.Metadata)
 	if err := validMetadata(metadata); err != nil {
 		return Org{}, fmt.Errorf("store: org %s: %w", row.ID, err)
@@ -103,7 +118,7 @@ func orgFromSQLite(row sqlitegen.Org) (Org, error) {
 	return Org{
 		ID:        row.ID,
 		Name:      row.Name,
-		Active:    row.Active != 0,
+		Active:    row.Active == 1,
 		Metadata:  metadata,
 		CreatedAt: created.UTC(),
 	}, nil

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path/filepath"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -27,13 +28,17 @@ import (
 // caller must refuse to serve (fail closed, loud).
 func Run(ctx context.Context, cfg store.Config) (err error) {
 	if cfg.Engine == store.EngineSQLite {
-		fl := flock.New(cfg.Path + ".lock")
+		lockPath, pathErr := canonicalPath(cfg.Path)
+		if pathErr != nil {
+			return fmt.Errorf("migrate: resolve sqlite path: %w", pathErr)
+		}
+		fl := flock.New(lockPath + ".lock")
 		locked, lockErr := fl.TryLockContext(ctx, 100*time.Millisecond)
 		if lockErr != nil {
 			return fmt.Errorf("migrate: acquire sqlite migration lock: %w", lockErr)
 		}
 		if !locked {
-			return fmt.Errorf("migrate: sqlite migration lock %s.lock is held", cfg.Path)
+			return fmt.Errorf("migrate: sqlite migration lock %s.lock is held", lockPath)
 		}
 		defer func() {
 			err = errors.Join(err, fl.Unlock())
@@ -47,16 +52,50 @@ func Run(ctx context.Context, cfg store.Config) (err error) {
 	})
 }
 
-// HasPending reports whether unapplied migrations exist. A pending state with
-// auto-apply disabled must refuse to serve.
-func HasPending(ctx context.Context, cfg store.Config) (bool, error) {
-	var pending bool
-	err := withProvider(ctx, cfg, func(p *goose.Provider) error {
-		var err error
-		pending, err = p.HasPending(ctx)
-		return err
+// Check verifies the database schema matches this binary exactly: no
+// unapplied embedded migrations (behind) and no applied version newer than
+// this binary knows (ahead — an old binary running against a database a
+// newer binary migrated must refuse, not report ready; goose's HasPending
+// alone cannot see this case). Any mismatch is a refuse-to-serve error.
+func Check(ctx context.Context, cfg store.Config) error {
+	return withProvider(ctx, cfg, func(p *goose.Provider) error {
+		pending, err := p.HasPending(ctx)
+		if err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+		if pending {
+			return errors.New("migrate: pending migrations — run `wenv migrate` or enable auto-migrate")
+		}
+		dbVersion, err := p.GetDBVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
+		var maxEmbedded int64
+		for _, src := range p.ListSources() {
+			if src.Version > maxEmbedded {
+				maxEmbedded = src.Version
+			}
+		}
+		if dbVersion > maxEmbedded {
+			return fmt.Errorf("migrate: database schema version %d is newer than this binary's %d — refusing to serve with an unknown schema", dbVersion, maxEmbedded)
+		}
+		return nil
 	})
-	return pending, err
+}
+
+// canonicalPath resolves symlinks and relativity so two spellings of the
+// same database file contend on the same lock file. The database itself may
+// not exist yet, so symlinks are resolved on its directory.
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, filepath.Base(abs)), nil
 }
 
 func withProvider(ctx context.Context, cfg store.Config, fn func(*goose.Provider) error) error {

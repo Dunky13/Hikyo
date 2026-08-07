@@ -5,6 +5,7 @@
 package config
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -55,6 +56,9 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	}
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		return nil, nil, fmt.Errorf("unexpected argument %q", rest[0])
 	}
 
 	var warnings []string
@@ -107,7 +111,13 @@ func parseDatastore(raw string) (Datastore, error) {
 		}
 		return Datastore{Engine: EnginePostgres, DSN: raw}, nil
 	default:
-		return Datastore{}, fmt.Errorf("WENV_DB %q: unsupported datastore (want sqlite:PATH or postgres://...)", raw)
+		// Never echo the raw value: an unrecognized DSN can still carry
+		// credentials, and these errors reach stderr and logs.
+		scheme, _, hasScheme := strings.Cut(raw, ":")
+		if !hasScheme {
+			scheme = "<none>"
+		}
+		return Datastore{}, fmt.Errorf("WENV_DB: unsupported datastore scheme %q (want sqlite:PATH or postgres://...)", scheme)
 	}
 }
 
@@ -121,7 +131,13 @@ func parseDatastore(raw string) (Datastore, error) {
 func validatePostgresTLS(dsn string) error {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return fmt.Errorf("WENV_DB: %w", err)
+		// url.Error embeds the raw URL (credentials included) — report only
+		// the underlying cause.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			return fmt.Errorf("WENV_DB: invalid postgres DSN: %w", uerr.Err)
+		}
+		return fmt.Errorf("WENV_DB: invalid postgres DSN")
 	}
 	host := u.Hostname()
 	if hostParam := u.Query().Get("host"); hostParam != "" {

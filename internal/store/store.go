@@ -43,18 +43,29 @@ type Org struct {
 	CreatedAt time.Time
 }
 
-// OrgRepo is the per-aggregate repository interface.
-type OrgRepo interface {
-	Create(ctx context.Context, org Org) error
+// OrgReader is the read side of the aggregate's repository.
+type OrgReader interface {
 	Get(ctx context.Context, id string) (Org, error)
 	List(ctx context.Context) ([]Org, error)
 	Count(ctx context.Context) (int64, error)
 }
 
-// Repos bundles the repositories bound to one execution scope (a transaction
-// or the read pool).
+// OrgRepo is the full per-aggregate repository interface. Only transaction
+// closures (internal/store/tx) ever hold one — the read pool hands out
+// OrgReader, so writes cannot bypass the transactional boundary.
+type OrgRepo interface {
+	OrgReader
+	Create(ctx context.Context, org Org) error
+}
+
+// Repos bundles the full repositories bound to one write transaction.
 type Repos interface {
 	Orgs() OrgRepo
+}
+
+// ReadRepos bundles the read-only repositories bound to the read pool.
+type ReadRepos interface {
+	Orgs() OrgReader
 }
 
 // ErrNotFound is the canonical cross-engine "no such row".
@@ -191,12 +202,12 @@ func (d *DB) Close() error {
 	return errors.Join(errs...)
 }
 
-// Read returns repositories bound to the read side (sqlite read pool /
-// postgres pool), outside any explicit transaction. Writes go through
-// internal/store/tx.
-func (d *DB) Read() Repos {
+// Read returns read-only repositories bound to the read side (sqlite read
+// pool / postgres pool), outside any explicit transaction. Writes go through
+// internal/store/tx, which is the only holder of the full Repos.
+func (d *DB) Read() ReadRepos {
 	if d.engine == EnginePostgres {
-		return pgRepos{db: d.pool}
+		return pgReadRepos{pgRepos{db: d.pool}}
 	}
-	return sqliteRepos{db: d.sqRead}
+	return sqliteReadRepos{sqliteRepos{db: d.sqRead}}
 }

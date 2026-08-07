@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -24,22 +23,15 @@ type System struct {
 }
 
 // Ready reports whether a request would actually work: the datastore is
-// reachable and migrations are current. Boot already refuses to serve on
-// pending migrations, but the live check also catches the cross-process
+// reachable and the schema matches this binary exactly. Boot already refuses
+// to serve on a mismatch, but the live check also catches the cross-process
 // race the ADR names — an old server still running after a newer
-// `wenv migrate` applied DDL.
+// `wenv migrate` applied DDL (behind or ahead).
 func (s *System) Ready(ctx context.Context) error {
 	if err := s.DB.Ping(ctx); err != nil {
 		return err
 	}
-	pending, err := migrate.HasPending(ctx, s.Store)
-	if err != nil {
-		return err
-	}
-	if pending {
-		return errors.New("service: migrations pending")
-	}
-	return nil
+	return migrate.Check(ctx, s.Store)
 }
 
 // Orgs is the demonstration aggregate's service.

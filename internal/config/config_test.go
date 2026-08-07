@@ -129,6 +129,32 @@ func TestUnknownEngineRefuses(t *testing.T) {
 	}
 }
 
+func TestErrorsNeverEchoCredentials(t *testing.T) {
+	const secret = "hunter2sentinel"
+	for _, dsn := range []string{
+		"mysql://user:" + secret + "@db.example.com/db",  // unsupported scheme
+		"postgres://user:" + secret + "@db\x7f.bad/db",   // url.Parse failure
+		"postgres://user:" + secret + "@db.example.com/", // TLS refusal
+	} {
+		_, _, err := Load("server", nil, env("WENV_DB", dsn), nil)
+		if err == nil {
+			t.Fatalf("%q: expected refusal", dsn)
+		}
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("error leaks credentials: %v", err)
+		}
+	}
+}
+
+func TestPositionalArgumentsRefused(t *testing.T) {
+	for _, sub := range []string{"server", "migrate"} {
+		_, _, err := Load(sub, []string{"--dev", "typo"}, env(), nil)
+		if err == nil {
+			t.Errorf("%s: stray positional argument must refuse", sub)
+		}
+	}
+}
+
 func TestUnknownWenvKeysWarn(t *testing.T) {
 	_, warnings, err := Load("server", []string{"--dev"}, env(), environFrom("WENV_TYPO", "x", "WENV_DB", ""))
 	if err != nil {

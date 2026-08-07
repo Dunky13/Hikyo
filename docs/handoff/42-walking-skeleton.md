@@ -34,8 +34,10 @@ Layout and the rules it carries:
   (`MaxOpenConns(1)`, `_txlock=immediate`) + separate read pool.
 - `internal/store/tx` — the transaction boundary: pg SERIALIZABLE retrying
   SQLSTATE 40001/40P01, sqlite BEGIN IMMEDIATE retrying SQLITE_BUSY/LOCKED;
-  3 attempts, jittered 10/50/250 ms backoff, 15 s overall deadline
-  (ops-spec values). Retried unit is the whole closure; effects after commit.
+  initial try + 3 retries with jittered 10/50/250 ms backoff, 15 s overall
+  deadline (ops-spec values). Retried unit is the whole closure; effects
+  after commit. Read pool hands out read-only repository interfaces, so
+  writes cannot bypass the boundary at compile time.
 - `internal/store/migrate` — goose (library mode) on the embedded per-dialect
   dirs; pg session advisory lock, sqlite flock (`<db>.lock`) held for the
   whole run; roll-forward only; any failure refuses to serve.
@@ -75,5 +77,7 @@ real domain lands.
   binary). CI fails on stale generated code.
 - Postgres locally: any 17/18 with a scratch database; the harness drops
   only `orgs` and `goose_db_version`.
-- `/readyz`'s "migrations current" claim rests on fail-closed boot; if a
-  live pending-check is ever wanted, put it in `service.System.Ready`.
+- `/readyz` checks liveness of the schema match on every call
+  (`migrate.Check`): pending migrations *and* a database migrated by a newer
+  binary both flip readiness — covering the old-server-after-new-migrate
+  race the ADR names.

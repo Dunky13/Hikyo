@@ -34,6 +34,14 @@ const deadline = 15 * time.Second
 // exhaustion surfaces as a loud failure wrapping the last error — never an
 // infinite loop or a silent drop.
 func Write(ctx context.Context, db *store.DB, fn func(ctx context.Context, r store.Repos) error) error {
+	return retryLoop(ctx, db.Engine(), func(ctx context.Context) error {
+		return once(ctx, db, fn)
+	})
+}
+
+// retryLoop is the engine-agnostic bounded-retry machinery, separated from
+// the driver plumbing so its attempt accounting is unit-testable.
+func retryLoop(ctx context.Context, engine store.Engine, attemptFn func(ctx context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 
@@ -49,11 +57,11 @@ func Write(ctx context.Context, db *store.DB, fn func(ctx context.Context, r sto
 				return fmt.Errorf("tx: deadline while retrying: %w", errors.Join(ctx.Err(), last))
 			}
 		}
-		err := once(ctx, db, fn)
+		err := attemptFn(ctx)
 		if err == nil {
 			return nil
 		}
-		if !retryable(db.Engine(), err) {
+		if !retryable(engine, err) {
 			return err
 		}
 		last = err

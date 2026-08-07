@@ -48,6 +48,8 @@ jobs:
         run: |
           go tool sqlc generate
           git diff --exit-code -- internal/store/sqlitegen internal/store/pggen
+          # git diff misses newly generated untracked files
+          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen)"
 
       - name: Test (sqlite + postgres conformance)
         env:

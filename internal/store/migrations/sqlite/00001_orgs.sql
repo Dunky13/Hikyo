@@ -5,7 +5,7 @@
 CREATE TABLE orgs (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    active INTEGER NOT NULL,
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
     metadata TEXT NOT NULL,
     created_at TEXT NOT NULL
 );

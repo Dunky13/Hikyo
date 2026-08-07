@@ -67,14 +67,12 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		if err := migrate.Run(ctx, sc); err != nil {
 			return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 		}
-	} else {
-		pending, err := migrate.HasPending(ctx, sc)
-		if err != nil {
-			return nil, fmt.Errorf("boot: refusing to serve: %w", err)
-		}
-		if pending {
-			return nil, errors.New("boot: pending migrations and auto-migrate is disabled — run `wenv migrate`; refusing to serve")
-		}
+	}
+	// Always verify exact schema match — with auto-migrate off this catches
+	// pending migrations; in both modes it catches a database migrated by a
+	// newer binary (Run applies nothing there and the schema stays ahead).
+	if err := migrate.Check(ctx, sc); err != nil {
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
 	db, err := store.Open(ctx, sc)
@@ -101,7 +99,14 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 // Serve blocks until ctx is cancelled, then shuts down gracefully.
 func (s *Server) Serve(ctx context.Context) error {
 	defer s.db.Close()
-	srv := &http.Server{Handler: s.handler}
+	// Baseline slow-client hardening; tuned values belong to the ops spec.
+	srv := &http.Server{
+		Handler:           s.handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(s.ln) }()
 	select {

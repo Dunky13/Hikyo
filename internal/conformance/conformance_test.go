@@ -117,7 +117,18 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 		t.Errorf("created_at not UTC: %v", got.CreatedAt.Location())
 	}
 	if !got.Active {
-		t.Error("active bool did not round-trip")
+		t.Error("active=true did not round-trip")
+	}
+	inactive, err := orgs.Create(t.Context(), "roundtrip-inactive", false, json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotInactive, err := orgs.Get(t.Context(), inactive.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotInactive.Active {
+		t.Error("active=false did not round-trip")
 	}
 	var m1, m2 any
 	if err := json.Unmarshal(created.Metadata, &m1); err != nil {
