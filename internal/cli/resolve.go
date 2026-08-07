@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -67,14 +66,15 @@ func (r Resolved) Require(d Dimension) (string, error) {
 // stderr, before acting, so the active target is visible exactly when it
 // matters without polluting parseable stdout.
 func (r Resolved) Echo() string {
-	dims := []Dimension{DimInstance, DimOrg, DimProject, DimEnv}
+	// Fixed order, outermost dimension first: the echo is read by a human
+	// about to run a disclosure verb, and a target that renders in a
+	// different order each time is one nobody checks.
 	var parts []string
-	for _, d := range dims {
+	for _, d := range []Dimension{DimInstance, DimOrg, DimProject, DimEnv} {
 		if v := r.Values[d]; v != "" {
 			parts = append(parts, fmt.Sprintf("%s=%s (%s)", d, v, r.Sources[d]))
 		}
 	}
-	sort.SliceStable(parts, func(i, j int) bool { return false })
 	return strings.Join(parts, " ")
 }
 

@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/Dunky13/wenv/api"
@@ -163,7 +165,7 @@ func runLogin(ctx context.Context, ios IO, args []string) error {
 	if err := CheckRevision(meta, "localLogin"); err != nil {
 		return err
 	}
-	if !slicesContains(meta.ProtocolCapabilities, "local-password") {
+	if !slices.Contains(meta.ProtocolCapabilities, "local-password") {
 		return failf(ExitRefused,
 			"%s does not serve the local-password flow (it advertises: %s)",
 			entry.Origin, strings.Join(meta.ProtocolCapabilities, ", "))
@@ -763,26 +765,9 @@ func boolString(b bool) string {
 	return "no"
 }
 
-func slicesContains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}
-
+// sortedKeys gives list output a stable order, which is what makes the
+// golden fixtures meaningful: map iteration order would make the same state
+// render differently on every run.
 func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	for i := range out {
-		for j := i + 1; j < len(out); j++ {
-			if out[j] < out[i] {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
-	return out
+	return slices.Sorted(maps.Keys(m))
 }
