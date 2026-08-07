@@ -7,7 +7,9 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": []
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"]
   },
   "include": ["src", "openapi-ts.config.ts"]
 }
