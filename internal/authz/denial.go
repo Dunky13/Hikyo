@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -40,6 +41,12 @@ type Denial struct {
 // package. The authorizer lives exactly one attempt, so there is no reset.
 func (a *TxAuthorizer) PendingDenials() []Denial { return a.denials }
 
+// DenialCaptureError reports a denial that could not even be captured
+// (event-id mint failure). The transaction package MUST treat it exactly
+// like a flush failure: loud refusal, never the uniform denial — a denial
+// answer without its durable record is what fail-closed forbids.
+func (a *TxAuthorizer) DenialCaptureError() error { return a.captureErr }
+
 const (
 	resolutionResolvable   = "resolvable"
 	resolutionUnresolvable = "unresolvable"
@@ -55,9 +62,10 @@ const (
 func (a *TxAuthorizer) captureDenial(ctx context.Context, principal domain.PrincipalID, op Operation, spec opSpec, resolution string, resolvedChain domain.Scope, claimed domain.Scope) {
 	id, err := audit.NewEventID()
 	if err != nil {
-		// Cannot mint an id: leave the denial uncaptured and let the flush
-		// step's absence be caught — nothing sensible can be written. The
-		// operation still fails with the uniform error.
+		// Cannot mint an id (entropy exhaustion): nothing writable exists,
+		// so record the capture failure — settleDenials converts it into
+		// the loud refusal instead of the uniform denial (fail-closed).
+		a.captureErr = errors.Join(a.captureErr, err)
 		return
 	}
 	wire := audit.FromContext(ctx)

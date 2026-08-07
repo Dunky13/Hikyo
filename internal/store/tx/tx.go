@@ -190,8 +190,16 @@ func readOnce(ctx context.Context, db *store.DB, fn ReadFn) error {
 //     record is exactly what fail-closed forbids (the A4 induced-commit-
 //     failure criterion).
 func settleDenials(ctx context.Context, db *store.DB, az *authz.TxAuthorizer, attemptErr error) error {
+	if attemptErr != nil && retryable(db.Engine(), attemptErr) {
+		return attemptErr // the retry re-runs authorize() and re-captures
+	}
+	if cerr := az.DenialCaptureError(); cerr != nil {
+		// A denial existed but could not even be captured: same fail-closed
+		// posture as a flush failure — loud, never the uniform denial.
+		return fmt.Errorf("tx: denial audit record not durable — refusing to answer (capture: %w; suppressed outcome: %v)", cerr, attemptErr)
+	}
 	denials := az.PendingDenials()
-	if len(denials) == 0 || (attemptErr != nil && retryable(db.Engine(), attemptErr)) {
+	if len(denials) == 0 {
 		return attemptErr
 	}
 	flushErr := retryLoop(ctx, db.Engine(), func(ctx context.Context) error {

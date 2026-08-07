@@ -15,9 +15,10 @@ import (
 // closure and can only mint proofs through it — the resolver itself is never
 // exposed.
 type TxAuthorizer struct {
-	r       *authn.Resolver
-	tok     *TxToken
-	denials []Denial
+	r          *authn.Resolver
+	tok        *TxToken
+	denials    []Denial
+	captureErr error // a denial that could not even be captured — fail-closed at settle
 }
 
 // NewTxAuthorizer binds authorize() to one transaction attempt. Called by
