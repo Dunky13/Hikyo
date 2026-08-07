@@ -14,7 +14,7 @@ FROM tier3_keys WHERE purpose = ? AND org_id = ? AND project_id = ? AND state = 
 INSERT INTO tier3_keys (id, purpose, org_id, project_id, version, master_key_version, state, blob, created_at)
 VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?);
 
--- name: TouchHierarchyGeneration :one
+-- name: AcquireHierarchyGeneration :one
 SELECT generation FROM key_generations WHERE scope = 'hierarchy';
 
 -- name: InsertKeyGeneration :exec

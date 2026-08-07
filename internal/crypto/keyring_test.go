@@ -308,3 +308,38 @@ func TestDEKCacheBounded(t *testing.T) {
 		t.Errorf("evicted scope unusable: %v", err)
 	}
 }
+
+// Regression (code review, #43): a sealer obtained before its scope was
+// evicted from the DEK cache aliases the cached buffer. Eviction must not
+// zero it — a zeroed-key seal would be a silent confidentiality break.
+func TestSealerSurvivesCacheEviction(t *testing.T) {
+	ctx := context.Background()
+	kr, err := LoadKeyring(ctx, newMemStore(), newRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := kr.ForProject(ctx, "org_1", "prj_victim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range dekCacheSize + 1 {
+		if _, err := kr.ForProject(ctx, "org_1", fmt.Sprintf("prj_%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aad := ValueAAD{OrgID: "org_1", ProjectID: "prj_victim", EnvID: "e", KeyID: "k", RowID: "r", FieldTag: "f"}
+	ct, err := sealer.SealValue(aad, []byte("sealed after eviction"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Open with a freshly fetched sealer: fails if the old sealer's key was
+	// zeroed under it.
+	fresh, err := kr.ForProject(ctx, "org_1", "prj_victim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pt, err := fresh.OpenValue(aad, ct)
+	if err != nil || string(pt) != "sealed after eviction" {
+		t.Fatalf("ciphertext sealed by evicted sealer: %q, %v", pt, err)
+	}
+}

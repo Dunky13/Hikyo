@@ -9,6 +9,17 @@ import (
 	"context"
 )
 
+const acquireHierarchyGeneration = `-- name: AcquireHierarchyGeneration :one
+SELECT generation FROM key_generations WHERE scope = 'hierarchy'
+`
+
+func (q *Queries) AcquireHierarchyGeneration(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, acquireHierarchyGeneration)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
 const getActiveMasterKey = `-- name: GetActiveMasterKey :one
 SELECT version, root_key_epoch, state, blob, created_at
 FROM master_keys WHERE state = 'active'
@@ -114,15 +125,4 @@ func (q *Queries) InsertTier3Key(ctx context.Context, arg InsertTier3KeyParams) 
 		arg.CreatedAt,
 	)
 	return err
-}
-
-const touchHierarchyGeneration = `-- name: TouchHierarchyGeneration :one
-SELECT generation FROM key_generations WHERE scope = 'hierarchy'
-`
-
-func (q *Queries) TouchHierarchyGeneration(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, touchHierarchyGeneration)
-	var generation int64
-	err := row.Scan(&generation)
-	return generation, err
 }

@@ -31,12 +31,12 @@ type KeyReader interface {
 }
 
 // KeyRepo is the transactional keyring repository. InsertTier3 and
-// InsertMaster are always preceded by TouchHierarchyGeneration in the same
+// InsertMaster are always preceded by AcquireHierarchyGeneration in the same
 // transaction — the fence that will serialize key creation against master
 // rotation (encryption ADR § Rotation; the rotation operations land later).
 type KeyRepo interface {
 	KeyReader
-	TouchHierarchyGeneration(ctx context.Context) error
+	AcquireHierarchyGeneration(ctx context.Context) error
 	InsertMaster(ctx context.Context, k crypto.WrappedKey) error
 	InsertTier3(ctx context.Context, k crypto.WrappedKey) error
 	InsertScopeGeneration(ctx context.Context, p crypto.Purpose, orgID, projectID string) error
@@ -46,9 +46,9 @@ func scopeGenerationKey(p crypto.Purpose, orgID, projectID string) string {
 	return fmt.Sprintf("tier3:%s:%s:%s", p, orgID, projectID)
 }
 
-func dbVersion(v int64) (uint32, error) {
+func dbVersion(field string, v int64) (uint32, error) {
 	if v < 0 || v > math.MaxUint32 {
-		return 0, fmt.Errorf("store: key version %d out of range", v)
+		return 0, fmt.Errorf("store: %s %d out of range", field, v)
 	}
 	return uint32(v), nil
 }
@@ -68,9 +68,13 @@ type sqliteKeys struct{ q *sqlitegen.Queries }
 
 func (r sqliteRepos) Keys() KeyRepo { return sqliteKeys{q: sqlitegen.New(r.db)} }
 
+// sqliteUniqueViolation matches exactly the uniqueness extended codes —
+// mirroring postgres 23505. A broader SQLITE_CONSTRAINT match would turn
+// CHECK/FK/NOT NULL bugs into a silent "key already exists" retry path.
 func sqliteUniqueViolation(err error) bool {
 	var se *sqlite.Error
-	return errors.As(err, &se) && se.Code()&0xff == sqlitelib.SQLITE_CONSTRAINT
+	return errors.As(err, &se) &&
+		(se.Code() == sqlitelib.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlitelib.SQLITE_CONSTRAINT_PRIMARYKEY)
 }
 
 func (k sqliteKeys) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error) {
@@ -81,11 +85,11 @@ func (k sqliteKeys) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	version, err := dbVersion(row.Version)
+	version, err := dbVersion("key version", row.Version)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	epoch, err := dbVersion(row.RootKeyEpoch)
+	epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
@@ -119,11 +123,11 @@ func tier3FromSQLite(row sqlitegen.Tier3Key) (crypto.WrappedKey, error) {
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	version, err := dbVersion(row.Version)
+	version, err := dbVersion("key version", row.Version)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	masterVersion, err := dbVersion(row.MasterKeyVersion)
+	masterVersion, err := dbVersion("master key version", row.MasterKeyVersion)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
@@ -143,11 +147,11 @@ func tier3FromSQLite(row sqlitegen.Tier3Key) (crypto.WrappedKey, error) {
 	}, nil
 }
 
-func (k sqliteKeys) TouchHierarchyGeneration(ctx context.Context) error {
+func (k sqliteKeys) AcquireHierarchyGeneration(ctx context.Context) error {
 	// sqlite: the single write connection plus BEGIN IMMEDIATE already
 	// serializes writers globally; reading the row keeps the call shape (and
 	// proves the row exists) until rotation gives it teeth.
-	_, err := k.q.TouchHierarchyGeneration(ctx)
+	_, err := k.q.AcquireHierarchyGeneration(ctx)
 	return err
 }
 
@@ -208,11 +212,11 @@ func (k pgKeys) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error) {
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	version, err := dbVersion(row.Version)
+	version, err := dbVersion("key version", row.Version)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	epoch, err := dbVersion(row.RootKeyEpoch)
+	epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
@@ -245,11 +249,11 @@ func tier3FromPG(row pggen.Tier3Key) (crypto.WrappedKey, error) {
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	version, err := dbVersion(row.Version)
+	version, err := dbVersion("key version", row.Version)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
-	masterVersion, err := dbVersion(row.MasterKeyVersion)
+	masterVersion, err := dbVersion("master key version", row.MasterKeyVersion)
 	if err != nil {
 		return crypto.WrappedKey{}, err
 	}
@@ -268,10 +272,10 @@ func tier3FromPG(row pggen.Tier3Key) (crypto.WrappedKey, error) {
 	}, nil
 }
 
-func (k pgKeys) TouchHierarchyGeneration(ctx context.Context) error {
+func (k pgKeys) AcquireHierarchyGeneration(ctx context.Context) error {
 	// SELECT ... FOR UPDATE: the row lock serializes tier-3 key creation
 	// against future master/root rotation in the same fence.
-	_, err := k.q.TouchHierarchyGeneration(ctx)
+	_, err := k.q.AcquireHierarchyGeneration(ctx)
 	return err
 }
 

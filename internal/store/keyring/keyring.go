@@ -29,7 +29,7 @@ func (s *Store) CreateHierarchy(ctx context.Context, master crypto.WrappedKey, t
 	now := store.CanonTime(time.Now())
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos) error {
 		keys := r.Keys()
-		if err := keys.TouchHierarchyGeneration(ctx); err != nil {
+		if err := keys.AcquireHierarchyGeneration(ctx); err != nil {
 			return err
 		}
 		master.CreatedAt = now
@@ -53,7 +53,7 @@ func (s *Store) CreateTier3(ctx context.Context, key crypto.WrappedKey) error {
 	key.CreatedAt = store.CanonTime(time.Now())
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos) error {
 		keys := r.Keys()
-		if err := keys.TouchHierarchyGeneration(ctx); err != nil {
+		if err := keys.AcquireHierarchyGeneration(ctx); err != nil {
 			return err
 		}
 		if err := keys.InsertTier3(ctx, key); err != nil {

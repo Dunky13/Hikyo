@@ -1,6 +1,9 @@
 package crypto
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"math"
+)
 
 // Associated-data encoding, per the encryption ADR § Envelope format:
 // injective by construction. Every AAD is a length-prefixed sequence — each
@@ -15,6 +18,12 @@ func be32(v uint32) []byte {
 }
 
 func appendLP(dst, field []byte) []byte {
+	if uint64(len(field)) > math.MaxUint32 {
+		// Programming error: no AAD field or header component is remotely
+		// this large. Truncating the length prefix would break injectivity,
+		// so fail loud.
+		panic("crypto: length-prefixed field exceeds uint32")
+	}
 	dst = append(dst, be32(uint32(len(field)))...)
 	return append(dst, field...)
 }

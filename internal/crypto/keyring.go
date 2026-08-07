@@ -211,19 +211,23 @@ func (k *Keyring) mintTier3(p Purpose, orgID, projectID string) (keyHandle, Wrap
 		Version:          1,
 		MasterKeyVersion: k.master.version,
 	}
-	var aad AAD
-	if p == PurposeToken {
-		aad = WrappedTokenKeyAAD{TokenKeyVersion: row.Version, MasterKeyVersion: k.master.version}
-	} else {
-		aad = WrappedDEKAAD{
-			OrgID: orgID, ProjectID: projectID, DEKID: row.ID,
-			DEKVersion: row.Version, MasterKeyVersion: k.master.version,
-		}
-	}
-	if row.Blob, err = seal(k.rnd, k.master.key, masterKeyID, k.master.version, aad, key); err != nil {
+	if row.Blob, err = seal(k.rnd, k.master.key, masterKeyID, k.master.version, tier3AAD(row), key); err != nil {
 		return keyHandle{}, WrappedKey{}, err
 	}
 	return keyHandle{id: row.ID, version: row.Version, key: key}, row, nil
+}
+
+// tier3AAD is the one place the tier-3 row → AAD mapping lives: the token
+// key wraps under wrapped_token_key, every DEK-shaped key (project,
+// instance, future scanning) under wrapped_dek.
+func tier3AAD(row WrappedKey) AAD {
+	if row.Purpose == PurposeToken {
+		return WrappedTokenKeyAAD{TokenKeyVersion: row.Version, MasterKeyVersion: row.MasterKeyVersion}
+	}
+	return WrappedDEKAAD{
+		OrgID: row.OrgID, ProjectID: row.ProjectID, DEKID: row.ID,
+		DEKVersion: row.Version, MasterKeyVersion: row.MasterKeyVersion,
+	}
 }
 
 func (k *Keyring) loadTier3(ctx context.Context, p Purpose, orgID, projectID string) (keyHandle, error) {
@@ -243,16 +247,7 @@ func (k *Keyring) unwrapTier3(row WrappedKey) (keyHandle, error) {
 		return keyHandle{}, fmt.Errorf("crypto: %s key %s wrapped under master v%d, active is v%d",
 			row.Purpose, row.ID, row.MasterKeyVersion, k.master.version)
 	}
-	var aad AAD
-	if row.Purpose == PurposeToken {
-		aad = WrappedTokenKeyAAD{TokenKeyVersion: row.Version, MasterKeyVersion: row.MasterKeyVersion}
-	} else {
-		aad = WrappedDEKAAD{
-			OrgID: row.OrgID, ProjectID: row.ProjectID, DEKID: row.ID,
-			DEKVersion: row.Version, MasterKeyVersion: row.MasterKeyVersion,
-		}
-	}
-	key, err := open(k.master.key, masterKeyID, row.MasterKeyVersion, aad, row.Blob)
+	key, err := open(k.master.key, masterKeyID, row.MasterKeyVersion, tier3AAD(row), row.Blob)
 	if err != nil {
 		return keyHandle{}, fmt.Errorf("crypto: unwrap %s key %s: %w", row.Purpose, row.ID, err)
 	}
@@ -320,16 +315,17 @@ func (k *Keyring) projectDEK(ctx context.Context, orgID, projectID string) (keyH
 	return handle, nil
 }
 
-// cacheDEK inserts under k.mu, evicting (and zeroing) the least recently
-// used entry past the bound.
+// cacheDEK inserts under k.mu, evicting the least recently used entry past
+// the bound. Evicted keys are NOT zeroed here: a live ProjectSealer may
+// still alias the buffer, and sealing under a zeroed key would be a silent
+// confidentiality break. Zeroing happens only where fencing guarantees no
+// live holder — rotation and project delete, with their tickets.
 func (k *Keyring) cacheDEK(scope string, h keyHandle) {
 	k.deks[scope] = k.lru.PushFront(&dekEntry{scope: scope, handle: h})
 	if k.lru.Len() > dekCacheSize {
 		oldest := k.lru.Back()
-		entry := oldest.Value.(*dekEntry)
-		Zero(entry.handle.key)
 		k.lru.Remove(oldest)
-		delete(k.deks, entry.scope)
+		delete(k.deks, oldest.Value.(*dekEntry).scope)
 	}
 }
 
