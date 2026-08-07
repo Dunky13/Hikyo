@@ -24,8 +24,8 @@ jobs:
           go-version-file: go.mod
       - name: Shellcheck (pinned archive)
         env:
-          SHELLCHECK_VERSION: v0.10.0
-          SHELLCHECK_SHA256: 6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
         run: |
           archive="$RUNNER_TEMP/shellcheck.tar.xz"
           curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error \
