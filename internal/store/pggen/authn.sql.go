@@ -11,6 +11,197 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advancePrincipalGeneration = `-- name: AdvancePrincipalGeneration :exec
+UPDATE principals SET session_generation = session_generation + 1 WHERE id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) AdvancePrincipalGeneration(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, advancePrincipalGeneration, id)
+	return err
+}
+
+const consumeCredentialAuthority = `-- name: ConsumeCredentialAuthority :execrows
+UPDATE credential_authorities SET consumed_at = $1
+WHERE id = $2 AND consumed_at IS NULL
+`
+
+type ConsumeCredentialAuthorityParams struct {
+	ConsumedAt pgtype.Timestamptz
+	ID         string
+}
+
+// Single-use consumption: the NULL guard is the atomic claim, so two
+// concurrent presentations cannot both establish a credential.
+// wenv:authn-resolution
+func (q *Queries) ConsumeCredentialAuthority(ctx context.Context, arg ConsumeCredentialAuthorityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeCredentialAuthority, arg.ConsumedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countAccounts = `-- name: CountAccounts :one
+SELECT COUNT(*) FROM accounts
+`
+
+// wenv:authn-resolution
+func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAccounts)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions WHERE id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeleteSession(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteSession, id)
+	return err
+}
+
+const deleteSessionsForPrincipal = `-- name: DeleteSessionsForPrincipal :exec
+DELETE FROM sessions WHERE principal_id = $1
+`
+
+// Every session of the principal dies, atomically and without reaching the
+// client — the invalidation that token rotation structurally cannot do.
+// wenv:authn-resolution
+func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID string) error {
+	_, err := q.db.Exec(ctx, deleteSessionsForPrincipal, principalID)
+	return err
+}
+
+const getAccountByID = `-- name: GetAccountByID :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetAccountByID(ctx context.Context, id string) (Account, error) {
+	row := q.db.QueryRow(ctx, getAccountByID, id)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Username,
+		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAccountByUsername = `-- name: GetAccountByUsername :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE username = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (Account, error) {
+	row := q.db.QueryRow(ctx, getAccountByUsername, username)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Username,
+		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getCredentialAuthorityByVerifier = `-- name: GetCredentialAuthorityByVerifier :one
+SELECT id, account_id, purpose, issued_by, credential_epoch, expires_at,
+       consumed_at, created_at
+FROM credential_authorities WHERE verifier = $1
+`
+
+type GetCredentialAuthorityByVerifierRow struct {
+	ID              string
+	AccountID       string
+	Purpose         string
+	IssuedBy        string
+	CredentialEpoch int64
+	ExpiresAt       pgtype.Timestamptz
+	ConsumedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetCredentialAuthorityByVerifier(ctx context.Context, verifier []byte) (GetCredentialAuthorityByVerifierRow, error) {
+	row := q.db.QueryRow(ctx, getCredentialAuthorityByVerifier, verifier)
+	var i GetCredentialAuthorityByVerifierRow
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Purpose,
+		&i.IssuedBy,
+		&i.CredentialEpoch,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getCredentialEpoch = `-- name: GetCredentialEpoch :one
+
+SELECT credential_epoch FROM auth_instance_state WHERE id = 1
+`
+
+// Human authentication (#47, human-auth ADR). These live in the resolution
+// surface for the same reason chain resolution does: deciding WHO a caller is
+// cannot run under a proof, because the proof is what the answer produces.
+// The write paths below are enumerated and pinned; anything else that mutates
+// inside this surface fails the sole-writer analyzer.
+// wenv:authn-resolution
+func (q *Queries) GetCredentialEpoch(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, getCredentialEpoch)
+	var credential_epoch int64
+	err := row.Scan(&credential_epoch)
+	return credential_epoch, err
+}
+
+const getPasswordCredential = `-- name: GetPasswordCredential :one
+SELECT account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
+       dek_version, credential_epoch, row_version, updated_at
+FROM password_credentials WHERE account_id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetPasswordCredential(ctx context.Context, accountID string) (PasswordCredential, error) {
+	row := q.db.QueryRow(ctx, getPasswordCredential, accountID)
+	var i PasswordCredential
+	err := row.Scan(
+		&i.AccountID,
+		&i.Verifier,
+		&i.KdfMemoryKib,
+		&i.KdfTime,
+		&i.KdfParallelism,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPrincipalGeneration = `-- name: GetPrincipalGeneration :one
+SELECT session_generation FROM principals WHERE id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetPrincipalGeneration(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRow(ctx, getPrincipalGeneration, id)
+	var session_generation int64
+	err := row.Scan(&session_generation)
+	return session_generation, err
+}
+
 const getPrincipalKind = `-- name: GetPrincipalKind :one
 
 SELECT kind FROM principals WHERE id = $1
@@ -25,6 +216,239 @@ func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, erro
 	var kind string
 	err := row.Scan(&kind)
 	return kind, err
+}
+
+const getSessionByVerifier = `-- name: GetSessionByVerifier :one
+SELECT id, principal_id, artifact, session_generation, credential_epoch,
+       auth_method, factors, authenticated_at, ceremony_id, created_at,
+       last_seen_at, idle_expires_at, absolute_expires_at
+FROM sessions WHERE verifier = $1
+`
+
+type GetSessionByVerifierRow struct {
+	ID                string
+	PrincipalID       string
+	Artifact          string
+	SessionGeneration int64
+	CredentialEpoch   int64
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   pgtype.Timestamptz
+	CeremonyID        pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	LastSeenAt        pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetSessionByVerifier(ctx context.Context, verifier []byte) (GetSessionByVerifierRow, error) {
+	row := q.db.QueryRow(ctx, getSessionByVerifier, verifier)
+	var i GetSessionByVerifierRow
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Artifact,
+		&i.SessionGeneration,
+		&i.CredentialEpoch,
+		&i.AuthMethod,
+		&i.Factors,
+		&i.AuthenticatedAt,
+		&i.CeremonyID,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.IdleExpiresAt,
+		&i.AbsoluteExpiresAt,
+	)
+	return i, err
+}
+
+const insertAccount = `-- name: InsertAccount :exec
+INSERT INTO accounts (id, principal_id, username, display_name, created_at)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertAccountParams struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertAccount(ctx context.Context, arg InsertAccountParams) error {
+	_, err := q.db.Exec(ctx, insertAccount,
+		arg.ID,
+		arg.PrincipalID,
+		arg.Username,
+		arg.DisplayName,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertCredentialAuthority = `-- name: InsertCredentialAuthority :exec
+INSERT INTO credential_authorities
+    (id, verifier, account_id, purpose, issued_by, credential_epoch, expires_at, consumed_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8)
+`
+
+type InsertCredentialAuthorityParams struct {
+	ID              string
+	Verifier        []byte
+	AccountID       string
+	Purpose         string
+	IssuedBy        string
+	CredentialEpoch int64
+	ExpiresAt       pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertCredentialAuthority(ctx context.Context, arg InsertCredentialAuthorityParams) error {
+	_, err := q.db.Exec(ctx, insertCredentialAuthority,
+		arg.ID,
+		arg.Verifier,
+		arg.AccountID,
+		arg.Purpose,
+		arg.IssuedBy,
+		arg.CredentialEpoch,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertGrant = `-- name: InsertGrant :exec
+INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertGrantParams struct {
+	ID          string
+	PrincipalID string
+	Capability  string
+	OrgID       pgtype.Text
+	ProjectID   pgtype.Text
+	EnvID       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) error {
+	_, err := q.db.Exec(ctx, insertGrant,
+		arg.ID,
+		arg.PrincipalID,
+		arg.Capability,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvID,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertPasswordCredential = `-- name: InsertPasswordCredential :exec
+INSERT INTO password_credentials
+    (account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
+     dek_version, credential_epoch, row_version, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)
+`
+
+type InsertPasswordCredentialParams struct {
+	AccountID       string
+	Verifier        []byte
+	KdfMemoryKib    int64
+	KdfTime         int64
+	KdfParallelism  int64
+	DekVersion      int64
+	CredentialEpoch int64
+	UpdatedAt       pgtype.Timestamptz
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertPasswordCredential(ctx context.Context, arg InsertPasswordCredentialParams) error {
+	_, err := q.db.Exec(ctx, insertPasswordCredential,
+		arg.AccountID,
+		arg.Verifier,
+		arg.KdfMemoryKib,
+		arg.KdfTime,
+		arg.KdfParallelism,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const insertPrincipal = `-- name: InsertPrincipal :exec
+
+INSERT INTO principals (id, kind, created_at, session_generation)
+VALUES ($1, $2, $3, 1)
+`
+
+type InsertPrincipalParams struct {
+	ID        string
+	Kind      string
+	CreatedAt pgtype.Timestamptz
+}
+
+// Enumerated writers.
+// wenv:authn-resolution
+func (q *Queries) InsertPrincipal(ctx context.Context, arg InsertPrincipalParams) error {
+	_, err := q.db.Exec(ctx, insertPrincipal, arg.ID, arg.Kind, arg.CreatedAt)
+	return err
+}
+
+const insertSession = `-- name: InsertSession :exec
+INSERT INTO sessions
+    (id, principal_id, verifier, artifact, session_generation, credential_epoch,
+     auth_method, factors, authenticated_at, ceremony_id, created_at,
+     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+`
+
+type InsertSessionParams struct {
+	ID                string
+	PrincipalID       string
+	Verifier          []byte
+	Artifact          string
+	SessionGeneration int64
+	CredentialEpoch   int64
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   pgtype.Timestamptz
+	CeremonyID        pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	LastSeenAt        pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+	SourceIp          string
+	UserAgent         string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
+	_, err := q.db.Exec(ctx, insertSession,
+		arg.ID,
+		arg.PrincipalID,
+		arg.Verifier,
+		arg.Artifact,
+		arg.SessionGeneration,
+		arg.CredentialEpoch,
+		arg.AuthMethod,
+		arg.Factors,
+		arg.AuthenticatedAt,
+		arg.CeremonyID,
+		arg.CreatedAt,
+		arg.LastSeenAt,
+		arg.IdleExpiresAt,
+		arg.AbsoluteExpiresAt,
+		arg.SourceIp,
+		arg.UserAgent,
+	)
+	return err
 }
 
 const listGrantsForPrincipal = `-- name: ListGrantsForPrincipal :many
@@ -132,4 +556,62 @@ func (q *Queries) ResolveProjectChain(ctx context.Context, arg ResolveProjectCha
 	var i ResolveProjectChainRow
 	err := row.Scan(&i.OrgID, &i.ID)
 	return i, err
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE sessions SET last_seen_at = $1, idle_expires_at = $2 WHERE id = $3
+`
+
+type TouchSessionParams struct {
+	LastSeenAt    pgtype.Timestamptz
+	IdleExpiresAt pgtype.Timestamptz
+	ID            string
+}
+
+// wenv:authn-resolution
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	_, err := q.db.Exec(ctx, touchSession, arg.LastSeenAt, arg.IdleExpiresAt, arg.ID)
+	return err
+}
+
+const updatePasswordCredentialCAS = `-- name: UpdatePasswordCredentialCAS :execrows
+UPDATE password_credentials
+SET verifier = $1, kdf_memory_kib = $2, kdf_time = $3, kdf_parallelism = $4,
+    dek_version = $5, credential_epoch = $6, row_version = row_version + 1,
+    updated_at = $7
+WHERE account_id = $8 AND row_version = $9
+`
+
+type UpdatePasswordCredentialCASParams struct {
+	Verifier        []byte
+	KdfMemoryKib    int64
+	KdfTime         int64
+	KdfParallelism  int64
+	DekVersion      int64
+	CredentialEpoch int64
+	UpdatedAt       pgtype.Timestamptz
+	AccountID       string
+	RowVersion      int64
+}
+
+// Compare-and-swap on row_version: a resumable, lock-free `reencrypt` racing
+// a password reset would otherwise write the stale verifier back under the
+// new DEK version and silently resurrect a superseded password.
+// wenv:authn-resolution
+func (q *Queries) UpdatePasswordCredentialCAS(ctx context.Context, arg UpdatePasswordCredentialCASParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePasswordCredentialCAS,
+		arg.Verifier,
+		arg.KdfMemoryKib,
+		arg.KdfTime,
+		arg.KdfParallelism,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.UpdatedAt,
+		arg.AccountID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

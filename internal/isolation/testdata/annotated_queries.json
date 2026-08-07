@@ -1,6 +1,24 @@
 [
   {
     "engine": "postgres",
+    "name": "AdvancePrincipalGeneration",
+    "annotation": "authn-resolution",
+    "hash": "b47a8093534021af496a3f9c90a7096a29d1509c0636c21a422b093fc33d4cd4"
+  },
+  {
+    "engine": "postgres",
+    "name": "ConsumeCredentialAuthority",
+    "annotation": "authn-resolution",
+    "hash": "b330ed55a007f19c32911b43853007489c586625c0a27daf9c38d6ad63e48b80"
+  },
+  {
+    "engine": "postgres",
+    "name": "CountAccounts",
+    "annotation": "authn-resolution",
+    "hash": "69674cdbf1872963e0baa7585228d5d70c3d4bda332fe67a800c0e9840ddd419"
+  },
+  {
+    "engine": "postgres",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
     "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
@@ -13,15 +31,105 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteSession",
+    "annotation": "authn-resolution",
+    "hash": "11e96cfd8c2736f13ce55975ea910dd68640f6f14e38a4b3342d514804e3de27"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSessionsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "d71eb4cf1d45147fbf7456e92835ccb858731dee0332838dde5f126896e21d08"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetAccountByID",
+    "annotation": "authn-resolution",
+    "hash": "f53bce6b6f22df5007369ba4429fb0a7256d27776cab7a7e798458b64e06c576"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetAccountByUsername",
+    "annotation": "authn-resolution",
+    "hash": "8c7e0be06817fe23b5ab786f43ed0972fc9b0638e0f1037437c7e953fe592edf"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetCredentialAuthorityByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "19f3539adc57a980876b1e858c8f249120a70002ba572e76084516721af030c9"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetCredentialEpoch",
+    "annotation": "authn-resolution",
+    "hash": "fc4d568512529604881c13b250d2d8922179bb5f49532ca64fb107f87f258810"
+  },
+  {
+    "engine": "postgres",
     "name": "GetOrg",
     "annotation": "instance-scoped",
     "hash": "4a4e28b0093acaf4c67487f0e19157cecbee480d5d2bd51e88e88074eb70e47d"
   },
   {
     "engine": "postgres",
+    "name": "GetPasswordCredential",
+    "annotation": "authn-resolution",
+    "hash": "b9305f60d3277b60befea01d7a8cf3271d3cd152ebead1a361e85c2e2017208a"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetPrincipalGeneration",
+    "annotation": "authn-resolution",
+    "hash": "557d84f0b1879f77618f5eac719f6f2c2acb2b767d45fad152832e5b11896596"
+  },
+  {
+    "engine": "postgres",
     "name": "GetPrincipalKind",
     "annotation": "authn-resolution",
     "hash": "7d34804525d3e9593db35c603cdd980dcb060dc83ff4600c08f3599d2b266de4"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetSessionByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "4bd8c86ddb49353001338e51d22434a29cb2f900d0433f1e4ed58e78c485b342"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertAccount",
+    "annotation": "authn-resolution",
+    "hash": "e49a478aa77279183d2d478de60367f0c515bc5bfe4cb5d8646e105088bd215a"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertCredentialAuthority",
+    "annotation": "authn-resolution",
+    "hash": "4190d037ef55279755904cbc0bc84a7a9317f19a778f7d89303e20d8d05ccd31"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertGrant",
+    "annotation": "authn-resolution",
+    "hash": "ebc8f27edf50d6400f6d92ed1af408ac9d3fdfa83e238498de684da12ff795f2"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertPasswordCredential",
+    "annotation": "authn-resolution",
+    "hash": "de67f9e8ab611d5f49aff9246d348028cc734e83b101a5d72f858bf86cb8b50e"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "3ca1f7b2720bc723487c9222622bd0056112c329a4d1b977799a575536dc0d6f"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertSession",
+    "annotation": "authn-resolution",
+    "hash": "1e3eabbbadb55112c9c6aff84583fcdc2494042fb35f5ef8effed15c6063f32d"
   },
   {
     "engine": "postgres",
@@ -54,6 +162,36 @@
     "hash": "5987f3b6b5f15c366598fc6bd4f53aff29afb1bc4f8906e3ea035100b9c8bc7f"
   },
   {
+    "engine": "postgres",
+    "name": "TouchSession",
+    "annotation": "authn-resolution",
+    "hash": "f28d8e41a5d8bfdc200bf38c1459ac05c3585e125bf69831572ed61df85f349e"
+  },
+  {
+    "engine": "postgres",
+    "name": "UpdatePasswordCredentialCAS",
+    "annotation": "authn-resolution",
+    "hash": "63093b4013caae1b8dfd3e82983292e570eabfb35e8b8586b938aac52fa1f0f1"
+  },
+  {
+    "engine": "sqlite",
+    "name": "AdvancePrincipalGeneration",
+    "annotation": "authn-resolution",
+    "hash": "08d4e8c14474157f924c8206e0729295dc3aa792c0f6441e8554cc30364fe4ce"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ConsumeCredentialAuthority",
+    "annotation": "authn-resolution",
+    "hash": "b55a467fd6ffe3d3f4bdce5f99f1536bcdd0213151e4f170fab088a938a11ec8"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CountAccounts",
+    "annotation": "authn-resolution",
+    "hash": "69674cdbf1872963e0baa7585228d5d70c3d4bda332fe67a800c0e9840ddd419"
+  },
+  {
     "engine": "sqlite",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
@@ -67,15 +205,105 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteSession",
+    "annotation": "authn-resolution",
+    "hash": "4c0c29fb3d9f50d5c04e9d5db62e3f64d8df43b42d5991d7c85276873e24167b"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSessionsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "4fb6f6f766cf8b9d331025566defdd05bcc63776e9f7bd7da052d1c11c77e0de"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetAccountByID",
+    "annotation": "authn-resolution",
+    "hash": "3a8ac0bfba6d04e573b523a3bcba38919495c87cfac6b91ce40103cf38392d4e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetAccountByUsername",
+    "annotation": "authn-resolution",
+    "hash": "3cdfa65ba79b4b0fd62e6d9c5d9142233f3c7c1b912a03807099bb97df4e6740"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetCredentialAuthorityByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "16811e2009cc56697ea33e50ce857997fee354b8cbf2cad5090511e58a6941f9"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetCredentialEpoch",
+    "annotation": "authn-resolution",
+    "hash": "fc4d568512529604881c13b250d2d8922179bb5f49532ca64fb107f87f258810"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetOrg",
     "annotation": "instance-scoped",
     "hash": "1f5399c8a18f2b8b804f8fcfb4552f19506b2df88063b896f702223ce2423742"
   },
   {
     "engine": "sqlite",
+    "name": "GetPasswordCredential",
+    "annotation": "authn-resolution",
+    "hash": "3b455d6e936523c6ebba942c06edda526495318ccec557a35aacac23f87dce33"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetPrincipalGeneration",
+    "annotation": "authn-resolution",
+    "hash": "edaa983ec7dab3409e5169df8ced76e89a1011ddfdaa7b76935eed99561a6193"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetPrincipalKind",
     "annotation": "authn-resolution",
     "hash": "9d2e7acdb6b1c52c840e24e6abdcf4102421a445eb0fdefa43ca81706a939516"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetSessionByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "1741b6bd0bb2fbccb016346d83588d5aec8782b1ec6c433a3687105e508060ed"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertAccount",
+    "annotation": "authn-resolution",
+    "hash": "53162bffe9c6fec06198d7b5430de4813739f09f157f3e9fb5748fe66fa97c62"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertCredentialAuthority",
+    "annotation": "authn-resolution",
+    "hash": "dd31f5fca392f36d4af0e819ab351217f576aeeead3703df0eb4fea5362a7667"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertGrant",
+    "annotation": "authn-resolution",
+    "hash": "25705797d0c69e23afdd18e67f04a3bbdb8d4a7de4272109983dbf76a62afa01"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertPasswordCredential",
+    "annotation": "authn-resolution",
+    "hash": "a2812c6a93fed15b6eb87bc7c3df5404b73312a6a7b66b6ccdc227b774707077"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "0ed06ada8cac89c2a005d4072b72c9c77c5040285e91d3d4aa79dde571d51c0d"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertSession",
+    "annotation": "authn-resolution",
+    "hash": "787cf4cf53d976da048f2144a1c6150cf24fe127be8329da6951ae486de60202"
   },
   {
     "engine": "sqlite",
@@ -106,5 +334,17 @@
     "name": "ResolveProjectChain",
     "annotation": "authn-resolution",
     "hash": "d50ebc48ca5cc932cb252816dc45e15e55619315c99e1593a06e1c07eb216de7"
+  },
+  {
+    "engine": "sqlite",
+    "name": "TouchSession",
+    "annotation": "authn-resolution",
+    "hash": "dc82c58a0bdd5b936cbd194f398a94c000bf292f6cbba03c61df86c159a85769"
+  },
+  {
+    "engine": "sqlite",
+    "name": "UpdatePasswordCredentialCAS",
+    "annotation": "authn-resolution",
+    "hash": "ed995538ba0a184c346e4e7a667911efdb2f75b0d9b24bfca11882bf1c25b560"
   }
 ]

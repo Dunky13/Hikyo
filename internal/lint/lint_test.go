@@ -373,9 +373,9 @@ func TestDenialWriterCatchesSecondWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	surface := Module + "/internal/lint/testdata/badauthn"
-	findings := CheckDenialWriterIn(pkgs, surface, "WriteDenial")
+	findings := CheckDenialWriterIn(pkgs, surface, map[string]bool{"WriteDenial": true})
 	assertFindings(t, findings, []string{
-		"SecondWriter calls the mutating query InsertTenantAuditEvent outside WriteDenial",
+		"SecondWriter calls the mutating query InsertTenantAuditEvent, and SecondWriter is not in the pinned enumerated write list",
 	})
 	for _, f := range findings {
 		if strings.Contains(f, "WriteDenial calls") || strings.Contains(f, "ReadsAreFine") {
@@ -383,7 +383,7 @@ func TestDenialWriterCatchesSecondWriter(t *testing.T) {
 		}
 	}
 	// Scoping: the same package is silent when it is not the named surface.
-	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial"); len(f) != 0 {
+	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", map[string]bool{"WriteDenial": true}); len(f) != 0 {
 		t.Errorf("analyzer fired outside the named surface: %v", f)
 	}
 	for _, name := range []string{"InsertTenantAuditEvent", "CreateOrg", "UpdateEnvironmentNote", "DeleteThing", "AcquireHierarchyGeneration"} {

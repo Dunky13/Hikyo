@@ -8,6 +8,14 @@ import (
 	"database/sql"
 )
 
+type Account struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   string
+}
+
 type AuditInstanceEvent struct {
 	Seq               int64
 	ID                string
@@ -56,6 +64,24 @@ type AuditTenantEvent struct {
 	Payload           string
 }
 
+type AuthInstanceState struct {
+	ID              int64
+	CredentialEpoch int64
+	UpdatedAt       string
+}
+
+type CredentialAuthority struct {
+	ID              string
+	Verifier        []byte
+	AccountID       string
+	Purpose         string
+	IssuedBy        string
+	CredentialEpoch int64
+	ExpiresAt       string
+	ConsumedAt      sql.NullString
+	CreatedAt       string
+}
+
 type Environment struct {
 	ID        string
 	OrgID     string
@@ -96,10 +122,23 @@ type Org struct {
 	CreatedAt string
 }
 
+type PasswordCredential struct {
+	AccountID       string
+	Verifier        []byte
+	KdfMemoryKib    int64
+	KdfTime         int64
+	KdfParallelism  int64
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	UpdatedAt       string
+}
+
 type Principal struct {
-	ID        string
-	Kind      string
-	CreatedAt string
+	ID                string
+	Kind              string
+	CreatedAt         string
+	SessionGeneration int64
 }
 
 type Project struct {
@@ -107,6 +146,25 @@ type Project struct {
 	OrgID     string
 	Name      string
 	CreatedAt string
+}
+
+type Session struct {
+	ID                string
+	PrincipalID       string
+	Verifier          []byte
+	Artifact          string
+	SessionGeneration int64
+	CredentialEpoch   int64
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   string
+	CeremonyID        sql.NullString
+	CreatedAt         string
+	LastSeenAt        string
+	IdleExpiresAt     string
+	AbsoluteExpiresAt string
+	SourceIp          string
+	UserAgent         string
 }
 
 type Tier3Key struct {
