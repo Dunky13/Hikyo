@@ -18,9 +18,7 @@ paths:
                   id: {type: string}
                   state:
                     type: string
-                    enum: [active, retired]
-                  note:
-                    type: string
+                    x-extensible-enum: [active, retired, archived]
     post:
       operationId: makeThing
       security:
@@ -34,19 +32,12 @@ paths:
               required: [name]
               properties:
                 name: {type: string}
-                label: {type: string}
       responses:
         "201": {description: created}
   /api/v1/legacy:
     get:
       operationId: getLegacy
       deprecated: true
-      security: []
-      responses:
-        "200": {description: ok}
-  /api/v1/added:
-    get:
-      operationId: getAdded
       security: []
       responses:
         "200": {description: ok}

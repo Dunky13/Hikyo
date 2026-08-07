@@ -358,29 +358,46 @@ func (a *API) sourceIP(r *http.Request) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if len(a.TrustedProxies) == 0 {
-		return host
-	}
-	peer := net.ParseIP(host)
-	trusted := false
-	for _, cidr := range a.TrustedProxies {
-		if peer != nil && cidr.Contains(peer) {
-			trusted = true
-			break
-		}
-	}
-	if !trusted {
+	if len(a.TrustedProxies) == 0 || !a.trusted(host) {
 		return host
 	}
 	forwarded := r.Header.Get("X-Forwarded-For")
 	if forwarded == "" {
 		return host
 	}
-	// The left-most entry is the original client as the trusted proxy saw it.
-	if first, _, ok := strings.Cut(forwarded, ","); ok {
-		return strings.TrimSpace(first)
+	// RIGHT to left, discarding trusted hops. The leftmost entry is the one
+	// the CLIENT can set: a normal proxy appends rather than overwrites, so
+	// reading leftmost hands an attacker their own choice of source address —
+	// bypassing the per-IP admission bucket and poisoning audit attribution
+	// in the same move. Walking backwards, the first address that is not a
+	// configured proxy is the furthest hop we have any reason to believe.
+	entries := strings.Split(forwarded, ",")
+	for i := len(entries) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(entries[i])
+		// A malformed entry ends the walk rather than being skipped: past it
+		// nothing is attributable, so the last trustworthy hop is the answer.
+		if net.ParseIP(candidate) == nil {
+			return host
+		}
+		if !a.trusted(candidate) {
+			return candidate
+		}
 	}
-	return strings.TrimSpace(forwarded)
+	return host
+}
+
+// trusted reports whether an address is a configured proxy.
+func (a *API) trusted(addr string) bool {
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range a.TrustedProxies {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // extractBearer moves the presented artifact into the request context. It
@@ -399,8 +416,19 @@ func (a *API) extractBearer(next http.Handler) http.Handler {
 // validateAgainstContract is the runtime request-validation duty: a request
 // that does not satisfy api/openapi.yaml never reaches a handler, so the
 // document is enforced rather than merely published.
+// MaxRequestBytes bounds a request body before anything decodes it. Contract
+// validation runs before the handler and before any pre-auth admission
+// decision, so without this an unauthenticated client could make the server
+// allocate an arbitrary amount of memory parsing JSON it was always going to
+// reject. The bound is far above any legitimate request this contract
+// describes.
+const MaxRequestBytes = 1 << 20
+
 func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
+		}
 		err := api.ValidateRequest(r)
 		switch {
 		case err == nil:

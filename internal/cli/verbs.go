@@ -235,6 +235,14 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 		if entry.Name == "" {
 			return TrustEntry{}, failf(ExitRefused, "trust bundle %s names no instance reference", bundlePath)
 		}
+		// If the caller named an explicit URL, the bundle must agree with it.
+		// Silently using the bundle's origin instead would let a provisioned
+		// file redirect a command whose target the operator typed by hand —
+		// the credential would still be correctly bound to that origin, but
+		// to the wrong one.
+		if err := requireSameOrigin(target, entry.Origin); err != nil {
+			return TrustEntry{}, err
+		}
 		if err := store.Put(entry); err != nil {
 			return TrustEntry{}, err
 		}
@@ -254,6 +262,13 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 		return TrustEntry{}, err
 	}
 	if entry, err := store.Lookup(originReference(origin, name)); err == nil {
+		// An already-established reference must still match the origin the
+		// caller named. Returning it unchecked would present the credential
+		// to whatever origin that reference happens to record now, which is
+		// not the one on the command line.
+		if oerr := requireSameOrigin(target, entry.Origin); oerr != nil {
+			return TrustEntry{}, oerr
+		}
 		return entry, nil
 	}
 
@@ -281,6 +296,26 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 		return TrustEntry{}, err
 	}
 	return entry, nil
+}
+
+// requireSameOrigin refuses when the caller named an explicit URL and the
+// resolved entry points somewhere else. A bare reference (no scheme) names no
+// origin, so there is nothing to compare and nothing to refuse.
+func requireSameOrigin(target, resolved string) error {
+	if !strings.Contains(target, "://") {
+		return nil
+	}
+	wanted, err := CanonicalOrigin(target)
+	if err != nil {
+		return err
+	}
+	if wanted != resolved {
+		return failf(ExitRefused,
+			"you named %s, but that instance is established as %s. Refusing rather than presenting a credential "+
+				"to an origin you did not ask for; remove the entry deliberately if the move is legitimate",
+			wanted, resolved)
+	}
+	return nil
 }
 
 func originReference(origin, name string) string {

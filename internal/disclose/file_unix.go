@@ -67,7 +67,19 @@ func writeExclusive(path, content string) error {
 		return fmt.Errorf("refusing to disclose: cannot create %q: %w", path, err)
 	}
 	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
+	// Any failure from here on removes the file. Leaving it behind is worse
+	// than either outcome it could represent: a partial write is a truncated
+	// secret the operator may not notice is truncated, and a complete write
+	// whose fsync failed is a secret on disk that Emit told the caller it had
+	// failed to deliver — so the caller mints another and the first is
+	// orphaned plaintext.
+	committed := false
+	defer func() {
+		f.Close()
+		if !committed {
+			_ = unix.Unlinkat(dirFD, name, 0)
+		}
+	}()
 
 	// Umask-independent: 0600 exactly, whatever the process umask was when
 	// the file came into existence.
@@ -91,7 +103,17 @@ func writeExclusive(path, content string) error {
 	if err := f.Sync(); err != nil {
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	// Syncing the file is not enough: the directory ENTRY is what makes it
+	// findable, and on a crash an unsynced entry can leave a durable file
+	// with no name pointing at it.
+	if err := unix.Fsync(dirFD); err != nil {
+		return fmt.Errorf("refusing to disclose: cannot commit the directory entry for %q: %w", path, err)
+	}
+	committed = true
+	return nil
 }
 
 // preflightFile reports whether writeExclusive would plausibly succeed: the

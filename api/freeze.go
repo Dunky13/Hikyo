@@ -58,17 +58,23 @@ var PermittedChanges = map[string]bool{
 
 	// New outputs. Clients must ignore unknown fields — stated in the spec —
 	// so a response gaining a member is additive by construction.
-	"response-property-added":           true,
-	"response-optional-property-added":  true,
-	"response-required-property-added":  true,
-	"response-property-became-optional": true,
+	//
+	// `response-property-became-optional` is deliberately ABSENT: a field
+	// every existing client was entitled to require, becoming one the server
+	// may omit, breaks each of them. oasdiff does not grade it as breaking;
+	// this promise does.
+	"response-property-added":          true,
+	"response-optional-property-added": true,
+	"response-required-property-added": true,
 
-	// Open enums may grow. Closed enums never do, and oasdiff cannot tell
-	// them apart — CheckProfile does, by refusing an `enum` keyword beside
-	// x-extensible-enum, which is what keeps this entry honest.
-	"request-parameter-enum-value-added": true,
-	"request-property-enum-value-added":  true,
-	"response-property-enum-value-added": true,
+	// Enum growth is deliberately NOT allowlisted, and the reason is worth
+	// stating because the naive reading is the opposite. An OPEN enum carries
+	// no `enum` keyword at all — growth is an edit to `x-extensible-enum`,
+	// which oasdiff does not report as an enum change — so permitting
+	// `*-enum-value-added` would buy nothing for open enums and would licence
+	// growth of the CLOSED ones, which never grow. oasdiff cannot tell the
+	// two apart; leaving the ids off the list is what makes the distinction
+	// hold.
 
 	// Documentation-only movement. It changes no wire behaviour, and refusing
 	// it would make improving a description a breaking change.

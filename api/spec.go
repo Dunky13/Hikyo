@@ -70,6 +70,15 @@ var (
 )
 
 func load() {
+	// The bound profile is checked HERE, not only in tests: kin-openapi's
+	// generic validation happily accepts a prohibited dialect or a legacy
+	// `nullable`, so without this the runtime would enforce a document the
+	// freeze policy would refuse. The two must agree about what the contract
+	// even is.
+	if loadErr = CheckProfile(SpecYAML); loadErr != nil {
+		loadErr = fmt.Errorf("api: openapi.yaml violates the bound 3.1 profile: %w", loadErr)
+		return
+	}
 	loader := &openapi3.Loader{IsExternalRefsAllowed: false}
 	doc, loadErr = loader.LoadFromData(SpecYAML)
 	if loadErr != nil {

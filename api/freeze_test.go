@@ -88,7 +88,6 @@ func TestAllowlistNamesThePromisedAdditions(t *testing.T) {
 		"endpoint-added",
 		"new-optional-request-property",
 		"response-property-added",
-		"response-property-enum-value-added",
 	} {
 		if !api.PermittedChanges[want] {
 			t.Errorf("the allowlist does not permit %q, which the version promise offers", want)
@@ -102,6 +101,14 @@ func TestAllowlistNamesThePromisedAdditions(t *testing.T) {
 		"new-required-request-property",
 		"api-security-removed",
 		"response-property-enum-value-removed",
+		// Growing an enum is not allowlisted: an OPEN enum carries no `enum`
+		// keyword, so its growth is not an oasdiff enum change at all, and
+		// permitting the id would only licence growth of the CLOSED ones.
+		"response-property-enum-value-added",
+		"request-property-enum-value-added",
+		// A required response field becoming optional is a field every client
+		// was entitled to require becoming one the server may omit.
+		"response-property-became-optional",
 	} {
 		if api.PermittedChanges[forbidden] {
 			t.Errorf("the allowlist permits %q, which is a break however oasdiff grades it", forbidden)
