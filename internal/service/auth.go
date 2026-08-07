@@ -139,15 +139,31 @@ func (s *Auth) LocalLogin(ctx context.Context, username, password string) (Login
 		}
 	}
 
-	var out LoginResult
+	// The refusal travels OUT of the closure rather than through its return
+	// value, because returning it would roll the transaction back — and the
+	// transaction is what makes the failure event durable. A login refusal
+	// whose audit record was rolled back with it is exactly the silent
+	// failure the ADR requires not to exist.
+	var (
+		out     LoginResult
+		refused error
+	)
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		refused = nil
 		result, ferr := s.authenticateLocal(ctx, az, username, password)
-		if ferr != nil {
-			return ferr
+		switch {
+		case errors.Is(ferr, domain.ErrUnauthenticated):
+			refused = ferr
+			return nil // commit the failure event
+		case ferr != nil:
+			return ferr // a real fault: roll back
 		}
 		out = result
 		return nil
 	})
+	if err == nil && refused != nil {
+		err = refused
+	}
 	switch {
 	case err == nil:
 		s.Admission.RecordSuccess(username)
@@ -364,12 +380,18 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		return s.refuseAuthority(ctx, "malformed")
 	}
 
-	return tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	// Same discipline as the login path: a refusal leaves the closure through
+	// `refused`, never through the return value, so the transaction commits
+	// the record of it instead of rolling that record back.
+	var refused error
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		refused = nil
 		now := s.now()
 		auth, err := az.AuthorityByValue(ctx, crypto.ArtifactVerifier(authority))
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				return s.refuseAuthorityIn(ctx, az, "unknown")
+				refused = s.refuseAuthorityIn(ctx, az, "unknown")
+				return nil
 			}
 			return err
 		}
@@ -377,13 +399,18 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		if err != nil {
 			return err
 		}
+		var cause string
 		switch {
 		case auth.Consumed:
-			return s.refuseAuthorityIn(ctx, az, "consumed")
+			cause = "consumed"
 		case !now.Before(auth.ExpiresAt):
-			return s.refuseAuthorityIn(ctx, az, "expired")
+			cause = "expired"
 		case auth.CredentialEpoch != epoch:
-			return s.refuseAuthorityIn(ctx, az, "epoch-superseded")
+			cause = "epoch-superseded"
+		}
+		if cause != "" {
+			refused = s.refuseAuthorityIn(ctx, az, cause)
+			return nil
 		}
 
 		// Claim it first. The NULL guard is the atomic claim, so two
@@ -394,7 +421,8 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 			return err
 		}
 		if !claimed {
-			return s.refuseAuthorityIn(ctx, az, "consumed")
+			refused = s.refuseAuthorityIn(ctx, az, "consumed")
+			return nil
 		}
 
 		if err := s.writeCredential(ctx, az, auth.AccountID, password, epoch, now); err != nil {
@@ -426,6 +454,10 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		}
 		return az.RecordAuthEvent(ctx, e)
 	})
+	if err != nil {
+		return err
+	}
+	return refused
 }
 
 // writeCredential seals a fresh verifier and writes it, inserting or
@@ -484,6 +516,9 @@ func (s *Auth) refuseAuthority(ctx context.Context, cause string) error {
 	return domain.ErrUnauthenticated
 }
 
+// refuseAuthorityIn records the refusal and returns the uniform outcome. The
+// caller commits the transaction and then returns what this produced: the
+// event has to survive the refusal it describes.
 func (s *Auth) refuseAuthorityIn(ctx context.Context, az *authz.TxAuthorizer, cause string) error {
 	e, err := newAuditEvent(ctx, audit.EventAuthAuthorityRefused, "",
 		audit.Object{Type: "credential_authority"}, audit.OutcomeFailure, "",

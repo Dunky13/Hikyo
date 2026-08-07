@@ -36,7 +36,7 @@ func TestInvariant01ClassificationTotality(t *testing.T) {
 	seen := map[string]bool{}
 
 	// HTTP routes, from the actual router.
-	router, ok := server.New(nil).(chi.Routes)
+	router, ok := server.New(nil, &server.API{}).(chi.Routes)
 	if ok {
 		err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 			key := "http:" + method + " " + strings.TrimSuffix(route, "/")

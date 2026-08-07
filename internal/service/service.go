@@ -78,6 +78,23 @@ func newID(prefix string) (string, error) {
 	return prefix + "_" + id.String(), nil
 }
 
+// Org is the service layer's organisation. It is a distinct type from the
+// store row on purpose: internal/store is importable only by this package, so
+// a transport that returned store rows would either violate that boundary or
+// force it open. Field names match the store row, which keeps the conversion
+// a copy rather than a translation.
+type Org struct {
+	ID        string
+	Name      string
+	Active    bool
+	Metadata  json.RawMessage
+	CreatedAt time.Time
+}
+
+func orgOf(o store.Org) Org {
+	return Org{ID: o.ID, Name: o.Name, Active: o.Active, Metadata: o.Metadata, CreatedAt: o.CreatedAt}
+}
+
 // Orgs is the demonstration aggregate's service. Org administration is
 // instance-scoped scaffolding (see the authz operation registry); the real
 // hierarchy surface lands with #48.
@@ -86,10 +103,10 @@ type Orgs struct {
 }
 
 // Create publishes a new org through the transactional boundary.
-func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name string, active bool, metadata json.RawMessage) (store.Org, error) {
+func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name string, active bool, metadata json.RawMessage) (Org, error) {
 	id, err := newID("org")
 	if err != nil {
-		return store.Org{}, err
+		return Org{}, err
 	}
 	org := store.Org{
 		ID:        id,
@@ -115,9 +132,9 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	if err != nil {
-		return store.Org{}, err
+		return Org{}, err
 	}
-	return org, nil
+	return orgOf(org), nil
 }
 
 // Org reads are instance-scoped operator reads of cross-tenant metadata, so
@@ -125,7 +142,7 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 // `audited: none` to instance-class operations). The event commits with the
 // read, which is why these run in a write transaction: an operator read
 // without its durable record does not complete.
-func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (store.Org, error) {
+func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (Org, error) {
 	var out store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
@@ -144,10 +161,10 @@ func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string)
 		}
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
-	return out, err
+	return orgOf(out), err
 }
 
-func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.Org, error) {
+func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]Org, error) {
 	var out []store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
@@ -165,7 +182,14 @@ func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.
 		}
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Org, 0, len(out))
+	for _, o := range out {
+		list = append(list, orgOf(o))
+	}
+	return list, nil
 }
 
 func (s *Orgs) Count(ctx context.Context, principal domain.PrincipalID) (int64, error) {

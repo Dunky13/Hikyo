@@ -146,7 +146,7 @@ UPDATE sessions SET last_seen_at = $1, idle_expires_at = $2 WHERE id = $3;
 DELETE FROM sessions WHERE id = $1;
 
 -- Every session of the principal dies, atomically and without reaching the
--- client — the invalidation that token rotation structurally cannot do.
+-- client  -  the invalidation that token rotation structurally cannot do.
 -- wenv:authn-resolution
 -- name: DeleteSessionsForPrincipal :exec
 DELETE FROM sessions WHERE principal_id = $1;

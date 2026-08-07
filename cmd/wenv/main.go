@@ -33,6 +33,8 @@ func run() int {
 	}
 	cmd, args := os.Args[1], os.Args[2:]
 
+	app.Version = version
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -38,14 +39,29 @@ type Config struct {
 	// package reads and validates it at boot. Only `wenv server` consults it.
 	RootKeyFile    string // --root-key-file (also covers systemd LoadCredential paths)
 	RootKeyFromEnv bool   // WENV_ROOT_KEY is set (documented weakest tier)
+
+	// Auth tuning. The Argon2id parameters may be raised for stronger
+	// hardware and never lowered: boot verifies them against the floor the
+	// human-auth ADR fixes and refuses to start below it, rather than
+	// degrading quietly. AdmissionBudgetMiB derives the pre-authentication
+	// concurrency, so raising the KDF memory lowers concurrency automatically
+	// instead of silently doubling the memory bill.
+	Argon2MemoryKiB    uint32
+	Argon2Time         uint32
+	Argon2Parallelism  uint8
+	AdmissionBudgetMiB int
 }
 
 // knownEnv is the closed set of WENV_* keys this build understands.
 var knownEnv = map[string]bool{
-	"WENV_DB":                  true,
-	"WENV_LISTEN":              true,
-	"WENV_TRUSTED_PROXY_CIDRS": true,
-	"WENV_ROOT_KEY":            true,
+	"WENV_DB":                   true,
+	"WENV_LISTEN":               true,
+	"WENV_TRUSTED_PROXY_CIDRS":  true,
+	"WENV_ROOT_KEY":             true,
+	"WENV_ARGON2_MEMORY_KIB":    true,
+	"WENV_ARGON2_TIME":          true,
+	"WENV_ARGON2_PARALLELISM":   true,
+	"WENV_ADMISSION_BUDGET_MIB": true,
 }
 
 const devSQLitePath = "wenv-dev.db"
@@ -94,6 +110,28 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
+	if subcommand == "server" || subcommand == "admin" {
+		var err error
+		if cfg.Argon2MemoryKiB, err = uintEnv(getenv, "WENV_ARGON2_MEMORY_KIB", 64*1024); err != nil {
+			return nil, nil, err
+		}
+		if cfg.Argon2Time, err = uintEnv(getenv, "WENV_ARGON2_TIME", 3); err != nil {
+			return nil, nil, err
+		}
+		parallelism, err := uintEnv(getenv, "WENV_ARGON2_PARALLELISM", 2)
+		if err != nil {
+			return nil, nil, err
+		}
+		if parallelism > 255 {
+			return nil, nil, fmt.Errorf("WENV_ARGON2_PARALLELISM: %d exceeds the 255 Argon2id allows", parallelism)
+		}
+		cfg.Argon2Parallelism = uint8(parallelism)
+		budget, err := uintEnv(getenv, "WENV_ADMISSION_BUDGET_MIB", 272)
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg.AdmissionBudgetMiB = int(budget)
+	}
 	if subcommand == "server" {
 		trustedProxyCIDRs, err := parseTrustedProxyCIDRs(getenv("WENV_TRUSTED_PROXY_CIDRS"))
 		if err != nil {
@@ -119,6 +157,21 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		return nil, nil, fmt.Errorf("no datastore configured: set WENV_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
 	}
 	return cfg, warnings, nil
+}
+
+// uintEnv parses an unsigned tunable, failing loudly rather than falling back
+// to the default on a malformed value: a typo in a security parameter must
+// not silently mean "use the default".
+func uintEnv(getenv func(string) string, key string, fallback uint64) (uint32, error) {
+	raw := strings.TrimSpace(getenv(key))
+	if raw == "" {
+		return uint32(fallback), nil
+	}
+	v, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not a non-negative integer", key, raw)
+	}
+	return uint32(v), nil
 }
 
 func parseTrustedProxyCIDRs(raw string) ([]string, error) {

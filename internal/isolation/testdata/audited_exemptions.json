@@ -5,7 +5,9 @@
     "http:GET /readyz": "unauthenticated readiness probe: same contract as /healthz",
     "cli:version": "local build-metadata print: no server, no store",
     "cli:server": "process entry point: boot's auditable acts run below the operation surface (system-proof keyring set); boot events arrive with their catalogue rows",
-    "cli:migrate": "process entry point: migration DDL runs below the store-method surface"
+    "cli:migrate": "process entry point: migration DDL runs below the store-method surface",
+    "http:GET /api/v1/meta": "unauthenticated capability print: server version, API revision and which auth protocol flows this instance serves \u2014 no principal, no tenant data, no state change, and the ADR declares no event type for it (same class as cli:version, which it is the network form of)",
+    "http:GET /api/v1/auth/whoami": "reports the session the caller already holds and writes nothing; the session's creation, method and assurance are already recorded by auth.session_created, so an event here would duplicate that record once per poll"
   },
   "operations": {}
 }

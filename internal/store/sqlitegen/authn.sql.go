@@ -11,9 +11,7 @@ import (
 )
 
 const advancePrincipalGeneration = `-- name: AdvancePrincipalGeneration :exec
-?;
-
-UPDATE principals SET session_generation = session_generation + 1 WHERE id =
+UPDATE principals SET session_generation = session_generation + 1 WHERE id = ?
 `
 
 // wenv:authn-resolution
@@ -66,11 +64,11 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 }
 
 const deleteSessionsForPrincipal = `-- name: DeleteSessionsForPrincipal :exec
-DELETE FROM sessions WHERE principal_id =
+DELETE FROM sessions WHERE principal_id = ?
 `
 
 // Every session of the principal dies, atomically and without reaching the
-// client — the invalidation that token rotation structurally cannot do.
+// client  -  the invalidation that token rotation structurally cannot do.
 // wenv:authn-resolution
 func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID string) error {
 	_, err := q.db.ExecContext(ctx, deleteSessionsForPrincipal, principalID)
