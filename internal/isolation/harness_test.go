@@ -36,6 +36,7 @@ const (
 	root   = domain.PrincipalID("usr_root")   // human, instance-config at instance scope
 	nobody = domain.PrincipalID("usr_nobody") // human, no grants at all
 	mchA1  = domain.PrincipalID("mch_a1")     // machine, confined to (org A, project A1) — the cross-project prober
+	reader = domain.PrincipalID("usr_reader") // human, org A, exactly `read` — the least-privilege prober
 )
 
 // Fixture chain.
@@ -66,6 +67,7 @@ var fixtureSQL = []string{
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_root', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_nobody', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('mch_a1', 'machine', ` + ts + `)`,
+	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_reader', 'human', ` + ts + `)`,
 	// alice: org-scope grants in org A.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_read', 'usr_alice', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_edit', 'usr_alice', 'edit', 'org_a', NULL, NULL, ` + ts + `)`,
@@ -76,6 +78,10 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_edit', 'usr_bob', 'edit', 'org_b', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_def', 'usr_bob', 'definitions-edit', 'org_b', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_mp', 'usr_bob', 'manage-projects', 'org_b', NULL, NULL, ` + ts + `)`,
+	// reader: exactly one capability in org A. Every operation whose formula
+	// is not `read` must deny them — that is what stops a formula being
+	// silently widened to a capability the fixtures happen to hold.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_rd_read', 'usr_reader', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
 	// root: the instance operator.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ic', 'usr_root', 'instance-config', NULL, NULL, NULL, ` + ts + `)`,
 	// mch_a1: machine authority confined to project A1.

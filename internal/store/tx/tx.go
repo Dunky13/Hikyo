@@ -131,7 +131,17 @@ func readOnce(ctx context.Context, db *store.DB, fn ReadFn) error {
 	defer tok.Invalidate()
 
 	if db.Engine() == store.EnginePostgres {
-		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		// REPEATABLE READ, not the server default: a proof certifies what
+		// authorize() saw, so chain resolution, grant evaluation and the
+		// store read must observe ONE snapshot. Under READ COMMITTED each
+		// statement takes a fresh snapshot, and a grant revoked between the
+		// grant lookup and the store query would leave the minted proof
+		// certifying a policy no single snapshot ever held. It also matches
+		// sqlite's WAL reader snapshot, so the engines agree.
+		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{
+			IsoLevel:   pgx.RepeatableRead,
+			AccessMode: pgx.ReadOnly,
+		})
 		if err != nil {
 			return err
 		}

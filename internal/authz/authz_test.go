@@ -36,6 +36,27 @@ func TestVerifyRejectsNilProof(t *testing.T) {
 	}
 }
 
+// embeddedProof is the shape an outside package could actually build: the
+// Proof interface embedded in a struct satisfies Proof by promotion over a
+// nil field. It must be rejected fail-closed, not panic.
+type embeddedProof struct{ Proof }
+
+func TestVerifyRejectsEmbeddedInterfaceForgery(t *testing.T) {
+	tok := NewTxToken()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("embedded-interface forgery panicked instead of failing closed: %v", r)
+		}
+	}()
+	if _, err := Verify(embeddedProof{}, StoreEnvironmentsGet, tok); err == nil {
+		t.Fatal("embedded-interface forgery accepted")
+	}
+	// Also with a real proof embedded: still not the canonical type.
+	if _, err := Verify(embeddedProof{Proof: mintTenant(t, tok)}, StoreEnvironmentsGet, tok); err == nil {
+		t.Fatal("wrapped proof accepted — only the canonical concrete type may pass")
+	}
+}
+
 func TestVerifyRejectsForeignTransaction(t *testing.T) {
 	p := mintTenant(t, NewTxToken())
 	other := NewTxToken()

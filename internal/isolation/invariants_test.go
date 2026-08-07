@@ -204,6 +204,22 @@ func TestInvariant08PredicateConfinement(t *testing.T) {
 	}
 }
 
+// TestInvariant09aDriverHandleConfinement: the proof boundary is only as
+// strong as the narrowest path around it. Raw driver handles and the
+// generated query packages are both one-line bypasses — a package holding
+// either can issue tenant queries with caller-controlled chain values and no
+// proof — so both carry exact allowlists, enforced across the module
+// including tests.
+func TestInvariant09aDriverHandleConfinement(t *testing.T) {
+	pkgs, err := lint.LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range lint.CheckDriverHandles(pkgs) {
+		t.Error(f)
+	}
+}
+
 // TestInvariant09ForgeryGuard: analyzer 3 over the real repository,
 // including test packages.
 func TestInvariant09ForgeryGuard(t *testing.T) {
@@ -320,5 +336,34 @@ func TestInvariant13AllowlistPinning(t *testing.T) {
 	want, _ := json.MarshalIndent(pinned, "", "  ")
 	if string(got) != string(want) {
 		t.Fatalf("annotated-query allowlist drifted from its pin; re-review and update %s.\ncurrent:\n%s\npinned:\n%s", fixturePath, got, want)
+	}
+}
+
+// TestInvariant06aFormulaPinning is the anti-widening half of registry
+// completeness. Probes prove that the CURRENT formulas deny the principals
+// they should, but a formula silently widened to a capability the fixtures
+// already hold (environment.update-note from edit to read, say) can slip
+// past a probe suite. The pin makes every formula change a reviewed diff.
+func TestInvariant06aFormulaPinning(t *testing.T) {
+	current := facts.FormulaPins()
+	fixturePath := filepath.Join("testdata", "operation_formulas.json")
+	got, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("formula pin missing (%v); review the registry and commit it as %s:\n%s", err, fixturePath, got)
+	}
+	var pinned []authz.FormulaPin
+	if err := json.Unmarshal(raw, &pinned); err != nil {
+		t.Fatalf("formula pin unreadable: %v", err)
+	}
+	want, err := json.MarshalIndent(pinned, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("the operation→formula map drifted from its pin; re-review authority changes and update %s.\ncurrent:\n%s\npinned:\n%s", fixturePath, got, want)
 	}
 }

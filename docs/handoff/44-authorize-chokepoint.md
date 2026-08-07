@@ -68,7 +68,7 @@ Proof-carrying authorization, end to end, with a demonstration operation set
   engines, dedup is #55's grant API). Scope-class directives
   (`-- wenv:table <t> class=<c> chain=<cols>`) declare every table; the
   derived registry is total or the build fails.
-- `internal/lint` — the three analyzers, run as build-failing tests against
+- `internal/lint` — the analyzers, run as build-failing tests against
   the real repo, each with negative fixtures proving it catches what it
   claims: proof signatures (repo surface discovered from `Repos`/`ReadRepos`
   transitively; tenant-typed params banned incl. struct fields), SQL
@@ -76,7 +76,12 @@ Proof-carrying authorization, end to end, with a demonstration operation set
   rejected outright; per-table chain conjuncts; INSERT chain columns; no SET
   on chain/id; annotated queries exempt-but-pinned), forgery guard
   (nil-in-Proof-position across call/var/assign/return/keyed-literal;
-  reflect/unsafe + Proof handling).
+  reflect/unsafe + Proof handling; exemption is exact-path, so a
+  neighbouring `internal/authz*` package cannot inherit it). A fourth check,
+  `CheckDriverHandles`, confines the two one-line bypasses of the whole
+  boundary: the raw driver accessors (`DB.PG/SQLiteWrite/SQLiteRead`) and
+  direct imports of the sqlc output packages, each to an exact allowlist,
+  across the module including tests.
 - `internal/isolation` — the probe harness + invariants (below). Fixtures:
   two orgs; human in org B probing org A (cross-org axis); machine
   principal confined to `(org A, project A1)` probing project A2
@@ -94,10 +99,11 @@ Proof-carrying authorization, end to end, with a demonstration operation set
 | 3 | Uniformity (status/body byte-shape; timing structural, not wall-clock) | `assertUniformNotFound` in every probe, `TestIsolationSQLite`/`Postgres` → `tenant_probes`; query-count: `query_count` subtests |
 | 4 | No side effect (row diff; effect ports vacuously zero — registries empty) | `tenant_probes` mutation probes + `instance_probes` |
 | 5 | Proof lifecycle (nil / foreign-tx / ended-tx / op-mismatch, retry invalidation) | `authz.TestVerify*` (unit) + `proof_lifecycle_e2e` (integration) |
-| 6 | Operation registry completeness | `isolation.TestInvariant06OperationRegistryCompleteness` |
+| 6 | Operation registry completeness (+ anti-widening formula pin) | `isolation.TestInvariant06OperationRegistryCompleteness`, `isolation.TestInvariant06aFormulaPinning` (fixture `testdata/operation_formulas.json`) |
 | 7 | Proof-signature analyzer | `isolation.TestInvariant07ProofSignatures`, `lint.TestProofSignatures*` |
 | 8 | Predicate confinement + chain-binding provenance | `isolation.TestInvariant08PredicateConfinement`, `lint.TestSQLPredicate*`, provenance: `positive_controls` + conformance `tenant_chain_roundtrip` |
-| 9 | Forgery guard | `isolation.TestInvariant09ForgeryGuard`, `lint.TestProofForgery*` |
+| 9 | Forgery guard | `isolation.TestInvariant09ForgeryGuard`, `lint.TestProofForgery*`, `authz.TestVerifyRejectsEmbeddedInterfaceForgery` |
+| 9a | Driver-handle + generated-package confinement | `isolation.TestInvariant09aDriverHandleConfinement`, `lint.TestDriverHandles*` |
 | 10 | Tenant columns / composite ancestry FKs / chain immutability | `chain_constraints` subtests (behavioral, both engines) + analyzer 2's SET ban |
 | 11 | System-proof enumeration and binding | `isolation.TestInvariant11SystemProofEnumeration` + `authz.TestSystemProof*` |
 | 12 | Cache discipline | `isolation.TestInvariant12CacheDiscipline` (no caches exist; heuristic forces registration) |
@@ -108,6 +114,37 @@ query on a miss at any level, 2 on evaluated denial/success) runs on both
 engines; handlers-cannot-import-store plus the new edges
 (server↛authz, authn importable only by authz/tx, authn imports only
 gen+domain) live in `internal/boundary`.
+
+## Cross-model review (gpt-5.6-sol, high effort)
+
+Round 1 returned 5 findings; all fixed in this branch, none deferred:
+
+1. *(HIGH)* Raw driver handles and the generated query packages bypassed the
+   chokepoint entirely — a package holding a `*store.DB` could run
+   `pggen.New(db.PG()).GetEnvironment(...)` with any tenant's chain and no
+   proof, with every analyzer still green. Fixed by `lint.CheckDriverHandles`
+   (two exact allowlists, invariant 9a) plus forbidden service→gen edges,
+   with a negative fixture.
+2. *(HIGH)* Postgres read transactions ran at the server-default READ
+   COMMITTED, so chain resolution, grant evaluation and the store read could
+   each see a different snapshot — a proof certifying a policy no snapshot
+   ever held. Fixed by `pgx.RepeatableRead` on read transactions (matching
+   sqlite's WAL reader snapshot); `read_snapshot_stability` covers it and
+   was confirmed to fail under the old setting.
+3. *(MEDIUM)* The forgery guard exempted packages by path *prefix*, so an
+   `internal/authzforge` would have been skipped. Fixed: exact-path
+   exemption + a collision test.
+4. *(MEDIUM)* `Proof` was satisfiable by interface embedding
+   (`type forged struct{ authz.Proof }`), and `Verify` panicked on the
+   promoted nil rather than failing closed. Fixed by asserting to the
+   canonical concrete type; covered by
+   `TestVerifyRejectsEmbeddedInterfaceForgery`.
+5. *(MEDIUM)* Probes could not detect a *widened* formula, since fixture
+   principals held every capability in play. Fixed by the content-pinned
+   operation→formula map (invariant 6a) plus a least-privilege principal
+   (`usr_reader`, exactly `read`) with denial probes on the three operations
+   whose formulas demand more, and a positive control proving its one
+   allowed operation still succeeds.
 
 ## Deviations from the ADR letter, stated
 

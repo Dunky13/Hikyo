@@ -23,9 +23,15 @@ func Verify(p Proof, op StoreOp, tok *TxToken) (domain.Scope, error) {
 	if p == nil {
 		return domain.Scope{}, errors.New("authz: store call without a proof")
 	}
-	c := p.proof()
-	if c == nil {
-		return domain.Scope{}, errors.New("authz: non-canonical proof")
+	// Type-assert rather than calling proof() through the interface: an
+	// outside package can embed Proof in a struct (`type forged struct
+	// { authz.Proof }`), producing a non-nil value that satisfies the
+	// interface by method promotion over a nil embedded field. Calling the
+	// promoted method would panic; asserting to the one canonical concrete
+	// type refuses it fail-closed, like every other non-canonical proof.
+	c, ok := p.(*proof)
+	if !ok || c == nil {
+		return domain.Scope{}, errors.New("authz: non-canonical proof — proofs come only from authorize()")
 	}
 	if tok == nil || c.tok != tok {
 		return domain.Scope{}, fmt.Errorf("authz: proof for operation %q presented outside its transaction", c.op)

@@ -117,6 +117,47 @@ var tenantProbes = []tenantProbe{
 			return err
 		},
 	},
+	// Least-privilege probes: `reader` holds exactly `read` in org A and
+	// addresses objects that genuinely exist, so each of these fails only
+	// because the operation's formula demands a capability they lack.
+	// Widening any of these formulas to `read` turns a probe green-to-red.
+	{
+		name: "env_update_note_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.UpdateNote(tctx(t), reader, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned")
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
+		},
+	},
+	{
+		name: "env_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Create(tctx(t), reader, domain.Scope{Org: orgA, Project: prjA1}, "intruder")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
+			return err
+		},
+	},
+	{
+		name: "project_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Create(tctx(t), reader, orgA, "intruder")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Create(tctx(t), alice, "org_missing", "intruder")
+			return err
+		},
+	},
 	{
 		name: "project_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
@@ -196,6 +237,12 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatalf("alice reading her own env: %v", err)
 	}
+	// The least-privilege prober must SUCCEED on the one operation whose
+	// formula it holds. Without this, the read-only denial probes above
+	// would pass even if `reader`'s grant were broken or missing entirely.
+	if _, err := envs.Get(tctx(t), reader, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); err != nil {
+		t.Fatalf("read-only principal denied on environment.read (formula is read(E)): %v", err)
+	}
 	if got.ID != string(envA1) || got.OrgID != string(orgA) || got.ProjectID != string(prjA1) {
 		t.Fatalf("env chain mismatch: %+v", got)
 	}
@@ -237,8 +284,9 @@ func runSuite(t *testing.T, db *store.DB) {
 	t.Run("chain_constraints", func(t *testing.T) { runChainConstraintChecks(t, db) })
 	t.Run("query_count", func(t *testing.T) { runQueryCountChecks(t, db) })
 	t.Run("proof_lifecycle_e2e", func(t *testing.T) { runProofLifecycleE2E(t, db) })
-	// Positive controls run last: they mutate the fixture set.
+	// These run last: they mutate the fixture set.
 	t.Run("positive_controls", func(t *testing.T) { runPositiveControls(t, db) })
+	t.Run("read_snapshot_stability", func(t *testing.T) { runReadSnapshotStability(t, db) })
 }
 
 func TestIsolationSQLite(t *testing.T) {

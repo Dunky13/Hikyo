@@ -51,6 +51,8 @@ var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/store", module + "/internal/server", "store never imports the HTTP layer"},
 	{module + "/internal/authz", module + "/internal/service", "the chokepoint never imports upward"},
 	{module + "/internal/authz", module + "/internal/server", "the chokepoint never imports the HTTP layer"},
+	{module + "/internal/service", module + "/internal/store/pggen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
+	{module + "/internal/service", module + "/internal/store/sqlitegen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
 	{module + "/cmd/", module + "/internal/store", "main wires through internal/app, not store"},
 	{module + "/internal/config", module + "/internal/", "config is a leaf package"},
 	{module + "/internal/crypto", module + "/internal/", "crypto is a leaf package: persistence arrives through its KeyStore interface"},

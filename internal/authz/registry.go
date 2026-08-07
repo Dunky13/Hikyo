@@ -1,6 +1,11 @@
 package authz
 
-import "github.com/Dunky13/wenv/internal/domain"
+import (
+	"slices"
+	"strings"
+
+	"github.com/Dunky13/wenv/internal/domain"
+)
 
 // Operation names one entry in the operation registry — the single table
 // mapping each operation to its authorization formula (permission ADR: per
@@ -214,5 +219,46 @@ func (RegistryFacts) SystemSites() map[SystemSite][]StoreOp {
 		}
 		out[site] = list
 	}
+	return out
+}
+
+// FormulaPin is one row of the pinned operation registry (invariant 6's
+// anti-widening half): silently changing an operation's formula — say
+// environment.update-note from edit(E) to read(E) — widens authority
+// without failing any probe whose fixtures happen to hold both. The pin
+// makes every such change a reviewed fixture diff.
+type FormulaPin struct {
+	Operation string   `json:"operation"`
+	Class     string   `json:"class"`
+	Level     string   `json:"level"`
+	Formula   []string `json:"formula"`
+}
+
+var classNames = map[Class]string{
+	ClassTenant: "tenant", ClassInstance: "instance",
+	ClassUnauthenticated: "unauthenticated", ClassSystem: "system", ClassStub: "stub",
+}
+
+var levelNames = map[domain.Level]string{
+	domain.LevelNone: "instance", domain.LevelOrg: "org",
+	domain.LevelProject: "project", domain.LevelEnv: "environment",
+}
+
+// FormulaPins returns the whole operation registry in a stable, diffable
+// shape, sorted by operation name.
+func (RegistryFacts) FormulaPins() []FormulaPin {
+	out := make([]FormulaPin, 0, len(operations))
+	for op, spec := range operations {
+		pin := FormulaPin{
+			Operation: string(op),
+			Class:     classNames[spec.class],
+			Level:     levelNames[spec.level],
+		}
+		for _, atom := range spec.formula {
+			pin.Formula = append(pin.Formula, string(atom.Cap)+"@"+levelNames[atom.At])
+		}
+		out = append(out, pin)
+	}
+	slices.SortFunc(out, func(a, b FormulaPin) int { return strings.Compare(a.Operation, b.Operation) })
 	return out
 }

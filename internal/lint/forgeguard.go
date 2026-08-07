@@ -32,7 +32,9 @@ func CheckProofForgery(pkgs []*packages.Package) []string {
 		}
 		// The authorization package and its test variants are exempt:
 		// boundary tests construct exactly these invalid values on purpose.
-		if strings.HasPrefix(p.PkgPath, Module+"/internal/authz") {
+		// Exact paths only — a prefix match would silently exempt a
+		// neighbouring `internal/authzforge` that reflects on proof values.
+		if authzExempt[p.PkgPath] {
 			continue
 		}
 		usesProof := false
@@ -53,6 +55,16 @@ func CheckProofForgery(pkgs []*packages.Package) []string {
 		findings = append(findings, nilProofLiterals(p)...)
 	}
 	return findings
+}
+
+// authzExempt is the exact set of package paths allowed to construct
+// non-canonical proof values: the authorization package (in-package tests
+// share its path), the test binary go/packages reports beside it, and the
+// external-test package path should one ever be added.
+var authzExempt = map[string]bool{
+	Module + "/internal/authz":      true,
+	Module + "/internal/authz.test": true,
+	Module + "/internal/authz_test": true,
 }
 
 func isAuthzProof(t types.Type) bool {

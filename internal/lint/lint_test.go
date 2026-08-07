@@ -86,6 +86,26 @@ func TestProofForgeryCatchesViolations(t *testing.T) {
 	}
 }
 
+// The forgery guard's exemption must be an exact path match: a neighbouring
+// package whose path merely starts with the authorization package's path
+// (internal/authzforge) would otherwise be skipped entirely and could
+// reflect on live proof values.
+func TestForgeryExemptionIsNotPrefixMatched(t *testing.T) {
+	neighbours := []string{
+		Module + "/internal/authzforge",
+		Module + "/internal/authz/forge",
+		Module + "/internal/authzutil",
+	}
+	for _, p := range neighbours {
+		if authzExempt[p] {
+			t.Errorf("%s is exempt from the forgery guard — exemption must be exact-path", p)
+		}
+	}
+	if !authzExempt[Module+"/internal/authz"] || !authzExempt[Module+"/internal/authz.test"] {
+		t.Error("the authorization package and its test binary must stay exempt")
+	}
+}
+
 func TestSQLPredicateCatchesViolations(t *testing.T) {
 	rules := map[string]TableRule{
 		"environments": {Class: "environment", Chain: []string{"org_id", "project_id"}},
@@ -174,4 +194,30 @@ func assertFindings(t *testing.T, findings, wantSubstrings []string) {
 			t.Errorf("findings do not contain %q:\n%s", want, strings.Join(findings, "\n"))
 		}
 	}
+}
+
+// The raw driver handles and the generated query packages are the two
+// one-line bypasses of the whole proof boundary; both allowlists are
+// enforced across the module, tests included.
+func TestDriverHandlesRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckDriverHandles(pkgs) {
+		t.Error(f)
+	}
+}
+
+func TestDriverHandlesCatchesViolations(t *testing.T) {
+	pkgs, err := Load("./testdata/badhandle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckDriverHandles(pkgs)
+	assertFindings(t, findings, []string{
+		"calls store.DB.PG",
+		"calls store.DB.SQLiteWrite",
+		"imports " + Module + "/internal/store/pggen",
+	})
 }
