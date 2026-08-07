@@ -32,6 +32,10 @@ var wireRegistry = map[string]Class{
 	"cli:server":  ClassSystem,
 	"cli:migrate": ClassSystem,
 
+	// `wenv version` (#46): local print of build metadata — no principal,
+	// no server, no store; the pre-auth contract is trivially total.
+	"cli:version": ClassUnauthenticated,
+
 	"cli:login":       ClassStub,
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,

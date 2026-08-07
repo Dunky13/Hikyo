@@ -56,9 +56,10 @@ func TestInvariant01ClassificationTotality(t *testing.T) {
 		t.Fatal("server.New no longer returns a chi router; the route walk must be updated")
 	}
 
-	// CLI verbs: server and migrate are system entry points; client verbs
-	// are stubs (declared not-yet-operations).
-	for _, verb := range append([]string{"server", "migrate"}, app.ClientVerbs...) {
+	// CLI verbs: server and migrate are system entry points, version (#46)
+	// is a local unauthenticated print; client verbs are stubs (declared
+	// not-yet-operations).
+	for _, verb := range append([]string{"server", "migrate", "version"}, app.ClientVerbs...) {
 		key := "cli:" + verb
 		seen[key] = true
 		if _, classified := wire[key]; !classified {
