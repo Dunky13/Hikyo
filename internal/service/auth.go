@@ -173,31 +173,7 @@ func (s *Auth) LocalLogin(ctx context.Context, username, password string) (Login
 		}
 	}
 
-	// The refusal travels OUT of the closure rather than through its return
-	// value, because returning it would roll the transaction back — and the
-	// transaction is what makes the failure event durable. A login refusal
-	// whose audit record was rolled back with it is exactly the silent
-	// failure the ADR requires not to exist.
-	var (
-		out     LoginResult
-		refused error
-	)
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
-		result, ferr := s.authenticateLocal(ctx, az, username, password)
-		switch {
-		case errors.Is(ferr, domain.ErrUnauthenticated):
-			refused = ferr
-			return nil // commit the failure event
-		case ferr != nil:
-			return ferr // a real fault: roll back
-		}
-		out = result
-		return nil
-	})
-	if err == nil && refused != nil {
-		err = refused
-	}
+	out, err := s.attemptLogin(ctx, username, password)
 	switch {
 	case err == nil:
 		s.Admission.RecordSuccess(username)
@@ -214,61 +190,142 @@ func (s *Auth) LocalLogin(ctx context.Context, username, password string) (Login
 	}
 }
 
-// authenticateLocal is the in-transaction half. It always writes an
-// auth.login event — failures matter as much as successes — and the event
-// commits with the transaction, so a login without its durable record does
-// not complete.
-func (s *Auth) authenticateLocal(ctx context.Context, az *authz.TxAuthorizer, username, password string) (LoginResult, error) {
-	now := s.now()
-	account, err := az.AccountByUsername(ctx, username)
-	resolved := err == nil
-	switch {
-	case err != nil && !errors.Is(err, domain.ErrNotFound):
-		return LoginResult{}, err
-	case !resolved:
-		// The expensive step happens either way. Returning early here would
-		// make the unknown-account path observably faster, which is exactly
-		// the oracle this path exists to close.
-		crypto.BurnDummyVerification([]byte(password), s.KDF)
-		return LoginResult{}, s.failLogin(ctx, az, now, "", false, "unknown-subject")
-	}
-
-	cred, err := az.PasswordCredentialFor(ctx, account.ID)
-	if err != nil {
-		if !errors.Is(err, domain.ErrNotFound) {
-			return LoginResult{}, err
+// attemptLogin runs the three phases in the order their costs demand: read,
+// verify, write.
+//
+// The Argon2id derivation deliberately happens BETWEEN two transactions
+// rather than inside one. At the locked floor it costs 64 MiB and hundreds of
+// milliseconds, and sqlite has a single write connection — so verifying
+// inside a write transaction would hold a global write lock for the whole
+// derivation, letting a handful of concurrent logins (the admission budget
+// allows four) stall every other write on the instance. That is a denial of
+// service reachable by anyone who can reach the login endpoint, which is
+// everyone.
+//
+// Splitting it introduces one thing to be careful about: the credential can
+// change between the read and the write. The write phase therefore re-reads
+// the row and refuses if its version counter or the instance epoch moved,
+// so a password changed mid-login cannot be used to mint a session.
+func (s *Auth) attemptLogin(ctx context.Context, username, password string) (LoginResult, error) {
+	// Phase 1 — read. A read transaction, so it does not queue behind the
+	// single writer.
+	var (
+		account   authz.Account
+		cred      authz.PasswordCredential
+		epoch     int64
+		resolved  bool
+		haveCred  bool
+		epochGood bool
+	)
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		var err error
+		if epoch, err = az.CredentialEpoch(ctx); err != nil {
+			return err
 		}
-		// An account with no credential established yet: same burn, same
-		// uniform answer.
-		crypto.BurnDummyVerification([]byte(password), s.KDF)
-		return LoginResult{}, s.failLogin(ctx, az, now, account.ID, true, "no-credential")
-	}
-
-	epoch, err := az.CredentialEpoch(ctx)
+		account, err = az.AccountByUsername(ctx, username)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			return nil
+		case err != nil:
+			return err
+		}
+		resolved = true
+		cred, err = az.PasswordCredentialFor(ctx, account.ID)
+		switch {
+		case errors.Is(err, domain.ErrNotFound):
+			return nil
+		case err != nil:
+			return err
+		}
+		haveCred = true
+		epochGood = cred.CredentialEpoch == epoch
+		return nil
+	})
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if cred.CredentialEpoch != epoch {
-		// A restored verifier is inert until the operator re-establishes it.
-		// The work still happens so the timing does not announce the state.
+
+	// Phase 2 — verify, outside any transaction. Every non-verifying path
+	// burns an equivalent derivation: returning early on an unknown account,
+	// a missing credential or a superseded epoch would make each of them
+	// observably faster than a wrong password, which is exactly the oracle
+	// this path exists to close.
+	cause := ""
+	switch {
+	case !resolved:
 		crypto.BurnDummyVerification([]byte(password), s.KDF)
-		return LoginResult{}, s.failLogin(ctx, az, now, account.ID, true, "epoch-superseded")
+		cause = "unknown-subject"
+	case !haveCred:
+		crypto.BurnDummyVerification([]byte(password), s.KDF)
+		cause = "no-credential"
+	case !epochGood:
+		// A restored verifier is inert until the operator re-establishes it.
+		crypto.BurnDummyVerification([]byte(password), s.KDF)
+		cause = "epoch-superseded"
+	default:
+		plain, err := s.Keyring.ForInstance().OpenField(verifierAAD(account.ID), cred.Verifier)
+		if err != nil {
+			// A verifier we cannot open is not a verifier we may accept. This
+			// is a real fault (wrong key, tampered row), so it is loud — but
+			// the caller still renders the uniform refusal.
+			return LoginResult{}, fmt.Errorf("service: opening the verifier for %s failed: %w", account.ID, err)
+		}
+		ok := crypto.VerifyPassword([]byte(password), plain, crypto.PasswordParams(cred.KDF))
+		crypto.Zero(plain)
+		if !ok {
+			cause = "bad-password"
+		}
 	}
 
-	plain, err := s.Keyring.ForInstance().OpenField(verifierAAD(account.ID), cred.Verifier)
+	// Phase 3 — write. The refusal travels out of the closure beside the
+	// return value, because returning it would roll the transaction back —
+	// and the transaction is what makes the failure event durable.
+	var (
+		result  LoginResult
+		refused error
+	)
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		refused = nil
+		now := s.now()
+		if cause != "" {
+			refused = s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, cause)
+			return nil
+		}
+		// Re-read under the write transaction: the credential must not have
+		// moved while we were deriving.
+		current, err := az.PasswordCredentialFor(ctx, account.ID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				refused = s.failLogin(ctx, az, now, account.ID, true, "credential-removed")
+				return nil
+			}
+			return err
+		}
+		liveEpoch, err := az.CredentialEpoch(ctx)
+		if err != nil {
+			return err
+		}
+		if current.RowVersion != cred.RowVersion || current.CredentialEpoch != liveEpoch {
+			refused = s.failLogin(ctx, az, now, account.ID, true, "credential-changed")
+			return nil
+		}
+		result, err = s.mintSession(ctx, az, account, now)
+		return err
+	})
 	if err != nil {
-		// A verifier we cannot open is not a verifier we may accept. This is
-		// a real fault (wrong key, tampered row), so it is loud — but the
-		// caller still renders the uniform refusal.
-		return LoginResult{}, fmt.Errorf("service: opening the verifier for %s failed: %w", account.ID, err)
+		return LoginResult{}, err
 	}
-	defer crypto.Zero(plain)
-
-	if !crypto.VerifyPassword([]byte(password), plain, crypto.PasswordParams(cred.KDF)) {
-		return LoginResult{}, s.failLogin(ctx, az, now, account.ID, true, "bad-password")
+	if refused != nil {
+		return LoginResult{}, refused
 	}
+	return result, nil
+}
 
-	return s.mintSession(ctx, az, account, now)
+func accountIDOf(resolved bool, a authz.Account) string {
+	if resolved {
+		return a.ID
+	}
+	return ""
 }
 
 // mintSession creates the artifact and its two audit events. The assurance

@@ -2,12 +2,15 @@ package isolation
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Dunky13/wenv/internal/cli"
 	"github.com/Dunky13/wenv/internal/server"
@@ -188,3 +191,63 @@ func (f *fakeTerminal) Read(p []byte) (int, error) {
 }
 
 func (f *fakeTerminal) Close() error { return nil }
+
+// A login must not hold the write lock while it derives.
+//
+// At the locked Argon2id floor a derivation costs 64 MiB and hundreds of
+// milliseconds, and sqlite has a single write connection. If verification ran
+// inside a write transaction, a handful of concurrent logins — four fit in
+// the admission budget — would stall every other write on the instance for as
+// long as they took. That is a denial of service reachable by anyone who can
+// reach the login endpoint.
+//
+// The check is structural rather than a stopwatch: an unrelated write must
+// complete while several failing logins are in flight. A timing assertion
+// would be flaky on a loaded machine; this one fails only if the writes are
+// actually serialised behind the derivations.
+func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
+	db := seededDB(t, openSQLite)
+	auth := authService(t, db)
+	orgs := &service.Orgs{DB: db}
+
+	boot, err := auth.BootstrapAdmin(t.Context(), "lockcheck", "Lock Check", "terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const password = "another perfectly ordinary passphrase"
+	if err := auth.EstablishCredential(t.Context(), boot.Authority, password); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				// Wrong password: burns a full derivation every time.
+				_, _ = auth.LocalLogin(t.Context(), "lockcheck", "not the password at all")
+			}
+		}()
+	}
+	t.Cleanup(func() { close(stop); wg.Wait() })
+
+	// An unrelated write, while those are in flight. The transaction package
+	// allows an initial try plus three retries inside a 15s deadline, so if
+	// the writes were queued behind derivations this would exhaust them.
+	deadline := time.Now().Add(20 * time.Second)
+	for i := range 5 {
+		if time.Now().After(deadline) {
+			t.Fatal("unrelated writes could not make progress while logins were deriving")
+		}
+		if _, err := orgs.Create(t.Context(), boot.PrincipalID, fmt.Sprintf("lockcheck-%d", i), true, []byte(`{}`)); err != nil {
+			t.Fatalf("write %d blocked behind a login derivation: %v", i, err)
+		}
+	}
+}
