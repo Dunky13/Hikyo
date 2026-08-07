@@ -150,14 +150,36 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 	collect(reflect.TypeOf((*store.ReadRepos)(nil)).Elem())
 
 	registered := facts.StoreOps()
+	// A store method is reachable either through an ordinary operation
+	// (grant-evaluated) or through a system mint site's closed set — the
+	// no-principal paths the ADR enumerates, e.g. boot's keyring checks.
+	// Both are registrations; an unregistered method is unreachable and
+	// unauthorized by construction.
+	systemRegistered := map[authz.StoreOp]authz.SystemSite{}
+	for site, ops := range facts.SystemSites() {
+		for _, op := range ops {
+			systemRegistered[op] = site
+		}
+	}
 	for method := range expected {
-		if _, ok := registered[authz.StoreOp(method)]; !ok {
-			t.Errorf("store method %q has no registered operation — it is unreachable and unauthorized by construction, register or remove it", method)
+		op := authz.StoreOp(method)
+		_, viaOperation := registered[op]
+		_, viaSite := systemRegistered[op]
+		if !viaOperation && !viaSite {
+			t.Errorf("store method %q has no registered operation and no system mint site — it is unreachable and unauthorized by construction, register or remove it", method)
+		}
+		if viaOperation && viaSite {
+			t.Errorf("store method %q is registered both to an operation and to system site %q — a method is grant-evaluated or site-bound, never both", method, systemRegistered[op])
 		}
 	}
 	for op := range registered {
 		if !expected[string(op)] {
 			t.Errorf("registry names store operation %q but no such store method exists", op)
+		}
+	}
+	for op, site := range systemRegistered {
+		if !expected[string(op)] {
+			t.Errorf("system site %q names store operation %q but no such store method exists", site, op)
 		}
 	}
 	tenantLevels := facts.TenantOperations()
@@ -249,9 +271,32 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 	if len(sites) != len(want) {
 		t.Errorf("system mint sites = %d entries, want exactly %d — amending the set reopens the tenant-isolation ADR", len(sites), len(want))
 	}
+	// Boot's set is the keyring surface the ADR names verbatim ("boot to its
+	// pragma/keyring checks"); the other three sites stay empty until
+	// recovery mode and break-glass land (#54/#55). Both directions are
+	// pinned, so widening any set fails the build.
+	wantBoot := map[authz.StoreOp]bool{
+		authz.StoreKeysActiveMasterWrappers:       true,
+		authz.StoreKeysActiveTier3:                true,
+		authz.StoreKeysAcquireHierarchyGeneration: true,
+		authz.StoreKeysInsertMaster:               true,
+		authz.StoreKeysInsertTier3:                true,
+		authz.StoreKeysInsertScopeGeneration:      true,
+	}
 	for site, ops := range sites {
 		if !want[site] {
 			t.Errorf("unregistered system mint site %q", site)
+		}
+		if site == authz.SiteBoot {
+			if len(ops) != len(wantBoot) {
+				t.Errorf("boot's operation set = %v, want exactly the keyring surface", ops)
+			}
+			for _, op := range ops {
+				if !wantBoot[op] {
+					t.Errorf("boot's set gained %q — widening a site's set reopens the tenant-isolation ADR", op)
+				}
+			}
+			continue
 		}
 		if len(ops) != 0 {
 			t.Errorf("site %q has store operations %v — widening a site's set reopens the tenant-isolation ADR", site, ops)
@@ -259,33 +304,65 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 	}
 }
 
-// TestInvariant12CacheDiscipline: no cache holding tenant-owned data exists
-// yet; when one lands it must register in the wire table's "cache:" space
-// with proof-taking accessors and a single proof-consuming key constructor.
-// The heuristic here forces the registration conversation: any cache-named
-// type anywhere in the module fails until it is registered.
+// TestInvariant12CacheDiscipline: every cache holding derived tenant
+// material is registered, with its single key constructor and the layer
+// that supplies its proof named. The module is swept for cache-shaped
+// declarations so a new cache cannot appear unregistered — the ADR's
+// keying rule and access rule both have to be answered for it in writing.
+//
+// The DEK LRU (#43) is keyed by internal/crypto.dekScope, a length-prefixed
+// injective encoding of (org_id, project_id) — the ADR's keying rule
+// exactly. Its access rule sits one layer up: internal/crypto is a locked
+// leaf package (boundary-tested) and cannot import the authorization
+// package, so proof-gating is the calling seam's obligation, recorded in
+// the registry entry and inherited by #50.
 func TestInvariant12CacheDiscipline(t *testing.T) {
-	for key := range facts.Wire() {
-		if strings.HasPrefix(key, "cache:") {
-			t.Errorf("cache %q is registered but no cache discipline checks exist yet — implement invariant 12's accessors/key-constructor assertions with the first cache", key)
+	registered := facts.Caches()
+	if len(registered) == 0 {
+		t.Fatal("cache registry is empty; the DEK LRU (#43) must be registered")
+	}
+	for name, c := range registered {
+		if c.KeyConstructor == "" {
+			t.Errorf("cache %q registers no key constructor — ad-hoc key construction is banned", name)
+		}
+		if c.ProofGatedAt == "" {
+			t.Errorf("cache %q does not say which layer supplies its proof", name)
 		}
 	}
+
+	// The DEK LRU's key constructor must exist and compose the full chain
+	// length-prefixed, not by bare concatenation.
+	src, err := os.ReadFile(filepath.Join("..", "crypto", "keyring.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "func dekScope(orgID, projectID string) string {") {
+		t.Error("internal/crypto.dekScope moved or changed shape; re-verify the DEK LRU's keying against invariant 12")
+	}
+	if !strings.Contains(string(src), "appendLP(appendLP(nil, []byte(orgID)), []byte(projectID))") {
+		t.Error("the DEK LRU is no longer keyed by a length-prefixed full chain — bare concatenation collides across scope boundaries")
+	}
+
+	// Sweep: any cache-shaped declaration must belong to a registered cache.
 	pkgs, err := lint.LoadRepo()
 	if err != nil {
 		t.Fatal(err)
+	}
+	knownPkgs := map[string]bool{
+		lint.Module + "/internal/crypto": true, // the DEK LRU, registered below
+		lint.Module + "/internal/authz":  true, // holds the registry itself
 	}
 	for _, p := range pkgs {
 		if p.Types == nil || !strings.HasPrefix(p.PkgPath, lint.Module) {
 			continue
 		}
-		// The probe harness itself names this very invariant.
-		if p.PkgPath == lint.Module+"/internal/isolation" {
-			continue
+		base := strings.TrimSuffix(p.PkgPath, ".test")
+		if base == lint.Module+"/internal/isolation" || knownPkgs[base] {
+			continue // the harness names the invariant; crypto's cache is registered
 		}
-		scope := p.Types.Scope()
-		for _, name := range scope.Names() {
+		for _, name := range p.Types.Scope().Names() {
 			if strings.Contains(strings.ToLower(name), "cache") {
-				t.Errorf("%s.%s: cache-named declaration with no cache registration — tenant-data caches take proofs and register in the wire table (invariant 12)", p.PkgPath, name)
+				t.Errorf("%s.%s: cache-shaped declaration with no entry in the cache registry — state its key constructor and proof-gating layer (invariant 12)", base, name)
 			}
 		}
 	}

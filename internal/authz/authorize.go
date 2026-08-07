@@ -179,3 +179,10 @@ func covers(g, target domain.Scope) bool {
 	}
 	return g.Env == target.Env
 }
+
+// Token exposes the attempt's transaction identity to the enumerated
+// system mint sites (boot's keyring reads and writes), which have no
+// principal to authorize and therefore call SystemAuthority instead of
+// Authorize. A token alone authorizes nothing — minting the proof is what
+// is privileged, and SystemAuthority checks the site registry.
+func (a *TxAuthorizer) Token() *TxToken { return a.tok }

@@ -45,11 +45,49 @@ var wireRegistry = map[string]Class{
 	"cli:definitions": ClassStub,
 	"cli:import":      ClassStub,
 
-	// Outbox job types, SSE emit sites and tenant-data caches: none exist.
-	// Their registries are this table's key spaces ("job:", "sse:",
-	// "cache:"); the first entry of each kind must arrive with its probe
-	// class (jobs, SSE) or its proof-taking accessors and key constructor
-	// (caches, invariant 12).
+	// Outbox job types and SSE emit sites: none exist. Their registries are
+	// this table's "job:" and "sse:" key spaces; the first entry of each
+	// kind must arrive with its probe class.
+}
+
+// Cache is one registered cache holding derived tenant material
+// (tenant-isolation ADR invariant 12). Registration is mandatory: the
+// invariant test fails on any cache-shaped declaration in the module that
+// is not listed here, so a new cache cannot appear without stating how it
+// is keyed and who may reach it.
+type Cache struct {
+	// KeyConstructor is the single function that builds its keys. The ADR's
+	// keying rule: the full id chain to the owning scope, structured and
+	// injectively encoded (length-prefixed — bare concatenation is how
+	// (org "a", project "bc") and (org "ab", project "c") collide).
+	KeyConstructor string
+	// ProofGatedAt names the layer that supplies the proof for reads and
+	// writes. For the DEK LRU this is deliberately NOT inside the cache:
+	// internal/crypto is a locked leaf package (encryption ADR; enforced by
+	// the boundary test) and may not import the authorization package, so
+	// its accessors cannot take an authz.Proof. The access rule is therefore
+	// discharged one layer up, at the service seam that resolves a scope
+	// before asking crypto to seal for it.
+	ProofGatedAt string
+}
+
+// caches is the closed cache registry.
+var caches = map[string]Cache{
+	"crypto.dek-lru": {
+		KeyConstructor: "internal/crypto.dekScope",
+		// No tenant-facing caller exists yet: the DEK LRU is reachable only
+		// from Keyring.ForProject, whose only callers today are crypto's own
+		// tests and the boot path. The first tenant consumer is #50 (flat
+		// encrypted values), which MUST resolve the scope through
+		// authorize() and pass the proof's chain — a cache hit must not be a
+		// proof-free path to tenant material.
+		ProofGatedAt: "service seam (#50); no tenant caller today",
+	},
+}
+
+// Caches returns the cache registry for the invariant test.
+func (RegistryFacts) Caches() map[string]Cache {
+	return maps.Clone(caches)
 }
 
 // Wire returns the wire registry for the invariant tests.

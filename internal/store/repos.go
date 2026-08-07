@@ -43,19 +43,14 @@ func PGTxReadRepos(tx pgx.Tx, tok *authz.TxToken) ReadRepos {
 
 type sqliteReadRepos struct{ r sqliteRepos }
 
-func (s sqliteReadRepos) Orgs() OrgReader { return s.r.Orgs() }
-func (s sqliteReadRepos) Keys() KeyReader { return s.r.Keys() }
-
-type pgReadRepos struct{ r pgRepos }
-
-func (p pgReadRepos) Orgs() OrgReader { return p.r.Orgs() }
-func (p pgReadRepos) Keys() KeyReader { return p.r.Keys() }
 func (s sqliteReadRepos) Orgs() OrgReader                 { return s.r.Orgs() }
+func (s sqliteReadRepos) Keys() KeyReader                 { return s.r.Keys() }
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
 
 type pgReadRepos struct{ r pgRepos }
 
 func (p pgReadRepos) Orgs() OrgReader                 { return p.r.Orgs() }
+func (p pgReadRepos) Keys() KeyReader                 { return p.r.Keys() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
 
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,

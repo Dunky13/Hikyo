@@ -47,12 +47,12 @@ var authnImporters = map[string]bool{
 var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/server", module + "/internal/store", "handlers cannot reach the datastore directly"},
 	{module + "/internal/server", module + "/internal/authz", "handlers extract artifacts only; authorization happens in the service transaction"},
-	{module + "/internal/store", module + "/internal/service", "dependency direction is service→store"},
-	{module + "/internal/store", module + "/internal/server", "store never imports the HTTP layer"},
 	{module + "/internal/authz", module + "/internal/service", "the chokepoint never imports upward"},
 	{module + "/internal/authz", module + "/internal/server", "the chokepoint never imports the HTTP layer"},
 	{module + "/internal/service", module + "/internal/store/pggen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
 	{module + "/internal/service", module + "/internal/store/sqlitegen", "generated queries take chain values as plain arguments: go through the store's proof-bound binding layer"},
+	{module + "/internal/store", module + "/internal/service", "dependency direction is service→store"},
+	{module + "/internal/store", module + "/internal/server", "store never imports the HTTP layer"},
 	{module + "/cmd/", module + "/internal/store", "main wires through internal/app, not store"},
 	{module + "/internal/config", module + "/internal/", "config is a leaf package"},
 	{module + "/internal/crypto", module + "/internal/", "crypto is a leaf package: persistence arrives through its KeyStore interface"},
@@ -140,6 +140,26 @@ func TestCryptoChokepoint(t *testing.T) {
 			}
 			if (imp == "filippo.io/age" || strings.HasPrefix(imp, "filippo.io/age/")) && !ageImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: age is confined to internal/crypto/backup", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+func TestForbiddenEdges(t *testing.T) {
+	for _, p := range loadPackages(t) {
+		for _, rule := range forbidden {
+			if !strings.HasPrefix(p.ImportPath, rule.importer) {
+				continue
+			}
+			for _, imp := range allImports(p) {
+				if strings.HasPrefix(imp, rule.imports) {
+					t.Errorf("%s imports %s: %s", p.ImportPath, imp, rule.why)
+				}
+			}
+		}
+	}
+}
+
 // TestAuthnImportAllowlist enforces the resolution surface's boundary in
 // both directions: only the packages on authnImporters may import it, and it
 // itself builds on generated queries and the domain vocabulary only — never
@@ -159,21 +179,6 @@ func TestAuthnImportAllowlist(t *testing.T) {
 			}
 			if p.ImportPath == authn && strings.HasPrefix(imp, module+"/") && !allowedImports[imp] {
 				t.Errorf("%s imports %s: the resolution surface builds on generated queries and domain only", p.ImportPath, imp)
-			}
-		}
-	}
-}
-
-func TestForbiddenEdges(t *testing.T) {
-	for _, p := range loadPackages(t) {
-		for _, rule := range forbidden {
-			if !strings.HasPrefix(p.ImportPath, rule.importer) {
-				continue
-			}
-			for _, imp := range allImports(p) {
-				if strings.HasPrefix(imp, rule.imports) {
-					t.Errorf("%s imports %s: %s", p.ImportPath, imp, rule.why)
-				}
 			}
 		}
 	}

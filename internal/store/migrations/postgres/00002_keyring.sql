@@ -8,6 +8,17 @@
 -- the master itself. The dual-wrapped transition state of rotate-root-key
 -- (encryption ADR § Rotation) is two active rows sharing a version with
 -- different epochs; startup accepts any wrapper the presented root opens.
+-- Scope-class declarations (tenant-isolation ADR; the derived registry must
+-- be total, so #44's analyzer fails the build on an undeclared table).
+-- Keyring rows are instance-scoped crypto material, not tenant-owned: a
+-- tier-3 key's scope lives in its AAD, which is what binds the ciphertext,
+-- and no query here carries a tenant predicate. They are reachable only
+-- under a SystemProof minted at the boot mint site.
+--
+-- wenv:table master_keys class=instance chain=-
+-- wenv:table tier3_keys class=instance chain=-
+-- wenv:table key_generations class=instance chain=-
+
 CREATE TABLE master_keys (
     version BIGINT NOT NULL,
     root_key_epoch BIGINT NOT NULL,

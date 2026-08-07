@@ -8,17 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type KeyGeneration struct {
-	Scope      string
-	Generation int64
-}
-
-type MasterKey struct {
-	Version      int64
-	RootKeyEpoch int64
-	State        string
-	Blob         []byte
-	CreatedAt    pgtype.Timestamptz
 type Environment struct {
 	ID        string
 	OrgID     string
@@ -38,11 +27,37 @@ type Grant struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type KeyGeneration struct {
+	Scope      string
+	Generation int64
+}
+
+type MasterKey struct {
+	Version      int64
+	RootKeyEpoch int64
+	State        string
+	Blob         []byte
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Org struct {
 	ID        string
 	Name      string
 	Active    bool
 	Metadata  string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Principal struct {
+	ID        string
+	Kind      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
 	CreatedAt pgtype.Timestamptz
 }
 
@@ -56,15 +71,4 @@ type Tier3Key struct {
 	State            string
 	Blob             []byte
 	CreatedAt        pgtype.Timestamptz
-type Principal struct {
-	ID        string
-	Kind      string
-	CreatedAt pgtype.Timestamptz
-}
-
-type Project struct {
-	ID        string
-	OrgID     string
-	Name      string
-	CreatedAt pgtype.Timestamptz
 }

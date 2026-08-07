@@ -41,7 +41,30 @@ const (
 	StoreEnvironmentsCreate     StoreOp = "environments.Create"
 	StoreEnvironmentsGet        StoreOp = "environments.Get"
 	StoreEnvironmentsUpdateNote StoreOp = "environments.UpdateNote"
+
+	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
+	// rows are instance-scoped crypto material, and the scope a tier-3 key
+	// belongs to is part of its AAD, not a tenant predicate.
+	StoreKeysActiveMasterWrappers       StoreOp = "keys.ActiveMasterWrappers"
+	StoreKeysActiveTier3                StoreOp = "keys.ActiveTier3"
+	StoreKeysAcquireHierarchyGeneration StoreOp = "keys.AcquireHierarchyGeneration"
+	StoreKeysInsertMaster               StoreOp = "keys.InsertMaster"
+	StoreKeysInsertTier3                StoreOp = "keys.InsertTier3"
+	StoreKeysInsertScopeGeneration      StoreOp = "keys.InsertScopeGeneration"
 )
+
+// bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
+// names it verbatim — "boot to its pragma/keyring checks" — so the keyring
+// reaches the store under a SystemProof minted at SiteBoot, not under an
+// ambient exemption. Widening this set reopens the ADR (invariant 11).
+var bootKeyringOps = map[StoreOp]bool{
+	StoreKeysActiveMasterWrappers:       true,
+	StoreKeysActiveTier3:                true,
+	StoreKeysAcquireHierarchyGeneration: true,
+	StoreKeysInsertMaster:               true,
+	StoreKeysInsertTier3:                true,
+	StoreKeysInsertScopeGeneration:      true,
+}
 
 // Class is the probe classification (tenant-isolation ADR § enforcement
 // machinery): every operation carries exactly one, and each class has its
@@ -148,13 +171,13 @@ const (
 
 // systemSites maps each mint site to the store operations it may invoke. A
 // SystemProof presented for any operation outside its site's set is rejected
-// fail-closed, exactly like an operation-mismatched ordinary proof. All sets
-// are empty today: boot's pragma checks and migration's DDL run inside the
-// trusted set below the store-method surface, and recovery reconciliation
-// and break-glass arrive with #54/#55 — a SystemProof therefore currently
-// authorizes no store method at all, which is the fail-closed default.
+// fail-closed, exactly like an operation-mismatched ordinary proof. Boot
+// carries the keyring set the ADR names verbatim ("boot to its pragma/
+// keyring checks"); migration's DDL runs below the store-method surface,
+// and recovery reconciliation and break-glass arrive with #54/#55 — for
+// those three an empty set is the fail-closed default.
 var systemSites = map[SystemSite]map[StoreOp]bool{
-	SiteBoot:              {},
+	SiteBoot:              bootKeyringOps,
 	SiteMigration:         {},
 	SiteRecoveryReconcile: {},
 	SiteBreakGlass:        {},

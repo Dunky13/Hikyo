@@ -174,7 +174,12 @@ func openPostgres(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"grants", "environments", "projects", "principals", "orgs", "goose_db_version"} {
+	// Children before parents; the keyring tables arrived with #43.
+	for _, table := range []string{
+		"grants", "environments", "projects", "principals",
+		"tier3_keys", "master_keys", "key_generations",
+		"orgs", "goose_db_version",
+	} {
 		if _, err := pre.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
 			pre.Close()
 			t.Fatal(err)

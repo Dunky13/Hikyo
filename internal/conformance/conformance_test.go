@@ -147,9 +147,13 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	// tier3_keys references master_keys: drop order matters.
-	for _, table := range []string{"orgs", "tier3_keys", "master_keys", "key_generations", "goose_db_version"} {
-	for _, table := range []string{"grants", "environments", "projects", "principals", "orgs", "goose_db_version"} {
+	// Children before parents: tier3_keys references master_keys, and the
+	// tenant chain is grants -> environments -> projects -> orgs.
+	for _, table := range []string{
+		"grants", "environments", "projects", "principals",
+		"tier3_keys", "master_keys", "key_generations",
+		"orgs", "goose_db_version",
+	} {
 		if _, err := db.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatal(err)
 		}
