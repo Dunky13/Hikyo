@@ -97,6 +97,17 @@ structural + cross-domain test). Deferred with their tickets: 2 (auth), 7–9
    operator-held) — `wenv init` (#25) will front-run this later; refusal 1
    covers the *root* key only.
 
+## Review trail
+
+In-house two-axis review (Standards + Spec sub-agents): 2 hard findings
+fixed (DEK-eviction zeroing under a live sealer — regression-tested; golden
+known-answer vector pinning the wire format) plus smell cleanups.
+Cross-model (Codex `gpt-5.6-sol`, high effort, 3-round protocol): R1 found
+1 blocker + 3 major + 1 minor (dual-wrap representability, fence teeth,
+root-key byte-path zeroing, Windows build, vacuous race test) — all fixed;
+R2 found one residual blocker (valid wrapper masking an unknown-format
+wrapper, refusal 5) — fixed; **R3: CLEAN**.
+
 ## Pickup notes
 
 - Root key encoding is fixed: 64 hex chars, whitespace-trimmed. `wenv init`
