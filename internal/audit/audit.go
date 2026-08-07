@@ -170,7 +170,13 @@ func Validate(e Event, trail Trail, scope domain.Scope) error {
 		return fmt.Errorf("audit: %s: zero occurred_at", e.Type)
 	}
 	switch e.Actor.Class {
-	case ActorHuman, ActorMachine, ActorSystem, ActorBreakGlass:
+	case ActorHuman, ActorMachine:
+		// A principal class asserts an identified actor: an empty id would
+		// be a class claim with nothing behind it.
+		if e.Actor.ID == "" {
+			return fmt.Errorf("audit: %s: %s actor without a principal id", e.Type, e.Actor.Class)
+		}
+	case ActorSystem, ActorBreakGlass:
 	case ActorUnauthenticated:
 		if e.Actor.ID != "" || e.Actor.CredentialID != "" {
 			return fmt.Errorf("audit: %s: unauthenticated actor with principal or credential id", e.Type)

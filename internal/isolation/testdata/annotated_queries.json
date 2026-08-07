@@ -1,6 +1,12 @@
 [
   {
     "engine": "postgres",
+    "name": "AuditWatermark",
+    "annotation": "instance-scoped",
+    "hash": "4f537560fe3521e68c9c2a2984b33e058eed3ec5a42df48f57188fc9f760879e"
+  },
+  {
+    "engine": "postgres",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
     "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
@@ -52,6 +58,12 @@
     "name": "ResolveProjectChain",
     "annotation": "authn-resolution",
     "hash": "5987f3b6b5f15c366598fc6bd4f53aff29afb1bc4f8906e3ea035100b9c8bc7f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "AuditWatermark",
+    "annotation": "instance-scoped",
+    "hash": "9ee3ad9a36fb2077eed73583fdf08b070f3e54864e575d7b536da1745b9fd082"
   },
   {
     "engine": "sqlite",

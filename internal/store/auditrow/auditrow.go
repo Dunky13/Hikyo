@@ -34,8 +34,18 @@ type KindLookup func(ctx context.Context, id string) (string, error)
 // dummy `unauthenticated` is exactly what the envelope rule forbids, so the
 // write must fail instead (fail-closed).
 func ResolveActorClass(ctx context.Context, kindOf KindLookup, a audit.Actor) (audit.Actor, error) {
-	if a.Class != "" {
+	switch a.Class {
+	case "":
+		// Resolve below.
+	case audit.ActorSystem, audit.ActorBreakGlass, audit.ActorUnauthenticated:
+		// Principal-less classes are the emitter's to assert: no row exists
+		// to check them against.
 		return a, nil
+	default:
+		// human/machine is server-side truth, never an emitter claim — an
+		// emitter that could assert it could attribute an event to any
+		// principal id it names.
+		return audit.Actor{}, fmt.Errorf("auditrow: actor class %q is resolved from principals.kind, not asserted by the emitter", a.Class)
 	}
 	if a.ID == "" {
 		a.Class = audit.ActorUnauthenticated

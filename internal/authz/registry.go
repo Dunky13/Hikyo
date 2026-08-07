@@ -78,6 +78,7 @@ const (
 	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
 	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
 	StoreAuditInstancePage   StoreOp = "audit.PageInstance"
+	StoreAuditWatermark      StoreOp = "audit.Watermark"
 )
 
 // readOnlyStoreOps pins which store operations mutate nothing — the
@@ -94,6 +95,7 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreKeysActiveTier3:          true,
 	StoreAuditTenantPage:          true,
 	StoreAuditInstancePage:        true,
+	StoreAuditWatermark:           true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -173,16 +175,14 @@ var operations = map[Operation]opSpec{
 	OpOrgGet: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreOrgsGet: true},
-		// No events and no auditedNone: carried by the pinned scaffolding
-		// exemption fixture until #48 lands the real org surface (the
-		// completeness invariant refuses auditedNone to instance-class
-		// operations, and refuses silence to everything unpinned).
+		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOrgRead},
 	},
 	OpOrgList: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreOrgsList: true, StoreOrgsCount: true},
+		storeOps: map[StoreOp]bool{StoreOrgsList: true, StoreOrgsCount: true, StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOrgRead},
 	},
 
 	// Tenant-scoped demonstration operations, one per chain depth. Their
@@ -228,54 +228,54 @@ var operations = map[Operation]opSpec{
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditQueryProject: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditQueryEnv: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditExportOrg: {
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditExportProject: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditExportEnv: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditInstanceQuery: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditInstanceExport: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditWatermark: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 }

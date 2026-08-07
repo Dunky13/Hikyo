@@ -22,3 +22,12 @@ func Leak(kr *crypto.Keyring, ps *crypto.ProjectSealer, ev audit.Event, row stor
 	slog.Info("audit event", "event", ev) // audit content → slog
 	log.Printf("row: %v", row)            // audit content → log
 }
+
+// Erasure evasions: the argument's own static type is `any`, but the value
+// is unchanged — the analyzer must look through the conversion and the map
+// index.
+func LeakByErasure(kr *crypto.Keyring, ev audit.Event) {
+	slog.Info("audit", "event", any(ev))     // erased audit content
+	log.Printf("field: %v", ev.Payload["x"]) // pinned map indexed
+	fmt.Printf("%v", any(kr))                // erased sensitive type
+}

@@ -80,6 +80,11 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 		if err != nil {
 			return err
 		}
+		// Page only over settled transactions (see AuditFilter.Watermark).
+		f.Watermark, err = r.Audit().Watermark(ctx, p)
+		if err != nil {
+			return err
+		}
 		page, err = r.Audit().PageTenant(ctx, p, f)
 		if err != nil {
 			return err
@@ -102,6 +107,10 @@ func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID
 	var page []store.AuditEvent
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpAuditInstanceQuery, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		f.Watermark, err = r.Audit().Watermark(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -236,9 +245,17 @@ func (s *Audits) export(
 		return err
 	}
 
-	// INTENT: export_started, durable before the first byte.
+	// INTENT: export_started, durable before the first byte. The
+	// settled-transaction watermark is captured here and held for every
+	// page: it keeps a later-committing lower seq from being skipped
+	// forever (postgres allocates seq before commit) AND makes the export a
+	// terminating snapshot instead of a chase of live writes.
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, op, scope)
+		if err != nil {
+			return err
+		}
+		f.Watermark, err = r.Audit().Watermark(ctx, p)
 		if err != nil {
 			return err
 		}

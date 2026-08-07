@@ -302,6 +302,25 @@ func TestSensitiveFormattingCatchesViolations(t *testing.T) {
 		"logs audit content " + Module + "/internal/audit.Event",
 		"logs audit content " + Module + "/internal/store.AuditEvent",
 	})
+	// The erasure evasions must be caught at the lines where they are
+	// written, not merely somewhere in the file.
+	for marker, what := range map[string]string{
+		`any(ev)`:                   "any-conversion erasure",
+		`ev.Payload["x"]`:           "payload map-index erasure",
+		`fmt.Printf("%v", any(kr))`: "sensitive-type erasure",
+	} {
+		line := fixtureLine(t, filepath.Join("testdata", "badredact", "badredact.go"), marker)
+		want := fmt.Sprintf("badredact.go:%d:", line)
+		found := false
+		for _, f := range findings {
+			if strings.Contains(f, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s not caught at %s:\n%s", what, want, strings.Join(findings, "\n"))
+		}
+	}
 }
 
 func TestAuditAppendOnlyRepo(t *testing.T) {
@@ -334,4 +353,39 @@ func TestAuditAppendOnlyCatchesViolations(t *testing.T) {
 		"RewriteAudit",
 		"SET synchronous_commit",
 	})
+}
+
+// The denial writer must be the resolution surface's ONLY write path
+// (audit-model ADR amendment part 4) — enforced, not asserted in prose.
+func TestDenialWriterIsSoleWriter(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckDenialWriter(pkgs) {
+		t.Error(f)
+	}
+}
+
+func TestDenialWriterCatchesSecondWriter(t *testing.T) {
+	pkgs, err := Load("./testdata/badredact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The analyzer is scoped to the resolution surface by path; prove the
+	// scoping by confirming it reports nothing elsewhere, then prove the
+	// detection logic itself.
+	if f := CheckDenialWriter(pkgs); len(f) != 0 {
+		t.Errorf("analyzer fired outside the resolution surface: %v", f)
+	}
+	for _, name := range []string{"InsertTenantAuditEvent", "CreateOrg", "UpdateEnvironmentNote", "DeleteThing", "AcquireHierarchyGeneration"} {
+		if !mutatingQuery(name) {
+			t.Errorf("mutatingQuery(%q) = false — a write verb the analyzer would miss", name)
+		}
+	}
+	for _, name := range []string{"GetPrincipalKind", "ResolveOrgChain", "ListGrantsForPrincipal", "PageTenantAuditOrg"} {
+		if mutatingQuery(name) {
+			t.Errorf("mutatingQuery(%q) = true — a read misclassified as a write", name)
+		}
+	}
 }

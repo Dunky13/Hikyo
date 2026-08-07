@@ -100,12 +100,12 @@ mvp-boundary rows A4 and A6.
 
 | # | Invariant | Test |
 |---|---|---|
-| 1 | Registry closure (runtime fail-closed + linkage) | `audit.TestValidate*`, `isolation.TestInvariantAuditRegistryClosure` |
+| 1 | Registry closure (runtime fail-closed + linkage + live emitters) | `audit.TestValidate*`, `isolation.TestInvariantAuditRegistryClosure`, `isolation.TestAuditCore*/every_registered_type_is_actually_emitted` |
 | 2 | Completeness vs the total probe classification, default-deny `audited: none` | `isolation.TestInvariantAuditCompleteness` (+ pinned `testdata/audited_exemptions.json`) |
 | 3 | Append-only, empty pinned deleter allowlist | `lint.TestAuditAppendOnly*`, `isolation.TestInvariantAuditAppendOnly` |
-| 4 | No plaintext: schema-field ban + `ew_` filter round-trip | `audit.TestRegistryForbiddenPayloadContent`, `audit.TestRedactTokens`, `audit.TestSanitizeFreeText` |
+| 4 | No plaintext: schema-field ban + `ew_` filter round-trip + dump-grep over both trails | `audit.TestRegistryForbiddenPayloadContent`, `audit.TestRedactTokens`, `audit.TestSanitizeFreeText`, `isolation.TestAuditCore*/no_token_material_in_trails` |
 | 5 | Cardinality (structural half: no counter/aggregate columns, pinned column set) | `isolation.TestInvariantAuditNoAggregates` — fetch-path halves arrive with #49+ |
-| 6 | Denial durability + siting + single writer | `isolation.TestAuditCore*/denial_*` (both engines), boundary test (authn importers), `denial_durability_under_induced_commit_failure` |
+| 6 | Denial durability + siting + single writer | `isolation.TestAuditCore*/denial_*` (both engines), `denial_durability_under_induced_commit_failure`, boundary test (authn importers), and `lint.TestDenialWriterIsSoleWriter` — an analyzer refusing any mutating generated query call outside `WriteDenial` inside the resolution surface |
 | 7 | Durability settings | `store.TestVerifyPGDurability` (seam), `isolation.TestPostgresDurabilityBootRefusal` (real `ALTER DATABASE`), sqlite pragmas #42's |
 | 8 | Redaction surfaces + lint bans | `crypto.TestRedactionSurfacesAgainstPlantedSecret`, `lint.TestRedaction*`, `lint.TestSensitiveFormatting*`, `isolation.TestInvariantAuditRedaction` |
 | 9 | Retention units (envelope+per-key atomic) | vacuous — no fetch envelopes exist; arrives with the fetch path |
@@ -142,17 +142,27 @@ secret, free-text filter fixtures.
   commit-order total on postgres, per the ADR's own statement). Display
   ordering by `(recorded_at, seq)` stays the audit view's job (#29).
 - **`audited: none` exemption fixture** (`audited_exemptions.json`,
-  name-pinned, reason-carrying): `healthz`/`readyz`/`cli:version`/
-  `cli:server`/`cli:migrate` (the ADR's default-deny rule refuses
-  `audited: none` to unauthenticated/system classes but declares no event
-  types for them; boot/migration auditable acts run below the operation
-  surface) and `org.get`/`org.list` (#44 scaffolding; #48 must map or
-  remove them). `ClassStub` verbs are excluded by their existing contract.
-- **Scaffolding event types** (`settings.org_created/project_created/
-  environment_created/environment_note_changed`): the v1 catalogue's real
-  rows land with the operations that emit them (#47/#48/#54/#55…), under
-  the completeness invariant that forces every newly registered operation
-  to map. The registry mechanism, not today's row set, is the lock.
+  name-pinned, reason-carrying) covers WIRE ENTRIES ONLY:
+  `healthz`/`readyz`/`cli:version`/`cli:server`/`cli:migrate` — the ADR's
+  default-deny rule refuses `audited: none` to unauthenticated/system
+  classes but declares no event types for health probes, a local version
+  print, or process entry points whose auditable acts (boot keyring reads,
+  migration DDL) run below the operation surface. The operations map is
+  EMPTY: `org.get`/`org.list` now emit `settings.org_read` (access class)
+  rather than riding an exemption, per cross-model R1. `ClassStub` verbs are
+  excluded by their existing contract.
+- **The registry does NOT yet contain the ADR's full v1 catalogue**, and
+  this slice does not claim otherwise: the ADR's completeness rule
+  ("the registry MUST contain every event an upstream locked ADR requires")
+  is satisfied per-slice, because the events of unbuilt surfaces (auth,
+  fetch, crypto rotation, adapters) cannot be emitted by code that does not
+  exist. What IS enforced here is the machine-checkable half — the
+  completeness invariant against the total probe-classification registry,
+  which refuses silence for every operation that exists today. Registered
+  types are additionally proven to have live emitters (E2E
+  `every_registered_type_is_actually_emitted`); the catalogue grows with
+  each surface's ticket, and the ADR's row list is the standing obligation
+  on those tickets, not a claim of present compliance.
 - **Filters**: time range + seq cursor + limit only. Category/type/scope/
   actor filters are the API surface's delegated mechanism (#25) — each is a
   further provable conjunct on the same queries.
@@ -168,6 +178,25 @@ secret, free-text filter fixtures.
 - **Offline-reconciled records**: envelope carries `occurred_asserted`,
   `origin: offline-reconciled`; no reconciliation path exists yet (#18's
   compose ticket).
+
+## Accepted residuals, stated
+
+- **Denial-path timing.** A resolvable denial evaluates grants and writes to
+  the tenant trail; an unresolvable one skips the grant lookup and writes to
+  the instance trail. The work differs, so repeated latency measurement can
+  in principle distinguish "exists but forbidden" from "does not exist"
+  despite the byte-identical response (cross-model R1 finding 5). This is
+  the tenant-isolation ADR's already-stated residual — application-layer
+  uniformity is the claim, engine-internal microtiming is not — and the
+  grant evaluation is inherent: a resolvable denial cannot be decided
+  without it. The mitigation is #8's per-principal rate limiting, which
+  bounds how many samples a prober can take. Recorded here rather than
+  papered over.
+- **Emitter-supplied actor id.** Until authentication lands (#16), the
+  service passes the acting principal id; the store resolves its CLASS from
+  `principals.kind` (an emitter may not assert human/machine) and the event
+  type is bound to the minting operation, so a proof cannot forge event
+  meaning. Binding the id itself to an authenticated session is #16's.
 
 ## Pickup notes
 

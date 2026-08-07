@@ -203,14 +203,14 @@ func TestInvariantAuditFKException(t *testing.T) {
 // counter or otherwise — is a reviewed diff here).
 func TestInvariantAuditNoAggregates(t *testing.T) {
 	wantTenant := []string{
-		"seq", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
+		"seq", "txid", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
 		"recorded_at", "actor_id", "actor_class", "actor_credential_id",
 		"authority_id", "scope_class", "org_id", "project_id", "env_id",
 		"object_type", "object_id", "outcome", "correlation_id",
 		"source_ip", "user_agent", "origin", "payload",
 	}
 	wantInstance := []string{
-		"seq", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
+		"seq", "txid", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
 		"recorded_at", "actor_id", "actor_class", "actor_credential_id",
 		"authority_id", "object_type", "object_id", "outcome", "correlation_id",
 		"source_ip", "user_agent", "origin", "payload",
@@ -259,6 +259,17 @@ func tableBodies(t *testing.T, migDir string) map[string]string {
 // columnNames extracts the column identifiers from a CREATE TABLE body,
 // skipping table-level constraints.
 func columnNames(body string) []string {
+	// Strip line comments first: a comma inside prose would otherwise split
+	// into a fragment the identifier regex happily reads as a column.
+	var stripped []string
+	for _, line := range strings.Split(body, "\n") {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+		stripped = append(stripped, line)
+	}
+	body = strings.Join(stripped, "\n")
+
 	var out []string
 	depth := 0
 	var lines []string

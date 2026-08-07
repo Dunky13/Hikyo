@@ -2,10 +2,14 @@ package lint
 
 import (
 	"fmt"
+	"go/ast"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // Analyzer 6 (audit-model ADR CI invariants 3 and 7): append-only audit
@@ -104,4 +108,69 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 		}
 	}
 	return findings
+}
+
+// CheckDenialWriter enforces the audit-model ADR's amendment part 4 as a
+// build failure, not a comment: the resolution surface's enumerated
+// interface gains EXACTLY ONE write path, the denial writer. The import
+// boundary alone cannot see this — internal/store/authn already holds the
+// generated query handles, so a second mutating call inside it would be a
+// proof-free writer that every other guard admits. Every call to a
+// generated mutating query from that package must sit inside WriteDenial.
+func CheckDenialWriter(pkgs []*packages.Package) []string {
+	var findings []string
+	const surface = Module + "/internal/store/authn"
+	const writer = "WriteDenial"
+	for _, p := range flatten(pkgs) {
+		if strings.TrimSuffix(p.PkgPath, ".test") != surface || p.TypesInfo == nil {
+			continue
+		}
+		for _, file := range p.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				fn, ok := n.(*ast.FuncDecl)
+				if !ok {
+					return true
+				}
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					obj, ok := p.TypesInfo.Uses[sel.Sel]
+					if !ok {
+						return true
+					}
+					f, ok := obj.(*types.Func)
+					if !ok || f.Pkg() == nil || !generatedPackages[f.Pkg().Path()] {
+						return true
+					}
+					if !mutatingQuery(f.Name()) || fn.Name.Name == writer {
+						return true
+					}
+					findings = append(findings, fmt.Sprintf(
+						"denialwriter: %s: %s calls the mutating query %s outside %s — the resolution surface has exactly one write path (audit-model ADR amendment part 4)",
+						p.Fset.Position(call.Pos()), fn.Name.Name, f.Name(), writer))
+					return true
+				})
+				return false
+			})
+		}
+	}
+	return findings
+}
+
+// mutatingQuery recognises a generated statement that writes. sqlc names
+// queries after their intent, so the prefix set is the whole vocabulary the
+// repo uses; a new verb must be added here deliberately.
+func mutatingQuery(name string) bool {
+	for _, prefix := range []string{"Insert", "Create", "Update", "Delete", "Acquire", "Prune", "Set"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }

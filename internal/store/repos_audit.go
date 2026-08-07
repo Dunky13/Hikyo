@@ -37,6 +37,13 @@ type AuditFilter struct {
 	To       time.Time
 	AfterSeq int64
 	Limit    int
+	// Watermark is the settled-transaction bound: only rows whose inserting
+	// transaction has finished are read, so a cursor cannot advance past a
+	// row that commits later (postgres allocates seq before commit — the
+	// silent-evidence-loss case). Callers obtain it from AuditReader.Watermark
+	// and hold it for the whole export, which also makes the export a
+	// terminating snapshot rather than a chase of live writes.
+	Watermark int64
 }
 
 // auditMaxTime bounds an open-ended To (year 9999 is inside both engines'
@@ -46,6 +53,9 @@ var auditMaxTime = time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
 func (f AuditFilter) bounds() (from, to time.Time, err error) {
 	if f.Limit <= 0 {
 		return time.Time{}, time.Time{}, errors.New("store: audit page limit must be positive")
+	}
+	if f.Watermark <= 0 {
+		return time.Time{}, time.Time{}, errors.New("store: audit page without a settled-transaction watermark")
 	}
 	from = f.From.UTC()
 	to = f.To.UTC()
@@ -87,6 +97,11 @@ type AuditEvent struct {
 
 // AuditReader is the read side of the trails.
 type AuditReader interface {
+	// Watermark returns the settled-transaction bound for paging (see
+	// AuditFilter.Watermark). It reads no tenant data — on postgres it is
+	// the snapshot xmin, on sqlite a sentinel — but it is proof-gated like
+	// every other store door.
+	Watermark(ctx context.Context, p authz.Proof) (int64, error)
 	// PageTenant returns one bounded page of the tenant trail addressed by
 	// the proof's resolved chain (org proofs read the whole org, deeper
 	// proofs read their refinement), ordered by seq.
@@ -118,7 +133,7 @@ type sqliteAudit struct {
 func (r sqliteRepos) Audit() AuditRepo { return sqliteAudit{q: sqlitegen.New(r.db), tok: r.tok} }
 
 func (a sqliteAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Event) error {
-	chain, err := authz.Verify(p, authz.StoreAuditTenantInsert, a.tok)
+	chain, err := authz.VerifyEvent(p, authz.StoreAuditTenantInsert, a.tok, e.Type)
 	if err != nil {
 		return err
 	}
@@ -135,7 +150,7 @@ func (a sqliteAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Ev
 }
 
 func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error {
-	if _, err := authz.Verify(p, authz.StoreAuditInstanceInsert, a.tok); err != nil {
+	if _, err := authz.VerifyEvent(p, authz.StoreAuditInstanceInsert, a.tok, e.Type); err != nil {
 		return err
 	}
 	var err error
@@ -148,6 +163,13 @@ func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.
 		return err
 	}
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.SQLiteInstance(row))
+}
+
+func (a sqliteAudit) Watermark(ctx context.Context, p authz.Proof) (int64, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditWatermark, a.tok); err != nil {
+		return 0, err
+	}
+	return a.q.AuditWatermark(ctx)
 }
 
 func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
@@ -167,20 +189,21 @@ func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilte
 	switch level {
 	case domain.LevelOrg:
 		rows, err = a.q.PageTenantAuditOrg(ctx, sqlitegen.PageTenantAuditOrgParams{
-			OrgID: string(chain.Org), Seq: f.AfterSeq,
+			OrgID: string(chain.Org), Seq: f.AfterSeq, Txid: f.Watermark,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, sqlitegen.PageTenantAuditProjectParams{
-			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true}, Seq: f.AfterSeq,
+			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true},
+			Seq: f.AfterSeq, Txid: f.Watermark,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, sqlitegen.PageTenantAuditEnvParams{
 			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true},
-			EnvID: sql.NullString{String: string(chain.Env), Valid: true}, Seq: f.AfterSeq,
+			EnvID: sql.NullString{String: string(chain.Env), Valid: true}, Seq: f.AfterSeq, Txid: f.Watermark,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
@@ -210,7 +233,7 @@ func (a sqliteAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFil
 		return nil, err
 	}
 	rows, err := a.q.PageInstanceAudit(ctx, sqlitegen.PageInstanceAuditParams{
-		Seq:        f.AfterSeq,
+		Seq: f.AfterSeq, Txid: f.Watermark,
 		RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 		Limit: int64(f.Limit),
 	})
@@ -238,7 +261,7 @@ type pgAudit struct {
 func (r pgRepos) Audit() AuditRepo { return pgAudit{q: pggen.New(r.db), tok: r.tok} }
 
 func (a pgAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Event) error {
-	chain, err := authz.Verify(p, authz.StoreAuditTenantInsert, a.tok)
+	chain, err := authz.VerifyEvent(p, authz.StoreAuditTenantInsert, a.tok, e.Type)
 	if err != nil {
 		return err
 	}
@@ -255,7 +278,7 @@ func (a pgAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Event)
 }
 
 func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error {
-	if _, err := authz.Verify(p, authz.StoreAuditInstanceInsert, a.tok); err != nil {
+	if _, err := authz.VerifyEvent(p, authz.StoreAuditInstanceInsert, a.tok, e.Type); err != nil {
 		return err
 	}
 	var err error
@@ -268,6 +291,13 @@ func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Even
 		return err
 	}
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.PGInstance(row))
+}
+
+func (a pgAudit) Watermark(ctx context.Context, p authz.Proof) (int64, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditWatermark, a.tok); err != nil {
+		return 0, err
+	}
+	return a.q.AuditWatermark(ctx)
 }
 
 func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
@@ -289,19 +319,21 @@ func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) (
 	switch level {
 	case domain.LevelOrg:
 		rows, err = a.q.PageTenantAuditOrg(ctx, pggen.PageTenantAuditOrgParams{
-			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq,
+			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq, Watermark: f.Watermark,
 			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, pggen.PageTenantAuditProjectParams{
 			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
-			AfterSeq: f.AfterSeq, FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+			AfterSeq: f.AfterSeq, Watermark: f.Watermark,
+			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, pggen.PageTenantAuditEnvParams{
 			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
 			ChainEnvID: pgtype.Text{String: string(chain.Env), Valid: true},
-			AfterSeq:   f.AfterSeq, FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+			AfterSeq:   f.AfterSeq, Watermark: f.Watermark,
+			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	default:
 		return nil, errors.New("store: tenant audit page with an empty chain")

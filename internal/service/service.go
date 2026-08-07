@@ -120,41 +120,71 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 	return org, nil
 }
 
+// Org reads are instance-scoped operator reads of cross-tenant metadata, so
+// they are audited (the audit-model ADR's default-deny rule refuses
+// `audited: none` to instance-class operations). The event commits with the
+// read, which is why these run in a write transaction: an operator read
+// without its durable record does not complete.
 func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (store.Org, error) {
 	var out store.Org
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().Get(ctx, p, id)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal,
+			audit.Object{Type: "org", ID: out.ID},
+			audit.Payload{"query": "get", "row_count": 1})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }
 
 func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.Org, error) {
 	var out []store.Org
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().List(ctx, p)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+			audit.Payload{"query": "list", "row_count": len(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }
 
 func (s *Orgs) Count(ctx context.Context, principal domain.PrincipalID) (int64, error) {
 	var out int64
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().Count(ctx, p)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+			audit.Payload{"query": "count", "row_count": int(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }

@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const auditWatermark = `-- name: AuditWatermark :one
+
+SELECT (pg_snapshot_xmin(pg_current_snapshot())::text::bigint) AS watermark
+`
+
+// The settled-transaction watermark: the snapshot xmin is the lowest xid
+// still running, so every row whose txid is strictly below it belongs to a
+// finished transaction. Paging under it is what keeps a later-committing
+// lower seq from being skipped forever (seq is allocated before commit on
+// this engine).
+// wenv:instance-scoped
+func (q *Queries) AuditWatermark(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, auditWatermark)
+	var watermark int64
+	err := row.Scan(&watermark)
+	return watermark, err
+}
+
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
 INSERT INTO audit_instance_events (
     id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
@@ -152,18 +170,19 @@ func (q *Queries) InsertTenantAuditEvent(ctx context.Context, arg InsertTenantAu
 }
 
 const pageInstanceAudit = `-- name: PageInstanceAudit :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_instance_events
-WHERE seq > $1
-    AND recorded_at >= $2 AND recorded_at <= $3
-ORDER BY seq LIMIT $4
+WHERE seq > $1 AND txid < $2
+    AND recorded_at >= $3 AND recorded_at <= $4
+ORDER BY seq LIMIT $5
 `
 
 type PageInstanceAuditParams struct {
 	AfterSeq  int64
+	Watermark int64
 	FromTime  pgtype.Timestamptz
 	ToTime    pgtype.Timestamptz
 	PageLimit int32
@@ -172,6 +191,7 @@ type PageInstanceAuditParams struct {
 func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditParams) ([]AuditInstanceEvent, error) {
 	rows, err := q.db.Query(ctx, pageInstanceAudit,
 		arg.AfterSeq,
+		arg.Watermark,
 		arg.FromTime,
 		arg.ToTime,
 		arg.PageLimit,
@@ -185,6 +205,7 @@ func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditPa
 		var i AuditInstanceEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.Txid,
 			&i.ID,
 			&i.Type,
 			&i.SchemaVersion,
@@ -215,16 +236,16 @@ func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditPa
 }
 
 const pageTenantAuditEnv = `-- name: PageTenantAuditEnv :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = $1 AND project_id = $2
-    AND env_id = $3 AND seq > $4
-    AND recorded_at >= $5 AND recorded_at <= $6
-ORDER BY seq LIMIT $7
+    AND env_id = $3 AND seq > $4 AND txid < $5
+    AND recorded_at >= $6 AND recorded_at <= $7
+ORDER BY seq LIMIT $8
 `
 
 type PageTenantAuditEnvParams struct {
@@ -232,6 +253,7 @@ type PageTenantAuditEnvParams struct {
 	ChainProjectID pgtype.Text
 	ChainEnvID     pgtype.Text
 	AfterSeq       int64
+	Watermark      int64
 	FromTime       pgtype.Timestamptz
 	ToTime         pgtype.Timestamptz
 	PageLimit      int32
@@ -243,6 +265,7 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 		arg.ChainProjectID,
 		arg.ChainEnvID,
 		arg.AfterSeq,
+		arg.Watermark,
 		arg.FromTime,
 		arg.ToTime,
 		arg.PageLimit,
@@ -256,6 +279,7 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 		var i AuditTenantEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.Txid,
 			&i.ID,
 			&i.Type,
 			&i.SchemaVersion,
@@ -290,20 +314,21 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 }
 
 const pageTenantAuditOrg = `-- name: PageTenantAuditOrg :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = $1 AND seq > $2
-    AND recorded_at >= $3 AND recorded_at <= $4
-ORDER BY seq LIMIT $5
+WHERE org_id = $1 AND seq > $2 AND txid < $3
+    AND recorded_at >= $4 AND recorded_at <= $5
+ORDER BY seq LIMIT $6
 `
 
 type PageTenantAuditOrgParams struct {
 	ChainOrgID string
 	AfterSeq   int64
+	Watermark  int64
 	FromTime   pgtype.Timestamptz
 	ToTime     pgtype.Timestamptz
 	PageLimit  int32
@@ -313,6 +338,7 @@ func (q *Queries) PageTenantAuditOrg(ctx context.Context, arg PageTenantAuditOrg
 	rows, err := q.db.Query(ctx, pageTenantAuditOrg,
 		arg.ChainOrgID,
 		arg.AfterSeq,
+		arg.Watermark,
 		arg.FromTime,
 		arg.ToTime,
 		arg.PageLimit,
@@ -326,6 +352,7 @@ func (q *Queries) PageTenantAuditOrg(ctx context.Context, arg PageTenantAuditOrg
 		var i AuditTenantEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.Txid,
 			&i.ID,
 			&i.Type,
 			&i.SchemaVersion,
@@ -360,22 +387,23 @@ func (q *Queries) PageTenantAuditOrg(ctx context.Context, arg PageTenantAuditOrg
 }
 
 const pageTenantAuditProject = `-- name: PageTenantAuditProject :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = $1 AND project_id = $2
-    AND seq > $3
-    AND recorded_at >= $4 AND recorded_at <= $5
-ORDER BY seq LIMIT $6
+    AND seq > $3 AND txid < $4
+    AND recorded_at >= $5 AND recorded_at <= $6
+ORDER BY seq LIMIT $7
 `
 
 type PageTenantAuditProjectParams struct {
 	ChainOrgID     string
 	ChainProjectID pgtype.Text
 	AfterSeq       int64
+	Watermark      int64
 	FromTime       pgtype.Timestamptz
 	ToTime         pgtype.Timestamptz
 	PageLimit      int32
@@ -386,6 +414,7 @@ func (q *Queries) PageTenantAuditProject(ctx context.Context, arg PageTenantAudi
 		arg.ChainOrgID,
 		arg.ChainProjectID,
 		arg.AfterSeq,
+		arg.Watermark,
 		arg.FromTime,
 		arg.ToTime,
 		arg.PageLimit,
@@ -399,6 +428,7 @@ func (q *Queries) PageTenantAuditProject(ctx context.Context, arg PageTenantAudi
 		var i AuditTenantEvent
 		if err := rows.Scan(
 			&i.Seq,
+			&i.Txid,
 			&i.ID,
 			&i.Type,
 			&i.SchemaVersion,

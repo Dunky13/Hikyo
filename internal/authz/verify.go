@@ -3,7 +3,9 @@ package authz
 import (
 	"errors"
 	"fmt"
+	"slices"
 
+	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/domain"
 )
 
@@ -50,4 +52,27 @@ func Verify(p Proof, op StoreOp, tok *TxToken) (domain.Scope, error) {
 		}
 	}
 	return c.chain, nil
+}
+
+// VerifyEvent is Verify for the audit-insert doors: on top of the ordinary
+// checks it binds the EVENT TYPE to the operation that minted the proof.
+// Without it a proof for any operation licensed to write the trail could
+// insert any tenant-licensed event type — a project-create proof could
+// persist an environment-note-changed event, forging the meaning of the
+// record while every other guard succeeds. The registry already declares
+// which types each operation emits; this makes that declaration binding at
+// the write boundary.
+func VerifyEvent(p Proof, op StoreOp, tok *TxToken, et audit.EventType) (domain.Scope, error) {
+	chain, err := Verify(p, op, tok)
+	if err != nil {
+		return domain.Scope{}, err
+	}
+	c, ok := p.(*proof)
+	if !ok || c == nil {
+		return domain.Scope{}, errors.New("authz: non-canonical proof")
+	}
+	if !slices.Contains(operations[c.op].events, et) {
+		return domain.Scope{}, fmt.Errorf("authz: proof minted for %q may not emit audit event %q", c.op, et)
+	}
+	return chain, nil
 }

@@ -39,46 +39,56 @@ INSERT INTO audit_instance_events (
 );
 
 -- name: PageTenantAuditOrg :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq)
+WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageTenantAuditProject :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND seq > sqlc.arg(after_seq)
+    AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageTenantAuditEnv :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq)
+    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageInstanceAudit :many
-SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_instance_events
-WHERE seq > sqlc.arg(after_seq)
+WHERE seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
+
+-- The settled-transaction watermark: the snapshot xmin is the lowest xid
+-- still running, so every row whose txid is strictly below it belongs to a
+-- finished transaction. Paging under it is what keeps a later-committing
+-- lower seq from being skipped forever (seq is allocated before commit on
+-- this engine).
+
+-- wenv:instance-scoped
+-- name: AuditWatermark :one
+SELECT (pg_snapshot_xmin(pg_current_snapshot())::text::bigint) AS watermark;

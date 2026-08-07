@@ -54,6 +54,8 @@ var auditContentTypes = map[string]bool{
 // with an event id is not mirroring the trail; log emission is).
 var formattingPackages = map[string]bool{
 	"fmt": true, "encoding/json": true, "log": true, "log/slog": true,
+	"encoding/xml": true, "encoding/gob": true, "encoding/csv": true,
+	"text/template": true, "html/template": true,
 }
 
 var loggingPackages = map[string]bool{
@@ -127,19 +129,24 @@ func CheckSensitiveFormatting(pkgs []*packages.Package) []string {
 					return true
 				}
 				for _, arg := range call.Args {
-					tv, ok := p.TypesInfo.Types[arg]
-					if !ok || tv.Type == nil {
+					// Static-type erasure is the obvious bypass: `any(ev)` and
+					// `ev.Payload["formula"]` both type as `any` at the argument
+					// position while still carrying the value. Every
+					// sub-expression's type is therefore checked, not just the
+					// argument's own.
+					argTypes := subexpressionTypes(p.TypesInfo, arg)
+					if len(argTypes) == 0 {
 						continue
 					}
 					if !exemptSensitive {
-						if name := mentionsNamed(tv.Type, SensitiveTypes, map[types.Type]bool{}); name != "" {
+						if name := mentionsAny(argTypes, SensitiveTypes); name != "" {
 							findings = append(findings, fmt.Sprintf(
 								"redaction: %s: %s passes sensitive type %s to %s — formatting/marshaling sensitive types outside their owning package is banned",
 								p.Fset.Position(arg.Pos()), base, name, calleePkg))
 						}
 					}
 					if logCall {
-						if name := mentionsNamed(tv.Type, auditContentTypes, map[types.Type]bool{}); name != "" {
+						if name := mentionsAny(argTypes, auditContentTypes); name != "" {
 							findings = append(findings, fmt.Sprintf(
 								"redaction: %s: %s logs audit content %s — audit events are never mirrored to the ops log (audit-model ADR)",
 								p.Fset.Position(arg.Pos()), base, name))
@@ -213,6 +220,35 @@ func mentionsNamed(t types.Type, pinned map[string]bool, seen map[types.Type]boo
 			}
 		}
 		return ""
+	}
+	return ""
+}
+
+// subexpressionTypes collects the type of an argument expression and of
+// every sub-expression inside it. Without the sub-expressions, wrapping a
+// pinned value in a conversion to `any` (or indexing a pinned map) hides it
+// from the check while logging exactly the same content.
+func subexpressionTypes(info *types.Info, arg ast.Expr) []types.Type {
+	var out []types.Type
+	ast.Inspect(arg, func(n ast.Node) bool {
+		expr, ok := n.(ast.Expr)
+		if !ok {
+			return true
+		}
+		if tv, ok := info.Types[expr]; ok && tv.Type != nil {
+			out = append(out, tv.Type)
+		}
+		return true
+	})
+	return out
+}
+
+// mentionsAny reports the first pinned type reachable from any of ts.
+func mentionsAny(ts []types.Type, pinned map[string]bool) string {
+	for _, t := range ts {
+		if name := mentionsNamed(t, pinned, map[types.Type]bool{}); name != "" {
+			return name
+		}
 	}
 	return ""
 }

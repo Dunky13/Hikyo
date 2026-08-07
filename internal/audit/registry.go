@@ -35,7 +35,13 @@ const (
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
 	// surfaces (#48) land their catalogue rows.
-	EventOrgCreated     EventType = "settings.org_created"
+	EventOrgCreated EventType = "settings.org_created"
+	// settings.org_read covers the instance-scoped org reads. The ADR's
+	// default-deny rule refuses `audited: none` to instance-class
+	// operations, and these are operator reads of cross-tenant metadata —
+	// so they are audited, at the access retention class (read volume, not
+	// grant history).
+	EventOrgRead        EventType = "settings.org_read"
 	EventProjectCreated EventType = "settings.project_created"
 	EventEnvCreated     EventType = "settings.environment_created"
 	EventEnvNoteChanged EventType = "settings.environment_note_changed"
@@ -124,6 +130,16 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"rows_streamed": {Kind: KindInt, Required: true},
 			"cause":         {Kind: KindString},
+		},
+	},
+	EventOrgRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"query":     {Kind: KindString, Required: true}, // get | list
+			"row_count": {Kind: KindInt, Required: true},
 		},
 	},
 	EventOrgCreated: {

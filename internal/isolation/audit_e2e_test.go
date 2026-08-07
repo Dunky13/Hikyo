@@ -65,6 +65,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	audits := &service.Audits{DB: db}
 	envs := &service.Environments{DB: db}
 	projects := &service.Projects{DB: db}
+	orgsSvc := &service.Orgs{DB: db}
 
 	countTenant := func(where string) int64 {
 		return queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE "+where)
@@ -257,6 +258,39 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE payload LIKE '%"+audit.RedactionMarker+"%'"); n == 0 {
 			t.Error("claimed identifiers were not token-filtered")
+		}
+	})
+
+	t.Run("every_registered_type_is_actually_emitted", func(t *testing.T) {
+		// The registry-closure invariant is static: it proves declarations
+		// agree, not that an emitter exists. This runs last over the trails
+		// the preceding subtests filled and asserts every registered type
+		// really reached a table — an operation that drops its insert while
+		// keeping its `events:` declaration fails here.
+		if _, err := orgsSvc.List(tctx(t), root); err != nil {
+			t.Fatal(err)
+		}
+		if err := envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := orgsSvc.Create(tctx(t), root, "audited-org", true, []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+		for _, typ := range audit.Types() {
+			spec, _ := audit.Spec(typ)
+			seen := int64(0)
+			if spec.Trails[audit.TrailTenant] {
+				seen += queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type = '"+string(typ)+"'")
+			}
+			if spec.Trails[audit.TrailInstance] {
+				seen += queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = '"+string(typ)+"'")
+			}
+			if seen == 0 {
+				t.Errorf("registered event type %s was never emitted — declaration without an emitter", typ)
+			}
 		}
 	})
 

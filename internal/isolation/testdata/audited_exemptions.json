@@ -7,8 +7,5 @@
     "cli:server": "process entry point: boot's auditable acts run below the operation surface (system-proof keyring set); boot events arrive with their catalogue rows",
     "cli:migrate": "process entry point: migration DDL runs below the store-method surface"
   },
-  "operations": {
-    "org.get": "instance-scoped scaffolding read (#44); the real org surface (#48) must map or remove it",
-    "org.list": "instance-scoped scaffolding read (#44); the real org surface (#48) must map or remove it"
-  }
+  "operations": {}
 }
