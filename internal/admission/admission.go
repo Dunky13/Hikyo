@@ -39,8 +39,15 @@ const (
 	// QueueDepth bounds waiters; beyond it the answer is a uniform refusal
 	// that performs no unbounded work.
 	QueueDepth = 16
-	// PerIPPerMinute is the sliding per-source-IP attempt allowance.
+	// PerIPPerMinute is the sliding per-source-IP attempt allowance for paths
+	// that can run Argon2id.
 	PerIPPerMinute = 10
+	// MetaPerIPPerMinute is the discovery endpoint's own allowance. It is
+	// looser because the endpoint is cheap and `login` legitimately calls it
+	// before every authentication — charging it against the verification
+	// budget would make the client's own capability check the thing that
+	// throttles the client.
+	MetaPerIPPerMinute = 60
 	// FailuresBeforeBackoff is how many consecutive per-account failures pass
 	// before the delay starts.
 	FailuresBeforeBackoff = 5
@@ -79,6 +86,7 @@ type Limiter struct {
 	mu       sync.Mutex
 	waiting  int
 	ipHits   map[string][]time.Time
+	metaHits map[string][]time.Time
 	failures map[[32]byte]int
 	blocked  map[[32]byte]time.Time
 }
@@ -115,6 +123,7 @@ func New(cfg Config) (*Limiter, error) {
 		slots:       make(chan struct{}, concurrency),
 		now:         now,
 		ipHits:      map[string][]time.Time{},
+		metaHits:    map[string][]time.Time{},
 		failures:    map[[32]byte]int{},
 		blocked:     map[[32]byte]time.Time{},
 	}
@@ -166,7 +175,19 @@ func (l *Limiter) dequeue() {
 	l.mu.Unlock()
 }
 
+// AllowDiscovery admits one unauthenticated discovery request. It has its own
+// bucket rather than sharing the verification budget: /meta performs no
+// expensive work, and a cheap endpoint queued behind a semaphore sized for
+// 64 MiB derivations would be throttled by a cost it does not incur.
+func (l *Limiter) AllowDiscovery(ip string) bool {
+	return l.allowIPIn(l.metaHits, ip, MetaPerIPPerMinute)
+}
+
 func (l *Limiter) allowIP(ip string) bool {
+	return l.allowIPIn(l.ipHits, ip, PerIPPerMinute)
+}
+
+func (l *Limiter) allowIPIn(bucket map[string][]time.Time, ip string, allowance int) bool {
 	if ip == "" {
 		// An unattributable source still consumes the instance-wide budget;
 		// it simply has no per-IP bucket to charge. Refusing outright would
@@ -178,18 +199,18 @@ func (l *Limiter) allowIP(ip string) bool {
 	cutoff := now.Add(-time.Minute)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	hits := l.ipHits[ip]
+	hits := bucket[ip]
 	kept := hits[:0]
 	for _, t := range hits {
 		if t.After(cutoff) {
 			kept = append(kept, t)
 		}
 	}
-	if len(kept) >= PerIPPerMinute {
-		l.ipHits[ip] = kept
+	if len(kept) >= allowance {
+		bucket[ip] = kept
 		return false
 	}
-	l.ipHits[ip] = append(kept, now)
+	bucket[ip] = append(kept, now)
 	return true
 }
 

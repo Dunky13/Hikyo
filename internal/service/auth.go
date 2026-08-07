@@ -665,12 +665,20 @@ func (s *Auth) Logout(ctx context.Context, presented string) error {
 // SlideGranularity. The transport calls it after a successful response, so
 // the write never sits between authorization and the answer.
 //
+// The decision is made in a READ transaction and a write is opened only when
+// one is actually needed. That ordering matters more than it looks: the
+// transport calls this for every request carrying any bearer at all,
+// including a fabricated one, so opening a write transaction first would let
+// anyone contend for sqlite's single write connection just by sending an
+// Authorization header full of noise.
+//
 // It is a no-op — not an error — when the session has since died: the request
 // it belonged to already succeeded, and failing here would report a problem
 // that no longer has a subject.
 func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 	now := s.now()
-	return tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	var sessionID string
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, err := az.Authenticate(ctx, presented, now)
 		if errors.Is(err, domain.ErrUnauthenticated) {
 			return nil
@@ -680,6 +688,23 @@ func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 		}
 		if now.Sub(id.LastSeenAt) < SlideGranularity {
 			return nil
+		}
+		sessionID = id.SessionID
+		return nil
+	})
+	if err != nil || sessionID == "" {
+		return err
+	}
+	return tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		// Re-authenticate inside the write transaction: the session may have
+		// been revoked between the two, and sliding a dead session's clock
+		// would resurrect nothing but would write to a row logout deleted.
+		id, err := az.Authenticate(ctx, presented, now)
+		if errors.Is(err, domain.ErrUnauthenticated) {
+			return nil
+		}
+		if err != nil {
+			return err
 		}
 		return az.SlideSession(ctx, id.SessionID, now, now.Add(CLISessionIdle))
 	})

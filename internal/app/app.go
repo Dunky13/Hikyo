@@ -190,6 +190,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	api := &server.API{
 		Auth:           authSvc,
 		Orgs:           &service.Orgs{DB: db},
+		Admission:      limiter,
 		Version:        Version,
 		Log:            log,
 		TrustedProxies: proxies,

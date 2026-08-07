@@ -12,6 +12,7 @@ import (
 
 	"github.com/Dunky13/wenv/api"
 	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
@@ -41,10 +42,16 @@ type OrgService interface {
 
 // API implements the generated strict server.
 type API struct {
-	Auth    AuthService
-	Orgs    OrgService
-	Version string
-	Log     *slog.Logger
+	Auth AuthService
+	Orgs OrgService
+	// Admission bounds the unauthenticated discovery endpoint. The expensive
+	// pre-auth paths take their own slot inside the service, where the cost
+	// they bound actually lives; /meta is cheap and only needs a per-IP
+	// ceiling, so it is charged here. Nil means unlimited, which is only for
+	// tests.
+	Admission *admission.Limiter
+	Version   string
+	Log       *slog.Logger
 	// TrustedProxies are the CIDRs whose forwarded headers are believed.
 	// Empty means none: proxy trust is explicit configuration, never
 	// inferred, because an unauthenticated header is not evidence.
@@ -72,7 +79,15 @@ func bearer(ctx context.Context) string {
 // Meta
 // ---------------------------------------------------------------------------
 
-func (a *API) GetMeta(_ context.Context, _ apigen.GetMetaRequestObject) (apigen.GetMetaResponseObject, error) {
+func (a *API) GetMeta(ctx context.Context, _ apigen.GetMetaRequestObject) (apigen.GetMetaResponseObject, error) {
+	// Under the instance-wide pre-auth admission limits like every other
+	// pre-auth path, with its own looser per-IP allowance: `login` calls this
+	// before every authentication, so charging it against the verification
+	// budget would make the client's own capability check the thing that
+	// throttles the client.
+	if a.Admission != nil && !a.Admission.AllowDiscovery(audit.FromContext(ctx).SourceIP) {
+		return apigen.GetMeta429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+	}
 	// The closed allowlist, and nothing else. `login` needs the protocol
 	// capabilities before any session exists; everything past protocol
 	// selection happens after authentication.
