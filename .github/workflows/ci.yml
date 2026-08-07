@@ -1,0 +1,55 @@
+# CI for the walking skeleton (#42): build, vet, generated-code freshness,
+# and the full test suite including the cross-engine conformance harness on
+# sqlite and postgres. Actions pinned by commit SHA and the Go toolchain
+# pinned exactly, per the system-architecture ADR's pinned-everything rule.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: wenv
+          POSTGRES_PASSWORD: wenv
+          POSTGRES_DB: wenv_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wenv"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod # exact toolchain pinned by go.mod's go directive
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Format
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Generated code is fresh
+        run: |
+          go tool sqlc generate
+          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen
+
+      - name: Test (sqlite + postgres conformance)
+        env:
+          WENV_TEST_POSTGRES_DSN: postgres://wenv:wenv@127.0.0.1:5432/wenv_test
+        run: go test ./...

@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/store/migrations/sqlite
+    queries: internal/store/queries/sqlite
+    gen:
+      go:
+        package: sqlitegen
+        out: internal/store/sqlitegen
+  - engine: postgresql
+    schema: internal/store/migrations/postgres
+    queries: internal/store/queries/postgres
+    gen:
+      go:
+        package: pggen
+        out: internal/store/pggen
+        sql_package: pgx/v5
