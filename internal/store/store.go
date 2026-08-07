@@ -61,11 +61,13 @@ type OrgRepo interface {
 // Repos bundles the full repositories bound to one write transaction.
 type Repos interface {
 	Orgs() OrgRepo
+	Keys() KeyRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to the read pool.
 type ReadRepos interface {
 	Orgs() OrgReader
+	Keys() KeyReader
 }
 
 // ErrNotFound is the canonical cross-engine "no such row".

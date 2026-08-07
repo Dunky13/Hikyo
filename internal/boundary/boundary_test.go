@@ -22,6 +22,7 @@ var storeImporters = map[string]bool{
 	module + "/internal/store":           true,
 	module + "/internal/store/tx":        true,
 	module + "/internal/store/migrate":   true,
+	module + "/internal/store/keyring":   true, // crypto.KeyStore implementation
 	module + "/internal/store/sqlitegen": true,
 	module + "/internal/store/pggen":     true,
 	module + "/internal/conformance":     true, // cross-engine test harness
@@ -34,6 +35,29 @@ var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/store", module + "/internal/server", "store never imports the HTTP layer"},
 	{module + "/cmd/", module + "/internal/store", "main wires through internal/app, not store"},
 	{module + "/internal/config", module + "/internal/", "config is a leaf package"},
+	{module + "/internal/crypto", module + "/internal/", "crypto is a leaf package: persistence arrives through its KeyStore interface"},
+}
+
+// Crypto chokepoint (encryption ADR CI invariant 12, placed by the
+// system-architecture ADR § Encryption boundary): no import of a
+// cryptographic primitive package outside the envelope package, and age
+// nowhere outside the backup package. crypto/sha256 and crypto/subtle stay
+// unrestricted — hashing verifiers is not envelope encryption.
+var cryptoPrimitiveImporters = map[string]bool{
+	module + "/internal/crypto": true,
+	// internal/crypto/backup joins when the backup ticket lands.
+}
+
+var cryptoPrimitivePrefixes = []string{
+	"golang.org/x/crypto/",
+	"crypto/cipher",
+	"crypto/aes",
+	"crypto/hkdf",
+	"crypto/hmac",
+}
+
+var ageImporters = map[string]bool{
+	module + "/internal/crypto/backup": true, // sole age importer, future ticket
 }
 
 type pkg struct {
@@ -81,6 +105,21 @@ func TestStoreImportAllowlist(t *testing.T) {
 				if !storeImporters[p.ImportPath] {
 					t.Errorf("%s imports %s: not on the store-importer allowlist", p.ImportPath, imp)
 				}
+			}
+		}
+	}
+}
+
+func TestCryptoChokepoint(t *testing.T) {
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			for _, prefix := range cryptoPrimitivePrefixes {
+				if strings.HasPrefix(imp, prefix) && !cryptoPrimitiveImporters[p.ImportPath] {
+					t.Errorf("%s imports %s: cryptographic primitives are confined to internal/crypto", p.ImportPath, imp)
+				}
+			}
+			if (imp == "filippo.io/age" || strings.HasPrefix(imp, "filippo.io/age/")) && !ageImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: age is confined to internal/crypto/backup", p.ImportPath, imp)
 			}
 		}
 	}
