@@ -1,0 +1,13 @@
+The chart pins the Wenv image by digest and contains release/trust/root.json,
+release/trust/primary.pub, and an optional Kyverno verification policy. Before
+Helm processes it, verify the chart digest with the primary key pinned by that
+root:
+
+  cosign verify --insecure-ignore-tlog --key release/trust/primary.pub \
+    ghcr.io/dunky13/charts/wenv@sha256:CHART_DIGEST
+
+Then name the database Secret and the reverse proxy's exact trusted CIDRs:
+
+  helm install {{ .Release.Name }} . \
+    --set database.existingSecret=YOUR_SECRET \
+    --set 'network.trustedProxyCIDRs={10.42.0.0/16}'

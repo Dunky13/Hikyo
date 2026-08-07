@@ -18,6 +18,14 @@ import (
 // § Component set); each is a stub until its ticket lands.
 var clientVerbs = []string{"login", "run", "render", "sync", "adopt", "doctor", "definitions", "import"}
 
+// Set by GoReleaser. Development builds deliberately identify themselves as
+// unversioned instead of guessing from the local checkout.
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	os.Exit(run())
 }
@@ -33,6 +41,9 @@ func run() int {
 	defer stop()
 
 	switch {
+	case cmd == "version" || cmd == "--version":
+		fmt.Fprintln(os.Stdout, versionString())
+		return 0
 	case cmd == "server":
 		return runServer(ctx, args)
 	case cmd == "migrate":
@@ -45,6 +56,13 @@ func run() int {
 		usage()
 		return 2
 	}
+}
+
+func versionString() string {
+	if version == "dev" {
+		return "wenv dev"
+	}
+	return fmt.Sprintf("wenv %s (%s, %s)", version, commit, buildDate)
 }
 
 func runServer(ctx context.Context, args []string) int {
@@ -92,6 +110,9 @@ func usage() {
 server commands:
   wenv server [--dev] [--listen ADDR] [--auto-migrate=BOOL]
   wenv migrate
+
+version:
+  wenv version
 
 client verbs (not implemented yet):
   %v

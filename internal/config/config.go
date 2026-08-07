@@ -28,16 +28,18 @@ type Datastore struct {
 }
 
 type Config struct {
-	Dev         bool
-	Listen      string
-	AutoMigrate bool
-	Store       Datastore
+	Dev               bool
+	Listen            string
+	TrustedProxyCIDRs []string
+	AutoMigrate       bool
+	Store             Datastore
 }
 
 // knownEnv is the closed set of WENV_* keys this build understands.
 var knownEnv = map[string]bool{
-	"WENV_DB":     true,
-	"WENV_LISTEN": true,
+	"WENV_DB":                  true,
+	"WENV_LISTEN":              true,
+	"WENV_TRUSTED_PROXY_CIDRS": true,
 }
 
 const devSQLitePath = "wenv-dev.db"
@@ -80,6 +82,16 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
+	if subcommand == "server" {
+		trustedProxyCIDRs, err := parseTrustedProxyCIDRs(getenv("WENV_TRUSTED_PROXY_CIDRS"))
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg.TrustedProxyCIDRs = trustedProxyCIDRs
+		if !isLoopbackListen(cfg.Listen) && len(cfg.TrustedProxyCIDRs) == 0 {
+			return nil, nil, fmt.Errorf("non-loopback plaintext listen %q requires WENV_TRUSTED_PROXY_CIDRS", cfg.Listen)
+		}
+	}
 
 	dbURL := getenv("WENV_DB")
 	switch {
@@ -95,6 +107,34 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		return nil, nil, fmt.Errorf("no datastore configured: set WENV_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
 	}
 	return cfg, warnings, nil
+}
+
+func parseTrustedProxyCIDRs(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	cidrs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cidr := strings.TrimSpace(part)
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return nil, fmt.Errorf("WENV_TRUSTED_PROXY_CIDRS: invalid CIDR %q", cidr)
+		}
+		cidrs = append(cidrs, cidr)
+	}
+	return cidrs, nil
+}
+
+func isLoopbackListen(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func parseDatastore(raw string) (Datastore, error) {

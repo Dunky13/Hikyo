@@ -1,0 +1,30 @@
+{
+  "schema": "wenv.dev/trust-metadata/v1",
+  "sequence": 1,
+  "highest_release": null,
+  "highest_release_sequence": null,
+  "recovery": {
+    "id": "recovery-1",
+    "sha256": "RECOVERY_PUBLIC_KEY_SHA256"
+  },
+  "event": {
+    "type": "bootstrap",
+    "signed_by": "recovery-1"
+  },
+  "primary_keys": [
+    {
+      "id": "primary-1",
+      "public_key": "primary-1.pub",
+      "sha256": "PRIMARY_PUBLIC_KEY_SHA256",
+      "valid_from_release_sequence": 1,
+      "valid_through_release_sequence": null,
+      "revoked": false
+    }
+  ],
+  "releases": [],
+  "pending_release": {
+    "version": "0.1.0",
+    "sequence": 1,
+    "manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

@@ -1,0 +1,252 @@
+name: release-build
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOFLAGS: -mod=readonly
+
+jobs:
+  build-unsigned-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.3
+
+      - name: Resolve immutable release identity
+        id: identity
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/release/check-tag.sh "$REPOSITORY" "$TAG" "$TAG_SHA"
+          WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES \
+            ./scripts/release/probe-tag-move.sh "$REPOSITORY" v-ruleset-probe "$TAG_SHA"
+          version=${TAG#v}
+          image=$(printf 'ghcr.io/%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          printf 'version=%s\nimage=%s\n' "$version" "$image" >>"$GITHUB_OUTPUT"
+
+      - name: Verify production trust bootstrap
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          test -f release/trust/root.json
+          test -f release/trust/metadata.json
+          test -f release/trust/metadata.sigstore.json
+          recovery=$(jq -r '.recovery.public_key' release/trust/root.json)
+          test -f "release/trust/$recovery"
+          recovery_sha=$(jq -r '.recovery.sha256' release/trust/root.json)
+          actual_sha=$(sha256sum "release/trust/$recovery" | awk '{print $1}')
+          test "$actual_sha" = "$recovery_sha"
+          cosign verify-blob --insecure-ignore-tlog \
+            --key "release/trust/$recovery" \
+            --bundle release/trust/metadata.sigstore.json \
+            release/trust/metadata.json
+          jq -e --arg version "$VERSION" '
+            .pending_release.version == $version and
+            (.pending_release.sequence | type == "number") and
+            .pending_release.manifest_sha256 == ("0" * 64) and
+            ([.releases[]? | select(.version == $version)] | length) == 0
+          ' release/trust/metadata.json
+          jq -r '.primary_keys[].public_key' release/trust/metadata.json | while IFS= read -r key; do
+            test -f "release/trust/$key"
+          done
+
+      - name: Test release source
+        run: |
+          go test ./...
+          ./scripts/release/test-fixtures.sh
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --clean --skip=publish
+
+      - name: Remove GoReleaser internal metadata
+        run: rm -f dist/artifacts.json dist/config.yaml dist/metadata.json
+
+      - name: Source dependency SBOM (Go and frontend)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/wenv-source.spdx.json
+          syft-version: v1.50.0
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Build pinned image inputs
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          commit_date=$(git show -s --format=%cI "$COMMIT")
+          for arch in amd64 arm64; do
+            mkdir -p "image-root/$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.buildDate=$commit_date" \
+              -o "image-root/$arch/wenv" ./cmd/wenv
+          done
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679fd # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse an already-used image version
+        env:
+          IMAGE: ${{ steps.identity.outputs.image }}
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: ./scripts/release/check-oci-unused.sh "$IMAGE:$VERSION"
+      - name: Publish unsigned multi-arch image
+        id: image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.identity.outputs.image }}:${{ steps.identity.outputs.version }}
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.identity.outputs.version }}
+
+      - name: Published image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ steps.identity.outputs.image }}@${{ steps.image.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          format: spdx-json
+          output-file: dist/wenv-image.spdx.json
+          syft-version: v1.50.0
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Package and publish digest-pinned Helm chart
+        id: chart
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          IMAGE: ${{ steps.identity.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          chart_dir="$RUNNER_TEMP/wenv-chart"
+          cp -R chart/wenv "$chart_dir"
+          active_key=$(jq -r --argjson sequence "$(jq -r --arg version "$VERSION" '([.releases[]?, .pending_release?] | .[] | select(.version == $version) | .sequence)' release/trust/metadata.json)" '
+            .primary_keys[] |
+            select(.revoked == false and
+              .valid_from_release_sequence <= $sequence and
+              (.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)) |
+            .public_key
+          ' release/trust/metadata.json)
+          test -n "$active_key"
+          test "$(printf '%s\n' "$active_key" | sed '/^$/d' | wc -l)" -eq 1
+          cp release/trust/root.json "$chart_dir/files/release/trust/root.json"
+          cp "release/trust/$active_key" "$chart_dir/files/release/trust/primary.pub"
+          sed -i "s|repository: ghcr.io/dunky13/wenv|repository: $IMAGE|" "$chart_dir/values.yaml"
+          sed -i "s|sha256:RELEASE_IMAGE_DIGEST|$IMAGE_DIGEST|" "$chart_dir/values.yaml"
+          grep -Fx "  repository: $IMAGE" "$chart_dir/values.yaml"
+          grep -Fx "  digest: $IMAGE_DIGEST" "$chart_dir/values.yaml"
+          helm lint "$chart_dir" --set database.existingSecret=wenv-database \
+            --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
+          helm template fixture "$chart_dir" --set database.existingSecret=wenv-database \
+            --set 'network.trustedProxyCIDRs={10.42.0.0/16}' >/dev/null
+          helm package "$chart_dir" --version "$VERSION" --app-version "$VERSION" --destination dist
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$ACTOR" --password-stdin
+          chart=$(printf 'ghcr.io/%s/charts/wenv' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          ./scripts/release/check-oci-unused.sh "$chart:$VERSION"
+          push_output=$(helm push "dist/wenv-$VERSION.tgz" "oci://$(dirname "$chart")")
+          chart_digest=$(printf '%s\n' "$push_output" | awk '$1 == "Digest:" {print $2}' | tail -n 1)
+          printf '%s\n' "$chart_digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf 'chart=%s\nchart_digest=%s\n' "$chart" "$chart_digest" >>"$GITHUB_OUTPUT"
+
+      - name: Prepare offline OCI signing payloads
+        env:
+          IMAGE: ${{ steps.identity.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          CHART: ${{ steps.chart.outputs.chart }}
+          CHART_DIGEST: ${{ steps.chart.outputs.chart_digest }}
+        run: |
+          cosign generate "$IMAGE@$IMAGE_DIGEST" >dist/image-index.oci-payload.json
+          cosign generate "$CHART@$CHART_DIGEST" >dist/chart-index.oci-payload.json
+
+      - name: Render installer with pinned trust root
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: >-
+          ./scripts/release/render-installer.sh "$VERSION"
+          release/trust/root.json scripts/release/verify-bundle.sh dist/install.sh
+
+      - name: Build release manifest
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          IMAGE: ${{ steps.identity.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          CHART: ${{ steps.chart.outputs.chart }}
+          CHART_DIGEST: ${{ steps.chart.outputs.chart_digest }}
+        run: |
+          sequence=$(jq -r --arg version "$VERSION" '([.releases[]?, .pending_release?] | .[] | select(.version == $version) | .sequence)' release/trust/metadata.json)
+          key_id=$(jq -r --argjson sequence "$sequence" '
+            .primary_keys[] |
+            select(.revoked == false and
+              .valid_from_release_sequence <= $sequence and
+              (.valid_through_release_sequence == null or .valid_through_release_sequence >= $sequence)) |
+            .id
+          ' release/trust/metadata.json)
+          test -n "$key_id"
+          test "$(printf '%s\n' "$key_id" | sed '/^$/d' | wc -l)" -eq 1
+          ./scripts/release/create-manifest.sh "$VERSION" "$COMMIT" "$key_id" \
+            "$IMAGE" "$IMAGE_DIGEST" "$CHART" "$CHART_DIGEST" \
+            dist release/trust/metadata.json
+
+      - name: Create unsigned draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=()
+          if [ "$(./scripts/release/release-channel.sh "$TAG")" = prerelease ]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$TAG" --verify-tag --draft "${prerelease[@]}" \
+            --title "$TAG" --notes "Unsigned draft. Publish only after the offline signing ceremony."
+          assets=(dist/release-manifest.json)
+          while IFS= read -r name; do
+            assets+=("dist/$name")
+          done < <(jq -r '.artifacts[].name' dist/release-manifest.json)
+          gh release upload "$TAG" "${assets[@]}"

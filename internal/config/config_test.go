@@ -204,3 +204,29 @@ func TestListenPrecedenceFlagOverEnv(t *testing.T) {
 		t.Fatalf("listen = %q", cfg.Listen)
 	}
 }
+
+func TestNonLoopbackListenRequiresTrustedProxyCIDRs(t *testing.T) {
+	_, _, err := Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"}, env(), nil)
+	if err == nil || !strings.Contains(err.Error(), "WENV_TRUSTED_PROXY_CIDRS") {
+		t.Fatalf("non-loopback plaintext listen must refuse without trusted proxies, got %v", err)
+	}
+
+	cfg, warnings, err := Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"},
+		env("WENV_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"),
+		environFrom("WENV_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("trusted proxy setting must be recognized, got warnings %v", warnings)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 {
+		t.Fatalf("trusted proxy CIDRs = %v", cfg.TrustedProxyCIDRs)
+	}
+
+	_, _, err = Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"},
+		env("WENV_TRUSTED_PROXY_CIDRS", "not-a-cidr"), nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid CIDR") {
+		t.Fatalf("invalid trusted proxy CIDR must refuse, got %v", err)
+	}
+}

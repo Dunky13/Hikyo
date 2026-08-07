@@ -37,3 +37,10 @@ wenv-dev.db*
 
 # Cross-model review artifacts
 .xreview/
+
+# Release build output
+/dist/
+/image-root/
+
+# Signing private keys are always offline; public roots are committed explicitly.
+release/trust/*.key
