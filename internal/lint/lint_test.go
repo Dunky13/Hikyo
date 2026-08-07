@@ -219,5 +219,10 @@ func TestDriverHandlesCatchesViolations(t *testing.T) {
 		"calls store.DB.PG",
 		"calls store.DB.SQLiteWrite",
 		"imports " + Module + "/internal/store/pggen",
+		// The escapes an accessor-call check alone cannot see: a locally
+		// declared structural interface, a type assertion to one, and a
+		// handle simply passed in as a parameter.
+		"names driver type *github.com/jackc/pgx/v5/pgxpool.Pool",
+		"names driver type *database/sql.DB",
 	})
 }

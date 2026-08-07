@@ -28,10 +28,36 @@ var driverHandles = map[string]bool{
 var handleUsers = map[string]bool{
 	Module + "/internal/store":            true, // defines them
 	Module + "/internal/store/tx":         true, // owns the transaction boundary
+	Module + "/internal/store/migrate":    true, // opens its own connection for DDL
+	Module + "/internal/store/sqlitegen":  true, // generated: it IS the driver layer
+	Module + "/internal/store/pggen":      true, // generated: it IS the driver layer
 	Module + "/internal/conformance":      true, // cross-engine fixtures
 	Module + "/internal/isolation":        true, // probe fixtures + instrumentation
 	Module + "/internal/conformance_test": true,
 	Module + "/internal/isolation_test":   true,
+}
+
+// driverTypes are the concrete engine handles. Naming one at all — in a
+// signature, a field, a local, or a locally-declared interface method — is
+// what the accessor check alone cannot see: a package can declare
+// `interface{ PG() *pgxpool.Pool }`, accept a *store.DB through it, and call
+// PG() on the LOCAL interface, so the selector never resolves to the store's
+// method. Requiring that non-allowlisted packages cannot even name these
+// types closes that escape and the type-assertion variant with it, because
+// both must write the driver type somewhere.
+//
+// Honest limit, stated: a package inside the allowlist could still hand out
+// a wrapper whose methods run queries behind a driver-free interface. That
+// is a trusted-set change — the allowlist is the trusted set — and gets
+// adversarial review depth, not lint.
+var driverTypes = map[string]bool{
+	"*github.com/jackc/pgx/v5/pgxpool.Pool": true,
+	"*github.com/jackc/pgx/v5/pgxpool.Conn": true,
+	"github.com/jackc/pgx/v5.Tx":            true,
+	"*github.com/jackc/pgx/v5.Conn":         true,
+	"*database/sql.DB":                      true,
+	"*database/sql.Tx":                      true,
+	"*database/sql.Conn":                    true,
 }
 
 // generatedPackages are the sqlc outputs. Reaching them directly is the same
@@ -82,6 +108,25 @@ func CheckDriverHandles(pkgs []*packages.Package) []string {
 					"handles: %s: %s calls store.DB.%s — a raw driver handle bypasses the proof boundary entirely",
 					p.Fset.Position(ident.Pos()), base, fn.Name()))
 			}
+			// Naming a driver type at all: catches the structural-interface
+			// and type-assertion escapes, where the accessor call resolves to
+			// a locally declared method rather than the store's.
+			reported := map[string]bool{}
+			for ident, obj := range p.TypesInfo.Defs {
+				if obj == nil || ident == nil {
+					continue
+				}
+				if named := mentionsDriverType(obj.Type(), map[types.Type]bool{}); named != "" {
+					key := named + "@" + p.Fset.Position(ident.Pos()).String()
+					if reported[key] {
+						continue
+					}
+					reported[key] = true
+					findings = append(findings, fmt.Sprintf(
+						"handles: %s: %s names driver type %s — only the transaction boundary and the harnesses may hold engine handles",
+						p.Fset.Position(ident.Pos()), base, named))
+				}
+			}
 		}
 		if generatedImporters[base] {
 			continue
@@ -95,4 +140,71 @@ func CheckDriverHandles(pkgs []*packages.Package) []string {
 		}
 	}
 	return findings
+}
+
+// mentionsDriverType reports the first driver type reachable from t —
+// through signatures, interface methods, struct fields, and the usual
+// composite types — or "" if none is.
+func mentionsDriverType(t types.Type, seen map[types.Type]bool) string {
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	if driverTypes[t.String()] {
+		return t.String()
+	}
+	switch u := t.(type) {
+	case *types.Named:
+		// Named driver types are matched by String() above. Descend only into
+		// interfaces declared in THIS module: that is where a structural
+		// escape would have to be written, and it keeps the walk out of the
+		// driver libraries' own type graphs, where nearly every interface
+		// transitively exposes a *pgx.Conn and would flag every legitimate
+		// holder of a generated Queries value.
+		obj := u.Obj()
+		if obj == nil || obj.Pkg() == nil || !strings.HasPrefix(obj.Pkg().Path(), Module) {
+			return ""
+		}
+		if iface, ok := u.Underlying().(*types.Interface); ok {
+			return mentionsDriverType(iface, seen)
+		}
+		return ""
+	case *types.Pointer:
+		return mentionsDriverType(u.Elem(), seen)
+	case *types.Slice:
+		return mentionsDriverType(u.Elem(), seen)
+	case *types.Array:
+		return mentionsDriverType(u.Elem(), seen)
+	case *types.Map:
+		if s := mentionsDriverType(u.Key(), seen); s != "" {
+			return s
+		}
+		return mentionsDriverType(u.Elem(), seen)
+	case *types.Chan:
+		return mentionsDriverType(u.Elem(), seen)
+	case *types.Signature:
+		for _, tup := range []*types.Tuple{u.Params(), u.Results()} {
+			for i := range tup.Len() {
+				if s := mentionsDriverType(tup.At(i).Type(), seen); s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	case *types.Interface:
+		for i := range u.NumMethods() {
+			if s := mentionsDriverType(u.Method(i).Type(), seen); s != "" {
+				return s
+			}
+		}
+		return ""
+	case *types.Struct:
+		for i := range u.NumFields() {
+			if s := mentionsDriverType(u.Field(i).Type(), seen); s != "" {
+				return s
+			}
+		}
+		return ""
+	}
+	return ""
 }

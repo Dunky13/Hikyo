@@ -124,7 +124,14 @@ Round 1 returned 5 findings; all fixed in this branch, none deferred:
    `pggen.New(db.PG()).GetEnvironment(...)` with any tenant's chain and no
    proof, with every analyzer still green. Fixed by `lint.CheckDriverHandles`
    (two exact allowlists, invariant 9a) plus forbidden service→gen edges,
-   with a negative fixture.
+   with a negative fixture. **R2 found this fix PARTIAL** — a locally
+   declared structural interface (`interface{ PG() *pgxpool.Pool }`), a type
+   assertion to one, or a handle simply passed in as a parameter all evade
+   an accessor-call check, since the selector resolves to the local method.
+   Closed by additionally refusing non-allowlisted packages the right to
+   *name* a driver type at all (walk scoped to module-declared types, so the
+   driver libraries' own graphs don't produce false positives); all three
+   escapes are in the negative fixture.
 2. *(HIGH)* Postgres read transactions ran at the server-default READ
    COMMITTED, so chain resolution, grant evaluation and the store read could
    each see a different snapshot — a proof certifying a policy no snapshot
@@ -145,6 +152,14 @@ Round 1 returned 5 findings; all fixed in this branch, none deferred:
    (`usr_reader`, exactly `read`) with denial probes on the three operations
    whose formulas demand more, and a positive control proving its one
    allowed operation still succeeds.
+
+Round 2 verdict: findings 2–5 **FIXED**, finding 1 **PARTIAL** → closed as
+above. No new criticals. Remaining honest limit, stated rather than hidden:
+an allowlisted package could still hand out a wrapper whose methods run
+queries behind a driver-free interface. The allowlist *is* the trusted set
+({store, store/tx, store/migrate, the two generated packages, the two
+harnesses}), and changes to it are the highest-scrutiny diffs in the repo —
+which is the ADR's own posture, not a gap this ticket introduces.
 
 ## Deviations from the ADR letter, stated
 
