@@ -303,7 +303,10 @@ failures made loud rather than swallowed with `_ =`; the proof-free-writer
 analyzer broadened to catch a mutating query taken as a method value; the
 artifact grammar tightened to a canonical decode so the accepted set equals
 the emittable set; and an oldest-live fallback added to account eviction so
-the limiter maps cannot grow past their bound. **Round 3 is the cap.**
+the limiter maps cannot grow past their bound.
+
+**Round 3 (the cap): CLEAN.** All five round-2 partials verified closed, no
+blocking items, no new scope. The adversarial loop is complete.
 
 ### Known-open, for disposition
 
