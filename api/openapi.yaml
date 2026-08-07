@@ -1,0 +1,693 @@
+# Wenv HTTP API — the single source of truth for every client.
+#
+# Hand-written and reviewed like code (api-cli-surface ADR § Version promise):
+# the behavioural half of the freeze — authorization formula, side effects,
+# idempotency, error semantics — is recorded here per operation and cannot be
+# policed by schema diffing alone.
+#
+# OpenAPI 3.1 per the 2026-08-07 amendment banner in system-architecture.md.
+# The bound 3.1 semantic profile, asserted by internal/api's profile tests:
+#   * nullability is `type: [T, "null"]` — legacy `nullable` is prohibited;
+#   * `jsonSchemaDialect` is the OAS 3.1 default dialect, alternates fail closed;
+#   * top-level `webhooks` is prohibited in v1.
+#
+# Wenv extensions, each cross-checked against the Go registries in CI so the
+# document cannot drift from the code it describes:
+#   x-wenv-class      probe classification (tenant-isolation ADR invariant 1);
+#                     must equal internal/authz's wire-registry entry.
+#   x-wenv-operation  the registered authz operation this route reaches;
+#                     absent for routes that reach none.
+#   x-wenv-formula    the authorization formula, spelled `cap@level`; must
+#                     equal the operation registry's formula pin.
+#   x-wenv-artifacts  the authentication-artifact eligibility set
+#                     (api-cli-surface ADR § verb × artifact matrix).
+#   x-wenv-min-revision  the API revision an operation first appeared in; the
+#                     capability registry a new client checks against an old
+#                     server's advertised revision.
+#   x-extensible-enum an enum declared OPEN: it may gain values additively and
+#                     every generated consumer must tolerate unknown ones. The
+#                     `enum` keyword is deliberately absent on open enums so
+#                     runtime validation tolerates growth; a closed enum uses
+#                     `enum` and never grows.
+openapi: 3.1.0
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+
+info:
+  title: Wenv API
+  version: "1"
+  summary: Self-hosted environment and secret management.
+  description: |
+    Every response may gain fields additively within `/api/v1`; clients MUST
+    ignore fields they do not know. Open enums (`x-extensible-enum`) may gain
+    values; closed enums never do.
+
+    Unauthorized is indistinguishable from nonexistent on every tenant-scoped
+    route: status, body and shape are identical (permission model ADR). Error
+    bodies carry a fixed message per code — nothing derived from the request —
+    except `bad_request`, which is decided before any tenant resolution and so
+    may carry a `detail` that leaks nothing about tenancy.
+  license:
+    name: MPL-2.0
+    identifier: MPL-2.0
+
+servers:
+  - url: /
+    description: The instance this document was served from.
+
+tags:
+  - name: meta
+    description: Unauthenticated instance discovery.
+  - name: auth
+    description: |
+      Identity-protocol endpoints — the closed, enumerated exception to the
+      one-surface rule (api-cli-surface ADR). Client-specific by nature and
+      parity-exempt; never domain endpoints.
+  - name: orgs
+    description: Organisation administration.
+
+paths:
+  /api/v1/meta:
+    get:
+      operationId: getMeta
+      tags: [meta]
+      summary: Instance discovery, unauthenticated.
+      description: |
+        The response is an exact closed allowlist: server version, API
+        revision, and which authentication protocol flows this instance
+        serves. Nothing tenant- or configuration-shaped — capability
+        discovery beyond protocol selection happens after authentication.
+
+        Sits under the instance-wide pre-auth admission limits like every
+        other pre-auth path.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: Instance metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meta"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/credential/establish:
+    post:
+      operationId: establishCredential
+      tags: [auth]
+      summary: Consume a credential-establishment authority and set an initial credential.
+      description: |
+        The named — and only — exception to "a new credential may never
+        authorize its own enrolment" (human-auth ADR § Credential-establishment
+        authority). The authority is target-bound, purpose-bound, single-use,
+        expiring, and issued only by the bootstrap path, `credential-reset`,
+        or local break-glass.
+
+        Consuming it establishes exactly one initial credential, atomically,
+        and nothing more: **no session is created, no assurance is carried,
+        no reauthentication window opens.** The holder authenticates
+        afterwards with the credential they just set, like anyone else.
+
+        Every refusal — unknown authority, expired, already consumed, wrong
+        epoch, weak password — answers the same `401` so presentation reveals
+        nothing about which authorities exist.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstablishCredentialRequest"
+      responses:
+        "204":
+          description: Credential established. No session, no assurance.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/local/login:
+    post:
+      operationId: localLogin
+      tags: [auth]
+      summary: Terminal-native local login; mints a CLI session artifact.
+      description: |
+        The local floor (human-auth ADR § Lockout and the local floor), which
+        an installation may never remove. Verifies an Argon2id password
+        verifier inside the instance-wide admission budget; an unknown account
+        traverses a bounded dummy-verifier path so timing is comparable and no
+        pre-authentication path distinguishes an existing account from a
+        missing one.
+
+        Mints a **CLI session** — a distinct artifact type with its own
+        storage, lifetime, audit identity and revocation surface. The value is
+        returned in the response body and is a replayable bearer credential;
+        it is never re-retrievable.
+
+        Browser sessions are a different artifact minted through the browser
+        login page, which this slice does not serve — see `/api/v1/meta` for
+        which protocol flows an instance actually offers.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LocalLoginRequest"
+      responses:
+        "200":
+          description: Session minted. The token is displayed once and never again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Revoke the presented session.
+      description: |
+        Deletes the presented session row. Idempotent in effect: a session
+        that no longer resolves answers `401` like any other unauthenticated
+        request, because there is nothing to revoke and nothing to report.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Session revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/whoami:
+    get:
+      operationId: whoami
+      tags: [auth]
+      summary: Describe the presented session.
+      description: |
+        Reports the acting principal and how **this session** authenticated —
+        the assurance record the chokepoint consults, never what the account
+        could have presented (human-auth ADR § Assurance).
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The acting session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhoAmI"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs:
+    get:
+      operationId: listOrgs
+      tags: [orgs]
+      summary: List organisations.
+      description: |
+        An instance-scoped operator read of cross-tenant metadata, and
+        therefore itself audited — the audit model's default-deny rule refuses
+        `audited: none` to instance-class operations. The event commits with
+        the read.
+      x-wenv-class: instance
+      x-wenv-operation: org.list
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The organisations this principal may administer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createOrg
+      tags: [orgs]
+      summary: Create an organisation.
+      description: |
+        The first audited mutating endpoint: authorization is evaluated at the
+        chokepoint inside the request's own transaction, and the
+        `org.created` audit event commits in that same transaction — a write
+        without its durable record does not complete.
+
+        Not idempotent: each call creates a distinct organisation.
+      x-wenv-class: instance
+      x-wenv-operation: org.create
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrgRequest"
+      responses:
+        "201":
+          description: The created organisation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Org"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    get:
+      operationId: getOrg
+      tags: [orgs]
+      summary: Read one organisation.
+      x-wenv-class: instance
+      x-wenv-operation: org.get
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The organisation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Org"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+components:
+  securitySchemes:
+    wenvSession:
+      type: http
+      scheme: bearer
+      bearerFormat: ew_1_cli_...
+      description: |
+        A CLI session artifact minted by an identity-protocol endpoint. The
+        server trusts nothing inside the value: kind, principal, expiry and
+        credential epoch are read from the row the verifier resolves to.
+
+  parameters:
+    OrgID:
+      name: org
+      in: path
+      required: true
+      description: Organisation identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+
+  responses:
+    BadRequest:
+      description: |
+        The request does not satisfy this document. Decided before any tenant
+        resolution, so `detail` leaks nothing about tenancy — it is the only
+        error response permitted to carry one.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthenticated:
+      description: |
+        No usable authentication artifact was presented. Uniform: absent,
+        malformed, unknown, expired, revoked and epoch-superseded artifacts
+        are indistinguishable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: |
+        The principal does not hold the operation's formula at instance scope.
+        Instance-class operations have no tenant object whose nonexistence
+        could be mimicked, so the probe contract here is grant refusal, not
+        tenancy.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: |
+        The addressed object does not exist **or** the principal may not reach
+        it — indistinguishable by design, byte-identical in status and body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: |
+        The instance-wide admission budget or a per-source limit is
+        exhausted. Uniform on every path, with no unbounded work performed.
+      headers:
+        Retry-After:
+          required: true
+          description: Whole seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Internal:
+      description: An unexpected server fault. The cause is logged, never returned.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    ID:
+      type: string
+      description: A prefixed UUIDv7, e.g. `org_0198…`.
+      minLength: 3
+      maxLength: 64
+      pattern: "^[a-z]{2,8}_[0-9a-fA-F-]{36}$"
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 UTC, microsecond precision.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+              description: |
+                Fixed per code. Never derived from the request, so two
+                refusals of the same class are byte-identical.
+            detail:
+              type: [string, "null"]
+              description: |
+                Present only on `bad_request`, where it names the offending
+                request member. `null` and absent are equivalent; every other
+                error code omits the member entirely.
+
+    ErrorCode:
+      type: string
+      description: Closed set — never grows. Clients branch on this, not on prose.
+      enum:
+        - bad_request
+        - unauthenticated
+        - forbidden
+        - not_found
+        - too_many_requests
+        - internal
+
+    Meta:
+      type: object
+      description: |
+        An exact closed allowlist. `additionalProperties: false` is the
+        allowlist's teeth: a field added here is a visible spec change, not a
+        quiet leak of instance configuration to unauthenticated callers.
+      additionalProperties: false
+      required: [server_version, api_revision, protocol_capabilities]
+      properties:
+        server_version:
+          type: string
+          description: The build's version string; `dev` for unreleased builds.
+        api_revision:
+          type: integer
+          minimum: 1
+          description: |
+            This server's API revision. A client refuses an operation whose
+            `x-wenv-min-revision` exceeds it, naming the server version — a
+            loud refusal, never a silent misbehave.
+        protocol_capabilities:
+          type: array
+          description: |
+            Which authentication protocol flows this instance serves. `login`
+            needs this before any session exists.
+          items:
+            $ref: "#/components/schemas/ProtocolCapability"
+
+    ProtocolCapability:
+      type: string
+      description: |
+        OPEN enum: an instance may advertise a flow this client has never
+        heard of, and every generated consumer must preserve and tolerate the
+        unknown value rather than reject the response.
+      x-extensible-enum:
+        - local-password
+        - loopback-handoff
+        - device-code
+        - oidc
+        - webauthn
+
+    EstablishCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [authority, password]
+      properties:
+        authority:
+          type: string
+          description: |
+            The single-use credential-establishment authority, exactly as
+            delivered. Never logged, never audited, never echoed.
+          minLength: 16
+          maxLength: 256
+        password:
+          type: string
+          description: |
+            The initial credential. Minimum length 12, no composition rules,
+            no forced rotation (NIST SP 800-63B shape); checked against a
+            bundled common-password list at set time only, never at login.
+          minLength: 12
+          maxLength: 1024
+
+    LocalLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+
+    LoginResult:
+      type: object
+      required: [session_token, session, principal]
+      properties:
+        session_token:
+          type: string
+          description: |
+            The bearer value, returned exactly once. A replayable credential:
+            cookie attributes constrain browsers, not an attacker holding the
+            value, which is why lifetimes are short and revocation is a
+            delete.
+        session:
+          $ref: "#/components/schemas/Session"
+        principal:
+          $ref: "#/components/schemas/Principal"
+
+    WhoAmI:
+      type: object
+      required: [session, principal]
+      properties:
+        session:
+          $ref: "#/components/schemas/Session"
+        principal:
+          $ref: "#/components/schemas/Principal"
+
+    Session:
+      type: object
+      required: [id, artifact, created_at, idle_expires_at, absolute_expires_at, assurance]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        artifact:
+          $ref: "#/components/schemas/SessionArtifact"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        idle_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        absolute_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        assurance:
+          $ref: "#/components/schemas/Assurance"
+
+    SessionArtifact:
+      type: string
+      description: |
+        OPEN enum: human sessions are per-client-class artifacts and new
+        classes are additive. A browser cookie's attributes protect nothing on
+        a non-browser client, and conflating the two hides which artifact was
+        actually used.
+      x-extensible-enum:
+        - cli
+        - browser
+
+    Assurance:
+      type: object
+      description: |
+        How **this session** authenticated — not what the account owns.
+        Authorization of an MFA-mandatory capability consults this record at
+        the same chokepoint as `authorize()`, in the same transaction,
+        uncached.
+      required: [method, factors, authenticated_at]
+      properties:
+        method:
+          $ref: "#/components/schemas/AuthMethod"
+        factors:
+          type: array
+          description: The factor classes actually presented in this session.
+          items:
+            $ref: "#/components/schemas/FactorClass"
+        authenticated_at:
+          $ref: "#/components/schemas/Timestamp"
+        ceremony_id:
+          type: [string, "null"]
+          description: |
+            The factor ceremony this session's assurance came from, where one
+            occurred. `null` for a single-factor password login.
+
+    AuthMethod:
+      type: string
+      description: OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+      x-extensible-enum:
+        - local-password
+        - local-passkey
+
+    FactorClass:
+      type: string
+      description: OPEN enum — new factor classes are additive.
+      x-extensible-enum:
+        - password
+        - totp
+        - webauthn
+        - recovery-code
+
+    Principal:
+      type: object
+      required: [id, kind]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        kind:
+          $ref: "#/components/schemas/PrincipalKind"
+        display_name:
+          type: [string, "null"]
+          description: For display only. Never a linking key, at any point, for any provider.
+
+    PrincipalKind:
+      type: string
+      description: Closed set — the human/machine distinction is structural in audit attribution.
+      enum: [human, machine]
+
+    CreateOrgRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        active:
+          type: boolean
+          default: true
+        metadata:
+          type: [object, "null"]
+          description: |
+            Free-form operator metadata. `null` and absent both mean "no
+            metadata"; the round-trip of absent/null/value is fixture-pinned
+            through both the Go and the TypeScript consumer.
+
+    Org:
+      type: object
+      required: [id, name, active, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+        active:
+          type: boolean
+        metadata:
+          type: [object, "null"]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    OrgList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Org"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+security:
+  - wenvSession: []
