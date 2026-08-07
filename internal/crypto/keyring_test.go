@@ -12,9 +12,10 @@ import (
 
 // memStore is an in-memory KeyStore for keyring tests.
 type memStore struct {
-	mu     sync.Mutex
-	master *WrappedKey
-	tier3  map[string]WrappedKey // scope key purpose|org|project
+	mu           sync.Mutex
+	master       *WrappedKey
+	extraMasters []WrappedKey          // additional wrappers, returned after master
+	tier3        map[string]WrappedKey // scope key purpose|org|project
 }
 
 func newMemStore() *memStore { return &memStore{tier3: map[string]WrappedKey{}} }
@@ -27,7 +28,7 @@ func (m *memStore) ActiveMasterWrappers(context.Context) ([]WrappedKey, error) {
 	if m.master == nil {
 		return nil, nil
 	}
-	return []WrappedKey{*m.master}, nil
+	return append([]WrappedKey{*m.master}, m.extraMasters...), nil
 }
 
 func (m *memStore) ActiveTier3(_ context.Context, p Purpose, org, proj string) (WrappedKey, error) {
@@ -125,6 +126,31 @@ func TestWrongRootKeyRefused(t *testing.T) {
 	_, err := LoadKeyring(ctx, ks, newRoot(t))
 	if !errors.Is(err, ErrRootKeyMismatch) {
 		t.Errorf("err = %v, want ErrRootKeyMismatch", err)
+	}
+}
+
+// Refusal 5 must hold across the whole wrapper set: a valid wrapper first
+// in order must not mask an unknown-format wrapper behind it.
+func TestUnknownFormatWrapperRefusedEvenWhenAnotherOpens(t *testing.T) {
+	ctx := context.Background()
+	ks := newMemStore()
+	root := newRoot(t)
+	kr, err := LoadKeyring(ctx, ks, bytes.Clone(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = kr
+	// Second wrapper of the same master at an unknown format version,
+	// ordered AFTER the valid one.
+	bad := *ks.master
+	bad.Blob = bytes.Clone(bad.Blob)
+	bad.Blob[0] = 0x7F
+	bad.RootKeyEpoch = 0 // distinct epoch, sorts after in the fake's slice
+	ks.extraMasters = append(ks.extraMasters, bad)
+
+	_, err = LoadKeyring(ctx, ks, root)
+	if !errors.Is(err, ErrUnknownFormat) {
+		t.Errorf("err = %v, want ErrUnknownFormat — a valid wrapper must not mask an unreadable one", err)
 	}
 }
 

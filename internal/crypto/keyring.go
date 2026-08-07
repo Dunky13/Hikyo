@@ -166,12 +166,18 @@ func LoadKeyring(ctx context.Context, ks KeyStore, root []byte) (*Keyring, error
 }
 
 func (k *Keyring) unwrapMaster(root []byte, wrappers []WrappedKey) (keyHandle, error) {
+	// Refusal 5 is checked over EVERY wrapper before any unwrap is accepted:
+	// a datastore carrying an unknown-format master wrapper aborts even when
+	// another wrapper would open — never a partial boot over a record this
+	// build cannot read.
+	for _, w := range wrappers {
+		if _, _, err := parseHeader(w.Blob); errors.Is(err, ErrUnknownFormat) {
+			return keyHandle{}, fmt.Errorf("crypto: master key: %w", err)
+		}
+	}
 	for _, w := range wrappers {
 		master, err := open(root, be32(w.RootKeyEpoch), 0,
 			WrappedMasterAAD{MasterKeyVersion: w.Version, RootKeyEpoch: w.RootKeyEpoch}, w.Blob)
-		if errors.Is(err, ErrUnknownFormat) {
-			return keyHandle{}, fmt.Errorf("crypto: master key: %w", err)
-		}
 		if err == nil {
 			return keyHandle{version: w.Version, key: master}, nil
 		}
