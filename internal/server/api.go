@@ -14,7 +14,6 @@ import (
 	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 )
 
@@ -34,10 +33,19 @@ type AuthService interface {
 }
 
 // OrgService is the domain surface this slice exposes.
+//
+// Every method takes a service.Actor, never a principal id: the transport
+// hands over the RAW artifact and the service resolves it inside the
+// transaction that authorizes the operation. Resolving here and passing an id
+// would put the decision about who the caller is on one side of a transaction
+// boundary and the authorization that trusts it on the other — a session
+// revoked in between would still authorize the operation. That is the
+// cross-request cache the permission model forbids, wearing an argument's
+// clothes.
 type OrgService interface {
-	Create(ctx context.Context, principal domain.PrincipalID, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
-	Get(ctx context.Context, principal domain.PrincipalID, id string) (service.Org, error)
-	List(ctx context.Context, principal domain.PrincipalID) ([]service.Org, error)
+	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
+	Get(ctx context.Context, actor service.Actor, id string) (service.Org, error)
+	List(ctx context.Context, actor service.Actor) ([]service.Org, error)
 }
 
 // API implements the generated strict server.
@@ -216,25 +224,7 @@ func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.
 // Domain
 // ---------------------------------------------------------------------------
 
-// principal resolves the acting principal for a domain call. Note what it
-// does NOT do: it does not authorize. Authorization happens in the service's
-// own transaction at the chokepoint, against the operation's formula — this
-// only says who is asking.
-func (a *API) principal(ctx context.Context) (domain.PrincipalID, error) {
-	id, err := a.Auth.Identity(ctx, bearer(ctx))
-	if err != nil {
-		return "", err
-	}
-	return id.Principal, nil
-}
-
 func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) (apigen.CreateOrgResponseObject, error) {
-	principal, err := a.principal(ctx)
-	if err != nil {
-		return apigen.CreateOrg401JSONResponse{
-			UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-		}, nil
-	}
 	active := true
 	if req.Body.Active != nil {
 		active = *req.Body.Active
@@ -245,9 +235,13 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 			BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "metadata")),
 		}, nil
 	}
-	org, err := a.Orgs.Create(ctx, principal, req.Body.Name, active, metadata)
+	org, err := a.Orgs.Create(ctx, service.Bearer(bearer(ctx)), req.Body.Name, active, metadata)
 	if err != nil {
 		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.CreateOrg401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
 		case apigen.ErrorCodeForbidden:
 			return apigen.CreateOrg403JSONResponse{
 				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),
@@ -265,15 +259,13 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 }
 
 func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (apigen.ListOrgsResponseObject, error) {
-	principal, err := a.principal(ctx)
-	if err != nil {
-		return apigen.ListOrgs401JSONResponse{
-			UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-		}, nil
-	}
-	orgs, err := a.Orgs.List(ctx, principal)
+	orgs, err := a.Orgs.List(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
 		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.ListOrgs401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
 		case apigen.ErrorCodeForbidden:
 			return apigen.ListOrgs403JSONResponse{
 				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),
@@ -293,15 +285,13 @@ func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (api
 }
 
 func (a *API) GetOrg(ctx context.Context, req apigen.GetOrgRequestObject) (apigen.GetOrgResponseObject, error) {
-	principal, err := a.principal(ctx)
-	if err != nil {
-		return apigen.GetOrg401JSONResponse{
-			UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-		}, nil
-	}
-	org, err := a.Orgs.Get(ctx, principal, req.Org)
+	org, err := a.Orgs.Get(ctx, service.Bearer(bearer(ctx)), req.Org)
 	if err != nil {
 		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.GetOrg401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
 		case apigen.ErrorCodeForbidden:
 			return apigen.GetOrg403JSONResponse{
 				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),

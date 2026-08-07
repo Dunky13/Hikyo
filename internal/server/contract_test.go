@@ -68,30 +68,30 @@ func (s stubAuth) Logout(ctx context.Context, presented string) error {
 func (s stubAuth) SlideIdleClock(context.Context, string) error { return nil }
 
 type stubOrgs struct {
-	create func(ctx context.Context, p domain.PrincipalID, name string, active bool, meta json.RawMessage) (service.Org, error)
-	get    func(ctx context.Context, p domain.PrincipalID, id string) (service.Org, error)
-	list   func(ctx context.Context, p domain.PrincipalID) ([]service.Org, error)
+	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
+	get    func(ctx context.Context, a service.Actor, id string) (service.Org, error)
+	list   func(ctx context.Context, a service.Actor) ([]service.Org, error)
 }
 
-func (s stubOrgs) Create(ctx context.Context, p domain.PrincipalID, n string, a bool, m json.RawMessage) (service.Org, error) {
+func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active bool, m json.RawMessage) (service.Org, error) {
 	if s.create == nil {
 		return service.Org{}, domain.ErrUnauthorized
 	}
-	return s.create(ctx, p, n, a, m)
+	return s.create(ctx, a, n, active, m)
 }
 
-func (s stubOrgs) Get(ctx context.Context, p domain.PrincipalID, id string) (service.Org, error) {
+func (s stubOrgs) Get(ctx context.Context, a service.Actor, id string) (service.Org, error) {
 	if s.get == nil {
 		return service.Org{}, domain.ErrNotFound
 	}
-	return s.get(ctx, p, id)
+	return s.get(ctx, a, id)
 }
 
-func (s stubOrgs) List(ctx context.Context, p domain.PrincipalID) ([]service.Org, error) {
+func (s stubOrgs) List(ctx context.Context, a service.Actor) ([]service.Org, error) {
 	if s.list == nil {
 		return nil, domain.ErrUnauthorized
 	}
-	return s.list(ctx, p)
+	return s.list(ctx, a)
 }
 
 type stubReady struct{ err error }
@@ -241,12 +241,12 @@ func TestNotFoundAndUnauthorizedAreIndistinguishable(t *testing.T) {
 	// unauthorized ≡ nonexistent, on the wire. A tenant read the principal may
 	// not perform and one addressing nothing must produce the same bytes.
 	missing := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
-		get: func(context.Context, domain.PrincipalID, string) (service.Org, error) {
+		get: func(context.Context, service.Actor, string) (service.Org, error) {
 			return service.Org{}, domain.ErrNotFound
 		},
 	})
 	forbidden := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
-		get: func(context.Context, domain.PrincipalID, string) (service.Org, error) {
+		get: func(context.Context, service.Actor, string) (service.Org, error) {
 			// The service maps a tenant-class refusal onto ErrNotFound at the
 			// chokepoint; this fixture stands in for that having happened.
 			return service.Org{}, domain.ErrNotFound
@@ -329,7 +329,7 @@ func TestNullableMetadataRoundTripsAbsentNullAndValue(t *testing.T) {
 	// absent, null and a value are three distinct facts and stay distinct.
 	var seen []json.RawMessage
 	srv := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
-		create: func(_ context.Context, _ domain.PrincipalID, name string, active bool, meta json.RawMessage) (service.Org, error) {
+		create: func(_ context.Context, _ service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error) {
 			seen = append(seen, meta)
 			return service.Org{
 				ID: testOrgID, Name: name, Active: active, Metadata: meta,

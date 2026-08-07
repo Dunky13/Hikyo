@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 )
 
@@ -206,16 +207,16 @@ func runTenantProbes(t *testing.T, db *store.DB) {
 func runInstanceProbes(t *testing.T, db *store.DB) {
 	orgs, _, _ := services(db)
 	before := rowCounts(t, db)
-	if _, err := orgs.Create(tctx(t), bob, "bob-empire", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Create(tctx(t), service.LocalPrincipal(bob), "bob-empire", true, []byte(`{}`)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.create as org admin: err = %v, want ErrUnauthorized", err)
 	}
-	if _, err := orgs.List(tctx(t), bob); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.List(tctx(t), service.LocalPrincipal(bob)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.list as org admin: err = %v, want ErrUnauthorized", err)
 	}
-	if _, err := orgs.Get(tctx(t), bob, string(orgA)); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(bob), string(orgA)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.get as org admin: err = %v, want ErrUnauthorized", err)
 	}
-	if _, err := orgs.Count(tctx(t), nobody); !errors.Is(err, domain.ErrUnauthorized) {
+	if _, err := orgs.Count(tctx(t), service.LocalPrincipal(nobody)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.count with no grants: err = %v, want ErrUnauthorized", err)
 	}
 	after := rowCounts(t, db)
@@ -269,11 +270,11 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 		t.Fatalf("created env's chain did not come from the proof")
 	}
 
-	org, err := orgs.Create(tctx(t), root, "root-org", true, []byte(`{}`))
+	org, err := orgs.Create(tctx(t), service.LocalPrincipal(root), "root-org", true, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("root creating an org: %v", err)
 	}
-	if _, err := orgs.Get(tctx(t), root, org.ID); err != nil {
+	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(root), org.ID); err != nil {
 		t.Fatalf("root reading the created org: %v", err)
 	}
 }

@@ -390,7 +390,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The administrator can now perform the first audited mutating
 		// operation — the demo criterion, exercised through the real grants
 		// the admin template wrote.
-		if _, err := orgsSvc.Create(ctx, id.Principal, "bootstrapped-org", true, []byte(`{}`)); err != nil {
+		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`)); err != nil {
 			t.Fatalf("the bootstrapped administrator cannot administer: %v", err)
 		}
 
@@ -413,7 +413,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// the preceding subtests filled and asserts every registered type
 		// really reached a table — an operation that drops its insert while
 		// keeping its `events:` declaration fails here.
-		if _, err := orgsSvc.List(tctx(t), root); err != nil {
+		if _, err := orgsSvc.List(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatal(err)
 		}
 		if err := envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
@@ -422,7 +422,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := orgsSvc.Create(tctx(t), root, "audited-org", true, []byte(`{}`)); err != nil {
+		if _, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 		for _, typ := range audit.Types() {
