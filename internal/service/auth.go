@@ -456,8 +456,10 @@ func (s *Auth) recordThrottleCrossing(ctx context.Context, username string) {
 // authorities exist. A weak password is the one loud refusal: it is the
 // caller's own input, evaluated before anything is looked up.
 func (s *Auth) EstablishCredential(ctx context.Context, authority, password string) error {
-	if len([]rune(password)) < PasswordMinLength {
-		return ErrWeakPassword
+	// Policy first: it is the caller's own input, costs nothing, and refusing
+	// here keeps a hopeless password from consuming an admission slot.
+	if err := CheckPassword(password); err != nil {
+		return err
 	}
 	release, err := s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
 	if err != nil {

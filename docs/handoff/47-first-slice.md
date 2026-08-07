@@ -200,11 +200,15 @@ Full suite green on sqlite **and** postgres 18 (local container).
    replace it — the constraint is written at the top of `internal/admission`.
 
 5. **The common-password list is a mechanism without its data.** The ops spec
-   names an embedded top-100k SecLists/HIBP-derived list. The length floor and
-   the set-time-only check are implemented; **the list itself is not bundled**
-   (it needs network sourcing and a licence review). This is a data gap, not a
-   mechanism gap, and it is the one acceptance-adjacent item this slice leaves
-   short.
+   names an embedded top-100k SecLists/HIBP-derived list, pinned and
+   hash-checked in CI. The whole mechanism is implemented — length floor,
+   no composition rules, no forced rotation, set-time-only checking, and the
+   embedded-list lookup — but **the bundled list is a ~90-entry starter set**,
+   because sourcing the real one needs a network fetch and a licence review
+   this ticket did not do. `service.TestCommonListIsAKnownPlaceholder` fails
+   the day the file grows past the placeholder bound, so the two cannot be
+   confused, and its failure message names what else to update. This is the
+   one acceptance-adjacent item this slice leaves short.
 
 6. **The freeze gate is fixture-proven, not yet armed.** No freeze tag exists,
    so there is no immutable base to diff the live contract against. The
@@ -234,6 +238,17 @@ Recorded because each was found by a check rather than by reading:
   positional, so the spelling the help advertises was parsed as three
   positionals.
 - **A trust-store refusal exited 1, not 4.**
+- **Argon2id ran inside a write transaction.** sqlite has one write
+  connection, so four concurrent logins — exactly the admission budget —
+  would have stalled every write on the instance for the length of a
+  derivation each. Login is now read / verify / write, with the write phase
+  re-reading the credential so a password changed mid-login cannot mint a
+  session.
+- **The idle-clock touch opened a write transaction for any bearer**,
+  including a fabricated one, so the same contention was reachable by anyone
+  sending a noise Authorization header.
+- **`/meta` had no rate limit** despite being the endpoint `login` calls
+  before every authentication.
 - **`admin create` created the administrator before checking it could deliver
   the authority** — leaving an instance bootstrapped with a value nobody saw
   and a command that refuses to run again. `disclose.Preflight` now runs first.

@@ -146,7 +146,7 @@ func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCrede
 	switch {
 	case err == nil:
 		return apigen.EstablishCredential204Response{}, nil
-	case errors.Is(err, service.ErrWeakPassword):
+	case errors.Is(err, service.ErrWeakPassword), errors.Is(err, service.ErrCommonPassword):
 		// The one loud refusal on this path: it is the caller's own input,
 		// evaluated before anything is looked up, so naming the rule helps
 		// the human and reveals nothing.
