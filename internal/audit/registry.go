@@ -31,6 +31,38 @@ const (
 	EventAuditExportStarted   EventType = "audit.export_started"
 	EventAuditExportCompleted EventType = "audit.export_completed"
 
+	// auth.* — human authentication (#47, human-auth ADR § Propagations to
+	// the audit ADR). Failures matter as much as successes, so every type
+	// below licenses the failure outcome its path can produce.
+	//
+	// Note what these payloads deliberately do NOT carry: the presented
+	// username. A human who types a password into the username field would
+	// otherwise put it in a durable trail, which is the exact accident the
+	// no-plaintext rule exists to prevent. Attribution is carried as the
+	// resolved account id — definitively not a password, because it resolved
+	// — plus a boolean saying whether resolution happened at all. Source IP
+	// and user agent ride in the envelope, so incident response keeps the
+	// signal it actually needs.
+	EventAuthLogin  EventType = "auth.login"
+	EventAuthLogout EventType = "auth.logout"
+	// auth.session_created records the artifact minted and the assurance it
+	// carries — the record the chokepoint will consult on every later request.
+	EventAuthSessionCreated EventType = "auth.session_created"
+	// auth.credential_authority_minted records a credential-establishment
+	// authority coming into existence AND how it was delivered, because
+	// delivery mode is the security property: a token that reached a log
+	// shipper is a different event from one written to a root-owned file.
+	EventAuthAuthorityMinted EventType = "auth.credential_authority_minted"
+	// auth.credential_established is its consumption: exactly one initial
+	// credential, atomically, and nothing more.
+	EventAuthCredentialEstablished EventType = "auth.credential_established"
+	// auth.credential_authority_refused covers failed presentation, expiry
+	// and re-use — the ADR requires the failures, not just the successes.
+	EventAuthAuthorityRefused EventType = "auth.credential_authority_refused"
+	// auth.throttle_crossed fires when a per-account backoff threshold is
+	// crossed, so a distributed attempt is visible rather than merely slowed.
+	EventAuthThrottleCrossed EventType = "auth.throttle_crossed"
+
 	// settings.* — scaffolding domain events for the demonstration
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
@@ -130,6 +162,88 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"rows_streamed": {Kind: KindInt, Required: true},
 			"cause":         {Kind: KindString},
+		},
+	},
+	EventAuthLogin: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"method":           {Kind: KindString, Required: true}, // local-password | …
+			"artifact":         {Kind: KindString, Required: true}, // cli | browser
+			"subject_resolved": {Kind: KindBool, Required: true},
+			"account_id":       {Kind: KindString},
+			"assurance":        {Kind: KindString}, // single-factor | multi-factor
+			"cause":            {Kind: KindString}, // failures only, by class never by detail
+		},
+	},
+	EventAuthLogout: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"artifact":   {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthSessionCreated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"artifact":   {Kind: KindString, Required: true},
+			"method":     {Kind: KindString, Required: true},
+			"assurance":  {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthAuthorityMinted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"authority_id": {Kind: KindString, Required: true},
+			"account_id":   {Kind: KindString, Required: true},
+			"issued_by":    {Kind: KindString, Required: true}, // bootstrap | credential-reset | break-glass
+			"delivery":     {Kind: KindString, Required: true}, // file | terminal
+		},
+	},
+	EventAuthCredentialEstablished: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"authority_id": {Kind: KindString, Required: true},
+			"account_id":   {Kind: KindString, Required: true},
+			"credential":   {Kind: KindString, Required: true}, // the credential class established
+		},
+	},
+	EventAuthAuthorityRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// By class — unknown | expired | consumed | epoch — never by
+			// detail, so the trail does not become the oracle the response
+			// deliberately is not.
+			"cause": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthThrottleCrossed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"scope":            {Kind: KindString, Required: true}, // account | source-ip | instance
+			"subject_resolved": {Kind: KindBool, Required: true},
+			"account_id":       {Kind: KindString},
 		},
 	},
 	EventOrgRead: {
