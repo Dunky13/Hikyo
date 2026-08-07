@@ -94,6 +94,42 @@ func writeExclusive(path, content string) error {
 	return f.Close()
 }
 
+// preflightFile reports whether writeExclusive would plausibly succeed: the
+// target is free and its parent passes the ownership and permission checks.
+// It creates nothing.
+func preflightFile(path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return ErrFileExists
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("refusing to disclose: cannot inspect %q: %w", path, err)
+	}
+	dir, name := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	if name == "" {
+		return fmt.Errorf("refusing to disclose: %q names a directory, not a file", path)
+	}
+	dirFD, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return fmt.Errorf("refusing to disclose: cannot open the parent directory %q safely: %w", dir, err)
+	}
+	defer unix.Close(dirFD)
+	var st unix.Stat_t
+	if err := unix.Fstat(dirFD, &st); err != nil {
+		return fmt.Errorf("refusing to disclose: cannot stat the parent directory %q: %w", dir, err)
+	}
+	if uint32(st.Uid) != uint32(os.Getuid()) {
+		return fmt.Errorf("refusing to disclose: the parent directory %q is owned by uid %d, not by you (uid %d)",
+			dir, st.Uid, os.Getuid())
+	}
+	if st.Mode&0o022 != 0 {
+		return fmt.Errorf("refusing to disclose: the parent directory %q is writable by group or others (mode %04o)",
+			dir, st.Mode&0o777)
+	}
+	return nil
+}
+
 // openControllingTerminal opens /dev/tty — the controlling terminal, which is
 // a different file from stdout. A process with no controlling terminal fails
 // here, which is exactly the non-TTY refusal.

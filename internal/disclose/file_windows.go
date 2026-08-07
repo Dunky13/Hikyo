@@ -37,6 +37,17 @@ func writeExclusive(path, content string) error {
 	return f.Close()
 }
 
+// preflightFile reports whether the target is free. The parent-ownership
+// half has no Windows equivalent here, as documented above.
+func preflightFile(path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return ErrFileExists
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("refusing to disclose: cannot inspect %q: %w", path, err)
+	}
+	return nil
+}
+
 // openControllingTerminal opens the console output device, the Windows
 // counterpart of /dev/tty: a redirected stdout does not reach it.
 func openControllingTerminal() (io.WriteCloser, error) {

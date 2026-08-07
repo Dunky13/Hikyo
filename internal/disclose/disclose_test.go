@@ -175,3 +175,41 @@ func TestOutputFileRefusesAWorldWritableParent(t *testing.T) {
 		t.Fatalf("refusal does not name the problem: %v", err)
 	}
 }
+
+func TestPreflightRefusesBeforeAnythingIsMinted(t *testing.T) {
+	// The ordering hazard the triad creates: a caller that mints a
+	// display-once secret and only then finds it has nowhere to put it has
+	// destroyed the secret and performed the side effect. Preflight is what
+	// lets `admin create` refuse before it creates an administrator.
+	noTerminal := func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") }
+	if err := Preflight(Options{OpenTerminal: noTerminal}); !errors.Is(err, ErrNoDestination) {
+		t.Fatalf("err = %v, want ErrNoDestination", err)
+	}
+	if err := Preflight(Options{DangerouslyPrint: true, OpenTerminal: noTerminal}); err != nil {
+		t.Fatalf("--dangerously-print refused: %v", err)
+	}
+	if err := Preflight(Options{OpenTerminal: func() (io.WriteCloser, error) { return &fakeTTY{}, nil }}); err != nil {
+		t.Fatalf("an available terminal refused: %v", err)
+	}
+
+	dir := t.TempDir()
+	fresh := filepath.Join(dir, "fresh")
+	if err := Preflight(Options{OutputFile: fresh, OpenTerminal: noTerminal}); err != nil {
+		t.Fatalf("a free path refused: %v", err)
+	}
+	// Preflight creates nothing — the O_EXCL that makes the real write safe
+	// must still be available to it.
+	if _, err := os.Stat(fresh); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("Preflight created the file")
+	}
+	taken := filepath.Join(dir, "taken")
+	if err := os.WriteFile(taken, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Preflight(Options{OutputFile: taken, OpenTerminal: noTerminal}); !errors.Is(err, ErrFileExists) {
+		t.Fatalf("an occupied path passed preflight: %v", err)
+	}
+	if err := Preflight(Options{OutputFile: fresh, DangerouslyPrint: true}); err == nil {
+		t.Fatal("two destinations passed preflight")
+	}
+}

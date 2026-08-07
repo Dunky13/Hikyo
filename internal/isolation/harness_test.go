@@ -181,8 +181,12 @@ func openPostgres(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Children before parents; the keyring tables arrived with #43.
+	// Children before parents; the keyring tables arrived with #43 and the
+	// human-authentication tables with #47 (sessions and accounts reference
+	// principals, so they drop first).
 	for _, table := range []string{
+		"credential_authorities", "password_credentials", "sessions", "accounts",
+		"auth_instance_state",
 		"grants", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",

@@ -89,6 +89,15 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 		delivery = string(disclose.DestStdout)
 	}
 
+	// Check the destination BEFORE anything is created. Minting first and
+	// discovering afterwards that the value has nowhere to go would leave the
+	// instance bootstrapped with an authority nobody ever saw — and running
+	// this again refuses, because the instance now has an account.
+	deliveryOpts := disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous}
+	if err := disclose.Preflight(deliveryOpts); err != nil {
+		return err
+	}
+
 	sc := storeConfig(cfg)
 	if cfg.AutoMigrate {
 		if err := migrate.Run(ctx, sc); err != nil {
@@ -98,6 +107,10 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 	if err := migrate.Check(ctx, sc); err != nil {
 		return err
 	}
+	// The root key is read from the same sources the server uses. `admin` has
+	// no --root-key-file of its own: the operator running it on the host is
+	// the operator who configured the server, and a second spelling for the
+	// same key is a second thing to get wrong.
 	root, err := resolveRootKey(cfg, log)
 	if err != nil {
 		return err
@@ -126,8 +139,7 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 	dest, err := disclose.Emit(
 		fmt.Sprintf("Credential-establishment authority for %s (expires %s)",
 			result.Username, result.ExpiresAt.Format("2006-01-02 15:04 MST")),
-		result.Authority,
-		disclose.Options{OutputFile: *outputFile, DangerouslyPrint: *dangerous})
+		result.Authority, deliveryOpts)
 	if err != nil {
 		// The administrator exists and the authority is minted, but nobody
 		// received it. Say so precisely rather than leaving the operator to

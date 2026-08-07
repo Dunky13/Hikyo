@@ -100,7 +100,10 @@ func runServer(ctx context.Context, args []string) int {
 // host. It is a client verb of the same binary, not a new multicall mode -
 // the mode set (server/operator/migrate/client) is unchanged.
 func runAdmin(ctx context.Context, args []string) int {
-	cfg, warnings, err := config.Load("admin", args, os.Getenv, os.Environ())
+	// No flags reach config: `admin` takes its own (--username, --output-file,
+	// …) and app.RunAdmin owns them. Configuration for this verb is
+	// environment-only, exactly as it is for the server it runs beside.
+	cfg, warnings, err := config.Load("admin", nil, os.Getenv, os.Environ())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "wenv admin:", err)
 		return 2

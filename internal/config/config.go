@@ -62,6 +62,20 @@ var knownEnv = map[string]bool{
 	"WENV_ARGON2_TIME":          true,
 	"WENV_ARGON2_PARALLELISM":   true,
 	"WENV_ADMISSION_BUDGET_MIB": true,
+
+	// Client-side keys. They configure no server behaviour, but they are
+	// listed here because the unknown-key warning is a typo detector: a
+	// mistyped WENV_PROJEKT that produced no warning would silently target
+	// the wrong project, which is the class of mistake the explicit-first
+	// context model exists to prevent.
+	"WENV_STATE_DIR":    true,
+	"WENV_TRUST_BUNDLE": true,
+	"WENV_CONTEXT":      true,
+	"WENV_INSTANCE":     true,
+	"WENV_ORG":          true,
+	"WENV_PROJECT":      true,
+	"WENV_ENV":          true,
+	"XDG_STATE_HOME":    true,
 }
 
 const devSQLitePath = "wenv-dev.db"

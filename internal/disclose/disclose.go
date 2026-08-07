@@ -65,6 +65,40 @@ const (
 	DestStdout   Destination = "stdout"
 )
 
+// Preflight checks that a destination is usable WITHOUT writing anything.
+//
+// It exists because of an ordering hazard the print triad creates on its own:
+// a caller that mints a display-once secret and only then discovers it has
+// nowhere to put it has destroyed the secret and performed the side effect.
+// `admin create` is the sharp case — it would leave an instance bootstrapped
+// with an administrator whose establishment authority nobody ever saw, and
+// re-running it refuses because the instance now has an account.
+//
+// Preflight is necessarily approximate for the file leg: it cannot create the
+// file (that would consume the O_EXCL that makes the real write safe), so it
+// reports what it can — the path is free and the parent is acceptable — and a
+// race between the check and the write still lands on Emit's refusal. It
+// closes the common failure, not every failure, and says so.
+func Preflight(o Options) error {
+	switch {
+	case o.OutputFile != "" && o.DangerouslyPrint:
+		return errors.New("refusing to disclose: --output-file and --dangerously-print name two destinations; choose one")
+	case o.DangerouslyPrint:
+		return nil
+	case o.OutputFile != "":
+		return preflightFile(o.OutputFile)
+	}
+	open := o.OpenTerminal
+	if open == nil {
+		open = openControllingTerminal
+	}
+	tty, err := open()
+	if err != nil {
+		return ErrNoDestination
+	}
+	return tty.Close()
+}
+
 // Emit writes value to exactly one permitted destination and reports which.
 // label is the human-facing description printed alongside on the interactive
 // path; it is never written to the file, which contains the value and a
