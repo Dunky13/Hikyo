@@ -1,0 +1,14 @@
+wenv -> 2 usage
+wenv teleport -> 2 usage
+wenv context warp -> 2 usage
+wenv context show -> 2 usage
+wenv context show nope -> 5 not found
+wenv context delete --instance nope -> 5 not found
+wenv login --local -> 2 usage
+wenv login https://wenv.example -> 4 refused
+wenv login https://wenv.example --device -> 4 refused
+wenv login --local --as u unknown-ref -> 4 refused
+wenv context list -o yaml -> 2 usage
+wenv org -> 2 usage
+wenv org list --instance unknown-ref -> 4 refused
+wenv account -> 2 usage

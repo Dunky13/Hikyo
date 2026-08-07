@@ -1,0 +1,24 @@
+# oapi-codegen v2.8.0 — the 3.1-support release, the named working pin
+# (system-architecture ADR amendment banner). It moves only by recorded
+# amendment, never silently; the pin lives in go.mod's tool directive and is
+# asserted by the api package's toolchain test.
+#
+# strict-server: handlers take and return typed values, so an unmarshalled
+# request cannot reach a handler as `any` and a response cannot be written
+# without passing through the generated type. That is the parse-don't-cast
+# rule expressed in the transport layer.
+package: apigen
+output: apigen/apigen.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true
+  embedded-spec: false
+output-options:
+  # Nullable members are `type: [T, "null"]` under the bound 3.1 profile;
+  # pointers keep absent and null distinguishable in Go instead of collapsing
+  # both onto a zero value.
+  prefer-skip-optional-pointer: false
+  # Extensions the CI cross-checks read straight off the loaded document
+  # rather than out of generated Go, so no compatibility shims are needed.
+  skip-prune: true

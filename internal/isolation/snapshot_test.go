@@ -15,6 +15,7 @@ import (
 
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
@@ -51,7 +52,7 @@ func runReadSnapshotStability(t *testing.T, db *store.DB) {
 	// cache. Granting and revoking both take effect on the next operation,
 	// which is what "no authorization cache" means.
 	_, _, envs := services(db)
-	if _, err := envs.Get(t.Context(), late, scope); err != nil {
+	if _, err := envs.Get(t.Context(), service.LocalPrincipal(late), scope); err != nil {
 		t.Fatalf("the grant must take effect in the next transaction: %v", err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/config"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/server"
@@ -26,7 +27,12 @@ import (
 // ADR § Component set); each is a stub until its ticket lands. Exported so
 // the classification-totality invariant can enumerate them — a verb missing
 // from the wire registry fails the build.
-var ClientVerbs = []string{"login", "run", "render", "sync", "adopt", "doctor", "definitions", "import"}
+var ClientVerbs = []string{"run", "render", "sync", "adopt", "doctor", "definitions", "import"}
+
+// Version is the build's version string, set from main's linker-stamped
+// value. It is what /api/v1/meta advertises, so a client that refuses an
+// operation above the server's API revision can name the version it refused.
+var Version = "dev"
 
 // Logger builds the process logger: text in dev, JSON in production.
 func Logger(dev bool) *slog.Logger {
@@ -162,21 +168,88 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
+	kdf, limiter, err := AuthComponents(cfg)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
+	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log}
+
+	proxies, err := parseCIDRs(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
+
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("boot: listen %s: %w", cfg.Listen, err)
 	}
 
-	log.Info("boot complete", "engine", sc.Engine, "addr", ln.Addr().String(), "dev", cfg.Dev)
+	api := &server.API{
+		Auth:           authSvc,
+		Orgs:           &service.Orgs{DB: db},
+		Admission:      limiter,
+		Version:        Version,
+		Log:            log,
+		TrustedProxies: proxies,
+	}
+
+	log.Info("boot complete", "engine", sc.Engine, "addr", ln.Addr().String(), "dev", cfg.Dev,
+		"argon2_memory_kib", cfg.Argon2MemoryKiB, "auth_concurrency", limiter.Concurrency())
 	return &Server{
 		Addr:    ln.Addr().String(),
 		db:      db,
 		keyring: kr,
 		ln:      ln,
-		handler: server.New(&service.System{DB: db, Store: sc}),
+		handler: server.New(&service.System{DB: db, Store: sc}, api),
 		log:     log,
 	}, nil
+}
+
+// AuthComponents resolves the two authentication settings and, in doing so,
+// runs two boot invariants that must fail fast rather than surface at the
+// first login:
+//
+//   - the Argon2id parameters are checked against the floor the human-auth
+//     ADR fixes, and the server refuses to start below it;
+//   - the admission budget must hold at least one verification plus the
+//     global headroom, so a configuration where one login cannot fit is a
+//     config error caught here, never a runtime surprise.
+//
+// It deliberately does not build the service: the service holds the keyring,
+// and the redaction analyzer bans key-bearing types from reaching a log call
+// — so the caller assembles it and logs from these values instead.
+func AuthComponents(cfg *config.Config) (crypto.PasswordParams, *admission.Limiter, error) {
+	kdf := crypto.PasswordParams{
+		MemoryKiB:   cfg.Argon2MemoryKiB,
+		Time:        cfg.Argon2Time,
+		Parallelism: cfg.Argon2Parallelism,
+	}
+	if err := kdf.CheckFloor(); err != nil {
+		return crypto.PasswordParams{}, nil, err
+	}
+	limiter, err := admission.New(admission.Config{
+		BudgetMiB:      cfg.AdmissionBudgetMiB,
+		ArgonMemoryKiB: kdf.MemoryKiB,
+	})
+	if err != nil {
+		return crypto.PasswordParams{}, nil, err
+	}
+	return kdf, limiter, nil
+}
+
+func parseCIDRs(raw []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(raw))
+	for _, s := range raw {
+		_, network, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxy CIDR %q: %w", s, err)
+		}
+		out = append(out, network)
+	}
+	return out, nil
 }
 
 // newHTTPServer applies the baseline slow-client hardening: bounded header

@@ -432,3 +432,8 @@ func (s *InstanceSealer) OpenField(a InstanceFieldAAD, record []byte) ([]byte, e
 	d := s.kr.instance
 	return open(d.key, []byte(d.id), d.version, a, record)
 }
+
+// Version reports the instance DEK version a row was (or will be) sealed
+// under. Credential rows record it so `reencrypt` knows which rows it has
+// already moved, and so the compare-and-swap rule has something to compare.
+func (s *InstanceSealer) Version() uint32 { return s.kr.instance.version }

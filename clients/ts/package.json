@@ -1,0 +1,19 @@
+{
+  "name": "@wenv/client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generated TypeScript client and Zod schemas for the Wenv API. Generated from ../../api/openapi.yaml - never edited by hand.",
+  "scripts": {
+    "generate": "openapi-ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types 'src/*.test.ts'",
+    "verify": "openapi-ts && tsc --noEmit && node --test --experimental-strip-types 'src/*.test.ts'"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.90.5",
+    "@types/node": "^24.13.3",
+    "typescript": "5.9.3",
+    "zod": "4.1.13"
+  }
+}

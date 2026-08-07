@@ -1,0 +1,28 @@
+wenv - environment and secret management
+
+authentication:
+  wenv login <instance-url> --local [--as USER]   terminal-native local login
+  wenv logout [--instance REF]                    revoke the stored session
+  wenv whoami [--instance REF] [-o table|json]    describe the stored session
+
+accounts:
+  wenv account establish-credential --instance <url|ref> [--as USER]
+
+contexts:
+  wenv context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
+  wenv context list [-o table|json]
+  wenv context show <name> [-o table|json]
+  wenv context delete <name>
+  wenv context delete --instance <ref>            forget a trust-store entry
+
+organisations:
+  wenv org list [-o table|json]
+  wenv org show <org> [-o table|json]
+  wenv org create --name <name>
+
+target resolution, per dimension, first hit wins:
+  --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context
+
+exit codes:
+  0 success   1 internal   2 usage   3 authentication   4 refused
+  5 not found (also unauthorized - indistinguishable by design)   6 unavailable

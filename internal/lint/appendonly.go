@@ -110,21 +110,72 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 	return findings
 }
 
-// CheckDenialWriter enforces the audit-model ADR's amendment part 4 as a
-// build failure, not a comment: the resolution surface's enumerated
-// interface gains EXACTLY ONE write path, the denial writer. The import
-// boundary alone cannot see this — internal/store/authn already holds the
-// generated query handles, so a second mutating call inside it would be a
-// proof-free writer that every other guard admits. Every call to a
-// generated mutating query from that package must sit inside WriteDenial.
-func CheckDenialWriter(pkgs []*packages.Package) []string {
-	return CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial")
+// ResolutionSurfaceWriters is the PINNED enumerated write list of the
+// authorization resolution surface. It is the review artifact: adding a name
+// here is how a new proof-free write path gets noticed, and everything not
+// named still fails the build.
+//
+// The audit-model ADR's amendment part 4 pinned exactly one entry,
+// WriteDenial, because a failed authorize() mints no proof and its denial
+// event therefore cannot travel the proof-carrying store surface. Human
+// authentication (#47) is the same circularity seen from the other side:
+// resolving, minting and revoking the artifact that decides WHO a caller is
+// cannot run under a proof, because the proof is what that answer produces.
+//
+// Stated as a deviation rather than smuggled in: the ADR says "exactly one",
+// and this is more than one. What is preserved is the property the "exactly
+// one" was protecting — every proof-free write is named, in one place, with a
+// build failure behind it. See docs/handoff/47-first-slice.md, which routes
+// the wording to human disposition.
+var ResolutionSurfaceWriters = map[string]bool{
+	// Audit (#45, audit-model ADR amendment part 4). writeProofFreeEvent is
+	// the shared body WriteDenial and WriteAuthEvent both delegate to, so the
+	// two cannot drift; it is the actual call site the analyzer sees.
+	"WriteDenial":         true,
+	"WriteAuthEvent":      true,
+	"writeProofFreeEvent": true,
+	// Bootstrap under local host authority (#47) — the closed local-authority
+	// exception set's boot/bootstrap member, never reachable over the network.
+	"CreatePrincipal":           true,
+	"CreateAccount":             true,
+	"CreateGrant":               true,
+	"CreateCredentialAuthority": true,
+	// Credential establishment and the local floor (#47). None of these can
+	// hold a proof: the first has no session by design, the rest are the
+	// session's own lifecycle.
+	"ConsumeCredentialAuthority": true,
+	"CreatePasswordCredential":   true,
+	"UpdatePasswordCredential":   true,
+	"CreateSession":              true,
+	"TouchSession":               true,
+	"DeleteSession":              true,
+	"DeleteSessionsForPrincipal": true,
+	"AdvanceGeneration":          true,
+}
+
+// CheckDenialWriter enforces the enumerated-writer rule as a build failure,
+// not a comment. The import boundary alone cannot see this —
+// internal/store/authn already holds the generated query handles, so a
+// mutating call inside it would be a proof-free writer that every other guard
+// admits. Every call to a generated mutating query from that package must sit
+// inside a function named in ResolutionSurfaceWriters.
+func CheckDenialWriter(pkgs []*packages.Package, repoRoot string) []string {
+	mutating, findings, err := MutatingQueries(repoRoot)
+	if err != nil {
+		return append(findings, "denialwriter: "+err.Error())
+	}
+	if len(mutating) == 0 {
+		return append(findings,
+			"denialwriter: no mutating queries found — the analyzer would be vacuously green")
+	}
+	return append(findings,
+		CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", ResolutionSurfaceWriters, mutating)...)
 }
 
 // CheckDenialWriterIn is CheckDenialWriter with the surface named, so the
-// negative fixture can prove the check actually fires on a second writer
+// negative fixture can prove the check actually fires on an unlisted writer
 // rather than merely on a package that has none.
-func CheckDenialWriterIn(pkgs []*packages.Package, surface, writer string) []string {
+func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers, mutating map[string]bool) []string {
 	var findings []string
 	for _, p := range flatten(pkgs) {
 		if strings.TrimSuffix(p.PkgPath, ".test") != surface || p.TypesInfo == nil {
@@ -133,15 +184,17 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface, writer string) []str
 		for _, file := range p.Syntax {
 			ast.Inspect(file, func(n ast.Node) bool {
 				fn, ok := n.(*ast.FuncDecl)
-				if !ok {
+				if !ok || fn.Body == nil {
 					return true
 				}
+				// Inspect every REFERENCE to a mutating generated query, not
+				// just calls. `x.InsertFoo(...)` and `f := x.InsertFoo` select
+				// the same method; catching only the first let a method value
+				// smuggle the write past the guard (round-2 finding). Naming
+				// the method at all, in any position, must sit inside an
+				// approved writer.
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
-					call, ok := n.(*ast.CallExpr)
-					if !ok {
-						return true
-					}
-					sel, ok := call.Fun.(*ast.SelectorExpr)
+					sel, ok := n.(*ast.SelectorExpr)
 					if !ok {
 						return true
 					}
@@ -153,12 +206,12 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface, writer string) []str
 					if !ok || f.Pkg() == nil || !generatedPackages[f.Pkg().Path()] {
 						return true
 					}
-					if !mutatingQuery(f.Name()) || fn.Name.Name == writer {
+					if !mutating[f.Name()] || writers[fn.Name.Name] {
 						return true
 					}
 					findings = append(findings, fmt.Sprintf(
-						"denialwriter: %s: %s calls the mutating query %s outside %s — the resolution surface has exactly one write path (audit-model ADR amendment part 4)",
-						p.Fset.Position(call.Pos()), fn.Name.Name, f.Name(), writer))
+						"denialwriter: %s: %s names the mutating query %s, and %s is not in the pinned enumerated write list — every proof-free writer in the resolution surface must be named there (audit-model ADR amendment part 4, extended by #47)",
+						p.Fset.Position(sel.Pos()), fn.Name.Name, f.Name(), fn.Name.Name))
 					return true
 				})
 				return false
@@ -168,14 +221,41 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface, writer string) []str
 	return findings
 }
 
-// mutatingQuery recognises a generated statement that writes. sqlc names
-// queries after their intent, so the prefix set is the whole vocabulary the
-// repo uses; a new verb must be added here deliberately.
-func mutatingQuery(name string) bool {
-	for _, prefix := range []string{"Insert", "Create", "Update", "Delete", "Acquire", "Prune", "Set"} {
-		if strings.HasPrefix(name, prefix) {
-			return true
+// MutatingQueries derives the set of generated queries that write, from the
+// sqlc command annotation on each query rather than from its name.
+//
+// The previous version guessed from a prefix list, and that was FAIL-OPEN in
+// the worst way: `ConsumeCredentialAuthority`, `TouchSession` and
+// `AdvancePrincipalGeneration` all mutate and none of them starts with a
+// listed prefix, so three real writers slipped past the enforcement that
+// exists to catch exactly them. A classifier that has to be remembered is a
+// classifier that will be forgotten.
+//
+// `:exec`, `:execrows`, `:execresult` and `:execlastid` are sqlc's write
+// commands; `:one` and `:many` read. An unrecognised command is treated as
+// MUTATING — the fail-closed direction — and reported, so a sqlc release that
+// adds a command cannot silently widen the hole.
+func MutatingQueries(repoRoot string) (map[string]bool, []string, error) {
+	out := map[string]bool{}
+	var findings []string
+	for _, engine := range []string{"sqlite", "postgres"} {
+		queries, err := ParseQueries(filepath.Join(repoRoot, "internal", "store", "queries", engine))
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, q := range queries {
+			switch q.Cmd {
+			case "one", "many", "batchmany", "batchone":
+				continue
+			case "exec", "execrows", "execresult", "execlastid", "copyfrom", "batchexec":
+				out[q.Name] = true
+			default:
+				out[q.Name] = true
+				findings = append(findings, fmt.Sprintf(
+					"denialwriter: query %s has unrecognised sqlc command %q — treated as mutating (fail-closed); classify it deliberately",
+					q.Name, q.Cmd))
+			}
 		}
 	}
-	return false
+	return out, findings, nil
 }

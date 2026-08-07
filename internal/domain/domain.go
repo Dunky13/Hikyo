@@ -34,6 +34,14 @@ const (
 	// ordinary additive downward-inheriting grant, never bundled into
 	// manage-members.
 	CapAuditRead Capability = "audit-read"
+
+	// The MFA-mandatory atoms (human-auth ADR § Assurance). Declared here
+	// with the rest of the closed set so the assurance rule can name them;
+	// the operations that carry them arrive with #50/#55.
+	CapReveal          Capability = "reveal"
+	CapRevealHistory   Capability = "reveal-history"
+	CapManageMembers   Capability = "manage-members"
+	CapCredentialReset Capability = "credential-reset"
 )
 
 // Scope addresses a node in the tenant chain as the request names it:
@@ -90,3 +98,10 @@ var ErrNotFound = errors.New("not found")
 // where there is no tenant object whose nonexistence could be mimicked —
 // the probe contract is grant refusal, not tenancy.
 var ErrUnauthorized = errors.New("unauthorized")
+
+// ErrUnauthenticated is the uniform outcome when no usable authentication
+// artifact was presented. Absent, malformed, unknown, expired, revoked,
+// generation-superseded and epoch-superseded artifacts all answer this, so
+// presentation reveals nothing about which artifacts exist — the same
+// indistinguishability rule as unauthorized ≡ nonexistent, one layer earlier.
+var ErrUnauthenticated = errors.New("unauthenticated")

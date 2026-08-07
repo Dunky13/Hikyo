@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Account struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
 type AuditInstanceEvent struct {
 	Seq               int64
 	ID                string
@@ -56,6 +64,24 @@ type AuditTenantEvent struct {
 	Payload           string
 }
 
+type AuthInstanceState struct {
+	ID              int32
+	CredentialEpoch int64
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type CredentialAuthority struct {
+	ID              string
+	Verifier        []byte
+	AccountID       string
+	Purpose         string
+	IssuedBy        string
+	CredentialEpoch int64
+	ExpiresAt       pgtype.Timestamptz
+	ConsumedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type Environment struct {
 	ID        string
 	OrgID     string
@@ -96,10 +122,23 @@ type Org struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type PasswordCredential struct {
+	AccountID       string
+	Verifier        []byte
+	KdfMemoryKib    int64
+	KdfTime         int64
+	KdfParallelism  int64
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type Principal struct {
-	ID        string
-	Kind      string
-	CreatedAt pgtype.Timestamptz
+	ID                string
+	Kind              string
+	CreatedAt         pgtype.Timestamptz
+	SessionGeneration int64
 }
 
 type Project struct {
@@ -107,6 +146,25 @@ type Project struct {
 	OrgID     string
 	Name      string
 	CreatedAt pgtype.Timestamptz
+}
+
+type Session struct {
+	ID                string
+	PrincipalID       string
+	Verifier          []byte
+	Artifact          string
+	SessionGeneration int64
+	CredentialEpoch   int64
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   pgtype.Timestamptz
+	CeremonyID        pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	LastSeenAt        pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+	SourceIp          string
+	UserAgent         string
 }
 
 type Tier3Key struct {

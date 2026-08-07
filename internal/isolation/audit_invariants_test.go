@@ -84,6 +84,7 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 	}
 
 	wire := facts.Wire()
+	wireEvents := facts.WireEvents()
 	for entry, class := range wire {
 		if class == authz.ClassStub {
 			// Declared not-yet-an-operation: no route, no store, enforced by
@@ -91,8 +92,33 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 			// mapping.
 			continue
 		}
-		if _, ok := ex.Wire[entry]; !ok {
+		_, exemptEntry := ex.Wire[entry]
+		events := wireEvents[entry]
+		if op, ok := facts.WireRoutes()[entry]; ok {
+			// A route that reaches a registered operation inherits that
+			// operation's audit mapping; declaring it twice is how the two
+			// declarations drift apart.
+			m, known := mappings[op]
+			if !known {
+				t.Errorf("wire entry %s names unregistered operation %q", entry, op)
+			}
+			events = append(events, m.Events...)
+			if m.AuditedNone {
+				exemptEntry = true
+			}
+		}
+		switch {
+		case len(events) > 0 && exemptEntry:
+			t.Errorf("wire entry %s: emits events AND is exemption-pinned — remove the stale fixture entry", entry)
+		case len(events) > 0, exemptEntry:
+			// Audited directly, or a reviewed deviation.
+		default:
 			t.Errorf("wire entry %s (class %v): unaudited and not exemption-pinned", entry, class)
+		}
+	}
+	for entry := range wireEvents {
+		if _, ok := wire[entry]; !ok {
+			t.Errorf("wire-event mapping names unknown wire entry %q", entry)
 		}
 	}
 	for name := range ex.Wire {
@@ -120,6 +146,18 @@ func TestInvariantAuditRegistryClosure(t *testing.T) {
 	emitted := map[audit.EventType]bool{audit.EventGrantDenied: true}
 	for _, m := range facts.AuditMappings() {
 		for _, et := range m.Events {
+			emitted[et] = true
+		}
+	}
+	// Wire entries that audit without an operation behind them (the
+	// authentication surface) count as emitters too — the point of the
+	// invariant is that no registered type is dead catalogue, not that every
+	// type has an operation row.
+	for entry, events := range facts.WireEvents() {
+		for _, et := range events {
+			if _, ok := audit.Spec(et); !ok {
+				t.Errorf("wire entry %s claims event type %q which is not in the closed registry", entry, et)
+			}
 			emitted[et] = true
 		}
 	}

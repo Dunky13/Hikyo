@@ -16,11 +16,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
+	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/wenv/internal/store/keyring"
 )
+
+// authService builds a real Auth against the harness database: a live
+// keyring (verifiers are envelope-encrypted, so there is nothing to fake) and
+// a real admission limiter. The Argon2id cost is dialled to the floor because
+// the floor is what production runs and the flow exercises it a handful of
+// times.
+func authService(t *testing.T, db *store.DB) *service.Auth {
+	t.Helper()
+	root, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter, err := admission.New(admission.Config{ArgonMemoryKiB: crypto.PasswordFloor.MemoryKiB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &service.Auth{DB: db, Keyring: kr, KDF: crypto.PasswordFloor, Admission: limiter}
+}
 
 func queryString(t *testing.T, db *store.DB, q string) string {
 	t.Helper()
@@ -77,7 +102,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 	t.Run("denial_resolvable_durable_before_response", func(t *testing.T) {
 		before := countTenant("type = 'grant.denied'")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("cross-org probe outcome = %v, want uniform not-found", err)
 		}
@@ -99,7 +124,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 	t.Run("denial_unresolvable_instance_trail", func(t *testing.T) {
 		before := countInstance("type = 'grant.denied'")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: "org_zz", Project: "prj_zz", Env: "env_zz"})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: "org_zz", Project: "prj_zz", Env: "env_zz"})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("unresolvable probe outcome = %v, want uniform not-found", err)
 		}
@@ -124,7 +149,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	})
 
 	t.Run("domain_event_committed_in_transaction", func(t *testing.T) {
-		proj, err := projects.Create(tctx(t), alice, orgA, "audited-project")
+		proj, err := projects.Create(tctx(t), service.LocalPrincipal(alice), orgA, "audited-project")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,10 +273,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			SourceIP:  "203.0.113.7",
 			Origin:    audit.OriginAPI,
 		})
-		if _, err := envs.Get(wired, bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("resolvable probe = %v", err)
 		}
-		if _, err := envs.Get(wired, bob, domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("unresolvable probe = %v", err)
 		}
 		for _, table := range []string{"audit_tenant_events", "audit_instance_events"} {
@@ -297,22 +322,107 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 	})
 
+	t.Run("human_authentication_flow", func(t *testing.T) {
+		// The A1 slice end to end on a real datastore: bootstrap the first
+		// administrator, refuse a bad authority, establish the credential,
+		// fail a login, succeed, and log out. It lives inside the audit suite
+		// because every step of it is an audit obligation the human-auth ADR
+		// names, and the emitter check below is what proves the obligations
+		// are met by code rather than by declaration.
+		auth := authService(t, db)
+		ctx := tctx(t)
+
+		boot, err := auth.BootstrapAdmin(ctx, "e2e-admin", "E2E Admin", "terminal")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := auth.BootstrapAdmin(ctx, "second", "Second", "terminal"); !errors.Is(err, service.ErrInstanceAlreadyBootstrapped) {
+			t.Fatalf("a second first-administrator was minted: %v", err)
+		}
+
+		// A well-formed but unknown authority is refused uniformly.
+		bogus, _, err := crypto.NewArtifact(crypto.ArtifactBootstrap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := auth.EstablishCredential(ctx, bogus, "a-long-enough-password"); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("unknown authority: err = %v, want ErrUnauthenticated", err)
+		}
+		// A short password is the one loud refusal on this path.
+		if err := auth.EstablishCredential(ctx, boot.Authority, "short"); !errors.Is(err, service.ErrWeakPassword) {
+			t.Fatalf("short password accepted: %v", err)
+		}
+
+		const password = "correct horse battery staple"
+		if err := auth.EstablishCredential(ctx, boot.Authority, password); err != nil {
+			t.Fatal(err)
+		}
+		// Single-use: the same authority cannot establish a second credential.
+		if err := auth.EstablishCredential(ctx, boot.Authority, password); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("an authority was consumed twice: %v", err)
+		}
+
+		// Wrong password and unknown account answer identically.
+		for _, bad := range []struct{ user, pass string }{
+			{"e2e-admin", "wrong password entirely"},
+			{"no-such-account", password},
+		} {
+			if _, err := auth.LocalLogin(ctx, bad.user, bad.pass); !errors.Is(err, domain.ErrUnauthenticated) {
+				t.Fatalf("login(%q): err = %v, want ErrUnauthenticated", bad.user, err)
+			}
+		}
+
+		session, err := auth.LocalLogin(ctx, "e2e-admin", password)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if session.Assurance.Method != service.MethodLocalPassword {
+			t.Errorf("assurance method %q", session.Assurance.Method)
+		}
+		id, err := auth.Identity(ctx, session.SessionToken)
+		if err != nil {
+			t.Fatalf("the freshly minted session does not resolve: %v", err)
+		}
+		if id.Principal != boot.PrincipalID {
+			t.Errorf("session resolves to %q, want %q", id.Principal, boot.PrincipalID)
+		}
+
+		// The administrator can now perform the first audited mutating
+		// operation — the demo criterion, exercised through the real grants
+		// the admin template wrote.
+		if _, err := orgsSvc.Create(ctx, service.LocalPrincipal(id.Principal), "bootstrapped-org", true, []byte(`{}`)); err != nil {
+			t.Fatalf("the bootstrapped administrator cannot administer: %v", err)
+		}
+
+		if err := auth.Logout(ctx, session.SessionToken); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := auth.Identity(ctx, session.SessionToken); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("a revoked session still resolves: %v", err)
+		}
+
+		// Crossing the per-account backoff threshold is its own event.
+		for range 6 {
+			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")
+		}
+	})
+
 	t.Run("every_registered_type_is_actually_emitted", func(t *testing.T) {
 		// The registry-closure invariant is static: it proves declarations
 		// agree, not that an emitter exists. This runs last over the trails
 		// the preceding subtests filled and asserts every registered type
 		// really reached a table — an operation that drops its insert while
 		// keeping its `events:` declaration fails here.
-		if _, err := orgsSvc.List(tctx(t), root); err != nil {
+		if _, err := orgsSvc.List(tctx(t), service.LocalPrincipal(root)); err != nil {
 			t.Fatal(err)
 		}
-		if err := envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
+		if err := envs.UpdateNote(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "noted"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
+		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := orgsSvc.Create(tctx(t), root, "audited-org", true, []byte(`{}`)); err != nil {
+		if _, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 		for _, typ := range audit.Types() {
@@ -336,7 +446,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// durable record is what fail-closed forbids.
 		execRaw(t, db, "ALTER TABLE audit_tenant_events RENAME TO audit_tenant_events_broken")
 		defer execRaw(t, db, "ALTER TABLE audit_tenant_events_broken RENAME TO audit_tenant_events")
-		_, err := envs.Get(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
+		_, err := envs.Get(tctx(t), service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 		if err == nil {
 			t.Fatal("denied probe answered success under audit-write failure")
 		}

@@ -150,6 +150,8 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 	// Children before parents: tier3_keys references master_keys, and the
 	// tenant chain is grants -> environments -> projects -> orgs.
 	for _, table := range []string{
+		"credential_authorities", "password_credentials", "sessions", "accounts",
+		"auth_instance_state",
 		"grants", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
@@ -167,11 +169,11 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	meta := json.RawMessage(`{"tier":"gold","limits":{"projects":3}}`)
-	created, err := orgs.Create(t.Context(), admin, "roundtrip", true, meta)
+	created, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip", true, meta)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := orgs.Get(t.Context(), admin, created.ID)
+	got, err := orgs.Get(t.Context(), service.LocalPrincipal(admin), created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,11 +186,11 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 	if !got.Active {
 		t.Error("active=true did not round-trip")
 	}
-	inactive, err := orgs.Create(t.Context(), admin, "roundtrip-inactive", false, json.RawMessage(`{}`))
+	inactive, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "roundtrip-inactive", false, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotInactive, err := orgs.Get(t.Context(), admin, inactive.ID)
+	gotInactive, err := orgs.Get(t.Context(), service.LocalPrincipal(admin), inactive.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +212,11 @@ func scenarioRoundtrip(t *testing.T, db *store.DB) {
 func scenarioListOrder(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	for _, name := range []string{"zebra", "alpha", "mango"} {
-		if _, err := orgs.Create(t.Context(), admin, name, false, json.RawMessage(`{}`)); err != nil {
+		if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), name, false, json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	list, err := orgs.List(t.Context(), admin)
+	list, err := orgs.List(t.Context(), service.LocalPrincipal(admin))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +231,7 @@ func scenarioListOrder(t *testing.T, db *store.DB) {
 
 func scenarioRollback(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	before, err := orgs.Count(t.Context(), admin)
+	before, err := orgs.Count(t.Context(), service.LocalPrincipal(admin))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +252,7 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 	if err == nil {
 		t.Fatal("closure error must surface")
 	}
-	after, err := orgs.Count(t.Context(), admin)
+	after, err := orgs.Count(t.Context(), service.LocalPrincipal(admin))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,24 +263,24 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 
 func scenarioDuplicate(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), admin, "dupe", false, json.RawMessage(`{}`)); err != nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := orgs.Create(t.Context(), admin, "dupe", false, json.RawMessage(`{}`)); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "dupe", false, json.RawMessage(`{}`)); err == nil {
 		t.Fatal("duplicate org name must be refused by the unique constraint")
 	}
 }
 
 func scenarioInvalidMetadata(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	if _, err := orgs.Create(t.Context(), admin, "badjson", false, json.RawMessage(`{not json`)); err == nil {
+	if _, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "badjson", false, json.RawMessage(`{not json`)); err == nil {
 		t.Fatal("invalid JSON metadata must be refused at the boundary")
 	}
 }
 
 func scenarioNotFound(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	_, err := orgs.Get(t.Context(), admin, "org_does_not_exist")
+	_, err := orgs.Get(t.Context(), service.LocalPrincipal(admin), "org_does_not_exist")
 	if err != store.ErrNotFound {
 		t.Fatalf("want store.ErrNotFound, got %v", err)
 	}
@@ -294,7 +296,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	projects := &service.Projects{DB: db}
 	envs := &service.Environments{DB: db}
 
-	org, err := orgs.Create(t.Context(), admin, "tenant-chain", true, json.RawMessage(`{}`))
+	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,17 +313,17 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		 VALUES ('grt_ct_edit', 'usr_conformance_tenant', 'edit', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
 
-	proj, err := projects.Create(t.Context(), tenant, domain.OrgID(org.ID), "conformance-project")
+	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project")
 	if err != nil {
 		t.Fatal(err)
 	}
 	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
-	created, err := envs.Create(t.Context(), tenant, envScope, "dev")
+	created, err := envs.Create(t.Context(), service.LocalPrincipal(tenant), envScope, "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fullScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID), Env: domain.EnvID(created.ID)}
-	got, err := envs.Get(t.Context(), tenant, fullScope)
+	got, err := envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,10 +336,10 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if got.OrgID != org.ID || got.ProjectID != proj.ID {
 		t.Errorf("chain columns did not come from the proof: %+v", got)
 	}
-	if err := envs.UpdateNote(t.Context(), tenant, fullScope, "noted"); err != nil {
+	if err := envs.UpdateNote(t.Context(), service.LocalPrincipal(tenant), fullScope, "noted"); err != nil {
 		t.Fatal(err)
 	}
-	got, err = envs.Get(t.Context(), tenant, fullScope)
+	got, err = envs.Get(t.Context(), service.LocalPrincipal(tenant), fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +353,7 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 // succeed within the bounded-retry budget.
 func scenarioConcurrent(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
-	before, err := orgs.Count(t.Context(), admin)
+	before, err := orgs.Count(t.Context(), service.LocalPrincipal(admin))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +364,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := orgs.Create(context.Background(), admin, fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
+			_, err := orgs.Create(context.Background(), service.LocalPrincipal(admin), fmt.Sprintf("concurrent-%d", i), true, json.RawMessage(`{}`))
 			errs <- err
 		}()
 	}
@@ -373,7 +375,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 			t.Errorf("concurrent create failed: %v", err)
 		}
 	}
-	after, err := orgs.Count(t.Context(), admin)
+	after, err := orgs.Count(t.Context(), service.LocalPrincipal(admin))
 	if err != nil {
 		t.Fatal(err)
 	}

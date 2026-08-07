@@ -70,12 +70,76 @@ func (s *System) Ready(ctx context.Context) error {
 	return migrate.Check(ctx, s.Store)
 }
 
+// Actor is who is asking, resolved INSIDE the operation's own transaction.
+//
+// This type exists because of a real defect two reviewers found
+// independently: the transport used to resolve the session in one
+// transaction and then hand a bare principal id to a service that opened
+// another. Between them a session could be revoked, expire, have its
+// generation advanced or its credential epoch bumped — and the operation
+// would still authorize against the principal that resolution had already
+// decided on. A principal id crossing a transaction boundary IS the
+// cross-request authorization cache the permission model forbids; it just
+// looks like an argument.
+//
+// The zero value resolves to nothing, so a caller that forgets to set one
+// gets a refusal rather than an anonymous success.
+type Actor struct {
+	bearer    string
+	principal domain.PrincipalID
+}
+
+// Bearer is the network path: a presented session artifact, resolved at the
+// chokepoint inside whichever transaction the operation opens.
+func Bearer(artifact string) Actor { return Actor{bearer: artifact} }
+
+// LocalPrincipal is the below-the-network path: a principal the caller
+// already established by other means — the isolation harness, and local
+// authority verbs that run on the server's own host.
+//
+// It bypasses session resolution by construction, which is exactly why the
+// import-boundary test refuses internal/server the right to name it. A
+// transport that could build one could authorize as anybody.
+func LocalPrincipal(p domain.PrincipalID) Actor { return Actor{principal: p} }
+
+// resolve turns an Actor into a principal, inside the caller's transaction.
+func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (domain.PrincipalID, error) {
+	if a.principal != "" {
+		return a.principal, nil
+	}
+	if a.bearer == "" {
+		return "", domain.ErrUnauthenticated
+	}
+	id, err := az.Authenticate(ctx, a.bearer, now)
+	if err != nil {
+		return "", err
+	}
+	return id.Principal, nil
+}
+
 func newID(prefix string) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
 		return "", fmt.Errorf("service: generate %s id: %w", prefix, err)
 	}
 	return prefix + "_" + id.String(), nil
+}
+
+// Org is the service layer's organisation. It is a distinct type from the
+// store row on purpose: internal/store is importable only by this package, so
+// a transport that returned store rows would either violate that boundary or
+// force it open. Field names match the store row, which keeps the conversion
+// a copy rather than a translation.
+type Org struct {
+	ID        string
+	Name      string
+	Active    bool
+	Metadata  json.RawMessage
+	CreatedAt time.Time
+}
+
+func orgOf(o store.Org) Org {
+	return Org{ID: o.ID, Name: o.Name, Active: o.Active, Metadata: o.Metadata, CreatedAt: o.CreatedAt}
 }
 
 // Orgs is the demonstration aggregate's service. Org administration is
@@ -86,10 +150,10 @@ type Orgs struct {
 }
 
 // Create publishes a new org through the transactional boundary.
-func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name string, active bool, metadata json.RawMessage) (store.Org, error) {
+func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool, metadata json.RawMessage) (Org, error) {
 	id, err := newID("org")
 	if err != nil {
-		return store.Org{}, err
+		return Org{}, err
 	}
 	org := store.Org{
 		ID:        id,
@@ -99,6 +163,10 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 		CreatedAt: store.CanonTime(time.Now()),
 	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpOrgCreate, domain.Scope{})
 		if err != nil {
 			return err
@@ -115,9 +183,9 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	if err != nil {
-		return store.Org{}, err
+		return Org{}, err
 	}
-	return org, nil
+	return orgOf(org), nil
 }
 
 // Org reads are instance-scoped operator reads of cross-tenant metadata, so
@@ -125,9 +193,13 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 // `audited: none` to instance-class operations). The event commits with the
 // read, which is why these run in a write transaction: an operator read
 // without its durable record does not complete.
-func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (store.Org, error) {
+func (s *Orgs) Get(ctx context.Context, actor Actor, id string) (Org, error) {
 	var out store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
 		if err != nil {
 			return err
@@ -144,12 +216,16 @@ func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string)
 		}
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
-	return out, err
+	return orgOf(out), err
 }
 
-func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.Org, error) {
+func (s *Orgs) List(ctx context.Context, actor Actor) ([]Org, error) {
 	var out []store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
@@ -165,12 +241,23 @@ func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.
 		}
 		return r.Audit().InsertInstance(ctx, p, ev)
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Org, 0, len(out))
+	for _, o := range out {
+		list = append(list, orgOf(o))
+	}
+	return list, nil
 }
 
-func (s *Orgs) Count(ctx context.Context, principal domain.PrincipalID) (int64, error) {
+func (s *Orgs) Count(ctx context.Context, actor Actor) (int64, error) {
 	var out int64
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
@@ -197,13 +284,17 @@ type Projects struct {
 // Create makes a project inside org. The service addresses the scope; the
 // chain the store writes comes from the proof authorize() minted after
 // resolving that scope — never from these arguments.
-func (s *Projects) Create(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, name string) (store.Project, error) {
+func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string) (store.Project, error) {
 	id, err := newID("prj")
 	if err != nil {
 		return store.Project{}, err
 	}
 	proj := store.NewProject{ID: id, Name: name, CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpProjectCreate, domain.Scope{Org: org})
 		if err != nil {
 			return err
@@ -235,13 +326,17 @@ type Environments struct {
 // Create addresses the parent project (Org+Project); Get/UpdateNote address
 // the environment (full chain).
 
-func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, name string) (store.Environment, error) {
+func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (store.Environment, error) {
 	id, err := newID("env")
 	if err != nil {
 		return store.Environment{}, err
 	}
 	env := store.NewEnvironment{ID: id, Name: name, Note: "", CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvCreate, scope)
 		if err != nil {
 			return err
@@ -266,9 +361,13 @@ func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID,
 	}, nil
 }
 
-func (s *Environments) Get(ctx context.Context, principal domain.PrincipalID, scope domain.Scope) (store.Environment, error) {
+func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope) (store.Environment, error) {
 	var out store.Environment
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvRead, scope)
 		if err != nil {
 			return err
@@ -279,8 +378,12 @@ func (s *Environments) Get(ctx context.Context, principal domain.PrincipalID, sc
 	return out, err
 }
 
-func (s *Environments) UpdateNote(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, note string) error {
+func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		p, err := az.Authorize(ctx, principal, authz.OpEnvUpdateNote, scope)
 		if err != nil {
 			return err

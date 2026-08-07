@@ -362,7 +362,7 @@ func TestDenialWriterIsSoleWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range CheckDenialWriter(pkgs) {
+	for _, f := range CheckDenialWriter(pkgs, repoRoot(t)) {
 		t.Error(f)
 	}
 }
@@ -373,27 +373,39 @@ func TestDenialWriterCatchesSecondWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	surface := Module + "/internal/lint/testdata/badauthn"
-	findings := CheckDenialWriterIn(pkgs, surface, "WriteDenial")
+	mutating, mfind, err := MutatingQueries(repoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mfind) != 0 {
+		t.Errorf("unclassified sqlc commands: %v", mfind)
+	}
+	findings := CheckDenialWriterIn(pkgs, surface, map[string]bool{"WriteDenial": true}, mutating)
 	assertFindings(t, findings, []string{
-		"SecondWriter calls the mutating query InsertTenantAuditEvent outside WriteDenial",
+		"SecondWriter names the mutating query InsertTenantAuditEvent, and SecondWriter is not in the pinned enumerated write list",
+		"MethodValueWriter names the mutating query InsertTenantAuditEvent, and MethodValueWriter is not in the pinned enumerated write list",
 	})
 	for _, f := range findings {
-		if strings.Contains(f, "WriteDenial calls") || strings.Contains(f, "ReadsAreFine") {
+		if strings.Contains(f, "WriteDenial names") || strings.Contains(f, "ReadsAreFine") {
 			t.Errorf("analyzer flagged a licensed write or a read: %s", f)
 		}
 	}
 	// Scoping: the same package is silent when it is not the named surface.
-	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial"); len(f) != 0 {
+	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", map[string]bool{"WriteDenial": true}, mutating); len(f) != 0 {
 		t.Errorf("analyzer fired outside the named surface: %v", f)
 	}
-	for _, name := range []string{"InsertTenantAuditEvent", "CreateOrg", "UpdateEnvironmentNote", "DeleteThing", "AcquireHierarchyGeneration"} {
-		if !mutatingQuery(name) {
-			t.Errorf("mutatingQuery(%q) = false — a write verb the analyzer would miss", name)
+	// The classifier is derived from sqlc's command annotation, not from the
+	// query's name. These three mutate and none of them starts with a verb a
+	// prefix list would have guessed — which is exactly how the previous
+	// version let three real writers through.
+	for _, name := range []string{"ConsumeCredentialAuthority", "TouchSession", "AdvancePrincipalGeneration", "InsertTenantAuditEvent"} {
+		if !mutating[name] {
+			t.Errorf("MutatingQueries omits %q — a write the analyzer would not enforce", name)
 		}
 	}
-	for _, name := range []string{"GetPrincipalKind", "ResolveOrgChain", "ListGrantsForPrincipal", "PageTenantAuditOrg"} {
-		if mutatingQuery(name) {
-			t.Errorf("mutatingQuery(%q) = true — a read misclassified as a write", name)
+	for _, name := range []string{"GetPrincipalKind", "ResolveOrgChain", "ListGrantsForPrincipal", "GetSessionByVerifier"} {
+		if mutating[name] {
+			t.Errorf("MutatingQueries includes %q — a read misclassified as a write", name)
 		}
 	}
 }

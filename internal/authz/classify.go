@@ -1,6 +1,10 @@
 package authz
 
-import "maps"
+import (
+	"maps"
+
+	"github.com/Dunky13/wenv/internal/audit"
+)
 
 // The wire registry: the probe classification for every non-operation entry
 // point (tenant-isolation ADR, invariant 1). Service operations carry their
@@ -25,6 +29,39 @@ var wireRegistry = map[string]Class{
 	"http:GET /healthz": ClassUnauthenticated,
 	"http:GET /readyz":  ClassUnauthenticated,
 
+	// The contract surface (#47). Every entry below exists in
+	// api/openapi.yaml and carries the same class there under
+	// `x-wenv-class`; api.TestContractClassesMatchTheWireRegistry fails the
+	// build if the two ever disagree, so the document cannot describe an
+	// authorization posture the router does not have.
+	//
+	// Identity-protocol endpoints are unauthenticated-class: their probe
+	// contract is enumeration uniformity — no pre-authentication path may
+	// distinguish an existing account, session or authority from a missing
+	// one. `logout` and `whoami` take an artifact but are classified here
+	// too, because an unresolvable artifact is exactly the case they must not
+	// distinguish.
+	"http:GET /api/v1/meta":                       ClassUnauthenticated,
+	"http:POST /api/v1/auth/credential/establish": ClassUnauthenticated,
+	"http:POST /api/v1/auth/local/login":          ClassUnauthenticated,
+	"http:POST /api/v1/auth/logout":               ClassUnauthenticated,
+	"http:GET /api/v1/auth/whoami":                ClassUnauthenticated,
+
+	// Org administration is instance-scoped: the probe contract is grant
+	// refusal, not tenancy, because no tenant object exists whose
+	// nonexistence could be mimicked.
+	"http:GET /api/v1/orgs":       ClassInstance,
+	"http:POST /api/v1/orgs":      ClassInstance,
+	"http:GET /api/v1/orgs/{org}": ClassInstance,
+
+	// `wenv admin create`: the bootstrap member of the closed local-authority
+	// exception set. System class, whose probe contract is network
+	// unreachability — the totality invariant asserts it by finding no HTTP
+	// route, which is the guarantee that matters here: a first-administrator
+	// endpoint reachable from the network is the trust-on-first-use race the
+	// ADR rejected outright.
+	"cli:admin": ClassSystem,
+
 	// Process entry points with no principal: boot (server) and migration.
 	// Their system-proof mint sites are enumerated in systemSites; the probe
 	// contract is network unreachability, which the totality check asserts
@@ -36,7 +73,19 @@ var wireRegistry = map[string]Class{
 	// no server, no store; the pre-auth contract is trivially total.
 	"cli:version": ClassUnauthenticated,
 
-	"cli:login":       ClassStub,
+	// Client verbs that reach the server. Their probe contract is the HTTP
+	// route they call, classified above; the verb itself carries the class of
+	// what it reaches, so a verb whose class is still ClassStub cannot
+	// silently start making requests.
+	"cli:login":   ClassUnauthenticated,
+	"cli:logout":  ClassUnauthenticated,
+	"cli:whoami":  ClassUnauthenticated,
+	"cli:account": ClassUnauthenticated,
+	// `context` is entirely client-local: the trust store and the named
+	// contexts live on this box and reach no server.
+	"cli:context": ClassUnauthenticated,
+	"cli:org":     ClassInstance,
+
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
 	"cli:sync":        ClassStub,
@@ -48,6 +97,63 @@ var wireRegistry = map[string]Class{
 	// Outbox job types and SSE emit sites: none exist. Their registries are
 	// this table's "job:" and "sse:" key spaces; the first entry of each
 	// kind must arrive with its probe class.
+}
+
+// wireEvents maps a wire entry to the audit event types it emits DIRECTLY,
+// without an operation registry row behind it.
+//
+// It exists because authentication is the one surface that cannot be modelled
+// as an operation: `authorize()` needs a principal, and these endpoints are
+// what produce one. Their audit obligation is real all the same — the
+// human-auth ADR requires login success and failure, logout, session
+// creation, and credential-establishment mint, consumption and refusal — so
+// the completeness invariant reads this table beside the operation registry
+// rather than letting an unaudited pre-auth path hide behind "no operation".
+//
+// A wire entry that appears here and also reaches a registered operation is a
+// modelling mistake, and the completeness invariant says so.
+var wireEvents = map[string][]audit.EventType{
+	"http:POST /api/v1/auth/local/login": {
+		audit.EventAuthLogin,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/logout": {audit.EventAuthLogout},
+	"http:POST /api/v1/auth/credential/establish": {
+		audit.EventAuthCredentialEstablished,
+		audit.EventAuthAuthorityRefused,
+	},
+	// whoami resolves a session and reports it. It writes nothing and its
+	// result duplicates what the login event already recorded, so it is the
+	// one auth path with no event of its own — pinned in the exemption
+	// fixture with that reason rather than silently absent.
+
+	// The bootstrap verb, running on the server's own host under local
+	// authority. Its mint is audited including the DELIVERY MODE, because a
+	// token that reached a log shipper is a different event from one written
+	// to a root-owned file.
+	"cli:admin": {audit.EventAuthAuthorityMinted},
+}
+
+// wireRoutes maps an HTTP entry point to the registered operation it reaches.
+// The audit-completeness invariant follows it so a domain route inherits its
+// operation's audit mapping instead of needing a second declaration that
+// could drift from the first.
+var wireRoutes = map[string]Operation{
+	"http:POST /api/v1/orgs":      OpOrgCreate,
+	"http:GET /api/v1/orgs":       OpOrgList,
+	"http:GET /api/v1/orgs/{org}": OpOrgGet,
+}
+
+// WireRoutes returns the route→operation mapping for the invariant tests and
+// the contract cross-check.
+func (RegistryFacts) WireRoutes() map[string]Operation {
+	return maps.Clone(wireRoutes)
+}
+
+// WireEvents returns the direct wire→event mapping for the invariant tests.
+func (RegistryFacts) WireEvents() map[string][]audit.EventType {
+	return maps.Clone(wireEvents)
 }
 
 // Cache is one registered cache holding derived tenant material
