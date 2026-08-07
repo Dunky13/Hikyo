@@ -296,8 +296,14 @@ a failed disclosure left its file behind; an explicit instance URL was not
 compared against the trust entry it resolved to; the limiter's maps were
 unbounded.
 
-**Round 2** verified the fixes. **Round 3 is the cap** — leftovers at that
-point are for human disposition, not another loop.
+**Round 2** verified the fixes: 10 HOLDS, 5 PARTIAL, 0 new criticals. All five
+partials closed in the follow-up commit — the Actor pattern extended to the
+Projects/Environments demonstration services; login/authority refusal audit
+failures made loud rather than swallowed with `_ =`; the proof-free-writer
+analyzer broadened to catch a mutating query taken as a method value; the
+artifact grammar tightened to a canonical decode so the accepted set equals
+the emittable set; and an oldest-live fallback added to account eviction so
+the limiter maps cannot grow past their bound. **Round 3 is the cap.**
 
 ### Known-open, for disposition
 
