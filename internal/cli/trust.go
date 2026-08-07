@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -215,13 +216,17 @@ func FetchIdentity(origin string) (string, error) {
 	if u.Scheme != "https" {
 		return "", nil
 	}
-	host := u.Host
-	if !strings.Contains(host, ":") {
-		host += ":443"
+	// url.Hostname/Port strip the brackets an IPv6 literal carries in a URL,
+	// and net.JoinHostPort puts them back. Splitting on ":" by hand gets
+	// `https://[::1]:8443` wrong in three different places.
+	port := u.Port()
+	if port == "" {
+		port = "443"
 	}
-	conn, err := tls.Dial("tcp", host, &tls.Config{
+	conn, err := tls.Dial("tcp", net.JoinHostPort(u.Hostname(), port), &tls.Config{
 		InsecureSkipVerify: true, //nolint:gosec // the ceremony displays the identity for a human to confirm; nothing is trusted here
-		ServerName:         hostnameOf(u.Host),
+		ServerName:         u.Hostname(),
+		MinVersion:         tls.VersionTLS12,
 	})
 	if err != nil {
 		return "", failf(ExitUnavailable, "cannot reach %s: %v", origin, err)
@@ -232,13 +237,6 @@ func FetchIdentity(origin string) (string, error) {
 		return "", failf(ExitRefused, "%s presented no certificate", origin)
 	}
 	return SPKIFingerprint(certs[0]), nil
-}
-
-func hostnameOf(hostport string) string {
-	if h, _, found := strings.Cut(hostport, ":"); found {
-		return h
-	}
-	return hostport
 }
 
 func shortPin(pin string) string {

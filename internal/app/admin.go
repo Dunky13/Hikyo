@@ -129,7 +129,7 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 	if err != nil {
 		return err
 	}
-	auth := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter}
+	auth := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log}
 
 	result, err := auth.BootstrapAdmin(ctx, *username, *displayName, delivery)
 	if err != nil {

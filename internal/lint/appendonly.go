@@ -159,14 +159,23 @@ var ResolutionSurfaceWriters = map[string]bool{
 // mutating call inside it would be a proof-free writer that every other guard
 // admits. Every call to a generated mutating query from that package must sit
 // inside a function named in ResolutionSurfaceWriters.
-func CheckDenialWriter(pkgs []*packages.Package) []string {
-	return CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", ResolutionSurfaceWriters)
+func CheckDenialWriter(pkgs []*packages.Package, repoRoot string) []string {
+	mutating, findings, err := MutatingQueries(repoRoot)
+	if err != nil {
+		return append(findings, "denialwriter: "+err.Error())
+	}
+	if len(mutating) == 0 {
+		return append(findings,
+			"denialwriter: no mutating queries found — the analyzer would be vacuously green")
+	}
+	return append(findings,
+		CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", ResolutionSurfaceWriters, mutating)...)
 }
 
 // CheckDenialWriterIn is CheckDenialWriter with the surface named, so the
 // negative fixture can prove the check actually fires on an unlisted writer
 // rather than merely on a package that has none.
-func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers map[string]bool) []string {
+func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers, mutating map[string]bool) []string {
 	var findings []string
 	for _, p := range flatten(pkgs) {
 		if strings.TrimSuffix(p.PkgPath, ".test") != surface || p.TypesInfo == nil {
@@ -195,7 +204,7 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers map[s
 					if !ok || f.Pkg() == nil || !generatedPackages[f.Pkg().Path()] {
 						return true
 					}
-					if !mutatingQuery(f.Name()) || writers[fn.Name.Name] {
+					if !mutating[f.Name()] || writers[fn.Name.Name] {
 						return true
 					}
 					findings = append(findings, fmt.Sprintf(
@@ -210,14 +219,41 @@ func CheckDenialWriterIn(pkgs []*packages.Package, surface string, writers map[s
 	return findings
 }
 
-// mutatingQuery recognises a generated statement that writes. sqlc names
-// queries after their intent, so the prefix set is the whole vocabulary the
-// repo uses; a new verb must be added here deliberately.
-func mutatingQuery(name string) bool {
-	for _, prefix := range []string{"Insert", "Create", "Update", "Delete", "Acquire", "Prune", "Set"} {
-		if strings.HasPrefix(name, prefix) {
-			return true
+// MutatingQueries derives the set of generated queries that write, from the
+// sqlc command annotation on each query rather than from its name.
+//
+// The previous version guessed from a prefix list, and that was FAIL-OPEN in
+// the worst way: `ConsumeCredentialAuthority`, `TouchSession` and
+// `AdvancePrincipalGeneration` all mutate and none of them starts with a
+// listed prefix, so three real writers slipped past the enforcement that
+// exists to catch exactly them. A classifier that has to be remembered is a
+// classifier that will be forgotten.
+//
+// `:exec`, `:execrows`, `:execresult` and `:execlastid` are sqlc's write
+// commands; `:one` and `:many` read. An unrecognised command is treated as
+// MUTATING — the fail-closed direction — and reported, so a sqlc release that
+// adds a command cannot silently widen the hole.
+func MutatingQueries(repoRoot string) (map[string]bool, []string, error) {
+	out := map[string]bool{}
+	var findings []string
+	for _, engine := range []string{"sqlite", "postgres"} {
+		queries, err := ParseQueries(filepath.Join(repoRoot, "internal", "store", "queries", engine))
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, q := range queries {
+			switch q.Cmd {
+			case "one", "many", "batchmany", "batchone":
+				continue
+			case "exec", "execrows", "execresult", "execlastid", "copyfrom", "batchexec":
+				out[q.Name] = true
+			default:
+				out[q.Name] = true
+				findings = append(findings, fmt.Sprintf(
+					"denialwriter: query %s has unrecognised sqlc command %q — treated as mutating (fail-closed); classify it deliberately",
+					q.Name, q.Cmd))
+			}
 		}
 	}
-	return false
+	return out, findings, nil
 }

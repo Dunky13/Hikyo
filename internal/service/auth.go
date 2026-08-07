@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Dunky13/wenv/internal/admission"
@@ -81,6 +82,10 @@ type Auth struct {
 	Admission *admission.Limiter
 	// Now is injectable for tests; nil means time.Now.
 	Now func() time.Time
+	// Log records server-side faults that must not reach the caller — an
+	// unreadable verifier answers the uniform refusal, and the reason it was
+	// unreadable belongs in the process log and nowhere else.
+	Log *slog.Logger
 }
 
 func (s *Auth) now() time.Time {
@@ -156,22 +161,21 @@ type LoginResult struct {
 // distinguishes it from a wrong password on a real account. Every refusal
 // answers domain.ErrUnauthenticated.
 func (s *Auth) LocalLogin(ctx context.Context, username, password string) (LoginResult, error) {
+	// The per-account delay is evaluated BEFORE the semaphore, not after.
+	// Sleeping while holding an expensive-work slot would let an attacker put
+	// a handful of identifiers into backoff and then occupy every slot doing
+	// no work at all, denying logins to everyone else — the throttle becoming
+	// the outage. An account in backoff is refused outright with the same
+	// uniform overload answer every other pre-auth path gives.
+	if delay := s.Admission.AccountDelay(username); delay > 0 {
+		return LoginResult{}, admission.ErrOverloaded
+	}
+
 	release, err := s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
 	if err != nil {
 		return LoginResult{}, err // admission.ErrOverloaded — uniform on every pre-auth path
 	}
 	defer release()
-
-	// The per-account delay is applied BEFORE verification begins and is
-	// shared across concurrent attempts on the account, because it is stored
-	// as an absolute instant rather than a per-call sleep.
-	if delay := s.Admission.AccountDelay(username); delay > 0 {
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			return LoginResult{}, admission.ErrOverloaded
-		}
-	}
 
 	out, err := s.attemptLogin(ctx, username, password)
 	switch {
@@ -247,10 +251,16 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 
 	// Phase 2 — verify, outside any transaction. Every non-verifying path
 	// burns an equivalent derivation: returning early on an unknown account,
-	// a missing credential or a superseded epoch would make each of them
-	// observably faster than a wrong password, which is exactly the oracle
-	// this path exists to close.
+	// a missing credential, a superseded epoch or an unreadable verifier
+	// would make each of them observably faster than a wrong password, which
+	// is exactly the oracle this path exists to close.
 	cause := ""
+	var (
+		upgrade       bool
+		upgradeSealed []byte
+		upgradeParams authz.KDFParams
+		upgradeDEK    int64
+	)
 	switch {
 	case !resolved:
 		crypto.BurnDummyVerification([]byte(password), s.KDF)
@@ -265,15 +275,38 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 	default:
 		plain, err := s.Keyring.ForInstance().OpenField(verifierAAD(account.ID), cred.Verifier)
 		if err != nil {
-			// A verifier we cannot open is not a verifier we may accept. This
-			// is a real fault (wrong key, tampered row), so it is loud — but
-			// the caller still renders the uniform refusal.
-			return LoginResult{}, fmt.Errorf("service: opening the verifier for %s failed: %w", account.ID, err)
+			// A verifier we cannot open is not a verifier we may accept. It is
+			// a real fault — wrong key, tampered row — and it is logged as
+			// one, but it must NOT reach the caller as a 500 while a missing
+			// account answers 401: that difference is an account-existence
+			// oracle for anyone who can provoke it. Burn the work and refuse
+			// uniformly.
+			s.logFault(ctx, "opening a password verifier failed", err, account.ID)
+			crypto.BurnDummyVerification([]byte(password), s.KDF)
+			cause = "verifier-unreadable"
+			break
 		}
 		ok := crypto.VerifyPassword([]byte(password), plain, crypto.PasswordParams(cred.KDF))
 		crypto.Zero(plain)
 		if !ok {
 			cause = "bad-password"
+		} else if cred.KDF != (authz.KDFParams{MemoryKiB: s.KDF.MemoryKiB, Time: s.KDF.Time, Parallelism: s.KDF.Parallelism}) {
+			// Derive the replacement HERE, outside any transaction, beside
+			// the verification that just succeeded.
+			// The verifier was written under different parameters. Re-derive
+			// under the configured ones so stored costs converge on the
+			// instance's — this is the "re-derivation on next successful
+			// login" the ADR specifies, and it is also what keeps the
+			// unknown-account burn (which uses the configured parameters)
+			// comparable to a real verification over time.
+			upgraded, upParams, upDEK, uerr := s.sealVerifier(account.ID, password)
+			if uerr != nil {
+				// An upgrade that cannot be prepared must not fail the login:
+				// the credential that just verified is still valid.
+				s.logFault(ctx, "preparing a KDF upgrade failed", uerr, account.ID)
+			} else {
+				upgrade, upgradeSealed, upgradeParams, upgradeDEK = true, upgraded, upParams, upDEK
+			}
 		}
 	}
 
@@ -309,6 +342,11 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 			refused = s.failLogin(ctx, az, now, account.ID, true, "credential-changed")
 			return nil
 		}
+		if upgrade {
+			if err := s.rehash(ctx, az, account.ID, upgradeSealed, upgradeParams, upgradeDEK, current, now); err != nil {
+				return err
+			}
+		}
 		result, err = s.mintSession(ctx, az, account, now)
 		return err
 	})
@@ -319,6 +357,34 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 		return LoginResult{}, refused
 	}
 	return result, nil
+}
+
+// rehash re-derives a verifier under the instance's configured parameters
+// after a successful login, so a raised floor propagates without locking
+// anyone out.
+//
+// The derivation happens BEFORE the write transaction for the same reason
+// everything else here does, and the swap is conditional on the version the
+// caller read: a password reset that landed while we were deriving must win,
+// and a KDF upgrade must never write a verifier derived from the OLD password
+// back over it. A losing swap is not an error — the credential is current
+// either way, and the session being minted is still legitimate.
+func (s *Auth) rehash(ctx context.Context, az *authz.TxAuthorizer, accountID string, sealed []byte, params authz.KDFParams, dekVersion int64, current authz.PasswordCredential, now time.Time) error {
+	_, err := az.ReplacePasswordCredential(ctx, authz.PasswordCredential{
+		AccountID: accountID, Verifier: sealed, KDF: params,
+		DEKVersion:      dekVersion,
+		CredentialEpoch: current.CredentialEpoch,
+		RowVersion:      current.RowVersion,
+	}, now)
+	return err
+}
+
+// logFault records a server-side fault. Nothing about it reaches the caller.
+func (s *Auth) logFault(ctx context.Context, what string, err error, accountID string) {
+	if s.Log == nil {
+		return
+	}
+	s.Log.ErrorContext(ctx, what, "err", err, "account_id", accountID)
 }
 
 func accountIDOf(resolved bool, a authz.Account) string {
@@ -423,11 +489,12 @@ func (s *Auth) failLogin(ctx context.Context, az *authz.TxAuthorizer, now time.T
 }
 
 func (s *Auth) recordThrottleCrossing(ctx context.Context, username string) {
-	// Best-effort by design: the login has already been refused, and failing
-	// the caller's request because a secondary observability event could not
-	// be written would convert a throttle into an outage. The failure is
-	// still loud in the process log via the transaction's own error.
-	_ = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	// Best-effort for the CALLER — the login is already refused, and failing
+	// their request because a secondary observability event could not be
+	// written would turn a throttle into an outage — but never silent. A
+	// swallowed error here means a threshold crossing nobody sees, which is
+	// the opposite of what the event is for.
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		accountID := ""
 		resolved := false
 		if acc, err := az.AccountByUsername(ctx, username); err == nil {
@@ -444,6 +511,9 @@ func (s *Auth) recordThrottleCrossing(ctx context.Context, username string) {
 		}
 		return az.RecordAuthEvent(ctx, e)
 	})
+	if err != nil {
+		s.logFault(ctx, "recording a throttle threshold crossing failed", err, "")
+	}
 }
 
 // EstablishCredential consumes a credential-establishment authority and sets
@@ -473,26 +543,32 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		return s.refuseAuthority(ctx, "malformed")
 	}
 
-	// Same discipline as the login path: a refusal leaves the closure through
-	// `refused`, never through the return value, so the transaction commits
-	// the record of it instead of rolling that record back.
-	var refused error
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		refused = nil
+	// Phase 1 — resolve and snapshot, in a READ transaction. Deriving inside
+	// a write transaction would hold sqlite's single writer for the length of
+	// an Argon2id derivation, which is the same denial of service the login
+	// path was carrying until a reviewer found it.
+	var (
+		auth     authz.CredentialAuthority
+		existing authz.PasswordCredential
+		haveCred bool
+		epoch    int64
+		cause    string
+	)
+	verifier := crypto.ArtifactVerifier(authority)
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		var rerr error
+		if epoch, rerr = az.CredentialEpoch(ctx); rerr != nil {
+			return rerr
+		}
+		auth, rerr = az.AuthorityByValue(ctx, verifier)
+		switch {
+		case errors.Is(rerr, domain.ErrNotFound):
+			cause = "unknown"
+			return nil
+		case rerr != nil:
+			return rerr
+		}
 		now := s.now()
-		auth, err := az.AuthorityByValue(ctx, crypto.ArtifactVerifier(authority))
-		if err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				refused = s.refuseAuthorityIn(ctx, az, "unknown")
-				return nil
-			}
-			return err
-		}
-		epoch, err := az.CredentialEpoch(ctx)
-		if err != nil {
-			return err
-		}
-		var cause string
 		switch {
 		case auth.Consumed:
 			cause = "consumed"
@@ -502,14 +578,68 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 			cause = "epoch-superseded"
 		}
 		if cause != "" {
-			refused = s.refuseAuthorityIn(ctx, az, cause)
+			return nil
+		}
+		existing, rerr = az.PasswordCredentialFor(ctx, auth.AccountID)
+		switch {
+		case errors.Is(rerr, domain.ErrNotFound):
+			return nil
+		case rerr != nil:
+			return rerr
+		}
+		haveCred = true
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if cause != "" {
+		return s.refuseAuthority(ctx, cause)
+	}
+
+	// Phase 2 — derive, outside any transaction. The version counter was
+	// snapshotted BEFORE this, so the compare-and-swap below covers the whole
+	// derivation window rather than just the instant after it.
+	sealed, params, dekVersion, err := s.sealVerifier(auth.AccountID, password)
+	if err != nil {
+		return err
+	}
+
+	// Phase 3 — claim and write, in a short write transaction.
+	var refused error
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		refused = nil
+		now := s.now()
+		// Re-validate everything the read phase decided on: it may have
+		// changed while we derived, and the atomic claim below is the only
+		// thing that makes single-use true under concurrency.
+		live, err := az.AuthorityByValue(ctx, verifier)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				refused = s.refuseAuthorityIn(ctx, az, "unknown")
+				return nil
+			}
+			return err
+		}
+		liveEpoch, err := az.CredentialEpoch(ctx)
+		if err != nil {
+			return err
+		}
+		switch {
+		case live.Consumed:
+			refused = s.refuseAuthorityIn(ctx, az, "consumed")
+			return nil
+		case !now.Before(live.ExpiresAt):
+			refused = s.refuseAuthorityIn(ctx, az, "expired")
+			return nil
+		case live.CredentialEpoch != liveEpoch || liveEpoch != epoch:
+			refused = s.refuseAuthorityIn(ctx, az, "epoch-superseded")
 			return nil
 		}
 
-		// Claim it first. The NULL guard is the atomic claim, so two
-		// concurrent presentations cannot both establish a credential and the
-		// loser fails closed.
-		claimed, err := az.ConsumeAuthority(ctx, auth.ID, now)
+		// The NULL guard is the atomic claim: two concurrent presentations
+		// cannot both establish a credential, and the loser fails closed.
+		claimed, err := az.ConsumeAuthority(ctx, live.ID, now)
 		if err != nil {
 			return err
 		}
@@ -518,17 +648,36 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 			return nil
 		}
 
-		if err := s.writeCredential(ctx, az, auth.AccountID, password, epoch, now); err != nil {
-			return err
+		cred := authz.PasswordCredential{
+			AccountID: live.AccountID, Verifier: sealed, KDF: params,
+			DEKVersion: dekVersion, CredentialEpoch: liveEpoch,
+			RowVersion: existing.RowVersion,
+		}
+		if !haveCred {
+			if err := az.WritePasswordCredential(ctx, cred, now); err != nil {
+				return err
+			}
+		} else {
+			swapped, err := az.ReplacePasswordCredential(ctx, cred, now)
+			if err != nil {
+				return err
+			}
+			if !swapped {
+				// The row moved while we derived. Loud rather than
+				// retried-into-silence: writing anyway would clobber whatever
+				// won, and the authority is already consumed, so the caller
+				// needs to know this attempt did not establish anything.
+				return ErrCredentialRace
+			}
 		}
 
-		// Establishing a credential invalidates every session of the
-		// principal: an account-security mutation deletes sessions in the
-		// same transaction as the credential change.
-		account, err := az.AccountByID(ctx, auth.AccountID)
+		account, err := az.AccountByID(ctx, live.AccountID)
 		if err != nil {
 			return err
 		}
+		// Establishing a credential invalidates every session of the
+		// principal: an account-security mutation deletes sessions in the
+		// same transaction as the credential change.
 		if err := az.AdvanceGeneration(ctx, account.PrincipalID); err != nil {
 			return err
 		}
@@ -537,9 +686,9 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 		}
 
 		e, err := newAuditEvent(ctx, audit.EventAuthCredentialEstablished, account.PrincipalID,
-			audit.Object{Type: "account", ID: auth.AccountID}, audit.OutcomeSuccess, "",
+			audit.Object{Type: "account", ID: live.AccountID}, audit.OutcomeSuccess, "",
 			audit.Payload{
-				"authority_id": auth.ID, "account_id": auth.AccountID,
+				"authority_id": live.ID, "account_id": live.AccountID,
 				"credential": MethodLocalPassword,
 			})
 		if err != nil {
@@ -553,57 +702,36 @@ func (s *Auth) EstablishCredential(ctx context.Context, authority, password stri
 	return refused
 }
 
-// writeCredential seals a fresh verifier and writes it, inserting or
-// compare-and-swapping depending on whether one already exists.
-func (s *Auth) writeCredential(ctx context.Context, az *authz.TxAuthorizer, accountID, password string, epoch int64, now time.Time) error {
+// sealVerifier derives and envelope-encrypts a verifier. It touches no
+// transaction, which is the point: it is the expensive half.
+func (s *Auth) sealVerifier(accountID, password string) ([]byte, authz.KDFParams, int64, error) {
 	salt, err := crypto.NewSalt()
 	if err != nil {
-		return err
+		return nil, authz.KDFParams{}, 0, err
 	}
 	plain, err := crypto.DeriveVerifier([]byte(password), salt, s.KDF)
 	if err != nil {
-		return err
+		return nil, authz.KDFParams{}, 0, err
 	}
 	defer crypto.Zero(plain)
-
 	sealer := s.Keyring.ForInstance()
 	sealed, err := sealer.SealField(verifierAAD(accountID), plain)
 	if err != nil {
-		return err
+		return nil, authz.KDFParams{}, 0, err
 	}
-	cred := authz.PasswordCredential{
-		AccountID: accountID, Verifier: sealed,
-		KDF:             authz.KDFParams{MemoryKiB: s.KDF.MemoryKiB, Time: s.KDF.Time, Parallelism: s.KDF.Parallelism},
-		DEKVersion:      int64(sealer.Version()),
-		CredentialEpoch: epoch,
-	}
-
-	existing, err := az.PasswordCredentialFor(ctx, accountID)
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		return az.WritePasswordCredential(ctx, cred, now)
-	case err != nil:
-		return err
-	}
-	cred.RowVersion = existing.RowVersion
-	swapped, err := az.ReplacePasswordCredential(ctx, cred, now)
-	if err != nil {
-		return err
-	}
-	if !swapped {
-		return ErrCredentialRace
-	}
-	return nil
+	return sealed,
+		authz.KDFParams{MemoryKiB: s.KDF.MemoryKiB, Time: s.KDF.Time, Parallelism: s.KDF.Parallelism},
+		int64(sealer.Version()), nil
 }
 
 func (s *Auth) refuseAuthority(ctx context.Context, cause string) error {
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		return s.refuseAuthorityIn(ctx, az, cause)
-	})
-	if errors.Is(err, domain.ErrUnauthenticated) {
-		return err
-	}
-	if err != nil {
+	// The refusal must NOT be the closure's return value: returning it rolls
+	// the transaction back, taking the event with it. Same discipline as the
+	// login path, and the same bug this had before a reviewer caught it.
+	if err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		_ = s.refuseAuthorityIn(ctx, az, cause)
+		return nil
+	}); err != nil {
 		return err
 	}
 	return domain.ErrUnauthenticated

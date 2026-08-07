@@ -75,60 +75,69 @@ const AssuranceEnforced = false
 // artifacts are indistinguishable, so presentation reveals nothing about
 // which artifacts exist.
 func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now time.Time) (Identity, error) {
-	if presented == "" {
-		return Identity{}, domain.ErrUnauthenticated
-	}
-	// The local grammar check first: a truncated or mistyped value is refused
-	// with no database work at all.
-	if err := crypto.ParseArtifact(presented, crypto.ArtifactCLISession); err != nil {
-		return Identity{}, domain.ErrUnauthenticated
-	}
-	row, err := a.r.SessionByVerifier(ctx, crypto.ArtifactVerifier(presented))
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return Identity{}, domain.ErrUnauthenticated
-		}
-		return Identity{}, err
-	}
-
-	// Two independent clocks. The absolute lifetime is never extended by
-	// activity; only the idle clock slides.
-	if !now.Before(row.IdleExpiresAt) || !now.Before(row.AbsoluteExpiresAt) {
+	// The grammar check is local and constant-cost, and a value that fails it
+	// cannot correspond to any row, so short-circuiting here reveals only
+	// that the caller sent something that is not a wenv artifact — a fact
+	// they already knew.
+	if presented == "" || crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 
-	// The generation counter is how a grant change — revocation OR addition,
-	// since a session that authenticated before a promotion carries the
-	// assurance it had then — reaches an idle or stolen session that is never
-	// told anything.
-	generation, err := a.r.PrincipalGeneration(ctx, row.PrincipalID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return Identity{}, domain.ErrUnauthenticated
-		}
-		return Identity{}, err
+	// From here every presentation performs the SAME THREE READS in the same
+	// order, whatever it turns out to be. Returning as soon as one predicate
+	// fails would make an unknown artifact cost one query, an expired one
+	// two, and a generation-superseded one three — a query-count oracle for
+	// which artifacts exist and why they died. The predicates are evaluated
+	// after all three reads, together.
+	row, rowErr := a.r.SessionByVerifier(ctx, crypto.ArtifactVerifier(presented))
+	if rowErr != nil && !errors.Is(rowErr, domain.ErrNotFound) {
+		return Identity{}, rowErr
 	}
-	if generation != row.SessionGeneration {
-		return Identity{}, domain.ErrUnauthenticated
-	}
+	live := rowErr == nil
 
-	// The credential epoch is what makes "restored verifiers are never
-	// trusted as-is" a mechanism rather than an assertion.
+	// A missing session still reads a generation, for the empty principal —
+	// which resolves to nothing, at the same cost.
+	generation, genErr := a.r.PrincipalGeneration(ctx, row.PrincipalID)
+	if genErr != nil && !errors.Is(genErr, domain.ErrNotFound) {
+		return Identity{}, genErr
+	}
+	generationOK := genErr == nil && generation == row.SessionGeneration
+
 	epoch, err := a.r.CredentialEpoch(ctx)
 	if err != nil {
 		return Identity{}, err
 	}
-	if epoch != row.CredentialEpoch {
+
+	var factors []string
+	factorsOK := true
+	if row.Factors != "" {
+		factorsOK = json.Unmarshal([]byte(row.Factors), &factors) == nil
+	}
+
+	switch {
+	case !live:
+	// Two independent clocks. The absolute lifetime is never extended by
+	// activity; only the idle clock slides.
+	case !now.Before(row.IdleExpiresAt) || !now.Before(row.AbsoluteExpiresAt):
+		live = false
+	// The generation counter is how a grant change — revocation OR addition,
+	// since a session that authenticated before a promotion carries the
+	// assurance it had then — reaches an idle or stolen session that is never
+	// told anything.
+	case !generationOK:
+		live = false
+	// The credential epoch is what makes "restored verifiers are never
+	// trusted as-is" a mechanism rather than an assertion.
+	case epoch != row.CredentialEpoch:
+		live = false
+	// A session row we cannot read is not a session we may trust.
+	case !factorsOK:
+		live = false
+	}
+	if !live {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 
-	var factors []string
-	if row.Factors != "" {
-		if err := json.Unmarshal([]byte(row.Factors), &factors); err != nil {
-			// A session row we cannot read is not a session we may trust.
-			return Identity{}, domain.ErrUnauthenticated
-		}
-	}
 	return Identity{
 		Principal: row.PrincipalID,
 		SessionID: row.ID,

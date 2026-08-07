@@ -99,10 +99,38 @@ func ParseArtifact(value string, want ArtifactType) error {
 		return ErrMalformedArtifact
 	}
 	body, sum := payload[:len(payload)-checksumChars], payload[len(payload)-checksumChars:]
+
+	// The accepted grammar must be exactly what NewArtifact can produce.
+	// Checking only the checksum accepted arbitrary bytes of arbitrary
+	// length, so a scanner or a log filter reasoning about "what a wenv token
+	// looks like" would have been reasoning about a much larger set than the
+	// one that exists — and an oversized body would have reached the hashing
+	// path unbounded.
+	if len(body) < minBodyChars || len(body) > maxBodyChars {
+		return ErrMalformedArtifact
+	}
+	for i := range len(body) + checksumChars {
+		if !isBase62(payload[i]) {
+			return ErrMalformedArtifact
+		}
+	}
 	if checksum(body) != sum {
 		return ErrMalformedArtifact
 	}
 	return nil
+}
+
+// The body is base62 of exactly bodyBytes of CSPRNG output. Leading zero
+// bytes render as leading zero digits, so the length varies slightly around
+// ceil(256 / log2(62)) = 43; the bounds admit that variation and nothing
+// else.
+const (
+	maxBodyChars = 44
+	minBodyChars = 40
+)
+
+func isBase62(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 // checksum is a CRC-32 over the body, base62-encoded to a fixed width. It is

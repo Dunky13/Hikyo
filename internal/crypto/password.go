@@ -99,11 +99,40 @@ func derive(password, salt []byte, p PasswordParams) ([]byte, error) {
 	return out, nil
 }
 
+// MaxPasswordMemoryKiB bounds what a stored parameter set may ask for.
+// Argon2id allocates m KiB up front, so a row carrying a nonsense value — a
+// corrupted write, a restored backup from a differently-configured instance —
+// would otherwise turn one login attempt into a multi-gigabyte allocation.
+// The bound is generous against any plausible configuration and fatal to an
+// implausible one.
+const MaxPasswordMemoryKiB = 1 << 21 // 2 GiB
+
+// Plausible bounds for the remaining parameters, for the same reason.
+const (
+	MaxPasswordTime        = 64
+	MaxPasswordParallelism = 64
+)
+
+// Plausible reports whether recorded parameters are within the bounds a
+// verification may be run under. It is deliberately separate from CheckFloor:
+// the floor is policy about NEW verifiers, this is safety about OLD ones.
+func (p PasswordParams) Plausible() bool {
+	return p.MemoryKiB > 0 && p.MemoryKiB <= MaxPasswordMemoryKiB &&
+		p.Time > 0 && p.Time <= MaxPasswordTime &&
+		p.Parallelism > 0 && p.Parallelism <= MaxPasswordParallelism
+}
+
 // VerifyPassword re-derives under the verifier's own recorded parameters and
 // compares in constant time. A malformed verifier answers false rather than
 // erroring: at the login path a stored-value defect and a wrong password must
 // look identical from outside.
 func VerifyPassword(password, verifier []byte, p PasswordParams) bool {
+	if !p.Plausible() {
+		// Refuse rather than allocate. The caller still has to burn an
+		// equivalent derivation so the refusal is not observably cheap; that
+		// obligation is the caller's, and internal/service/auth.go meets it.
+		return false
+	}
 	if len(verifier) != SaltSize+verifierSize {
 		return false
 	}

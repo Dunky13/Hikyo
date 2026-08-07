@@ -109,12 +109,16 @@ func NewClient(entry TrustEntry, bearer string) (*Client, error) {
 	}, nil
 }
 
+// isLoopbackOrigin decides whether plaintext http is acceptable. url.Hostname
+// strips the brackets an IPv6 literal carries, so `http://[::1]:8080` is
+// recognised — a hand-rolled colon split reads its host as "[" and refuses a
+// perfectly good loopback address.
 func isLoopbackOrigin(origin string) bool {
 	u, err := url.Parse(origin)
 	if err != nil {
 		return false
 	}
-	host := hostnameOf(u.Host)
+	host := u.Hostname()
 	if host == "localhost" {
 		return true
 	}

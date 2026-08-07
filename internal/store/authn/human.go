@@ -224,11 +224,17 @@ func (r *Resolver) PasswordCredential(ctx context.Context, accountID string) (Pa
 // PrincipalGeneration reads the principal's current session generation. A
 // session whose recorded generation is behind is dead — that is how a grant
 // change reaches an idle or stolen session without needing to tell it.
+// A principal with no row answers domain.ErrNotFound rather than a raw
+// driver error: the session-liveness path reads a generation for every
+// presentation including ones that resolved no session at all, so "no such
+// principal" has to be an ordinary outcome there rather than a fault.
 func (r *Resolver) PrincipalGeneration(ctx context.Context, p domain.PrincipalID) (int64, error) {
 	if r.sq != nil {
-		return r.sq.GetPrincipalGeneration(ctx, string(p))
+		n, err := r.sq.GetPrincipalGeneration(ctx, string(p))
+		return n, notFoundOr(err)
 	}
-	return r.pg.GetPrincipalGeneration(ctx, string(p))
+	n, err := r.pg.GetPrincipalGeneration(ctx, string(p))
+	return n, notFoundOr(err)
 }
 
 // SessionByVerifier resolves a presented artifact. Expiry, generation and
