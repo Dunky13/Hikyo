@@ -194,9 +194,13 @@ secret, free-text filter fixtures.
   papered over.
 - **Emitter-supplied actor id.** Until authentication lands (#16), the
   service passes the acting principal id; the store resolves its CLASS from
-  `principals.kind` (an emitter may not assert human/machine) and the event
-  type is bound to the minting operation, so a proof cannot forge event
-  meaning. Binding the id itself to an authenticated session is #16's.
+  `principals.kind` and the event type is bound to the minting operation, so
+  a proof cannot forge event meaning. Under a principal-backed proof an
+  emitter may not assert ANY actor class — `system`/`break-glass`/
+  `unauthenticated` are accepted only under a system proof or on the denial
+  writer's own no-principal path (cross-model R2), so a principal's act
+  cannot be recorded as a system or anonymous one. Binding the id itself to
+  an authenticated session is #16's.
 
 ## Pickup notes
 

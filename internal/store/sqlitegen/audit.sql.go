@@ -10,22 +10,27 @@ import (
 	"database/sql"
 )
 
-const auditWatermark = `-- name: AuditWatermark :one
+const auditUnsettledThreshold = `-- name: AuditUnsettledThreshold :one
 
-SELECT 9223372036854775807 AS watermark
+SELECT 1 AS threshold
 `
 
-// The settled-transaction watermark: every row whose txid is strictly below
-// it belongs to a transaction that has finished, so paging under it cannot
-// skip a row that commits later (postgres allocates seq before commit).
-// This engine's single write connection makes allocation order and commit
-// order identical, so the maximum sentinel admits every visible row.
+// Paging is bounded by the SETTLED-SEQ bound: the lowest seq whose
+// transaction has not finished. Every row below it is settled, so a cursor
+// can never step past a row that commits later (postgres allocates seq
+// before commit). The bound is computed from txid against the engine's
+// unsettled threshold, and an export holds one bound for all its pages.
+//
+// On this engine the single write connection makes allocation order and
+// commit order identical: every visible row is settled, so the threshold is
+// 1 (no row's txid ever reaches it) and the bound falls through to the
+// maximum sentinel.
 // wenv:instance-scoped
-func (q *Queries) AuditWatermark(ctx context.Context) (int64, error) {
-	row := q.db.QueryRowContext(ctx, auditWatermark)
-	var watermark int64
-	err := row.Scan(&watermark)
-	return watermark, err
+func (q *Queries) AuditUnsettledThreshold(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, auditUnsettledThreshold)
+	var threshold int64
+	err := row.Scan(&threshold)
+	return threshold, err
 }
 
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
@@ -161,13 +166,13 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_instance_events
-WHERE seq > ? AND txid < ? AND recorded_at >= ? AND recorded_at <= ?
+WHERE seq > ? AND seq < ? AND recorded_at >= ? AND recorded_at <= ?
 ORDER BY seq LIMIT ?
 `
 
 type PageInstanceAuditParams struct {
 	Seq          int64
-	Txid         int64
+	Seq_2        int64
 	RecordedAt   string
 	RecordedAt_2 string
 	Limit        int64
@@ -176,7 +181,7 @@ type PageInstanceAuditParams struct {
 func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditParams) ([]AuditInstanceEvent, error) {
 	rows, err := q.db.QueryContext(ctx, pageInstanceAudit,
 		arg.Seq,
-		arg.Txid,
+		arg.Seq_2,
 		arg.RecordedAt,
 		arg.RecordedAt_2,
 		arg.Limit,
@@ -230,7 +235,7 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = ? AND project_id = ? AND env_id = ? AND seq > ? AND txid < ? AND recorded_at >= ? AND recorded_at <= ?
+WHERE org_id = ? AND project_id = ? AND env_id = ? AND seq > ? AND seq < ? AND recorded_at >= ? AND recorded_at <= ?
 ORDER BY seq LIMIT ?
 `
 
@@ -239,7 +244,7 @@ type PageTenantAuditEnvParams struct {
 	ProjectID    sql.NullString
 	EnvID        sql.NullString
 	Seq          int64
-	Txid         int64
+	Seq_2        int64
 	RecordedAt   string
 	RecordedAt_2 string
 	Limit        int64
@@ -251,7 +256,7 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 		arg.ProjectID,
 		arg.EnvID,
 		arg.Seq,
-		arg.Txid,
+		arg.Seq_2,
 		arg.RecordedAt,
 		arg.RecordedAt_2,
 		arg.Limit,
@@ -309,14 +314,14 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = ? AND seq > ? AND txid < ? AND recorded_at >= ? AND recorded_at <= ?
+WHERE org_id = ? AND seq > ? AND seq < ? AND recorded_at >= ? AND recorded_at <= ?
 ORDER BY seq LIMIT ?
 `
 
 type PageTenantAuditOrgParams struct {
 	OrgID        string
 	Seq          int64
-	Txid         int64
+	Seq_2        int64
 	RecordedAt   string
 	RecordedAt_2 string
 	Limit        int64
@@ -326,7 +331,7 @@ func (q *Queries) PageTenantAuditOrg(ctx context.Context, arg PageTenantAuditOrg
 	rows, err := q.db.QueryContext(ctx, pageTenantAuditOrg,
 		arg.OrgID,
 		arg.Seq,
-		arg.Txid,
+		arg.Seq_2,
 		arg.RecordedAt,
 		arg.RecordedAt_2,
 		arg.Limit,
@@ -384,7 +389,7 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = ? AND project_id = ? AND seq > ? AND txid < ? AND recorded_at >= ? AND recorded_at <= ?
+WHERE org_id = ? AND project_id = ? AND seq > ? AND seq < ? AND recorded_at >= ? AND recorded_at <= ?
 ORDER BY seq LIMIT ?
 `
 
@@ -392,7 +397,7 @@ type PageTenantAuditProjectParams struct {
 	OrgID        string
 	ProjectID    sql.NullString
 	Seq          int64
-	Txid         int64
+	Seq_2        int64
 	RecordedAt   string
 	RecordedAt_2 string
 	Limit        int64
@@ -403,7 +408,7 @@ func (q *Queries) PageTenantAuditProject(ctx context.Context, arg PageTenantAudi
 		arg.OrgID,
 		arg.ProjectID,
 		arg.Seq,
-		arg.Txid,
+		arg.Seq_2,
 		arg.RecordedAt,
 		arg.RecordedAt_2,
 		arg.Limit,
@@ -452,4 +457,33 @@ func (q *Queries) PageTenantAuditProject(ctx context.Context, arg PageTenantAudi
 		return nil, err
 	}
 	return items, nil
+}
+
+const settledBelowInstance = `-- name: SettledBelowInstance :one
+SELECT CAST(COALESCE(MIN(seq), 9223372036854775807) AS INTEGER) AS settled_below
+FROM audit_instance_events WHERE txid >= ?
+`
+
+func (q *Queries) SettledBelowInstance(ctx context.Context, txid int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, settledBelowInstance, txid)
+	var settled_below int64
+	err := row.Scan(&settled_below)
+	return settled_below, err
+}
+
+const settledBelowTenant = `-- name: SettledBelowTenant :one
+SELECT CAST(COALESCE(MIN(seq), 9223372036854775807) AS INTEGER) AS settled_below
+FROM audit_tenant_events WHERE org_id = ? AND txid >= ?
+`
+
+type SettledBelowTenantParams struct {
+	OrgID string
+	Txid  int64
+}
+
+func (q *Queries) SettledBelowTenant(ctx context.Context, arg SettledBelowTenantParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, settledBelowTenant, arg.OrgID, arg.Txid)
+	var settled_below int64
+	err := row.Scan(&settled_below)
+	return settled_below, err
 }

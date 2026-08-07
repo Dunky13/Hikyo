@@ -368,15 +368,23 @@ func TestDenialWriterIsSoleWriter(t *testing.T) {
 }
 
 func TestDenialWriterCatchesSecondWriter(t *testing.T) {
-	pkgs, err := Load("./testdata/badredact")
+	pkgs, err := Load("./testdata/badauthn")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The analyzer is scoped to the resolution surface by path; prove the
-	// scoping by confirming it reports nothing elsewhere, then prove the
-	// detection logic itself.
-	if f := CheckDenialWriter(pkgs); len(f) != 0 {
-		t.Errorf("analyzer fired outside the resolution surface: %v", f)
+	surface := Module + "/internal/lint/testdata/badauthn"
+	findings := CheckDenialWriterIn(pkgs, surface, "WriteDenial")
+	assertFindings(t, findings, []string{
+		"SecondWriter calls the mutating query InsertTenantAuditEvent outside WriteDenial",
+	})
+	for _, f := range findings {
+		if strings.Contains(f, "WriteDenial calls") || strings.Contains(f, "ReadsAreFine") {
+			t.Errorf("analyzer flagged a licensed write or a read: %s", f)
+		}
+	}
+	// Scoping: the same package is silent when it is not the named surface.
+	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial"); len(f) != 0 {
+		t.Errorf("analyzer fired outside the named surface: %v", f)
 	}
 	for _, name := range []string{"InsertTenantAuditEvent", "CreateOrg", "UpdateEnvironmentNote", "DeleteThing", "AcquireHierarchyGeneration"} {
 		if !mutatingQuery(name) {

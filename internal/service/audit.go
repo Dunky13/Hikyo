@@ -80,8 +80,8 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 		if err != nil {
 			return err
 		}
-		// Page only over settled transactions (see AuditFilter.Watermark).
-		f.Watermark, err = r.Audit().Watermark(ctx, p)
+		// Page only below the settled-seq bound (see AuditFilter).
+		f.SettledBelow, err = r.Audit().SettledBelowTenant(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID
 		if err != nil {
 			return err
 		}
-		f.Watermark, err = r.Audit().Watermark(ctx, p)
+		f.SettledBelow, err = r.Audit().SettledBelowInstance(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -212,7 +212,10 @@ func (s *Audits) Export(ctx context.Context, principal domain.PrincipalID, scope
 	page := func(ctx context.Context, r store.ReadRepos, p authz.Proof, pf store.AuditFilter) ([]store.AuditEvent, error) {
 		return r.Audit().PageTenant(ctx, p, pf)
 	}
-	return s.export(ctx, principal, op, scope, f, pageSize, w, insertTenant, page)
+	bound := func(ctx context.Context, r store.Repos, p authz.Proof) (int64, error) {
+		return r.Audit().SettledBelowTenant(ctx, p)
+	}
+	return s.export(ctx, principal, op, scope, f, pageSize, w, insertTenant, page, bound)
 }
 
 // InstanceExport is Export for the instance trail.
@@ -226,7 +229,10 @@ func (s *Audits) InstanceExport(ctx context.Context, principal domain.PrincipalI
 	page := func(ctx context.Context, r store.ReadRepos, p authz.Proof, pf store.AuditFilter) ([]store.AuditEvent, error) {
 		return r.Audit().PageInstance(ctx, p, pf)
 	}
-	return s.export(ctx, principal, authz.OpAuditInstanceExport, domain.Scope{}, f, pageSize, w, insertInstance, page)
+	bound := func(ctx context.Context, r store.Repos, p authz.Proof) (int64, error) {
+		return r.Audit().SettledBelowInstance(ctx, p)
+	}
+	return s.export(ctx, principal, authz.OpAuditInstanceExport, domain.Scope{}, f, pageSize, w, insertInstance, page, bound)
 }
 
 func (s *Audits) export(
@@ -239,6 +245,7 @@ func (s *Audits) export(
 	w io.Writer,
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
+	bound func(context.Context, store.Repos, authz.Proof) (int64, error),
 ) error {
 	started, err := newAuditEvent(ctx, audit.EventAuditExportStarted, principal, audit.Object{}, audit.OutcomeIntent, "", f.Normalized())
 	if err != nil {
@@ -255,7 +262,7 @@ func (s *Audits) export(
 		if err != nil {
 			return err
 		}
-		f.Watermark, err = r.Audit().Watermark(ctx, p)
+		f.SettledBelow, err = bound(ctx, r, p)
 		if err != nil {
 			return err
 		}

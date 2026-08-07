@@ -26,7 +26,10 @@ import (
 // real, identified prober as a dummy `unauthenticated` actor is exactly
 // what the envelope rule forbids.
 func (r *Resolver) WriteDenial(ctx context.Context, e audit.Event, trail audit.Trail, scope domain.Scope) error {
-	actor, err := auditrow.ResolveActorClass(ctx, r.principalKind, e.Actor)
+	// The denial writer has no proof at all: authorize() failed. Its own
+	// capture never asserts a class, and the absent-principal case resolves
+	// to unauthenticated inside ResolveActorClass.
+	actor, err := auditrow.ResolveActorClass(ctx, r.principalKind, e.Actor, true)
 	if err != nil {
 		return fmt.Errorf("authn: denial actor resolution: %w", err)
 	}

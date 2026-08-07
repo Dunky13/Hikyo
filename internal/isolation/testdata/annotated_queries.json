@@ -1,9 +1,9 @@
 [
   {
     "engine": "postgres",
-    "name": "AuditWatermark",
+    "name": "AuditUnsettledThreshold",
     "annotation": "instance-scoped",
-    "hash": "4f537560fe3521e68c9c2a2984b33e058eed3ec5a42df48f57188fc9f760879e"
+    "hash": "f659a0351404e849ed802356269c0d9c64ebebb3bf3df99a3cd9e0d85a5dee22"
   },
   {
     "engine": "postgres",
@@ -61,9 +61,9 @@
   },
   {
     "engine": "sqlite",
-    "name": "AuditWatermark",
+    "name": "AuditUnsettledThreshold",
     "annotation": "instance-scoped",
-    "hash": "9ee3ad9a36fb2077eed73583fdf08b070f3e54864e575d7b536da1745b9fd082"
+    "hash": "bf80d2f18a441e4e4678911ef780b27e12b7b458be4c59713f403c294985e37d"
   },
   {
     "engine": "sqlite",

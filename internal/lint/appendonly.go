@@ -118,9 +118,14 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 // proof-free writer that every other guard admits. Every call to a
 // generated mutating query from that package must sit inside WriteDenial.
 func CheckDenialWriter(pkgs []*packages.Package) []string {
+	return CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial")
+}
+
+// CheckDenialWriterIn is CheckDenialWriter with the surface named, so the
+// negative fixture can prove the check actually fires on a second writer
+// rather than merely on a package that has none.
+func CheckDenialWriterIn(pkgs []*packages.Package, surface, writer string) []string {
 	var findings []string
-	const surface = Module + "/internal/store/authn"
-	const writer = "WriteDenial"
 	for _, p := range flatten(pkgs) {
 		if strings.TrimSuffix(p.PkgPath, ".test") != surface || p.TypesInfo == nil {
 			continue

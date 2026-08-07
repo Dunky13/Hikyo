@@ -33,13 +33,20 @@ type KindLookup func(ctx context.Context, id string) (string, error)
 // kind value is a loud error — recording a real, identified principal as a
 // dummy `unauthenticated` is exactly what the envelope rule forbids, so the
 // write must fail instead (fail-closed).
-func ResolveActorClass(ctx context.Context, kindOf KindLookup, a audit.Actor) (audit.Actor, error) {
+// allowAsserted is true only where the caller's authority is itself
+// principal-less (a system proof, or the denial writer's own no-principal
+// path). Under an ordinary principal-backed proof an emitter may not assert
+// ANY class: doing so would let a principal's action be recorded as a
+// system or anonymous act.
+func ResolveActorClass(ctx context.Context, kindOf KindLookup, a audit.Actor, allowAsserted bool) (audit.Actor, error) {
 	switch a.Class {
 	case "":
 		// Resolve below.
 	case audit.ActorSystem, audit.ActorBreakGlass, audit.ActorUnauthenticated:
-		// Principal-less classes are the emitter's to assert: no row exists
-		// to check them against.
+		if !allowAsserted {
+			return audit.Actor{}, fmt.Errorf("auditrow: actor class %q asserted under a principal-backed proof — attribution comes from the acting principal, not the emitter", a.Class)
+		}
+		// Principal-less authority: no row exists to check the class against.
 		return a, nil
 	default:
 		// human/machine is server-side truth, never an emitter claim — an

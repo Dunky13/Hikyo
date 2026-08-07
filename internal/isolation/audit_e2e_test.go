@@ -151,8 +151,15 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 	})
 
 	t.Run("instance_query_grant_evaluated", func(t *testing.T) {
-		if _, err := audits.InstanceQuery(tctx(t), root, store.AuditFilter{Limit: 100}); err != nil {
+		page, err := audits.InstanceQuery(tctx(t), root, store.AuditFilter{Limit: 100})
+		if err != nil {
 			t.Fatalf("root with instance audit-read: %v", err)
+		}
+		// Asserting the ROWS, not just the absence of an error: an instance
+		// page that silently returns nothing (a mis-bound paging parameter)
+		// would otherwise pass every other assertion here.
+		if len(page) == 0 {
+			t.Fatal("instance trail page is empty — prior subtests wrote instance events")
 		}
 		if n := countInstance("type = 'audit.query' AND actor_id = 'usr_root'"); n != 1 {
 			t.Fatalf("instance audit.query events = %d, want 1", n)

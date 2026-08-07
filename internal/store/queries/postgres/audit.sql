@@ -45,7 +45,7 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
+WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
@@ -57,7 +57,7 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
+    AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
@@ -69,7 +69,7 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
+    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
@@ -79,16 +79,27 @@ SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, reco
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_instance_events
-WHERE seq > sqlc.arg(after_seq) AND txid < sqlc.arg(watermark)
+WHERE seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
--- The settled-transaction watermark: the snapshot xmin is the lowest xid
--- still running, so every row whose txid is strictly below it belongs to a
--- finished transaction. Paging under it is what keeps a later-committing
--- lower seq from being skipped forever (seq is allocated before commit on
--- this engine).
+-- Paging is bounded by the SETTLED-SEQ bound: the lowest seq whose
+-- transaction has not finished. Every row below it is settled, so a cursor
+-- can never step past a row that commits later - seq is allocated before
+-- commit on this engine, so that is a real omission, not a reordering. The
+-- unsettled threshold is the snapshot xmin (the lowest still-running xid);
+-- rows at or above it may or may not commit, so the bound stops there and a
+-- later export picks them up. An export holds one bound for all its pages,
+-- which also makes it terminate instead of chasing live writes.
 
 -- wenv:instance-scoped
--- name: AuditWatermark :one
-SELECT (pg_snapshot_xmin(pg_current_snapshot())::text::bigint) AS watermark;
+-- name: AuditUnsettledThreshold :one
+SELECT (pg_snapshot_xmin(pg_current_snapshot())::text::bigint) AS threshold;
+
+-- name: SettledBelowTenant :one
+SELECT COALESCE(MIN(seq), 9223372036854775807)::bigint AS settled_below
+FROM audit_tenant_events WHERE org_id = sqlc.arg(chain_org_id) AND txid >= sqlc.arg(threshold);
+
+-- name: SettledBelowInstance :one
+SELECT COALESCE(MIN(seq), 9223372036854775807)::bigint AS settled_below
+FROM audit_instance_events WHERE txid >= sqlc.arg(threshold);

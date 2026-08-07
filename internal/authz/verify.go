@@ -62,6 +62,16 @@ func Verify(p Proof, op StoreOp, tok *TxToken) (domain.Scope, error) {
 // record while every other guard succeeds. The registry already declares
 // which types each operation emits; this makes that declaration binding at
 // the write boundary.
+// IsSystemProof reports whether p was minted at a no-principal system site.
+// The audit write path uses it to decide whether an emitter may ASSERT an
+// actor class: a principal-backed operation's events are attributed from
+// principals.kind, never from what the emitter claims, so only a system
+// proof may say "system" or "break-glass".
+func IsSystemProof(p Proof) bool {
+	c, ok := p.(*proof)
+	return ok && c != nil && c.kind == kindSystem
+}
+
 func VerifyEvent(p Proof, op StoreOp, tok *TxToken, et audit.EventType) (domain.Scope, error) {
 	chain, err := Verify(p, op, tok)
 	if err != nil {

@@ -74,11 +74,12 @@ const (
 	// denial writer does NOT pass through these: it is the authorization
 	// package's own enumerated write path (audit-model ADR amendment part 4)
 	// and runs with no proof to verify.
-	StoreAuditTenantInsert   StoreOp = "audit.InsertTenant"
-	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
-	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
-	StoreAuditInstancePage   StoreOp = "audit.PageInstance"
-	StoreAuditWatermark      StoreOp = "audit.Watermark"
+	StoreAuditTenantInsert         StoreOp = "audit.InsertTenant"
+	StoreAuditInstanceInsert       StoreOp = "audit.InsertInstance"
+	StoreAuditTenantPage           StoreOp = "audit.PageTenant"
+	StoreAuditInstancePage         StoreOp = "audit.PageInstance"
+	StoreAuditSettledBelowTenant   StoreOp = "audit.SettledBelowTenant"
+	StoreAuditSettledBelowInstance StoreOp = "audit.SettledBelowInstance"
 )
 
 // readOnlyStoreOps pins which store operations mutate nothing — the
@@ -87,15 +88,16 @@ const (
 // op it can invoke is in this set. A wrongly listed op is caught by review
 // of this pinned table, exactly like the formula pins.
 var readOnlyStoreOps = map[StoreOp]bool{
-	StoreOrgsGet:                  true,
-	StoreOrgsList:                 true,
-	StoreOrgsCount:                true,
-	StoreEnvironmentsGet:          true,
-	StoreKeysActiveMasterWrappers: true,
-	StoreKeysActiveTier3:          true,
-	StoreAuditTenantPage:          true,
-	StoreAuditInstancePage:        true,
-	StoreAuditWatermark:           true,
+	StoreOrgsGet:                   true,
+	StoreOrgsList:                  true,
+	StoreOrgsCount:                 true,
+	StoreEnvironmentsGet:           true,
+	StoreKeysActiveMasterWrappers:  true,
+	StoreKeysActiveTier3:           true,
+	StoreAuditTenantPage:           true,
+	StoreAuditInstancePage:         true,
+	StoreAuditSettledBelowTenant:   true,
+	StoreAuditSettledBelowInstance: true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -228,54 +230,54 @@ var operations = map[Operation]opSpec{
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditQueryProject: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditQueryEnv: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditExportOrg: {
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditExportProject: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditExportEnv: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true, StoreAuditSettledBelowTenant: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 	OpAuditInstanceQuery: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditSettledBelowInstance: true},
 		events:   []audit.EventType{audit.EventAuditQuery},
 	},
 	OpAuditInstanceExport: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditWatermark: true},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true, StoreAuditSettledBelowInstance: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 }
