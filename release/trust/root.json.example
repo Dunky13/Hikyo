@@ -1,0 +1,13 @@
+{
+  "schema": "wenv.dev/trust-root/v1",
+  "recovery": {
+    "id": "recovery-1",
+    "public_key": "recovery-1.pub",
+    "sha256": "RECOVERY_PUBLIC_KEY_SHA256"
+  },
+  "bootstrap_primary": {
+    "id": "primary-1",
+    "public_key": "primary-1.pub",
+    "sha256": "PRIMARY_PUBLIC_KEY_SHA256"
+  }
+}

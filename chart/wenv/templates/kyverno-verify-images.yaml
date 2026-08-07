@@ -1,0 +1,30 @@
+{{- if .Values.releaseTrust.admissionPolicy.enabled }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ include "wenv.fullname" . }}-verify-images
+  labels:
+    {{- include "wenv.labels" . | nindent 4 }}
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: verify-wenv-image
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - {{ printf "%s@*" .Values.image.repository | quote }}
+          mutateDigest: false
+          verifyDigest: true
+          required: true
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+{{ .Files.Get "files/release/trust/primary.pub" | indent 22 }}
+                    rekor:
+                      ignoreTlog: true
+{{- end }}

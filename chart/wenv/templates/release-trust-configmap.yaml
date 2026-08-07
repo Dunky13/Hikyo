@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wenv.fullname" . }}-release-trust
+  labels:
+    {{- include "wenv.labels" . | nindent 4 }}
+data:
+  root.json: |
+{{ .Files.Get "files/release/trust/root.json" | indent 4 }}
+  primary.pub: |
+{{ .Files.Get "files/release/trust/primary.pub" | indent 4 }}

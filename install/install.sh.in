@@ -1,0 +1,108 @@
+#!/bin/sh
+set -eu
+
+repository=Dunky13/wenv
+version='@VERSION@'
+root_sha256='@ROOT_SHA256@'
+verifier_sha256='@VERIFIER_SHA256@'
+release_lib_sha256='@RELEASE_LIB_SHA256@'
+base_url="https://github.com/$repository/releases/download/v$version"
+source_url="https://raw.githubusercontent.com/$repository/v$version"
+current_trust_url="https://raw.githubusercontent.com/$repository/refs/heads/main"
+
+fail() {
+	printf 'wenv install failed: %s\n' "$*" >&2
+	exit 1
+}
+
+sha256_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
+safe_name() {
+	case "$1" in
+		'' | */* | *..*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+for command_name in curl jq cosign; do
+	command -v "$command_name" >/dev/null 2>&1 || fail "$command_name is required"
+done
+
+case "$(uname -s)" in
+	Linux) os=Linux ;;
+	Darwin) os=Darwin ;;
+	*) fail "unsupported operating system $(uname -s)" ;;
+esac
+case "$(uname -m)" in
+	x86_64 | amd64) arch=x86_64 ;;
+	arm64 | aarch64) arch=arm64 ;;
+	*) fail "unsupported architecture $(uname -m)" ;;
+esac
+
+install_dir=${WENV_INSTALL_DIR:-/usr/local/bin}
+state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/wenv
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/wenv-install.XXXXXX")
+trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+
+download() {
+	url=$1
+	output=$2
+	curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error "$url" -o "$output"
+}
+
+download "$source_url/release/trust/root.json" "$scratch/root.json"
+[ "$(sha256_file "$scratch/root.json")" = "$root_sha256" ] || fail 'pinned trust-root hash mismatch'
+mkdir -p "$scratch/scripts/release" "$scratch/scripts/lib"
+download "$source_url/scripts/release/verify-bundle.sh" "$scratch/scripts/release/verify-bundle.sh"
+[ "$(sha256_file "$scratch/scripts/release/verify-bundle.sh")" = "$verifier_sha256" ] || fail 'pinned verifier hash mismatch'
+download "$source_url/scripts/lib/release.sh" "$scratch/scripts/lib/release.sh"
+[ "$(sha256_file "$scratch/scripts/lib/release.sh")" = "$release_lib_sha256" ] || fail 'pinned verifier-library hash mismatch'
+chmod +x "$scratch/scripts/release/verify-bundle.sh"
+
+download "$current_trust_url/release/trust/metadata.json" "$scratch/metadata.json"
+download "$current_trust_url/release/trust/metadata.sigstore.json" "$scratch/metadata.sigstore.json"
+jq -r '[.recovery.public_key, .bootstrap_primary.public_key] | unique[]' "$scratch/root.json" |
+while IFS= read -r key_name; do
+	safe_name "$key_name" || fail "unsafe public-key name $key_name"
+	download "$source_url/release/trust/$key_name" "$scratch/$key_name"
+done
+jq -r '.primary_keys[].public_key' "$scratch/metadata.json" | sort -u |
+while IFS= read -r key_name; do
+	safe_name "$key_name" || fail "unsafe public-key name $key_name"
+	download "$current_trust_url/release/trust/$key_name" "$scratch/$key_name"
+done
+
+bundle="$scratch/bundle"
+mkdir -p "$bundle" "$state_dir"
+download "$base_url/release-manifest.json" "$bundle/release-manifest.json"
+download "$base_url/release-manifest.sigstore.json" "$bundle/release-manifest.sigstore.json"
+jq -r '.artifacts[].name' "$bundle/release-manifest.json" | while IFS= read -r name; do
+	safe_name "$name" || fail "unsafe artifact name $name"
+	download "$base_url/$name" "$bundle/$name"
+	download "$base_url/$name.sigstore.json" "$bundle/$name.sigstore.json"
+done
+
+"$scratch/scripts/release/verify-bundle.sh" \
+	--root "$scratch/root.json" \
+	--metadata "$scratch/metadata.json" \
+	--metadata-signature "$scratch/metadata.sigstore.json" \
+	--bundle "$bundle" \
+	--state "$state_dir/release-trust.json" \
+	--published \
+	--latest
+
+archive="wenv_${version}_${os}_${arch}"
+case "$os" in
+	Linux | Darwin) archive="$archive.tar.gz" ;;
+esac
+[ -f "$bundle/$archive" ] || fail "verified archive $archive is absent"
+mkdir -p "$install_dir"
+tar -xzf "$bundle/$archive" -C "$scratch" wenv
+install -m 0755 "$scratch/wenv" "$install_dir/wenv"
+printf 'installed verified wenv %s to %s/wenv\n' "$version" "$install_dir"
