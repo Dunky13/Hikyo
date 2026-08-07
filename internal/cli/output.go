@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -72,4 +73,25 @@ func asCLIError(err error, out **Error) bool {
 		return true
 	}
 	return false
+}
+
+// parseInterspersed parses a flag set that allows flags AFTER positional
+// arguments.
+//
+// Go's flag package stops at the first non-flag argument, so `wenv login
+// <url> --local` would silently treat --local as a positional and the verb
+// would refuse a spelling its own help advertises. The loop is the standard
+// idiom: parse, take one positional, parse the rest.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, &Error{Code: ExitUsage, Err: err}
+		}
+		if fs.NArg() == 0 {
+			return positional, nil
+		}
+		positional = append(positional, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
 }

@@ -99,10 +99,13 @@ func (s *TrustStore) Lookup(name string) (TrustEntry, error) {
 	}
 	e, ok := entries[name]
 	if !ok {
-		return TrustEntry{}, fmt.Errorf(
+		// Exit 4, refused: a trust-store refusal is a policy decision this
+		// client made, not an internal fault and not a missing object. The
+		// exit-code matrix pins that so a script can tell the difference.
+		return TrustEntry{}, &Error{Code: ExitRefused, Err: fmt.Errorf(
 			"%w: %q. Establish it interactively with `wenv login <url>` or `wenv context create --instance <url>`, "+
 				"or provision it with --trust-file / WENV_TRUST_BUNDLE through the same protected channel as the credential",
-			ErrUntrusted, name)
+			ErrUntrusted, name)}
 	}
 	return e, nil
 }

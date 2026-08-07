@@ -116,8 +116,9 @@ func runLogin(ctx context.Context, ios IO, args []string) error {
 	as := fs.String("as", "", "username to log in as")
 	name := fs.String("name", "", "local reference to record this instance under (default: its host)")
 	trustFile := fs.String("trust-file", "", "provisioned trust bundle (the CI path)")
-	if err := fs.Parse(args); err != nil {
-		return &Error{Code: ExitUsage, Err: err}
+	positional, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
 	}
 
 	st, err := NewState(ios.Env)
@@ -141,10 +142,10 @@ func runLogin(ctx context.Context, ios IO, args []string) error {
 				"pass --local to use the terminal-native local floor, which an installation can never remove")
 	}
 
-	target := fs.Arg(0)
-	if target == "" {
-		return failf(ExitUsage, "usage: wenv login <instance-url> --local")
+	if len(positional) == 0 {
+		return failf(ExitUsage, "usage: wenv login <instance-url> --local --as <username>")
 	}
+	target := positional[0]
 
 	entry, err := establish(ios, st, target, *name, *trustFile)
 	if err != nil {
@@ -455,10 +456,11 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		project := fs.String("project", "", "project")
 		environment := fs.String("env", "", "environment")
 		trustFile := fs.String("trust-file", "", "provisioned trust bundle")
-		if err := fs.Parse(rest); err != nil {
-			return &Error{Code: ExitUsage, Err: err}
+		positional, err := parseInterspersed(fs, rest)
+		if err != nil {
+			return err
 		}
-		name := fs.Arg(0)
+		name := first(positional)
 		if name == "" || *instance == "" {
 			return failf(ExitUsage, "usage: wenv context create <name> --instance <url|ref>")
 		}
@@ -474,8 +476,8 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		fs := flag.NewFlagSet("context list", flag.ContinueOnError)
 		fs.SetOutput(ios.Stderr)
 		format := fs.String("o", "table", "output format")
-		if err := fs.Parse(rest); err != nil {
-			return &Error{Code: ExitUsage, Err: err}
+		if _, err := parseInterspersed(fs, rest); err != nil {
+			return err
 		}
 		f, err := ParseFormat(*format)
 		if err != nil {
@@ -503,14 +505,15 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		fs := flag.NewFlagSet("context show", flag.ContinueOnError)
 		fs.SetOutput(ios.Stderr)
 		format := fs.String("o", "table", "output format")
-		if err := fs.Parse(rest); err != nil {
-			return &Error{Code: ExitUsage, Err: err}
+		positional, err := parseInterspersed(fs, rest)
+		if err != nil {
+			return err
 		}
 		f, err := ParseFormat(*format)
 		if err != nil {
 			return err
 		}
-		name := fs.Arg(0)
+		name := first(positional)
 		if name == "" {
 			return failf(ExitUsage, "usage: wenv context show <name>")
 		}
@@ -532,13 +535,14 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		fs := flag.NewFlagSet("context delete", flag.ContinueOnError)
 		fs.SetOutput(ios.Stderr)
 		instance := fs.String("instance", "", "forget a trust-store entry instead of a context")
-		if err := fs.Parse(rest); err != nil {
-			return &Error{Code: ExitUsage, Err: err}
+		positional, err := parseInterspersed(fs, rest)
+		if err != nil {
+			return err
 		}
 		if *instance != "" {
 			return st.Trust().Delete(*instance)
 		}
-		name := fs.Arg(0)
+		name := first(positional)
 		if name == "" {
 			return failf(ExitUsage, "usage: wenv context delete <name> | --instance <ref>")
 		}
@@ -654,10 +658,11 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 	if extra != nil {
 		extra(fs)
 	}
-	if err := fs.Parse(args); err != nil {
-		return nil, commonFlags{}, &Error{Code: ExitUsage, Err: err}
+	positional, err := parseInterspersed(fs, args)
+	if err != nil {
+		return nil, commonFlags{}, err
 	}
-	c.positional = fs.Arg(0)
+	c.positional = first(positional)
 	st, err := NewState(ios.Env)
 	if err != nil {
 		return nil, commonFlags{}, err
@@ -677,23 +682,29 @@ func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, Session
 	}
 	instance, err := resolved.Require(DimInstance)
 	if err != nil {
-		// One established instance and no ambiguity is the common single-
-		// instance case; more than one is an ambiguity, and ambiguity is a
-		// hard error, never a default.
-		sessions, serr := st.Sessions()
+		// Exactly one established instance is not an ambiguity, so falling
+		// back to it is not a silent assumption — it is the only reading. Two
+		// or more IS an ambiguity, and ambiguity is a hard error naming what
+		// was missing, never a default.
+		//
+		// The fallback is the TRUST STORE rather than the session file, so
+		// that after a logout the answer is "you are not logged in" (exit 3)
+		// rather than "no instance" (exit 2). The distinction matters to a
+		// script deciding whether to re-authenticate.
+		entries, serr := st.Trust().Load()
 		if serr != nil {
 			return nil, SessionArtifact{}, serr
 		}
-		if len(sessions) != 1 {
+		if len(entries) != 1 {
 			return nil, SessionArtifact{}, err
 		}
-		for k := range sessions {
+		for k := range entries {
 			instance = k
 		}
 	}
 	entry, err := st.Trust().Lookup(instance)
 	if err != nil {
-		return nil, SessionArtifact{}, &Error{Code: ExitRefused, Err: err}
+		return nil, SessionArtifact{}, err
 	}
 	sessions, err := st.Sessions()
 	if err != nil {
@@ -727,6 +738,13 @@ func (ios IO) readPassword(prompt string) (string, error) {
 		return ios.ReadPassword(prompt)
 	}
 	return readTerminalPassword(prompt)
+}
+
+func first(vs []string) string {
+	if len(vs) == 0 {
+		return ""
+	}
+	return vs[0]
 }
 
 func firstNonEmpty(vs ...string) string {
