@@ -9,8 +9,10 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
+	"time"
 
 	"github.com/gofrs/flock"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -23,13 +25,19 @@ import (
 
 // Run applies all pending migrations, roll-forward only. Any error means the
 // caller must refuse to serve (fail closed, loud).
-func Run(ctx context.Context, cfg store.Config) error {
+func Run(ctx context.Context, cfg store.Config) (err error) {
 	if cfg.Engine == store.EngineSQLite {
 		fl := flock.New(cfg.Path + ".lock")
-		if err := fl.Lock(); err != nil {
-			return fmt.Errorf("migrate: acquire sqlite migration lock: %w", err)
+		locked, lockErr := fl.TryLockContext(ctx, 100*time.Millisecond)
+		if lockErr != nil {
+			return fmt.Errorf("migrate: acquire sqlite migration lock: %w", lockErr)
 		}
-		defer fl.Unlock()
+		if !locked {
+			return fmt.Errorf("migrate: sqlite migration lock %s.lock is held", cfg.Path)
+		}
+		defer func() {
+			err = errors.Join(err, fl.Unlock())
+		}()
 	}
 	return withProvider(ctx, cfg, func(p *goose.Provider) error {
 		if _, err := p.Up(ctx); err != nil {

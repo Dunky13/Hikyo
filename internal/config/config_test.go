@@ -104,6 +104,24 @@ func TestPostgresRemoteVerifiedTLSAllowed(t *testing.T) {
 	}
 }
 
+func TestPostgresHostParamCannotBypassTLSCheck(t *testing.T) {
+	for _, dsn := range []string{
+		"postgres:///wenv?host=remote.example.com",          // libpq-style host param
+		"postgres://u:p@/wenv?host=10.0.0.5&sslmode=prefer", // empty authority + host param
+		"postgres:///wenv", // no host at all (implicit PGHOST)
+		"postgres://u:p@localhost/wenv?host=remote.example.com", // conflicting hosts
+		"postgres:///wenv?host=a,b",                             // multi-host
+	} {
+		if _, _, err := Load("server", nil, env("WENV_DB", dsn), nil); err == nil {
+			t.Errorf("%s: must refuse", dsn)
+		}
+	}
+	// Socket path via host param stays allowed.
+	if _, _, err := Load("server", nil, env("WENV_DB", "postgres:///wenv?host=/var/run/postgresql"), nil); err != nil {
+		t.Errorf("socket host param: %v", err)
+	}
+}
+
 func TestUnknownEngineRefuses(t *testing.T) {
 	_, _, err := Load("server", nil, env("WENV_DB", "mysql://u@localhost/db"), nil)
 	if err == nil {

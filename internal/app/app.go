@@ -93,7 +93,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Addr:    ln.Addr().String(),
 		db:      db,
 		ln:      ln,
-		handler: server.New(&service.System{DB: db}),
+		handler: server.New(&service.System{DB: db, Store: sc}),
 		log:     log,
 	}, nil
 }

@@ -20,12 +20,13 @@ import (
 	"github.com/Dunky13/wenv/internal/store"
 )
 
-// Ops-spec bounds: 3 attempts with jittered 10/50/250 ms backoff; a 15 s
-// overall deadline clamps cumulative sqlite busy waits (busy_timeout bounds
-// each lock wait, not the transaction).
-const attempts = 3
-
+// Ops-spec bounds: an initial try plus 3 retry attempts with jittered
+// 10/50/250 ms backoff (one delay per retry); a 15 s overall deadline clamps
+// cumulative sqlite busy waits (busy_timeout bounds each lock wait, not the
+// transaction).
 var backoff = [...]time.Duration{10 * time.Millisecond, 50 * time.Millisecond, 250 * time.Millisecond}
+
+const attempts = len(backoff) + 1
 
 const deadline = 15 * time.Second
 
@@ -40,7 +41,7 @@ func Write(ctx context.Context, db *store.DB, fn func(ctx context.Context, r sto
 	for attempt := 0; attempt < attempts; attempt++ {
 		if attempt > 0 {
 			d := backoff[attempt-1]
-			// Full jitter in [d/2, d).
+			// Equal jitter in [d/2, d).
 			d = d/2 + rand.N(d/2)
 			select {
 			case <-time.After(d):

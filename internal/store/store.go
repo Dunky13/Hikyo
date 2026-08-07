@@ -65,15 +65,17 @@ var ErrNotFound = errors.New("not found")
 // policy; postgres uses one pgx pool.
 type DB struct {
 	engine Engine
-	path   string
 
 	sqWrite *sql.DB // sqlite only, MaxOpenConns(1), BEGIN IMMEDIATE via _txlock
 	sqRead  *sql.DB // sqlite only
 	pool    *pgxpool.Pool
 }
 
+// Engine, SQLiteWrite, and PG are the doors internal/store/tx and the test
+// harness need; Go has no friend packages, so the "service never sees a pgx
+// or sqlite type" rule is carried by the import-boundary test and review,
+// not the type system.
 func (d *DB) Engine() Engine       { return d.engine }
-func (d *DB) SQLitePath() string   { return d.path }
 func (d *DB) SQLiteWrite() *sql.DB { return d.sqWrite }
 func (d *DB) PG() *pgxpool.Pool    { return d.pool }
 
@@ -120,7 +122,7 @@ func openSQLite(ctx context.Context, path string) (*DB, error) {
 		write.Close()
 		return nil, fmt.Errorf("store: open sqlite read pool: %w", err)
 	}
-	d := &DB{engine: EngineSQLite, path: path, sqWrite: write, sqRead: read}
+	d := &DB{engine: EngineSQLite, sqWrite: write, sqRead: read}
 	for name, pool := range map[string]*sql.DB{"write": write, "read": read} {
 		if err := verifySQLitePragmas(ctx, pool); err != nil {
 			d.Close()
@@ -142,6 +144,7 @@ func verifySQLitePragmas(ctx context.Context, db *sql.DB) error {
 		{"PRAGMA journal_mode", "wal"},
 		{"PRAGMA synchronous", "2"}, // FULL
 		{"PRAGMA busy_timeout", "5000"},
+		{"PRAGMA read_uncommitted", "0"}, // prohibited by the tx boundary contract
 	}
 	for _, c := range checks {
 		var got string

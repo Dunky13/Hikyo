@@ -64,9 +64,19 @@ func loadPackages(t *testing.T) []pkg {
 	return pkgs
 }
 
+// allImports covers production and test imports alike — a test file in
+// internal/server reaching into store is the same boundary breach.
+func allImports(p pkg) []string {
+	out := make([]string, 0, len(p.Imports)+len(p.TestImports)+len(p.XTestImports))
+	out = append(out, p.Imports...)
+	out = append(out, p.TestImports...)
+	out = append(out, p.XTestImports...)
+	return out
+}
+
 func TestStoreImportAllowlist(t *testing.T) {
 	for _, p := range loadPackages(t) {
-		for _, imp := range p.Imports {
+		for _, imp := range allImports(p) {
 			if imp == module+"/internal/store" || strings.HasPrefix(imp, module+"/internal/store/") {
 				if !storeImporters[p.ImportPath] {
 					t.Errorf("%s imports %s: not on the store-importer allowlist", p.ImportPath, imp)
@@ -82,7 +92,7 @@ func TestForbiddenEdges(t *testing.T) {
 			if !strings.HasPrefix(p.ImportPath, rule.importer) {
 				continue
 			}
-			for _, imp := range p.Imports {
+			for _, imp := range allImports(p) {
 				if strings.HasPrefix(imp, rule.imports) {
 					t.Errorf("%s imports %s: %s", p.ImportPath, imp, rule.why)
 				}

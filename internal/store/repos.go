@@ -20,10 +20,11 @@ import (
 func SQLiteTxRepos(tx *sql.Tx) Repos { return sqliteRepos{db: tx} }
 func PGTxRepos(tx pgx.Tx) Repos      { return pgRepos{db: tx} }
 
-// canonTime fixes the canonical cross-engine timestamp semantics: UTC,
+// CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
 // microsecond precision (postgres timestamptz cannot hold more; sqlite text
-// stores the same so both engines round-trip identically).
-func canonTime(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
+// stores the same so both engines round-trip identically). Callers producing
+// timestamps use it too, so the rule lives in exactly one place.
+func CanonTime(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
 
 const timeFormat = time.RFC3339Nano
 
@@ -55,7 +56,7 @@ func (o sqliteOrgs) Create(ctx context.Context, org Org) error {
 		Name:      org.Name,
 		Active:    active,
 		Metadata:  string(org.Metadata),
-		CreatedAt: canonTime(org.CreatedAt).Format(timeFormat),
+		CreatedAt: CanonTime(org.CreatedAt).Format(timeFormat),
 	})
 }
 
@@ -125,7 +126,7 @@ func (o pgOrgs) Create(ctx context.Context, org Org) error {
 		Name:      org.Name,
 		Active:    org.Active,
 		Metadata:  string(org.Metadata),
-		CreatedAt: pgtype.Timestamptz{Time: canonTime(org.CreatedAt), Valid: true},
+		CreatedAt: pgtype.Timestamptz{Time: CanonTime(org.CreatedAt), Valid: true},
 	})
 }
 

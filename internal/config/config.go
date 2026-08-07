@@ -47,8 +47,12 @@ const devSQLitePath = "wenv-dev.db"
 func Load(subcommand string, args []string, getenv func(string) string, environ []string) (*Config, []string, error) {
 	fs := flag.NewFlagSet(subcommand, flag.ContinueOnError)
 	dev := fs.Bool("dev", false, "development mode: zero-config sqlite, text logs")
-	listen := fs.String("listen", "", "listen address (default 127.0.0.1:8080, env WENV_LISTEN)")
-	autoMigrate := fs.Bool("auto-migrate", true, "apply pending migrations at boot")
+	listen, autoMigrate := new(string), new(bool)
+	*autoMigrate = true
+	if subcommand == "server" {
+		listen = fs.String("listen", "", "listen address (default 127.0.0.1:8080, env WENV_LISTEN)")
+		autoMigrate = fs.Bool("auto-migrate", true, "apply pending migrations at boot")
+	}
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
 	}
@@ -110,14 +114,33 @@ func parseDatastore(raw string) (Datastore, error) {
 // validatePostgresTLS enforces the threat-model boundary restated in the
 // system-architecture ADR: remote postgres requires TLS with certificate
 // verification or a same-host socket; no plaintext to a non-loopback host.
+// The effective host may arrive as the URL authority or as a libpq-style
+// ?host= parameter; both are validated, and a DSN naming no host at all is
+// refused rather than left to driver/environment defaults (fail-fast, no
+// silent resolution through PGHOST).
 func validatePostgresTLS(dsn string) error {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return fmt.Errorf("WENV_DB: %w", err)
 	}
 	host := u.Hostname()
-	if host == "" || host == "localhost" || strings.HasPrefix(host, "/") {
-		return nil // unix socket or local resolution
+	if hostParam := u.Query().Get("host"); hostParam != "" {
+		if host != "" && host != hostParam {
+			return fmt.Errorf("WENV_DB: conflicting hosts %q and ?host=%q", host, hostParam)
+		}
+		host = hostParam
+	}
+	if host == "" {
+		return fmt.Errorf("WENV_DB: postgres DSN must name its host explicitly (no implicit PGHOST/default resolution)")
+	}
+	if strings.Contains(host, ",") {
+		return fmt.Errorf("WENV_DB: multi-host DSNs are not supported")
+	}
+	if strings.HasPrefix(host, "/") {
+		return nil // same-host unix socket
+	}
+	if host == "localhost" {
+		return nil
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return nil

@@ -6,25 +6,40 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/wenv/internal/store/migrate"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
 
 // System answers operational questions for the HTTP layer.
 type System struct {
-	DB *store.DB
+	DB    *store.DB
+	Store store.Config
 }
 
 // Ready reports whether a request would actually work: the datastore is
-// reachable. Migrations are current by construction at serve time — the
-// server refuses to start otherwise (fail-closed serving).
+// reachable and migrations are current. Boot already refuses to serve on
+// pending migrations, but the live check also catches the cross-process
+// race the ADR names — an old server still running after a newer
+// `wenv migrate` applied DDL.
 func (s *System) Ready(ctx context.Context) error {
-	return s.DB.Ping(ctx)
+	if err := s.DB.Ping(ctx); err != nil {
+		return err
+	}
+	pending, err := migrate.HasPending(ctx, s.Store)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return errors.New("service: migrations pending")
+	}
+	return nil
 }
 
 // Orgs is the demonstration aggregate's service.
@@ -43,7 +58,7 @@ func (s *Orgs) Create(ctx context.Context, name string, active bool, metadata js
 		Name:      name,
 		Active:    active,
 		Metadata:  metadata,
-		CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
+		CreatedAt: store.CanonTime(time.Now()),
 	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos) error {
 		return r.Orgs().Create(ctx, org)
