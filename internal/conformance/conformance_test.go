@@ -152,6 +152,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 	for _, table := range []string{
 		"grants", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
+		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",
 	} {
 		if _, err := db.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {

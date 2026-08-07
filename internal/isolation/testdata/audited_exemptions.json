@@ -1,0 +1,11 @@
+{
+  "_comment": "Name-pinned exemptions from the audit completeness invariant (audit-model ADR CI invariant 2). The ADR's default-deny rule refuses `audited: none` to unauthenticated- and system-class operations, but declares no event types for health probes, local version prints, or process entry points whose auditable acts (boot keyring reads, migration DDL) run below the operation surface; the demonstration org reads are #44 scaffolding whose real surface (#48) must map them. Every entry here is a reviewed deviation, not a hole: removing an entry without mapping the operation fails the build.",
+  "wire": {
+    "http:GET /healthz": "unauthenticated liveness probe: no principal, no tenant data, no state change; ADR names no health event type",
+    "http:GET /readyz": "unauthenticated readiness probe: same contract as /healthz",
+    "cli:version": "local build-metadata print: no server, no store",
+    "cli:server": "process entry point: boot's auditable acts run below the operation surface (system-proof keyring set); boot events arrive with their catalogue rows",
+    "cli:migrate": "process entry point: migration DDL runs below the store-method surface"
+  },
+  "operations": {}
+}

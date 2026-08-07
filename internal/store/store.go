@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
 
@@ -136,6 +137,7 @@ type Repos interface {
 	Keys() KeyRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
+	Audit() AuditRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
@@ -145,6 +147,7 @@ type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
 	Environments() EnvironmentReader
+	Audit() AuditReader
 }
 
 // ErrNotFound is the canonical cross-engine "no such row" — aliased from
@@ -269,7 +272,39 @@ func openPostgres(ctx context.Context, dsn string) (*DB, error) {
 		pool.Close()
 		return nil, fmt.Errorf("store: postgres ping: %w", err)
 	}
+	if err := verifyPGDurability(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	return &DB{engine: EnginePostgres, pool: pool}, nil
+}
+
+// pgSettingQuerier is the seam verifyPGDurability tests through: the fsync
+// leg cannot be exercised against a live server without restarting it, so
+// the unit test injects a fake.
+type pgSettingQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// verifyPGDurability is the audit-model ADR's boot check (CI invariant 7):
+// sqlite runs synchronous=FULL precisely so audit commits are durable, and
+// postgres gets the same no-silent-downgrade posture — a server with
+// fsync=off or synchronous_commit=off would make "denial durable before the
+// response" a fiction, so boot refuses. A deployment wanting async commit
+// for other workloads runs Wenv against a database configured for durable
+// commits or does not run it. The store never issues SET synchronous_commit
+// at any level (lint-banned).
+func verifyPGDurability(ctx context.Context, q pgSettingQuerier) error {
+	for _, setting := range []string{"fsync", "synchronous_commit"} {
+		var v string
+		if err := q.QueryRow(ctx, "SHOW "+setting).Scan(&v); err != nil {
+			return fmt.Errorf("store: postgres SHOW %s: %w", setting, err)
+		}
+		if v != "on" {
+			return fmt.Errorf("store: postgres %s = %q — audit durability requires it on; refusing to boot without durable commits (audit-model ADR)", setting, v)
+		}
+	}
+	return nil
 }
 
 func (d *DB) Ping(ctx context.Context) error {

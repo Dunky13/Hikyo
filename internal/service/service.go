@@ -15,12 +15,42 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/migrate"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
+
+// newAuditEvent is the one event constructor for every service emitter —
+// domain events (committed in-transaction with their write, per the
+// audit-model ADR's durability discipline), the audit.query event, and the
+// export INTENT/OUTCOME pair. It mints the id, stamps occurred_at, and
+// carries the request's wire metadata; the actor class is resolved
+// server-side at the store boundary.
+func newAuditEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, outcome audit.Outcome, correlationID string, payload audit.Payload) (audit.Event, error) {
+	id, err := audit.NewEventID()
+	if err != nil {
+		return audit.Event{}, err
+	}
+	wire := audit.FromContext(ctx)
+	return audit.Event{
+		ID: id, Type: typ, SchemaVersion: 1,
+		OccurredAt:    time.Now().UTC(),
+		Actor:         audit.Actor{ID: string(principal)},
+		Object:        obj,
+		Outcome:       outcome,
+		CorrelationID: correlationID,
+		SourceIP:      wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
+		Payload: payload,
+	}, nil
+}
+
+// domainEvent is newAuditEvent for the common success-outcome domain event.
+func domainEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, payload audit.Payload) (audit.Event, error) {
+	return newAuditEvent(ctx, typ, principal, obj, audit.OutcomeSuccess, "", payload)
+}
 
 // System answers operational questions for the HTTP layer.
 type System struct {
@@ -73,7 +103,16 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 		if err != nil {
 			return err
 		}
-		return r.Orgs().Create(ctx, p, org)
+		if err := r.Orgs().Create(ctx, p, org); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgCreated, principal,
+			audit.Object{Type: "org", ID: org.ID},
+			audit.Payload{"org_id": org.ID, "org_name": audit.SanitizeFreeText(org.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Org{}, err
@@ -81,41 +120,71 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 	return org, nil
 }
 
+// Org reads are instance-scoped operator reads of cross-tenant metadata, so
+// they are audited (the audit-model ADR's default-deny rule refuses
+// `audited: none` to instance-class operations). The event commits with the
+// read, which is why these run in a write transaction: an operator read
+// without its durable record does not complete.
 func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (store.Org, error) {
 	var out store.Org
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().Get(ctx, p, id)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal,
+			audit.Object{Type: "org", ID: out.ID},
+			audit.Payload{"query": "get", "row_count": 1})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }
 
 func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.Org, error) {
 	var out []store.Org
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().List(ctx, p)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+			audit.Payload{"query": "list", "row_count": len(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }
 
 func (s *Orgs) Count(ctx context.Context, principal domain.PrincipalID) (int64, error) {
 	var out int64
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		out, err = r.Orgs().Count(ctx, p)
-		return err
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+			audit.Payload{"query": "count", "row_count": int(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	return out, err
 }
@@ -139,7 +208,16 @@ func (s *Projects) Create(ctx context.Context, principal domain.PrincipalID, org
 		if err != nil {
 			return err
 		}
-		return r.Projects().Create(ctx, p, proj)
+		if err := r.Projects().Create(ctx, p, proj); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventProjectCreated, principal,
+			audit.Object{Type: "project", ID: proj.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(proj.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Project{}, err
@@ -168,7 +246,16 @@ func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID,
 		if err != nil {
 			return err
 		}
-		return r.Environments().Create(ctx, p, env)
+		if err := r.Environments().Create(ctx, p, env); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvCreated, principal,
+			audit.Object{Type: "environment", ID: env.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(env.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Environment{}, err
@@ -198,6 +285,14 @@ func (s *Environments) UpdateNote(ctx context.Context, principal domain.Principa
 		if err != nil {
 			return err
 		}
-		return r.Environments().UpdateNote(ctx, p, note)
+		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvNoteChanged, principal,
+			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 }

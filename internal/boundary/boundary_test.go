@@ -25,6 +25,7 @@ var storeImporters = map[string]bool{
 	module + "/internal/store/tx":        true,
 	module + "/internal/store/migrate":   true,
 	module + "/internal/store/keyring":   true, // crypto.KeyStore implementation
+	module + "/internal/store/auditrow":  true, // shared audit Row→params mapping
 	module + "/internal/store/sqlitegen": true,
 	module + "/internal/store/pggen":     true,
 	module + "/internal/conformance":     true, // cross-engine test harness
@@ -171,6 +172,11 @@ func TestAuthnImportAllowlist(t *testing.T) {
 		module + "/internal/domain":          true,
 		module + "/internal/store/sqlitegen": true,
 		module + "/internal/store/pggen":     true,
+		// The audit vocabulary (leaf) and the shared Row→params mapping, for
+		// the denial writer — the surface's single write path (audit-model
+		// ADR amendment part 4).
+		module + "/internal/audit":          true,
+		module + "/internal/store/auditrow": true,
 	}
 	for _, p := range loadPackages(t) {
 		for _, imp := range allImports(p) {

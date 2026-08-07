@@ -19,6 +19,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetPrincipalKind",
+    "annotation": "authn-resolution",
+    "hash": "7d34804525d3e9593db35c603cdd980dcb060dc83ff4600c08f3599d2b266de4"
+  },
+  {
+    "engine": "postgres",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
@@ -64,6 +70,12 @@
     "name": "GetOrg",
     "annotation": "instance-scoped",
     "hash": "1f5399c8a18f2b8b804f8fcfb4552f19506b2df88063b896f702223ce2423742"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetPrincipalKind",
+    "annotation": "authn-resolution",
+    "hash": "9d2e7acdb6b1c52c840e24e6abdcf4102421a445eb0fdefa43ca81706a939516"
   },
   {
     "engine": "sqlite",

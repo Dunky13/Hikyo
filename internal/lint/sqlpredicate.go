@@ -295,13 +295,27 @@ func checkWhere(label, sql, upper string, chainCols []string) []string {
 	}
 	conjuncts := andSplitRe.Split(where, -1)
 	present := map[string]bool{}
+	chain := map[string]bool{}
+	for _, col := range chainCols {
+		chain[col] = true
+	}
 	for _, c := range conjuncts {
 		c = strings.TrimSpace(c)
 		m := conjunctRe.FindStringSubmatch(c)
 		if m == nil {
-			return []string{fmt.Sprintf("%s: conjunct %q is not a provable `column = param` shape", label, c)}
+			return []string{fmt.Sprintf("%s: conjunct %q is not a provable `column OP param` shape", label, c)}
 		}
-		present[strings.ToLower(m[1])] = true
+		col, op := strings.ToLower(m[1]), m[2]
+		// Chain columns require equality — a range predicate on a chain
+		// column is not a tenant address. Non-chain columns may carry the
+		// comparison operators (cursor and time-range predicates on the
+		// audit trails); they only ever narrow within the chain conjunct.
+		if chain[col] && op != "=" {
+			return []string{fmt.Sprintf("%s: chain column %q used with %q — chain conjuncts must be equality", label, col, op)}
+		}
+		if op == "=" {
+			present[col] = true
+		}
 	}
 	var out []string
 	for _, col := range chainCols {
@@ -408,7 +422,7 @@ func eachSQLFile(dir string, fn func(path, src string) error) error {
 
 var (
 	andSplitRe = regexp.MustCompile(`(?i)\s+AND\s+`)
-	conjunctRe = regexp.MustCompile(`^(\w+)\s*=\s*` + paramRe + `$`)
+	conjunctRe = regexp.MustCompile(`^(\w+)\s*(=|<=|>=|<|>)\s*` + paramRe + `$`)
 	spaceRe    = regexp.MustCompile(`\s+`)
 
 	setColRes  = map[string]*regexp.Regexp{}

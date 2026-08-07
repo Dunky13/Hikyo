@@ -86,6 +86,7 @@ var generatedPackages = map[string]bool{
 var generatedImporters = map[string]bool{
 	Module + "/internal/store":           true, // the binding layer
 	Module + "/internal/store/authn":     true, // the resolution surface
+	Module + "/internal/store/auditrow":  true, // shared audit Row→params mapping
 	Module + "/internal/store/sqlitegen": true,
 	Module + "/internal/store/pggen":     true,
 	Module + "/internal/isolation":       true, // DBTX instrumentation (tests)

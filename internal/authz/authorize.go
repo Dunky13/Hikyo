@@ -15,8 +15,10 @@ import (
 // closure and can only mint proofs through it — the resolver itself is never
 // exposed.
 type TxAuthorizer struct {
-	r   *authn.Resolver
-	tok *TxToken
+	r          *authn.Resolver
+	tok        *TxToken
+	denials    []Denial
+	captureErr error // a denial that could not even be captured — fail-closed at settle
 }
 
 // NewTxAuthorizer binds authorize() to one transaction attempt. Called by
@@ -75,7 +77,15 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, principal domain.Pri
 	chain, err := a.r.ResolveChain(ctx, scope)
 	if err != nil {
 		// domain.ErrNotFound passes through untouched: the uniform
-		// nonexistent outcome, before any capability evaluation.
+		// nonexistent outcome, before any capability evaluation. The
+		// unresolvable denial is captured for the durable flush — foreign
+		// tenant or genuinely nonexistent, indistinguishable by design and
+		// recorded indistinguishably (instance trail, caller-asserted
+		// claims). Any other resolver error is a loud bug, not a probe
+		// outcome, and mints no event.
+		if errors.Is(err, domain.ErrNotFound) {
+			a.captureDenial(ctx, principal, op, spec, resolutionUnresolvable, domain.Scope{}, scope)
+		}
 		return nil, err
 	}
 
@@ -84,6 +94,9 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, principal domain.Pri
 		return nil, err
 	}
 	if !evaluate(spec.formula, chain, grants) {
+		// Resolvable, unauthorized: the truthful resolved chain, tenant
+		// trail.
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
 		return nil, domain.ErrNotFound
 	}
 	return &proof{kind: kindTenant, op: op, chain: chain, tok: a.tok}, nil
@@ -95,6 +108,9 @@ func (a *TxAuthorizer) authorizeInstance(ctx context.Context, principal domain.P
 		return nil, err
 	}
 	if !evaluate(spec.formula, domain.Scope{}, grants) {
+		// Instance-scoped grant refusal: no tenant object exists, the
+		// denial lands in the instance trail.
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}
 	return &proof{kind: kindInstance, op: op, tok: a.tok}, nil

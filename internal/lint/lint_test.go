@@ -266,3 +266,134 @@ func fixtureLine(t *testing.T, path, marker string) int {
 	t.Fatalf("marker %q not found in %s", marker, path)
 	return 0
 }
+
+// --- redaction + append-only (audit-model ADR, #45) ---
+
+func TestRedactionSurfacesRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckRedactionSurfaces(pkgs) {
+		t.Error(f)
+	}
+}
+
+func TestSensitiveFormattingRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckSensitiveFormatting(pkgs) {
+		t.Error(f)
+	}
+}
+
+func TestSensitiveFormattingCatchesViolations(t *testing.T) {
+	pkgs, err := Load("./testdata/badredact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckSensitiveFormatting(pkgs)
+	assertFindings(t, findings, []string{
+		"passes sensitive type " + Module + "/internal/crypto.Keyring to fmt",
+		"passes sensitive type " + Module + "/internal/crypto.ProjectSealer to fmt",
+		"passes sensitive type " + Module + "/internal/crypto.Keyring to encoding/json",
+		"logs audit content " + Module + "/internal/audit.Event",
+		"logs audit content " + Module + "/internal/store.AuditEvent",
+	})
+	// The erasure evasions must be caught at the lines where they are
+	// written, not merely somewhere in the file.
+	for marker, what := range map[string]string{
+		`any(ev)`:                   "any-conversion erasure",
+		`ev.Payload["x"]`:           "payload map-index erasure",
+		`fmt.Printf("%v", any(kr))`: "sensitive-type erasure",
+	} {
+		line := fixtureLine(t, filepath.Join("testdata", "badredact", "badredact.go"), marker)
+		want := fmt.Sprintf("badredact.go:%d:", line)
+		found := false
+		for _, f := range findings {
+			if strings.Contains(f, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s not caught at %s:\n%s", what, want, strings.Join(findings, "\n"))
+		}
+	}
+}
+
+func TestAuditAppendOnlyRepo(t *testing.T) {
+	for _, f := range CheckAuditAppendOnly(repoRoot(t)) {
+		t.Error(f)
+	}
+}
+
+func TestAuditAppendOnlyCatchesViolations(t *testing.T) {
+	// The check parses real query directories; feed it a synthetic tree.
+	dir := t.TempDir()
+	for _, engine := range []string{"sqlite", "postgres"} {
+		qdir := filepath.Join(dir, "internal", "store", "queries", engine)
+		if err := os.MkdirAll(qdir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		bad := "-- name: PruneAudit :exec\nDELETE FROM audit_tenant_events WHERE org_id = ?;\n" +
+			"-- name: RewriteAudit :exec\nUPDATE audit_instance_events SET payload = ? WHERE id = ?;\n"
+		if err := os.WriteFile(filepath.Join(qdir, "audit.sql"), []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sdir := filepath.Join(dir, "internal", "store")
+	if err := os.WriteFile(filepath.Join(sdir, "downgrade.go"), []byte("package store\nconst q = \"SET synchronous_commit = off\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := CheckAuditAppendOnly(dir)
+	assertFindings(t, findings, []string{
+		"PruneAudit",
+		"RewriteAudit",
+		"SET synchronous_commit",
+	})
+}
+
+// The denial writer must be the resolution surface's ONLY write path
+// (audit-model ADR amendment part 4) — enforced, not asserted in prose.
+func TestDenialWriterIsSoleWriter(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckDenialWriter(pkgs) {
+		t.Error(f)
+	}
+}
+
+func TestDenialWriterCatchesSecondWriter(t *testing.T) {
+	pkgs, err := Load("./testdata/badauthn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface := Module + "/internal/lint/testdata/badauthn"
+	findings := CheckDenialWriterIn(pkgs, surface, "WriteDenial")
+	assertFindings(t, findings, []string{
+		"SecondWriter calls the mutating query InsertTenantAuditEvent outside WriteDenial",
+	})
+	for _, f := range findings {
+		if strings.Contains(f, "WriteDenial calls") || strings.Contains(f, "ReadsAreFine") {
+			t.Errorf("analyzer flagged a licensed write or a read: %s", f)
+		}
+	}
+	// Scoping: the same package is silent when it is not the named surface.
+	if f := CheckDenialWriterIn(pkgs, Module+"/internal/store/authn", "WriteDenial"); len(f) != 0 {
+		t.Errorf("analyzer fired outside the named surface: %v", f)
+	}
+	for _, name := range []string{"InsertTenantAuditEvent", "CreateOrg", "UpdateEnvironmentNote", "DeleteThing", "AcquireHierarchyGeneration"} {
+		if !mutatingQuery(name) {
+			t.Errorf("mutatingQuery(%q) = false — a write verb the analyzer would miss", name)
+		}
+	}
+	for _, name := range []string{"GetPrincipalKind", "ResolveOrgChain", "ListGrantsForPrincipal", "PageTenantAuditOrg"} {
+		if mutatingQuery(name) {
+			t.Errorf("mutatingQuery(%q) = true — a read misclassified as a write", name)
+		}
+	}
+}
