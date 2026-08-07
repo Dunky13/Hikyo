@@ -253,6 +253,76 @@ Recorded because each was found by a check rather than by reading:
   the authority** — leaving an instance bootstrapped with a value nobody saw
   and a command that refuses to run again. `disclose.Preflight` now runs first.
 
+## Cross-model review (Codex `gpt-5.6-sol`, high effort)
+
+Standing rule: Claude-authored code gets a blocking pass by the other
+vendor's model. Round 1 was run twice — the first attempt died with context
+exhausted on a 445 KB diff, which is CODEX.md's documented failure mode — and
+then split into two focused passes over the actual files. Both reports are in
+`.xreview/`.
+
+**Round 1: 4 blockers, 11 highs, 6 mediums, 2 lows across the two passes.**
+All fixed in this branch; none deferred. The two that mattered most:
+
+1. **Identity was resolved in a different transaction from the operation it
+   authorized.** Both reviewers found it independently. The transport
+   resolved the session, then handed a bare principal id to a service that
+   opened its own transaction — so a session revoked in between still
+   authorized the operation. A principal id crossing a transaction boundary
+   IS the cross-request authorization cache the permission model forbids; it
+   just looks like an argument. `service.Actor` now carries the raw artifact
+   and the service resolves it at the chokepoint, with a lint check refusing
+   `internal/server` the right to name the bypass constructor.
+
+2. **The proof-free-writer analyzer was fail-open.** It guessed "does this
+   mutate?" from a name-prefix list, and `ConsumeCredentialAuthority`,
+   `TouchSession` and `AdvancePrincipalGeneration` match no listed prefix —
+   so three real writers bypassed the enforcement that exists to catch
+   exactly them. Classification now comes from sqlc's own command
+   annotation, with an unrecognised command treated as mutating.
+
+Also fixed: `EstablishCredential` derived Argon2id inside a write
+transaction; the malformed-authority audit event was rolled back with the
+refusal it recorded (a previous pass claimed to have fixed this and had not —
+the reviewer read the code, not the claim); an unreadable verifier answered
+500 while a missing account answered 401, an account-existence oracle;
+session liveness returned early so the query count told you why an artifact
+was dead; the KDF upgrade existed only in a comment; per-account backoff slept
+while holding an expensive-work slot; stored KDF parameters were unbounded
+before Argon2id allocated; `ParseArtifact` accepted arbitrary bytes;
+`X-Forwarded-For` was read leftmost, which is the client-controlled end; the
+freeze allowlist permitted closed-enum growth and optionality relaxation;
+a failed disclosure left its file behind; an explicit instance URL was not
+compared against the trust entry it resolved to; the limiter's maps were
+unbounded.
+
+**Round 2** verified the fixes. **Round 3 is the cap** — leftovers at that
+point are for human disposition, not another loop.
+
+### Known-open, for disposition
+
+- **State-directory hardening.** Existing state files are not checked for
+  ownership, mode, symlink status or regular-file-ness, and the temporary
+  files used for atomic replacement have fixed names. A pre-existing
+  writable or symlinked state directory is therefore a session-disclosure
+  path. The disclosure path (`internal/disclose`) IS hardened; the CLI's own
+  state directory is not. Bounded work, not done here.
+- **A hostile pin file can still select among ALREADY-TRUSTED instances.**
+  Origin binding now covers the case where the operator names a URL
+  explicitly. A `.wenv.json` that names a bare reference can still direct a
+  command at a different established instance the box already trusts — which
+  is the residual the ADR itself states ("bounded to retargeting within
+  origins this box already trusts"), but the reviewer's point that
+  `--context` should outrank a repository file is a fair reading and is not
+  implemented.
+- **Username is not re-resolved between the read and write phases of login.**
+  No rename verb exists, so the race is currently unreachable; it becomes
+  reachable the day one lands.
+- **The freeze gate is not armed against a baseline in CI.** By design —
+  pre-freeze the spec may change freely, and there is no freeze tag to diff
+  against. The gate is fixture-proven and the CI wiring is the freeze
+  ticket's.
+
 ## Pickup notes
 
 - Adding an endpoint: describe it in `api/openapi.yaml` with all five
