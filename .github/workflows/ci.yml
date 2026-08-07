@@ -105,6 +105,37 @@ jobs:
       - name: Classify complete snapshot manifest
         run: ./scripts/release/snapshot-manifest_test.sh
 
+  # The TypeScript half of the contract chain. It is a separate job because it
+  # needs a different toolchain, and because a Go-only change must not be able
+  # to leave the generated client stale without anyone noticing.
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install (frozen lockfile)
+        working-directory: clients/ts
+        run: pnpm install --frozen-lockfile
+      - name: Regenerate from the contract
+        working-directory: clients/ts
+        run: pnpm run generate
+      - name: Generated client is fresh
+        run: |
+          git diff --exit-code -- clients/ts/src/generated
+          test -z "$(git status --porcelain --untracked-files=all -- clients/ts/src/generated)"
+      - name: Typecheck
+        working-directory: clients/ts
+        run: pnpm run typecheck
+      - name: Contract round-trip fixtures (3.1 profile, Zod half)
+        working-directory: clients/ts
+        run: pnpm run test
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -141,9 +172,10 @@ jobs:
       - name: Generated code is fresh
         run: |
           go tool sqlc generate
-          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen
+          go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
+          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen
           # git diff misses newly generated untracked files
-          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen)"
+          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen)"
 
       - name: Test (sqlite + postgres conformance)
         env:
