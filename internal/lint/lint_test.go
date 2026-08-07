@@ -7,6 +7,8 @@ package lint
 // green run is never vacuous.
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -222,7 +224,45 @@ func TestDriverHandlesCatchesViolations(t *testing.T) {
 		// The escapes an accessor-call check alone cannot see: a locally
 		// declared structural interface, a type assertion to one, and a
 		// handle simply passed in as a parameter.
-		"names driver type *github.com/jackc/pgx/v5/pgxpool.Pool",
-		"names driver type *database/sql.DB",
+		"names driver type github.com/jackc/pgx/v5/pgxpool.Pool",
+		"names driver type database/sql.DB",
 	})
+	// The alias and generic-instantiation escapes must be caught at the
+	// exact lines where they are written: an alias hides the driver type's
+	// spelling, and a generic's declaration carries only its type parameter,
+	// so the concrete handle exists solely in the instantiation expression.
+	// Lines are located from the fixture source, so it can move freely.
+	for marker, what := range map[string]string{
+		"type aliasHolder interface": "alias escape",
+		"db.(holder[*pgxpool.Pool])": "generic-instantiation escape",
+	} {
+		line := fixtureLine(t, filepath.Join("testdata", "badhandle", "evasions.go"), marker)
+		want := fmt.Sprintf("evasions.go:%d:", line)
+		found := false
+		for _, f := range findings {
+			if strings.Contains(f, want) && strings.Contains(f, "names driver type") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s not caught at %s:\n%s", what, want, strings.Join(findings, "\n"))
+		}
+	}
+}
+
+// fixtureLine finds the 1-indexed line of the first source line containing
+// marker, so position assertions survive edits to the fixture above them.
+func fixtureLine(t *testing.T, path, marker string) int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range strings.Split(string(b), "\n") {
+		if strings.Contains(line, marker) {
+			return i + 1
+		}
+	}
+	t.Fatalf("marker %q not found in %s", marker, path)
+	return 0
 }

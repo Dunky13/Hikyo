@@ -154,7 +154,18 @@ Round 1 returned 5 findings; all fixed in this branch, none deferred:
    allowed operation still succeeds.
 
 Round 2 verdict: findings 2–5 **FIXED**, finding 1 **PARTIAL** → closed as
-above. No new criticals. Remaining honest limit, stated rather than hidden:
+above. No new criticals.
+
+Round 3 (final, cap reached) returned **BLOCKING 2**, both against that
+closure and both **dispositioned by applying the prescribed fix**: (i) the
+walk had no alias case, so `type pool = pgxpool.Pool` plus
+`interface{ PG() *pool }` slipped through — driver types are now keyed by
+their *named* identity (not their pointer spelling) and aliases are
+unwrapped; (ii) `TypesInfo.Defs` alone misses types that exist only as
+expressions — a generic instantiation like `holder[*pgxpool.Pool]` carries
+the concrete handle nowhere else — so expression types and generic type
+arguments are walked too. Both escapes are in
+`testdata/badhandle/evasions.go`, asserted at source-located positions. Remaining honest limit, stated rather than hidden:
 an allowlisted package could still hand out a wrapper whose methods run
 queries behind a driver-free interface. The allowlist *is* the trusted set
 ({store, store/tx, store/migrate, the two generated packages, the two

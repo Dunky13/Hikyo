@@ -2,6 +2,7 @@ package lint
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 	"strings"
 
@@ -50,14 +51,27 @@ var handleUsers = map[string]bool{
 // a wrapper whose methods run queries behind a driver-free interface. That
 // is a trusted-set change — the allowlist is the trusted set — and gets
 // adversarial review depth, not lint.
+// Keyed by the NAMED type, not its pointer spelling: matching "*pkg.Pool"
+// as a string misses `*pool` where `type pool = pgxpool.Pool`, and misses a
+// value-typed occurrence entirely.
 var driverTypes = map[string]bool{
-	"*github.com/jackc/pgx/v5/pgxpool.Pool": true,
-	"*github.com/jackc/pgx/v5/pgxpool.Conn": true,
-	"github.com/jackc/pgx/v5.Tx":            true,
-	"*github.com/jackc/pgx/v5.Conn":         true,
-	"*database/sql.DB":                      true,
-	"*database/sql.Tx":                      true,
-	"*database/sql.Conn":                    true,
+	"github.com/jackc/pgx/v5/pgxpool.Pool": true,
+	"github.com/jackc/pgx/v5/pgxpool.Conn": true,
+	"github.com/jackc/pgx/v5.Tx":           true,
+	"github.com/jackc/pgx/v5.Conn":         true,
+	"database/sql.DB":                      true,
+	"database/sql.Tx":                      true,
+	"database/sql.Conn":                    true,
+}
+
+// namedKey is a named type's stable identity, independent of how any use
+// site spells it (pointer, alias, generic instantiation).
+func namedKey(n *types.Named) string {
+	obj := n.Obj()
+	if obj == nil || obj.Pkg() == nil {
+		return ""
+	}
+	return obj.Pkg().Path() + "." + obj.Name()
 }
 
 // generatedPackages are the sqlc outputs. Reaching them directly is the same
@@ -112,20 +126,35 @@ func CheckDriverHandles(pkgs []*packages.Package) []string {
 			// and type-assertion escapes, where the accessor call resolves to
 			// a locally declared method rather than the store's.
 			reported := map[string]bool{}
+			report := func(pos token.Pos, named string) {
+				if named == "" {
+					return
+				}
+				at := p.Fset.Position(pos)
+				key := named + "@" + at.String()
+				if reported[key] {
+					return
+				}
+				reported[key] = true
+				findings = append(findings, fmt.Sprintf(
+					"handles: %s: %s names driver type %s — only the transaction boundary and the harnesses may hold engine handles",
+					at, base, named))
+			}
 			for ident, obj := range p.TypesInfo.Defs {
 				if obj == nil || ident == nil {
 					continue
 				}
-				if named := mentionsDriverType(obj.Type(), map[types.Type]bool{}); named != "" {
-					key := named + "@" + p.Fset.Position(ident.Pos()).String()
-					if reported[key] {
-						continue
-					}
-					reported[key] = true
-					findings = append(findings, fmt.Sprintf(
-						"handles: %s: %s names driver type %s — only the transaction boundary and the harnesses may hold engine handles",
-						p.Fset.Position(ident.Pos()), base, named))
+				report(ident.Pos(), mentionsDriverType(obj.Type(), map[types.Type]bool{}))
+			}
+			// Declarations alone miss types that exist only as expressions:
+			// an inline type assertion, and a generic instantiation like
+			// holder[*pgxpool.Pool] whose declaration carries only the type
+			// parameter. Expression types close both.
+			for expr, tv := range p.TypesInfo.Types {
+				if expr == nil {
+					continue
 				}
+				report(expr.Pos(), mentionsDriverType(tv.Type, map[types.Type]bool{}))
 			}
 		}
 		if generatedImporters[base] {
@@ -150,11 +179,17 @@ func mentionsDriverType(t types.Type, seen map[types.Type]bool) string {
 		return ""
 	}
 	seen[t] = true
-	if driverTypes[t.String()] {
-		return t.String()
+	// Unwrap aliases: `type pool = pgxpool.Pool` would otherwise make
+	// `interface{ PG() *pool }` invisible to both the String() match and the
+	// module-scope guard below.
+	if u := types.Unalias(t); u != t {
+		return mentionsDriverType(u, seen)
 	}
 	switch u := t.(type) {
 	case *types.Named:
+		if key := namedKey(u); driverTypes[key] {
+			return key
+		}
 		// Named driver types are matched by String() above. Descend only into
 		// interfaces declared in THIS module: that is where a structural
 		// escape would have to be written, and it keeps the walk out of the
@@ -164,6 +199,15 @@ func mentionsDriverType(t types.Type, seen map[types.Type]bool) string {
 		obj := u.Obj()
 		if obj == nil || obj.Pkg() == nil || !strings.HasPrefix(obj.Pkg().Path(), Module) {
 			return ""
+		}
+		// A generic instantiation carries its arguments here, and nowhere in
+		// the generic's own declaration.
+		if args := u.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if s := mentionsDriverType(args.At(i), seen); s != "" {
+					return s
+				}
+			}
 		}
 		if iface, ok := u.Underlying().(*types.Interface); ok {
 			return mentionsDriverType(iface, seen)
