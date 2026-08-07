@@ -4,10 +4,35 @@
 
 package sqlitegen
 
+type KeyGeneration struct {
+	Scope      string
+	Generation int64
+}
+
+type MasterKey struct {
+	Version      int64
+	RootKeyEpoch int64
+	State        string
+	Blob         []byte
+	CreatedAt    string
+}
+
 type Org struct {
 	ID        string
 	Name      string
 	Active    int64
 	Metadata  string
 	CreatedAt string
+}
+
+type Tier3Key struct {
+	ID               string
+	Purpose          string
+	OrgID            string
+	ProjectID        string
+	Version          int64
+	MasterKeyVersion int64
+	State            string
+	Blob             []byte
+	CreatedAt        string
 }

@@ -8,10 +8,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type KeyGeneration struct {
+	Scope      string
+	Generation int64
+}
+
+type MasterKey struct {
+	Version      int64
+	RootKeyEpoch int64
+	State        string
+	Blob         []byte
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Org struct {
 	ID        string
 	Name      string
 	Active    bool
 	Metadata  string
 	CreatedAt pgtype.Timestamptz
+}
+
+type Tier3Key struct {
+	ID               string
+	Purpose          string
+	OrgID            string
+	ProjectID        string
+	Version          int64
+	MasterKeyVersion int64
+	State            string
+	Blob             []byte
+	CreatedAt        pgtype.Timestamptz
 }

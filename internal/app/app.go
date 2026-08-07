@@ -10,12 +10,15 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Dunky13/wenv/internal/config"
+	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/server"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/wenv/internal/store/keyring"
 	"github.com/Dunky13/wenv/internal/store/migrate"
 )
 
@@ -51,16 +54,76 @@ func RunMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger) error
 type Server struct {
 	Addr    string
 	db      *store.DB
+	keyring *crypto.Keyring // held for the process lifetime; consumed by later tickets
 	ln      net.Listener
 	handler http.Handler
 	log     *slog.Logger
 }
 
-// Boot runs the fail-closed startup sequence: migrations (auto-apply by
-// default; with auto-apply disabled a pending migration state refuses to
-// serve), then datastore open with the boot-enforced pragma policy, then the
-// listener. Any error means the process must exit without serving.
+// devRootKeyName sits beside the dev sqlite database (cwd when no sqlite
+// path exists). Dev bootstrap only; a production start never generates a
+// root key.
+const devRootKeyName = "wenv-dev.rootkey"
+
+func devRootKeyPath(cfg *config.Config) string {
+	if cfg.Store.Engine == config.EngineSQLite && cfg.Store.Path != "" {
+		return filepath.Join(filepath.Dir(cfg.Store.Path), devRootKeyName)
+	}
+	return devRootKeyName
+}
+
+// resolveRootKey reads the operator root key, or — in --dev with no source
+// configured — generates and persists a development root key beside the dev
+// database.
+//
+// The dev generation is a recorded deviation from the encryption ADR's
+// refusal 1 ("the server never auto-generates a root key on first run"),
+// forced by the architecture ADR's zero-config `--dev` evaluation mode: an
+// ephemeral key would brick wenv-dev.db on every restart, and refusing would
+// make --dev not zero-config. The rationale behind refusal 1 (a silent key
+// nobody backed up, discovered at restore) does not bite an evaluation
+// database sitting next to its own key file, and the generation is loud.
+func resolveRootKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
+	file := cfg.RootKeyFile
+	if file == "" && !cfg.RootKeyFromEnv && cfg.Dev {
+		devPath := devRootKeyPath(cfg)
+		if _, err := os.Stat(devPath); errors.Is(err, os.ErrNotExist) {
+			key, err := crypto.GenerateRootKey()
+			if err != nil {
+				return nil, err
+			}
+			defer crypto.Zero(key)
+			if err := os.WriteFile(devPath, []byte(crypto.EncodeRootKey(key)+"\n"), 0o600); err != nil {
+				return nil, fmt.Errorf("write dev root key: %w", err)
+			}
+			log.Warn("generated development root key — evaluation only, back it up with the dev database or lose the data",
+				"path", devPath)
+		} else if err != nil {
+			return nil, fmt.Errorf("dev root key: %w", err)
+		} else {
+			log.Warn("using development root key", "path", devPath)
+		}
+		file = devPath
+	}
+	var envValue string
+	if cfg.RootKeyFromEnv {
+		envValue = os.Getenv("WENV_ROOT_KEY")
+		log.Warn("root key delivered via WENV_ROOT_KEY: the value stays readable in the process environment for the whole lifetime; prefer --root-key-file or a systemd credential")
+	}
+	return crypto.ReadRootKey(file, envValue)
+}
+
+// Boot runs the fail-closed startup sequence: process hardening before any
+// key material exists, migrations (auto-apply by default; with auto-apply
+// disabled a pending migration state refuses to serve), datastore open with
+// the boot-enforced pragma policy, keyring load (root key read, master key
+// unwrapped or minted, root key zeroed — `wenv server` is the only mode that
+// does this), then the listener. Any error means the process must exit
+// without serving.
 func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, error) {
+	if err := crypto.HardenProcess(); err != nil {
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
 	sc := storeConfig(cfg)
 
 	if cfg.AutoMigrate {
@@ -75,8 +138,21 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
+	root, err := resolveRootKey(cfg, log)
+	if err != nil {
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
+
 	db, err := store.Open(ctx, sc)
 	if err != nil {
+		crypto.Zero(root)
+		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+	}
+
+	// LoadKeyring consumes root: it is zeroed before this returns.
+	kr, err := crypto.LoadKeyring(ctx, &keyring.Store{DB: db}, root)
+	if err != nil {
+		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 
@@ -90,6 +166,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	return &Server{
 		Addr:    ln.Addr().String(),
 		db:      db,
+		keyring: kr,
 		ln:      ln,
 		handler: server.New(&service.System{DB: db, Store: sc}),
 		log:     log,

@@ -33,6 +33,11 @@ type Config struct {
 	TrustedProxyCIDRs []string
 	AutoMigrate       bool
 	Store             Datastore
+
+	// Root-key source descriptor — never the key material itself; the crypto
+	// package reads and validates it at boot. Only `wenv server` consults it.
+	RootKeyFile    string // --root-key-file (also covers systemd LoadCredential paths)
+	RootKeyFromEnv bool   // WENV_ROOT_KEY is set (documented weakest tier)
 }
 
 // knownEnv is the closed set of WENV_* keys this build understands.
@@ -40,6 +45,7 @@ var knownEnv = map[string]bool{
 	"WENV_DB":                  true,
 	"WENV_LISTEN":              true,
 	"WENV_TRUSTED_PROXY_CIDRS": true,
+	"WENV_ROOT_KEY":            true,
 }
 
 const devSQLitePath = "wenv-dev.db"
@@ -50,11 +56,12 @@ const devSQLitePath = "wenv-dev.db"
 func Load(subcommand string, args []string, getenv func(string) string, environ []string) (*Config, []string, error) {
 	fs := flag.NewFlagSet(subcommand, flag.ContinueOnError)
 	dev := fs.Bool("dev", false, "development mode: zero-config sqlite, text logs")
-	listen, autoMigrate := new(string), new(bool)
+	listen, autoMigrate, rootKeyFile := new(string), new(bool), new(string)
 	*autoMigrate = true
 	if subcommand == "server" {
 		listen = fs.String("listen", "", "listen address (default 127.0.0.1:8080, env WENV_LISTEN)")
 		autoMigrate = fs.Bool("auto-migrate", true, "apply pending migrations at boot")
+		rootKeyFile = fs.String("root-key-file", "", "path to the 64-hex-char root key file (mode 0600)")
 	}
 	if err := fs.Parse(args); err != nil {
 		return nil, nil, err
@@ -72,9 +79,14 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	}
 
 	cfg := &Config{
-		Dev:         *dev,
-		AutoMigrate: *autoMigrate,
-		Listen:      *listen,
+		Dev:            *dev,
+		AutoMigrate:    *autoMigrate,
+		Listen:         *listen,
+		RootKeyFile:    *rootKeyFile,
+		RootKeyFromEnv: getenv("WENV_ROOT_KEY") != "",
+	}
+	if cfg.RootKeyFile != "" && cfg.RootKeyFromEnv {
+		return nil, nil, fmt.Errorf("both --root-key-file and WENV_ROOT_KEY are set: configure exactly one root-key source")
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = getenv("WENV_LISTEN")

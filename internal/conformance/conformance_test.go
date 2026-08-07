@@ -110,7 +110,8 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, table := range []string{"orgs", "goose_db_version"} {
+	// tier3_keys references master_keys: drop order matters.
+	for _, table := range []string{"orgs", "tier3_keys", "master_keys", "key_generations", "goose_db_version"} {
 		if _, err := db.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatal(err)
 		}
