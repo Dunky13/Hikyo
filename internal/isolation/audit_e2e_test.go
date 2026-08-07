@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/domain"
@@ -62,7 +63,7 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func runAuditSuite(t *testing.T, db *store.DB) {
-	audits := &service.Audits{DB: db}
+	audits := &service.Audits{DB: db, SettleHorizon: service.ZeroSettleHorizon}
 	envs := &service.Environments{DB: db}
 	projects := &service.Projects{DB: db}
 	orgsSvc := &service.Orgs{DB: db}
@@ -265,6 +266,34 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE payload LIKE '%"+audit.RedactionMarker+"%'"); n == 0 {
 			t.Error("claimed identifiers were not token-filtered")
+		}
+	})
+
+	t.Run("export_ceiling_excludes_unsettled_writes", func(t *testing.T) {
+		// With the production horizon, an export must NOT reach events
+		// written moments ago: those are exactly the ones whose transaction
+		// may still be in flight, and whose seq an earlier page's cursor
+		// could otherwise step past (cross-model R3). Same export, ceiling
+		// disabled, sees them — so this asserts the ceiling, not an empty
+		// trail.
+		lagged := &service.Audits{DB: db, SettleHorizon: time.Hour}
+		var buf bytes.Buffer
+		if err := lagged.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &buf); err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.TrimSpace(buf.String()); n != "" {
+			t.Errorf("export reached events inside the settle horizon:\n%s", n)
+		}
+		var live bytes.Buffer
+		if err := audits.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &live); err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(live.String()) == "" {
+			t.Fatal("ceiling-free export is also empty — the assertion above proves nothing")
+		}
+		// The started event records the ceiling it actually applied.
+		if n := countTenant("type = 'audit.export_started' AND payload LIKE '%filter_to%'"); n == 0 {
+			t.Error("export_started does not record the effective ceiling")
 		}
 	})
 

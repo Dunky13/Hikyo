@@ -39,67 +39,47 @@ INSERT INTO audit_instance_events (
 );
 
 -- name: PageTenantAuditOrg :many
-SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
-WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
+WHERE org_id = sqlc.arg(chain_org_id) AND seq > sqlc.arg(after_seq)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageTenantAuditProject :many
-SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
+    AND seq > sqlc.arg(after_seq)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageTenantAuditEnv :many
-SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_tenant_events
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
-    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
+    AND env_id = sqlc.arg(chain_env_id) AND seq > sqlc.arg(after_seq)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
 -- name: PageInstanceAudit :many
-SELECT seq, txid, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 FROM audit_instance_events
-WHERE seq > sqlc.arg(after_seq) AND seq < sqlc.arg(settled_below)
+WHERE seq > sqlc.arg(after_seq)
     AND recorded_at >= sqlc.arg(from_time) AND recorded_at <= sqlc.arg(to_time)
 ORDER BY seq LIMIT sqlc.arg(page_limit);
 
--- Paging is bounded by the SETTLED-SEQ bound: the lowest seq whose
--- transaction has not finished. Every row below it is settled, so a cursor
--- can never step past a row that commits later - seq is allocated before
--- commit on this engine, so that is a real omission, not a reordering. The
--- unsettled threshold is the snapshot xmin (the lowest still-running xid);
--- rows at or above it may or may not commit, so the bound stops there and a
--- later export picks them up. An export holds one bound for all its pages,
--- which also makes it terminate instead of chasing live writes.
-
--- wenv:instance-scoped
--- name: AuditUnsettledThreshold :one
-SELECT (pg_snapshot_xmin(pg_current_snapshot())::text::bigint) AS threshold;
-
--- name: SettledBelowTenant :one
-SELECT COALESCE(MIN(seq), 9223372036854775807)::bigint AS settled_below
-FROM audit_tenant_events WHERE org_id = sqlc.arg(chain_org_id) AND txid >= sqlc.arg(threshold);
-
--- name: SettledBelowInstance :one
-SELECT COALESCE(MIN(seq), 9223372036854775807)::bigint AS settled_below
-FROM audit_instance_events WHERE txid >= sqlc.arg(threshold);

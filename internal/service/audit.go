@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
@@ -21,6 +22,41 @@ import (
 // page read in its own transaction under a fresh proof.
 type Audits struct {
 	DB *store.DB
+	// SettleHorizon is how far back an EXPORT's ceiling is held from now.
+	// Zero means DefaultSettleHorizon; tests set it to zero-lag explicitly.
+	//
+	// Why an export needs it: `seq` is allocated before commit on postgres,
+	// so a row can become visible with a seq BELOW a cursor an earlier page
+	// already passed — silently dropping it from the export (cross-model
+	// R1/R3). Neither a txid predicate nor a MIN(seq) bound fixes that,
+	// because an in-flight row is invisible to the very query that would
+	// have to see it. What IS observable is time: every audit row's
+	// recorded_at is stamped inside its transaction, and the transaction
+	// package enforces a hard 15 s deadline, so a row whose recorded_at is
+	// older than the horizon has certainly settled — committed and visible,
+	// or aborted and gone forever. Bounding an export's ceiling there makes
+	// the seq cursor safe, at the cost of the export trailing live writes.
+	SettleHorizon time.Duration
+}
+
+// DefaultSettleHorizon is four times the transaction package's 15 s
+// deadline, leaving room for clock skew between instances writing to one
+// postgres. Ops-spec territory (#32) once it owns the concrete values.
+const DefaultSettleHorizon = 60 * time.Second
+
+// ZeroSettleHorizon disables the export ceiling. It exists for tests that
+// export events they just wrote; production paths take the default.
+const ZeroSettleHorizon = time.Duration(-1)
+
+func (s *Audits) settleCeiling(now time.Time) (time.Time, bool) {
+	h := s.SettleHorizon
+	if h == ZeroSettleHorizon {
+		return time.Time{}, false
+	}
+	if h <= 0 {
+		h = DefaultSettleHorizon
+	}
+	return now.Add(-h), true
 }
 
 func auditQueryOp(scope domain.Scope) (authz.Operation, error) {
@@ -80,11 +116,6 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 		if err != nil {
 			return err
 		}
-		// Page only below the settled-seq bound (see AuditFilter).
-		f.SettledBelow, err = r.Audit().SettledBelowTenant(ctx, p)
-		if err != nil {
-			return err
-		}
 		page, err = r.Audit().PageTenant(ctx, p, f)
 		if err != nil {
 			return err
@@ -107,10 +138,6 @@ func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID
 	var page []store.AuditEvent
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, authz.OpAuditInstanceQuery, domain.Scope{})
-		if err != nil {
-			return err
-		}
-		f.SettledBelow, err = r.Audit().SettledBelowInstance(ctx, p)
 		if err != nil {
 			return err
 		}
@@ -212,10 +239,7 @@ func (s *Audits) Export(ctx context.Context, principal domain.PrincipalID, scope
 	page := func(ctx context.Context, r store.ReadRepos, p authz.Proof, pf store.AuditFilter) ([]store.AuditEvent, error) {
 		return r.Audit().PageTenant(ctx, p, pf)
 	}
-	bound := func(ctx context.Context, r store.Repos, p authz.Proof) (int64, error) {
-		return r.Audit().SettledBelowTenant(ctx, p)
-	}
-	return s.export(ctx, principal, op, scope, f, pageSize, w, insertTenant, page, bound)
+	return s.export(ctx, principal, op, scope, f, pageSize, w, insertTenant, page)
 }
 
 // InstanceExport is Export for the instance trail.
@@ -229,10 +253,7 @@ func (s *Audits) InstanceExport(ctx context.Context, principal domain.PrincipalI
 	page := func(ctx context.Context, r store.ReadRepos, p authz.Proof, pf store.AuditFilter) ([]store.AuditEvent, error) {
 		return r.Audit().PageInstance(ctx, p, pf)
 	}
-	bound := func(ctx context.Context, r store.Repos, p authz.Proof) (int64, error) {
-		return r.Audit().SettledBelowInstance(ctx, p)
-	}
-	return s.export(ctx, principal, authz.OpAuditInstanceExport, domain.Scope{}, f, pageSize, w, insertInstance, page, bound)
+	return s.export(ctx, principal, authz.OpAuditInstanceExport, domain.Scope{}, f, pageSize, w, insertInstance, page)
 }
 
 func (s *Audits) export(
@@ -245,8 +266,15 @@ func (s *Audits) export(
 	w io.Writer,
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
-	bound func(context.Context, store.Repos, authz.Proof) (int64, error),
 ) error {
+	// The export ceiling: everything at or before it has settled, so the
+	// seq cursor cannot step past a row that is still in flight. Recorded in
+	// the started event's normalized filters, so the trail shows the range
+	// the export actually covered.
+	if ceiling, ok := s.settleCeiling(time.Now()); ok && (f.To.IsZero() || f.To.After(ceiling)) {
+		f.To = ceiling
+	}
+
 	started, err := newAuditEvent(ctx, audit.EventAuditExportStarted, principal, audit.Object{}, audit.OutcomeIntent, "", f.Normalized())
 	if err != nil {
 		return err
@@ -259,10 +287,6 @@ func (s *Audits) export(
 	// terminating snapshot instead of a chase of live writes.
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, principal, op, scope)
-		if err != nil {
-			return err
-		}
-		f.SettledBelow, err = bound(ctx, r, p)
 		if err != nil {
 			return err
 		}

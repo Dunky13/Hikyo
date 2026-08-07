@@ -40,8 +40,9 @@ mvp-boundary rows A4 and A6.
   keys** — the composite-FK rule's single declared exception (amendment
   part 5): an audit event must outlive its subject.
 - Queries (`audit.sql`, both engines): 2 INSERTs + 4 paged SELECTs (org/
-  project/env refinement + instance), nothing else. Page order is `seq`
-  with a `seq > ?` cursor; time-range conjuncts on `recorded_at`.
+  project/env refinement + instance) — INSERT and SELECT only, nothing
+  else. Page order is `seq` with a `seq > ?` cursor and `recorded_at`
+  range conjuncts; an export's upper bound is the settle ceiling below.
 - `internal/store/repos_audit.go` — proof-gated `AuditRepo`/`AuditReader`
   (insert tenant/instance, page tenant/instance). Tenant chains bound
   exclusively from the verified proof; the page depth follows the proof's
@@ -110,7 +111,7 @@ mvp-boundary rows A4 and A6.
 | 8 | Redaction surfaces + lint bans | `crypto.TestRedactionSurfacesAgainstPlantedSecret`, `lint.TestRedaction*`, `lint.TestSensitiveFormatting*`, `isolation.TestInvariantAuditRedaction` |
 | 9 | Retention units (envelope+per-key atomic) | vacuous — no fetch envelopes exist; arrives with the fetch path |
 | 10 | Class totality | `audit.TestRegistryWellFormed` |
-| 11 | Export pair + paging + revocation stop | `isolation.TestAuditCore*/export_*` (both engines) |
+| 11 | Export pair + paging + revocation stop + settle ceiling | `isolation.TestAuditCore*/export_*` (both engines), incl. `export_ceiling_excludes_unsettled_writes` (asserts both directions: the ceiling hides recent events, the ceiling-free export sees them) |
 | 12 | Outcome restriction, no payload shadow | `audit.TestRegistryWellFormed`, `TestRegistryNoOutcomeShadow`, `TestValidateRefusals` |
 | 13 | FK exception named, not counted | `isolation.TestInvariantAuditFKException` |
 

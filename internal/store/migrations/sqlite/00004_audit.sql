@@ -27,12 +27,6 @@
 
 CREATE TABLE audit_tenant_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    -- txid mirrors the postgres settled-transaction column so both engines
-    -- share one query shape. The single write connection makes allocation
-    -- order and commit order identical here, so every row is settled the
-    -- moment it is visible and the constant 0 is always below the reader's
-    -- watermark.
-    txid INTEGER NOT NULL DEFAULT 0,
     id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
@@ -72,7 +66,6 @@ CREATE INDEX audit_tenant_events_org_seq ON audit_tenant_events (org_id, seq);
 
 CREATE TABLE audit_instance_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    txid INTEGER NOT NULL DEFAULT 0,
     id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
     schema_version INTEGER NOT NULL,

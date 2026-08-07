@@ -24,14 +24,6 @@
 
 CREATE TABLE audit_tenant_events (
     seq BIGSERIAL PRIMARY KEY,
-    -- txid records the inserting transaction so readers can skip rows whose
-    -- transaction has not settled. seq is allocated BEFORE commit on this
-    -- engine, so a cursor that advances past a later-committing lower seq
-    -- would skip that row forever - silent evidence loss in a forensic
-    -- export. Readers therefore page under a watermark (the snapshot xmin,
-    -- below which every transaction has finished) and never see a row whose
-    -- transaction is still in flight.
-    txid BIGINT NOT NULL DEFAULT (pg_current_xact_id()::text::bigint),
     id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
@@ -71,7 +63,6 @@ CREATE INDEX audit_tenant_events_org_seq ON audit_tenant_events (org_id, seq);
 
 CREATE TABLE audit_instance_events (
     seq BIGSERIAL PRIMARY KEY,
-    txid BIGINT NOT NULL DEFAULT (pg_current_xact_id()::text::bigint),
     id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
     schema_version INTEGER NOT NULL,

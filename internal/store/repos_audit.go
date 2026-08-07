@@ -37,15 +37,6 @@ type AuditFilter struct {
 	To       time.Time
 	AfterSeq int64
 	Limit    int
-	// SettledBelow is the exclusive seq upper bound: the lowest seq whose
-	// inserting transaction has not finished. Every row below it is settled,
-	// so a cursor can never step past a row that commits later — postgres
-	// allocates seq before commit, which makes that a permanent omission
-	// rather than a reordering. Callers obtain it from
-	// AuditReader.SettledBelowTenant/Instance and hold ONE value for a whole
-	// export, which also makes the export terminate instead of chasing live
-	// writes; rows at or above the bound are picked up by the next export.
-	SettledBelow int64
 }
 
 // auditMaxTime bounds an open-ended To (year 9999 is inside both engines'
@@ -55,9 +46,6 @@ var auditMaxTime = time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
 func (f AuditFilter) bounds() (from, to time.Time, err error) {
 	if f.Limit <= 0 {
 		return time.Time{}, time.Time{}, errors.New("store: audit page limit must be positive")
-	}
-	if f.SettledBelow <= 0 {
-		return time.Time{}, time.Time{}, errors.New("store: audit page without a settled-seq bound")
 	}
 	from = f.From.UTC()
 	to = f.To.UTC()
@@ -99,12 +87,6 @@ type AuditEvent struct {
 
 // AuditReader is the read side of the trails.
 type AuditReader interface {
-	// SettledBelowTenant and SettledBelowInstance return the exclusive seq
-	// bound for paging that trail (see AuditFilter.SettledBelow). Both are
-	// proof-gated like every other store door; the tenant bound is computed
-	// within the proof's org.
-	SettledBelowTenant(ctx context.Context, p authz.Proof) (int64, error)
-	SettledBelowInstance(ctx context.Context, p authz.Proof) (int64, error)
 	// PageTenant returns one bounded page of the tenant trail addressed by
 	// the proof's resolved chain (org proofs read the whole org, deeper
 	// proofs read their refinement), ordered by seq.
@@ -168,31 +150,6 @@ func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.SQLiteInstance(row))
 }
 
-func (a sqliteAudit) SettledBelowTenant(ctx context.Context, p authz.Proof) (int64, error) {
-	chain, err := authz.Verify(p, authz.StoreAuditSettledBelowTenant, a.tok)
-	if err != nil {
-		return 0, err
-	}
-	threshold, err := a.q.AuditUnsettledThreshold(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return a.q.SettledBelowTenant(ctx, sqlitegen.SettledBelowTenantParams{
-		OrgID: string(chain.Org), Txid: threshold,
-	})
-}
-
-func (a sqliteAudit) SettledBelowInstance(ctx context.Context, p authz.Proof) (int64, error) {
-	if _, err := authz.Verify(p, authz.StoreAuditSettledBelowInstance, a.tok); err != nil {
-		return 0, err
-	}
-	threshold, err := a.q.AuditUnsettledThreshold(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return a.q.SettledBelowInstance(ctx, threshold)
-}
-
 func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
 	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
 	if err != nil {
@@ -210,21 +167,21 @@ func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilte
 	switch level {
 	case domain.LevelOrg:
 		rows, err = a.q.PageTenantAuditOrg(ctx, sqlitegen.PageTenantAuditOrgParams{
-			OrgID: string(chain.Org), Seq: f.AfterSeq, Seq_2: f.SettledBelow,
+			OrgID: string(chain.Org), Seq: f.AfterSeq,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, sqlitegen.PageTenantAuditProjectParams{
 			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true},
-			Seq: f.AfterSeq, Seq_2: f.SettledBelow,
+			Seq:        f.AfterSeq,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, sqlitegen.PageTenantAuditEnvParams{
 			OrgID: string(chain.Org), ProjectID: sql.NullString{String: string(chain.Project), Valid: true},
-			EnvID: sql.NullString{String: string(chain.Env), Valid: true}, Seq: f.AfterSeq, Seq_2: f.SettledBelow,
+			EnvID: sql.NullString{String: string(chain.Env), Valid: true}, Seq: f.AfterSeq,
 			RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 			Limit: int64(f.Limit),
 		})
@@ -254,7 +211,7 @@ func (a sqliteAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFil
 		return nil, err
 	}
 	rows, err := a.q.PageInstanceAudit(ctx, sqlitegen.PageInstanceAuditParams{
-		Seq: f.AfterSeq, Seq_2: f.SettledBelow,
+		Seq:        f.AfterSeq,
 		RecordedAt: audit.FormatTime(from), RecordedAt_2: audit.FormatTime(to),
 		Limit: int64(f.Limit),
 	})
@@ -314,31 +271,6 @@ func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Even
 	return a.q.InsertInstanceAuditEvent(ctx, auditrow.PGInstance(row))
 }
 
-func (a pgAudit) SettledBelowTenant(ctx context.Context, p authz.Proof) (int64, error) {
-	chain, err := authz.Verify(p, authz.StoreAuditSettledBelowTenant, a.tok)
-	if err != nil {
-		return 0, err
-	}
-	threshold, err := a.q.AuditUnsettledThreshold(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return a.q.SettledBelowTenant(ctx, pggen.SettledBelowTenantParams{
-		ChainOrgID: string(chain.Org), Threshold: threshold,
-	})
-}
-
-func (a pgAudit) SettledBelowInstance(ctx context.Context, p authz.Proof) (int64, error) {
-	if _, err := authz.Verify(p, authz.StoreAuditSettledBelowInstance, a.tok); err != nil {
-		return 0, err
-	}
-	threshold, err := a.q.AuditUnsettledThreshold(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return a.q.SettledBelowInstance(ctx, threshold)
-}
-
 func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
 	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
 	if err != nil {
@@ -358,21 +290,21 @@ func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) (
 	switch level {
 	case domain.LevelOrg:
 		rows, err = a.q.PageTenantAuditOrg(ctx, pggen.PageTenantAuditOrgParams{
-			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq, SettledBelow: f.SettledBelow,
+			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq,
 			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	case domain.LevelProject:
 		rows, err = a.q.PageTenantAuditProject(ctx, pggen.PageTenantAuditProjectParams{
 			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
-			AfterSeq: f.AfterSeq, SettledBelow: f.SettledBelow,
+			AfterSeq: f.AfterSeq,
 			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	case domain.LevelEnv:
 		rows, err = a.q.PageTenantAuditEnv(ctx, pggen.PageTenantAuditEnvParams{
 			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
 			ChainEnvID: pgtype.Text{String: string(chain.Env), Valid: true},
-			AfterSeq:   f.AfterSeq, SettledBelow: f.SettledBelow,
-			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+			AfterSeq:   f.AfterSeq,
+			FromTime:   fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
 		})
 	default:
 		return nil, errors.New("store: tenant audit page with an empty chain")
@@ -400,7 +332,7 @@ func (a pgAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter)
 		return nil, err
 	}
 	rows, err := a.q.PageInstanceAudit(ctx, pggen.PageInstanceAuditParams{
-		AfterSeq: f.AfterSeq, SettledBelow: f.SettledBelow,
+		AfterSeq:  f.AfterSeq,
 		FromTime:  pgtype.Timestamptz{Time: from, Valid: true},
 		ToTime:    pgtype.Timestamptz{Time: to, Valid: true},
 		PageLimit: int32(f.Limit),

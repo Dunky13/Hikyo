@@ -1,12 +1,6 @@
 [
   {
     "engine": "postgres",
-    "name": "AuditUnsettledThreshold",
-    "annotation": "instance-scoped",
-    "hash": "f659a0351404e849ed802356269c0d9c64ebebb3bf3df99a3cd9e0d85a5dee22"
-  },
-  {
-    "engine": "postgres",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
     "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
@@ -58,12 +52,6 @@
     "name": "ResolveProjectChain",
     "annotation": "authn-resolution",
     "hash": "5987f3b6b5f15c366598fc6bd4f53aff29afb1bc4f8906e3ea035100b9c8bc7f"
-  },
-  {
-    "engine": "sqlite",
-    "name": "AuditUnsettledThreshold",
-    "annotation": "instance-scoped",
-    "hash": "bf80d2f18a441e4e4678911ef780b27e12b7b458be4c59713f403c294985e37d"
   },
   {
     "engine": "sqlite",

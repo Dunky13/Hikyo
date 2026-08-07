@@ -203,14 +203,14 @@ func TestInvariantAuditFKException(t *testing.T) {
 // counter or otherwise — is a reviewed diff here).
 func TestInvariantAuditNoAggregates(t *testing.T) {
 	wantTenant := []string{
-		"seq", "txid", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
+		"seq", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
 		"recorded_at", "actor_id", "actor_class", "actor_credential_id",
 		"authority_id", "scope_class", "org_id", "project_id", "env_id",
 		"object_type", "object_id", "outcome", "correlation_id",
 		"source_ip", "user_agent", "origin", "payload",
 	}
 	wantInstance := []string{
-		"seq", "txid", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
+		"seq", "id", "type", "schema_version", "occurred_at", "occurred_asserted",
 		"recorded_at", "actor_id", "actor_class", "actor_credential_id",
 		"authority_id", "object_type", "object_id", "outcome", "correlation_id",
 		"source_ip", "user_agent", "origin", "payload",

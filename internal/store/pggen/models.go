@@ -10,7 +10,6 @@ import (
 
 type AuditInstanceEvent struct {
 	Seq               int64
-	Txid              int64
 	ID                string
 	Type              string
 	SchemaVersion     int32
@@ -33,7 +32,6 @@ type AuditInstanceEvent struct {
 
 type AuditTenantEvent struct {
 	Seq               int64
-	Txid              int64
 	ID                string
 	Type              string
 	SchemaVersion     int32
