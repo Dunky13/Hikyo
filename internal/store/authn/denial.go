@@ -10,11 +10,18 @@ import (
 	"github.com/Dunky13/wenv/internal/store/auditrow"
 )
 
-// WriteDenial is the resolution surface's SINGLE write path (audit-model ADR
-// amendment part 4: the tenant-isolation ADR's enumerated read-only
-// interface gains exactly one write, the denial writer — a failed
+// WriteDenial is the resolution surface's FIRST proof-free write path
+// (audit-model ADR amendment part 4: the tenant-isolation ADR's enumerated
+// read-only interface gains a write, the denial writer — a failed
 // authorize() mints no proof, so the denial event cannot travel the
-// proof-carrying store surface). The transaction package calls it inside a
+// proof-carrying store surface).
+//
+// The ADR said "exactly one". Human authentication (#47) added twelve more
+// for the same structural reason, and the "exactly one" is now a PINNED
+// ENUMERATED LIST in internal/lint.ResolutionSurfaceWriters rather than a
+// count — see the deviation recorded in docs/handoff/47-first-slice.md.
+//
+// The transaction package calls it inside a
 // dedicated flush transaction after rolling back the denied attempt; the
 // event is durable at that transaction's commit, before the error response.
 //

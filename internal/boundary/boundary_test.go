@@ -173,7 +173,7 @@ func TestAuthnImportAllowlist(t *testing.T) {
 		module + "/internal/store/sqlitegen": true,
 		module + "/internal/store/pggen":     true,
 		// The audit vocabulary (leaf) and the shared Row→params mapping, for
-		// the denial writer — the surface's single write path (audit-model
+		// the denial writer — one of the surface's pinned write paths (audit-model
 		// ADR amendment part 4).
 		module + "/internal/audit":          true,
 		module + "/internal/store/auditrow": true,

@@ -20,7 +20,7 @@ import (
 // CAPTURES the denial here, bound to the attempt's authorizer; the
 // transaction package rolls the attempt back and then flushes every captured
 // denial through the enumerated resolution surface (authn.WriteDenial — the
-// interface's single write path, amendment part 4) in its own small
+// interface's first pinned write path, amendment part 4) in its own small
 // transaction, before the error returns to the caller. A flush failure is a
 // loud error, never the uniform denial: a denial response without its
 // durable record is exactly what fail-closed forbids.

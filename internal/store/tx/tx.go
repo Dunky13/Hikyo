@@ -216,7 +216,7 @@ func settleDenials(ctx context.Context, db *store.DB, az *authz.TxAuthorizer, at
 }
 
 // flushOnce writes the captured denials through the resolution surface's
-// single write path (authn.WriteDenial) in one dedicated transaction.
+// pinned write paths (authn.WriteDenial) in one dedicated transaction.
 func flushOnce(ctx context.Context, db *store.DB, denials []authz.Denial) error {
 	if db.Engine() == store.EnginePostgres {
 		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
