@@ -98,6 +98,40 @@ func verifierAAD(accountID string) crypto.InstanceFieldAAD {
 	}
 }
 
+// Assurance and Identity are the service layer's own shapes for what the
+// chokepoint resolved. They are restated here rather than re-exported from
+// internal/authz because the transport must not import the authorization
+// package at all - the boundary test enforces that edge, and it is what keeps
+// "handlers extract artifacts, they never evaluate policy" structural.
+type Assurance struct {
+	Method          string
+	Factors         []string
+	AuthenticatedAt time.Time
+	CeremonyID      string
+}
+
+// Identity is a live, resolved caller.
+type Identity struct {
+	Principal         domain.PrincipalID
+	SessionID         string
+	Artifact          string
+	Assurance         Assurance
+	CreatedAt         time.Time
+	IdleExpiresAt     time.Time
+	AbsoluteExpiresAt time.Time
+}
+
+func identityOf(i authz.Identity) Identity {
+	return Identity{
+		Principal: i.Principal, SessionID: i.SessionID, Artifact: i.Artifact,
+		Assurance: Assurance{
+			Method: i.Assurance.Method, Factors: i.Assurance.Factors,
+			AuthenticatedAt: i.Assurance.AuthenticatedAt, CeremonyID: i.Assurance.CeremonyID,
+		},
+		CreatedAt: i.CreatedAt, IdleExpiresAt: i.IdleExpiresAt, AbsoluteExpiresAt: i.AbsoluteExpiresAt,
+	}
+}
+
 // LoginResult is a freshly minted session. SessionToken is returned exactly
 // once, to exactly one caller.
 type LoginResult struct {
@@ -110,7 +144,7 @@ type LoginResult struct {
 	Principal    domain.PrincipalID
 	AccountID    string
 	DisplayName  string
-	Assurance    authz.Assurance
+	Assurance    Assurance
 }
 
 // LocalLogin is the local floor: password verification against an
@@ -302,7 +336,7 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 		SessionToken: value, SessionID: id, Artifact: ArtifactCLI,
 		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
 		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: authz.Assurance{
+		Assurance: Assurance{
 			Method: MethodLocalPassword, Factors: []string{"password"}, AuthenticatedAt: now,
 		},
 	}, nil
@@ -535,14 +569,14 @@ func (s *Auth) refuseAuthorityIn(ctx context.Context, az *authz.TxAuthorizer, ca
 // Identity resolves a presented session artifact. It is the read half of
 // every authenticated request, and it runs in the request's own transaction
 // at the chokepoint — never in a middleware, never cached.
-func (s *Auth) Identity(ctx context.Context, presented string) (authz.Identity, error) {
-	var out authz.Identity
+func (s *Auth) Identity(ctx context.Context, presented string) (Identity, error) {
+	var out Identity
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, err := az.Authenticate(ctx, presented, s.now())
 		if err != nil {
 			return err
 		}
-		out = id
+		out = identityOf(id)
 		return nil
 	})
 	return out, err

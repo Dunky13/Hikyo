@@ -20,6 +20,7 @@ import (
 
 	"github.com/Dunky13/wenv/internal/app"
 	"github.com/Dunky13/wenv/internal/authz"
+	"github.com/Dunky13/wenv/internal/cli"
 	"github.com/Dunky13/wenv/internal/lint"
 	"github.com/Dunky13/wenv/internal/server"
 	"github.com/Dunky13/wenv/internal/store"
@@ -59,7 +60,10 @@ func TestInvariant01ClassificationTotality(t *testing.T) {
 	// CLI verbs: server and migrate are system entry points, version (#46)
 	// is a local unauthenticated print; client verbs are stubs (declared
 	// not-yet-operations).
-	for _, verb := range append([]string{"server", "migrate", "version"}, app.ClientVerbs...) {
+	verbs := []string{"server", "migrate", "version", "admin"}
+	verbs = append(verbs, cli.Verbs...)
+	verbs = append(verbs, app.ClientVerbs...)
+	for _, verb := range verbs {
 		key := "cli:" + verb
 		seen[key] = true
 		if _, classified := wire[key]; !classified {

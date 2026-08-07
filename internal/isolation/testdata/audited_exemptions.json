@@ -7,7 +7,13 @@
     "cli:server": "process entry point: boot's auditable acts run below the operation surface (system-proof keyring set); boot events arrive with their catalogue rows",
     "cli:migrate": "process entry point: migration DDL runs below the store-method surface",
     "http:GET /api/v1/meta": "unauthenticated capability print: server version, API revision and which auth protocol flows this instance serves \u2014 no principal, no tenant data, no state change, and the ADR declares no event type for it (same class as cli:version, which it is the network form of)",
-    "http:GET /api/v1/auth/whoami": "reports the session the caller already holds and writes nothing; the session's creation, method and assurance are already recorded by auth.session_created, so an event here would duplicate that record once per poll"
+    "http:GET /api/v1/auth/whoami": "reports the session the caller already holds and writes nothing; the session's creation, method and assurance are already recorded by auth.session_created, so an event here would duplicate that record once per poll",
+    "cli:login": "client transport for POST /api/v1/auth/local/login: the server audits the login it performs (auth.login, auth.session_created); the verb itself adds transport, not an auditable act",
+    "cli:logout": "client transport for POST /api/v1/auth/logout, audited server-side as auth.logout",
+    "cli:whoami": "client transport for GET /api/v1/auth/whoami, which is itself exempt (it reports the session the caller already holds and writes nothing)",
+    "cli:account": "client transport for POST /api/v1/auth/credential/establish, audited server-side as auth.credential_established / auth.credential_authority_refused",
+    "cli:context": "entirely client-local: the trust store and named contexts live on this box, reach no server, and hold no credential material; the offline client-side audit record is the compose ticket's (#63)",
+    "cli:org": "client transport for the /api/v1/orgs routes, whose operations carry the audit mapping"
   },
   "operations": {}
 }

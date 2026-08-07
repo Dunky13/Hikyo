@@ -13,7 +13,6 @@ import (
 	"github.com/Dunky13/wenv/api"
 	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 )
@@ -28,7 +27,7 @@ import (
 type AuthService interface {
 	LocalLogin(ctx context.Context, username, password string) (service.LoginResult, error)
 	EstablishCredential(ctx context.Context, authority, password string) error
-	Identity(ctx context.Context, presented string) (authz.Identity, error)
+	Identity(ctx context.Context, presented string) (service.Identity, error)
 	Logout(ctx context.Context, presented string) error
 	SlideIdleClock(ctx context.Context, presented string) error
 }
@@ -443,7 +442,7 @@ func tooMany() apigen.TooManyRequestsJSONResponse {
 	}
 }
 
-func assuranceOf(a authz.Assurance) apigen.Assurance {
+func assuranceOf(a service.Assurance) apigen.Assurance {
 	factors := a.Factors
 	if factors == nil {
 		factors = []apigen.FactorClass{}

@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/Dunky13/wenv/internal/app"
+	"github.com/Dunky13/wenv/internal/cli"
 	"github.com/Dunky13/wenv/internal/config"
 )
 
@@ -46,6 +47,16 @@ func run() int {
 		return runServer(ctx, args)
 	case cmd == "migrate":
 		return runMigrate(ctx, args)
+	case cmd == "admin":
+		return runAdmin(ctx, args)
+	case slices.Contains(cli.Verbs, cmd):
+		return cli.Run(ctx, cli.IO{
+			Stdin:   os.Stdin,
+			Stdout:  os.Stdout,
+			Stderr:  os.Stderr,
+			Env:     cli.Env{Getenv: os.Getenv},
+			Workdir: workdir(),
+		}, os.Args[1:])
 	case slices.Contains(app.ClientVerbs, cmd):
 		fmt.Fprintf(os.Stderr, "wenv %s: not implemented yet\n", cmd)
 		return 2
@@ -85,6 +96,34 @@ func runServer(ctx context.Context, args []string) int {
 	return 0
 }
 
+// runAdmin is the local-admin group: `wenv admin create` on the server's own
+// host. It is a client verb of the same binary, not a new multicall mode -
+// the mode set (server/operator/migrate/client) is unchanged.
+func runAdmin(ctx context.Context, args []string) int {
+	cfg, warnings, err := config.Load("admin", args, os.Getenv, os.Environ())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "wenv admin:", err)
+		return 2
+	}
+	log := app.Logger(cfg.Dev)
+	for _, w := range warnings {
+		log.Warn(w)
+	}
+	if err := app.RunAdmin(ctx, cfg, log, args, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "wenv admin:", err)
+		return 1
+	}
+	return 0
+}
+
+func workdir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return wd
+}
+
 func runMigrate(ctx context.Context, args []string) int {
 	cfg, warnings, err := config.Load("migrate", args, os.Getenv, os.Environ())
 	if err != nil {
@@ -112,7 +151,13 @@ server commands:
 version:
   wenv version
 
-client verbs (not implemented yet):
+local host authority (server host only):
+  wenv admin create --username USER
+
+client verbs:
   %v
-`, app.ClientVerbs)
+
+client verbs not implemented yet:
+  %v
+`, cli.Verbs, app.ClientVerbs)
 }

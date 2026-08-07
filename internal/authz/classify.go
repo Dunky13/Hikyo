@@ -73,7 +73,19 @@ var wireRegistry = map[string]Class{
 	// no server, no store; the pre-auth contract is trivially total.
 	"cli:version": ClassUnauthenticated,
 
-	"cli:login":       ClassStub,
+	// Client verbs that reach the server. Their probe contract is the HTTP
+	// route they call, classified above; the verb itself carries the class of
+	// what it reaches, so a verb whose class is still ClassStub cannot
+	// silently start making requests.
+	"cli:login":   ClassUnauthenticated,
+	"cli:logout":  ClassUnauthenticated,
+	"cli:whoami":  ClassUnauthenticated,
+	"cli:account": ClassUnauthenticated,
+	// `context` is entirely client-local: the trust store and the named
+	// contexts live on this box and reach no server.
+	"cli:context": ClassUnauthenticated,
+	"cli:org":     ClassInstance,
+
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
 	"cli:sync":        ClassStub,

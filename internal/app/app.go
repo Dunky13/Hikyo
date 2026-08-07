@@ -27,7 +27,7 @@ import (
 // ADR § Component set); each is a stub until its ticket lands. Exported so
 // the classification-totality invariant can enumerate them — a verb missing
 // from the wire registry fails the build.
-var ClientVerbs = []string{"login", "run", "render", "sync", "adopt", "doctor", "definitions", "import"}
+var ClientVerbs = []string{"run", "render", "sync", "adopt", "doctor", "definitions", "import"}
 
 // Version is the build's version string, set from main's linker-stamped
 // value. It is what /api/v1/meta advertises, so a client that refuses an
