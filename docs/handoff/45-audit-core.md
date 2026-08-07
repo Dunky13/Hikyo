@@ -182,6 +182,37 @@ secret, free-text filter fixtures.
 
 ## Accepted residuals, stated
 
+- **Export ordering is not gap-free on postgres.** `seq` is allocated
+  BEFORE commit, so a row can become visible with a `seq` below a cursor an
+  earlier page already passed, omitting it from that export. Four in-band
+  fixes were attempted and all failed cross-model review, each for the same
+  structural reason: an in-flight row is invisible to the very query that
+  would have to bound it, and no clock the application controls is
+  authoritative.
+  - `txid < snapshot-xmin` predicate — defers rows committed above a
+    long-running transaction (R2).
+  - `MIN(seq)` settled bound — cannot see an uncommitted lower-seq row (R3).
+  - 60s/30s time ceiling — `recorded_at` is stamped by the writing app
+    instance while the ceiling uses the exporter's clock, so a slow writer
+    reopens the window; and the 15 s transaction deadline is client-side,
+    which does not prove postgres settled a `COMMIT` whose cancel raced
+    (scoped verify pass).
+
+  The **30 s settle ceiling is retained as harm reduction, not as a
+  guarantee**: it removes the common case (an export written seconds after
+  the events it covers) while the residual survives only under clock skew
+  beyond the horizon or a transaction outliving its deadline. sqlite is
+  unaffected — its single write connection makes allocation order commit
+  order.
+
+  The real fix needs a **serialization point**, which this ADR explicitly
+  defers: § *Storage* states a future hash-chain extension "must introduce
+  its own serialization point (a single-writer chain appender or
+  equivalent)", and v1 ships none. **Disposition (human, after the review
+  cap): documented here and routed to a follow-up ticket, which #25 MUST
+  satisfy before an export route ships** — no export surface exists today,
+  so no user-visible path is affected by this slice.
+
 - **Denial-path timing.** A resolvable denial evaluates grants and writes to
   the tenant trail; an unresolvable one skips the grant lookup and writes to
   the instance trail. The work differs, so repeated latency measurement can

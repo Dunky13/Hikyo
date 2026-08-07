@@ -25,25 +25,30 @@ type Audits struct {
 	// SettleHorizon is how far back an EXPORT's ceiling is held from now.
 	// Zero means DefaultSettleHorizon; tests set it to zero-lag explicitly.
 	//
-	// Why an export needs it: `seq` is allocated before commit on postgres,
+	// Why an export has one: `seq` is allocated before commit on postgres,
 	// so a row can become visible with a seq BELOW a cursor an earlier page
-	// already passed — silently dropping it from the export (cross-model
-	// R1/R3). Neither a txid predicate nor a MIN(seq) bound fixes that,
-	// because an in-flight row is invisible to the very query that would
-	// have to see it. What IS observable is time: every audit row's
-	// recorded_at is stamped inside its transaction, and the transaction
-	// package enforces a hard 15 s deadline, so a row whose recorded_at is
-	// older than the horizon has certainly settled — committed and visible,
-	// or aborted and gone forever. Bounding an export's ceiling there makes
-	// the seq cursor safe, at the cost of the export trailing live writes.
+	// already passed — silently dropping it from the export. Neither a txid
+	// predicate nor a MIN(seq) bound fixes that: an in-flight row is
+	// invisible to the very query that would have to bound it.
+	//
+	// This ceiling is HARM REDUCTION, NOT A GUARANTEE, and the handoff says
+	// so. recorded_at is stamped inside the writing transaction and the
+	// transaction package enforces a 15 s deadline, so in the ordinary case
+	// a row older than the horizon has settled. It does NOT hold under
+	// clock skew beyond the horizon (recorded_at comes from the writer's
+	// clock, the ceiling from the exporter's) or a transaction outliving
+	// its client-side deadline. A gap-free cursor needs a serialization
+	// point the audit-model ADR defers past v1; #25 must satisfy it before
+	// an export route ships. sqlite is unaffected — one write connection
+	// makes allocation order commit order.
 	SettleHorizon time.Duration
 }
 
 // DefaultSettleHorizon is twice the transaction package's hard 15 s
-// deadline: enough that a write which started before the ceiling has
-// certainly ended, with one deadline's worth of margin for clock skew
-// between instances writing to one postgres. Ops-spec territory (#32) once
-// it owns the concrete values.
+// deadline: one deadline for the write to end, one of margin for clock skew
+// between instances writing to one postgres. Skew beyond that margin is the
+// documented residual, not a covered case. Ops-spec territory (#32) once it
+// owns the concrete values.
 const DefaultSettleHorizon = 30 * time.Second
 
 // ZeroSettleHorizon disables the export ceiling. It exists for tests that
