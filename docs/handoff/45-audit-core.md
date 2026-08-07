@@ -209,7 +209,7 @@ secret, free-text filter fixtures.
   defers: § *Storage* states a future hash-chain extension "must introduce
   its own serialization point (a single-writer chain appender or
   equivalent)", and v1 ships none. **Disposition (human, after the review
-  cap): documented here and routed to a follow-up ticket, which #25 MUST
+  cap): documented here and routed to [#84](https://github.com/Dunky13/wenv/issues/84), which #25 MUST
   satisfy before an export route ships** — no export surface exists today,
   so no user-visible path is affected by this slice.
 
