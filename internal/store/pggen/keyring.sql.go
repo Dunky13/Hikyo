@@ -22,22 +22,35 @@ func (q *Queries) AcquireHierarchyGeneration(ctx context.Context) (int64, error)
 	return generation, err
 }
 
-const getActiveMasterKey = `-- name: GetActiveMasterKey :one
+const getActiveMasterKeys = `-- name: GetActiveMasterKeys :many
 SELECT version, root_key_epoch, state, blob, created_at
-FROM master_keys WHERE state = 'active'
+FROM master_keys WHERE state = 'active' ORDER BY root_key_epoch DESC
 `
 
-func (q *Queries) GetActiveMasterKey(ctx context.Context) (MasterKey, error) {
-	row := q.db.QueryRow(ctx, getActiveMasterKey)
-	var i MasterKey
-	err := row.Scan(
-		&i.Version,
-		&i.RootKeyEpoch,
-		&i.State,
-		&i.Blob,
-		&i.CreatedAt,
-	)
-	return i, err
+func (q *Queries) GetActiveMasterKeys(ctx context.Context) ([]MasterKey, error) {
+	rows, err := q.db.Query(ctx, getActiveMasterKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MasterKey
+	for rows.Next() {
+		var i MasterKey
+		if err := rows.Scan(
+			&i.Version,
+			&i.RootKeyEpoch,
+			&i.State,
+			&i.Blob,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getActiveTier3Key = `-- name: GetActiveTier3Key :one

@@ -21,13 +21,13 @@ func newMemStore() *memStore { return &memStore{tier3: map[string]WrappedKey{}} 
 
 func t3key(p Purpose, org, proj string) string { return string(p) + "|" + org + "|" + proj }
 
-func (m *memStore) ActiveMaster(context.Context) (WrappedKey, error) {
+func (m *memStore) ActiveMasterWrappers(context.Context) ([]WrappedKey, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.master == nil {
-		return WrappedKey{}, ErrNoKey
+		return nil, nil
 	}
-	return *m.master, nil
+	return []WrappedKey{*m.master}, nil
 }
 
 func (m *memStore) ActiveTier3(_ context.Context, p Purpose, org, proj string) (WrappedKey, error) {
@@ -232,8 +232,25 @@ func TestProjectDEKsAreDistinctAndCached(t *testing.T) {
 	}
 }
 
-// A lost CreateTier3 race must converge on the winner's key, not error and
-// not fork the key domain.
+// lostRaceStore simulates losing the mint race deterministically: the first
+// project-DEK read reports ErrNoKey (the rival has not committed yet), the
+// subsequent CreateTier3 hits the rival's committed row (ErrKeyExists), and
+// the re-read must converge on the winner.
+type lostRaceStore struct {
+	*memStore
+	raced bool
+}
+
+func (s *lostRaceStore) ActiveTier3(ctx context.Context, p Purpose, org, proj string) (WrappedKey, error) {
+	if p == PurposeProject && !s.raced {
+		s.raced = true
+		return WrappedKey{}, ErrNoKey
+	}
+	return s.memStore.ActiveTier3(ctx, p, org, proj)
+}
+
+// A lost CreateTier3 race must converge on the winner's key — through the
+// ErrKeyExists branch, not around it — never error, never fork the domain.
 func TestProjectDEKMintRaceConverges(t *testing.T) {
 	ctx := context.Background()
 	ks := newMemStore()
@@ -242,21 +259,28 @@ func TestProjectDEKMintRaceConverges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kr2, err := LoadKeyring(ctx, ks, root)
+	s1, err := kr1.ForProject(ctx, "org_1", "prj_1") // the winner commits first
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, err := kr1.ForProject(ctx, "org_1", "prj_1")
+
+	racing := &lostRaceStore{memStore: ks}
+	kr2, err := LoadKeyring(ctx, racing, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// kr2 has a cold cache; the store already holds kr1's DEK.
 	s2, err := kr2.ForProject(ctx, "org_1", "prj_1")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !racing.raced {
+		t.Fatal("test harness bug: the race branch never ran")
+	}
 	if s1.dek.id != s2.dek.id {
 		t.Errorf("same scope resolved to different DEKs: %s vs %s", s1.dek.id, s2.dek.id)
+	}
+	if !bytes.Equal(s1.dek.key, s2.dek.key) {
+		t.Error("loser did not converge on the winner's key material")
 	}
 }
 

@@ -1,13 +1,13 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"strings"
 )
 
 // Root-key bootstrap, per the encryption ADR: the operator-held 256-bit root
@@ -52,18 +52,27 @@ func ReadRootKey(file, envValue string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("crypto: root key file: %w", err)
 		}
-		return decodeRootKey(string(raw))
+		// Best-effort zeroing (ADR § Key material in memory) starts at the
+		// read buffer: decode on the byte path, no string copies, wipe the
+		// hex on every exit. (Env delivery cannot offer this — the value
+		// lives in the process environment regardless; that is why it is
+		// the documented weakest tier.)
+		defer Zero(raw)
+		return decodeRootKey(raw)
 	case envValue != "":
-		return decodeRootKey(envValue)
+		return decodeRootKey([]byte(envValue))
 	default:
 		return nil, ErrNoRootKey
 	}
 }
 
-func decodeRootKey(s string) ([]byte, error) {
-	key, err := hex.DecodeString(strings.TrimSpace(s))
-	if err != nil || len(key) != KeySize {
+func decodeRootKey(raw []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	key := make([]byte, hex.DecodedLen(len(trimmed)))
+	n, err := hex.Decode(key, trimmed)
+	if err != nil || n != KeySize {
 		// Never echo the value or the hex error (which embeds input bytes).
+		Zero(key)
 		return nil, ErrRootKeyFormat
 	}
 	return key, nil

@@ -26,7 +26,10 @@ import (
 
 // KeyReader is the read side of keyring persistence.
 type KeyReader interface {
-	ActiveMaster(ctx context.Context) (crypto.WrappedKey, error)
+	// ActiveMasterWrappers returns every active master wrapper (one per
+	// root epoch; two while a root rotation is dual-wrapped; empty at
+	// first boot), newest epoch first.
+	ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error)
 	ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error)
 }
 
@@ -77,32 +80,33 @@ func sqliteUniqueViolation(err error) bool {
 		(se.Code() == sqlitelib.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlitelib.SQLITE_CONSTRAINT_PRIMARYKEY)
 }
 
-func (k sqliteKeys) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error) {
-	row, err := k.q.GetActiveMasterKey(ctx)
-	if errors.Is(err, sql.ErrNoRows) {
-		return crypto.WrappedKey{}, crypto.ErrNoKey
-	}
+func (k sqliteKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error) {
+	rows, err := k.q.GetActiveMasterKeys(ctx)
 	if err != nil {
-		return crypto.WrappedKey{}, err
+		return nil, err
 	}
-	version, err := dbVersion("key version", row.Version)
-	if err != nil {
-		return crypto.WrappedKey{}, err
+	out := make([]crypto.WrappedKey, 0, len(rows))
+	for _, row := range rows {
+		version, err := dbVersion("key version", row.Version)
+		if err != nil {
+			return nil, err
+		}
+		epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
+		if err != nil {
+			return nil, err
+		}
+		created, err := time.Parse(timeFormat, row.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: master key created_at %q: %w", row.CreatedAt, err)
+		}
+		out = append(out, crypto.WrappedKey{
+			Version:      version,
+			RootKeyEpoch: epoch,
+			Blob:         row.Blob,
+			CreatedAt:    created.UTC(),
+		})
 	}
-	epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
-	if err != nil {
-		return crypto.WrappedKey{}, err
-	}
-	created, err := time.Parse(timeFormat, row.CreatedAt)
-	if err != nil {
-		return crypto.WrappedKey{}, fmt.Errorf("store: master key created_at %q: %w", row.CreatedAt, err)
-	}
-	return crypto.WrappedKey{
-		Version:      version,
-		RootKeyEpoch: epoch,
-		Blob:         row.Blob,
-		CreatedAt:    created.UTC(),
-	}, nil
+	return out, nil
 }
 
 func (k sqliteKeys) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
@@ -204,31 +208,32 @@ func pgUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func (k pgKeys) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error) {
-	row, err := k.q.GetActiveMasterKey(ctx)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return crypto.WrappedKey{}, crypto.ErrNoKey
-	}
+func (k pgKeys) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error) {
+	rows, err := k.q.GetActiveMasterKeys(ctx)
 	if err != nil {
-		return crypto.WrappedKey{}, err
+		return nil, err
 	}
-	version, err := dbVersion("key version", row.Version)
-	if err != nil {
-		return crypto.WrappedKey{}, err
+	out := make([]crypto.WrappedKey, 0, len(rows))
+	for _, row := range rows {
+		version, err := dbVersion("key version", row.Version)
+		if err != nil {
+			return nil, err
+		}
+		epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
+		if err != nil {
+			return nil, err
+		}
+		if !row.CreatedAt.Valid {
+			return nil, errors.New("store: master key: null created_at")
+		}
+		out = append(out, crypto.WrappedKey{
+			Version:      version,
+			RootKeyEpoch: epoch,
+			Blob:         row.Blob,
+			CreatedAt:    row.CreatedAt.Time.UTC(),
+		})
 	}
-	epoch, err := dbVersion("root key epoch", row.RootKeyEpoch)
-	if err != nil {
-		return crypto.WrappedKey{}, err
-	}
-	if !row.CreatedAt.Valid {
-		return crypto.WrappedKey{}, errors.New("store: master key: null created_at")
-	}
-	return crypto.WrappedKey{
-		Version:      version,
-		RootKeyEpoch: epoch,
-		Blob:         row.Blob,
-		CreatedAt:    row.CreatedAt.Time.UTC(),
-	}, nil
+	return out, nil
 }
 
 func (k pgKeys) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {

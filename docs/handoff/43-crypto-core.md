@@ -30,20 +30,31 @@ banners) and `docs/adr/system-architecture.md` § Encryption boundary, both on
     success or failure.
   - `token.go` — `ScopedTokenKey` = stdlib HKDF-SHA256 over the LP-encoded
     `(label, org, project, env)` info; derived per use, never cached.
-  - `harden.go` — `RLIMIT_CORE=0` everywhere, `PR_SET_DUMPABLE=0` on Linux,
-    called first thing in server `Boot`.
+  - `harden_unix.go` — `RLIMIT_CORE=0` on unix, `PR_SET_DUMPABLE=0` on
+    Linux, called first thing in server `Boot`. Windows builds (client
+    verbs) get a documented no-op.
 - `internal/store/keyring` — `crypto.KeyStore` over the datastore: reads on
   the read pool, creation through `tx.Write` with
   `TouchHierarchyGeneration` (pg `SELECT … FOR UPDATE`) in the same
   transaction. `internal/store/keys.go` maps rows ⇄ `crypto.WrappedKey`
   (blobs only), unique violations ⇄ `crypto.ErrKeyExists`, no-rows ⇄
   `crypto.ErrNoKey`.
-- Migration `00002_keyring` (both dialects): `master_keys`, `tier3_keys`
-  (purpose CHECK includes reserved `'scanning'`), `key_generations` with the
-  seeded `'hierarchy'` row; partial unique indexes enforce one active key
-  per scope. State columns + generation rows are the rotation scaffolding —
-  the five operations, dual-wrap, retirement and zero-reference checks are
-  the rotations ticket's.
+- Migration `00002_keyring` (both dialects): `master_keys` — a row is one
+  **wrapper** of one master version under one root epoch, PK
+  `(version, root_key_epoch)`, so the dual-wrapped root-rotation transition
+  state is representable and boot tries every active wrapper (unknown
+  format version still aborts, refusal 5, even if another wrapper opens);
+  `tier3_keys` (purpose CHECK includes reserved `'scanning'`; no FK on
+  `master_key_version` — versions stop being unique rows once dual-wrapped,
+  the in-fence check below replaces it); `key_generations` with the seeded
+  `'hierarchy'` row; partial unique indexes enforce one active wrapper per
+  epoch and one active key per tier-3 scope. The five rotation operations,
+  retirement and zero-reference checks are the rotations ticket's.
+- The hierarchy fence has teeth: `CreateTier3` verifies, inside the
+  transaction with the generation row held, that the key's
+  `MasterKeyVersion` is still the active master — `crypto.ErrStaleMaster`
+  otherwise (invariant 9's writer-race, structurally refused; unreachable
+  until rotations land).
 - Wiring: `app.Boot` = harden → migrate → root key → store → keyring →
   listen. `wenv migrate` and client verbs never touch any of it.
 - `internal/boundary` — invariant 12: `golang.org/x/crypto/*`,

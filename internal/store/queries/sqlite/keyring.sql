@@ -1,6 +1,6 @@
--- name: GetActiveMasterKey :one
+-- name: GetActiveMasterKeys :many
 SELECT version, root_key_epoch, state, blob, created_at
-FROM master_keys WHERE state = 'active';
+FROM master_keys WHERE state = 'active' ORDER BY root_key_epoch DESC;
 
 -- name: InsertMasterKey :exec
 INSERT INTO master_keys (version, root_key_epoch, state, blob, created_at)

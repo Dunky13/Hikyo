@@ -46,18 +46,30 @@ var ErrNoKey = errors.New("crypto: no active key for scope")
 // racing to mint the same scope's key. Callers re-read the winner.
 var ErrKeyExists = errors.New("crypto: key already exists for scope")
 
+// ErrStaleMaster reports a tier-3 key creation carrying a master version
+// that is no longer the active master: the writer sealed under a master a
+// rotation has since retired. Unreachable until the rotations ticket lands;
+// the fence check exists so the race of CI invariant 9 is structurally
+// refused rather than silently committed.
+var ErrStaleMaster = errors.New("crypto: wrapping master key version is no longer active")
+
 // KeyStore is the persistence seam. internal/store/keyring implements it;
-// every method that creates keys must run in one transaction and acquire the
+// every method that creates keys must run in one transaction, acquire the
 // hierarchy generation (the fence that serializes tier-3 key creation
-// against master rotation — encryption ADR § Rotation).
+// against master rotation — encryption ADR § Rotation), and for tier-3
+// creation verify the key's MasterKeyVersion is still the active master
+// inside that fence (ErrStaleMaster otherwise).
 type KeyStore interface {
-	ActiveMaster(ctx context.Context) (WrappedKey, error)
+	// ActiveMasterWrappers returns every active wrapper of the master key —
+	// one per root epoch; two during a dual-wrapped root rotation; empty at
+	// first boot.
+	ActiveMasterWrappers(ctx context.Context) ([]WrappedKey, error)
 	ActiveTier3(ctx context.Context, p Purpose, orgID, projectID string) (WrappedKey, error)
 	// CreateHierarchy persists the first-boot key set (master + tier-3 keys)
 	// atomically. A concurrent first boot returns ErrKeyExists.
 	CreateHierarchy(ctx context.Context, master WrappedKey, tier3 []WrappedKey) error
 	// CreateTier3 persists one new tier-3 key. Same-scope race returns
-	// ErrKeyExists.
+	// ErrKeyExists; a retired MasterKeyVersion returns ErrStaleMaster.
 	CreateTier3(ctx context.Context, key WrappedKey) error
 }
 
@@ -117,30 +129,32 @@ func LoadKeyring(ctx context.Context, ks KeyStore, root []byte) (*Keyring, error
 		lru:  list.New(),
 	}
 
-	masterRow, err := ks.ActiveMaster(ctx)
-	if errors.Is(err, ErrNoKey) {
-		if err := k.mintHierarchy(ctx, root); err != nil && !errors.Is(err, ErrKeyExists) {
-			return nil, err
-		} else if err == nil {
-			return k, nil
-		}
-		// Lost a first-boot race: the winner's hierarchy is in the store.
-		masterRow, err = ks.ActiveMaster(ctx)
-	}
+	wrappers, err := ks.ActiveMasterWrappers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: load master key: %w", err)
 	}
-
-	master, err := open(root, be32(masterRow.RootKeyEpoch), 0,
-		WrappedMasterAAD{MasterKeyVersion: masterRow.Version, RootKeyEpoch: masterRow.RootKeyEpoch},
-		masterRow.Blob)
-	if err != nil {
-		if errors.Is(err, ErrUnknownFormat) {
-			return nil, fmt.Errorf("crypto: master key: %w", err)
+	if len(wrappers) == 0 {
+		switch err := k.mintHierarchy(ctx, root); {
+		case err == nil:
+			return k, nil
+		case !errors.Is(err, ErrKeyExists):
+			return nil, err
 		}
-		return nil, ErrRootKeyMismatch
+		// Lost a first-boot race: the winner's hierarchy is in the store.
+		if wrappers, err = ks.ActiveMasterWrappers(ctx); err != nil {
+			return nil, fmt.Errorf("crypto: load master key: %w", err)
+		}
 	}
-	k.master = keyHandle{version: masterRow.Version, key: master}
+
+	// Startup accepts any root key that unwraps any present wrapper, so a
+	// crash mid root-rotation (dual-wrapped state) boots with either root
+	// (encryption ADR § Rotation). A wrapper at an unknown format version
+	// aborts rather than guessing — refusal 5 — even if another opens.
+	master, err := k.unwrapMaster(root, wrappers)
+	if err != nil {
+		return nil, err
+	}
+	k.master = master
 
 	if k.instance, err = k.loadTier3(ctx, PurposeInstance, "", ""); err != nil {
 		return nil, err
@@ -149,6 +163,20 @@ func LoadKeyring(ctx context.Context, ks KeyStore, root []byte) (*Keyring, error
 		return nil, err
 	}
 	return k, nil
+}
+
+func (k *Keyring) unwrapMaster(root []byte, wrappers []WrappedKey) (keyHandle, error) {
+	for _, w := range wrappers {
+		master, err := open(root, be32(w.RootKeyEpoch), 0,
+			WrappedMasterAAD{MasterKeyVersion: w.Version, RootKeyEpoch: w.RootKeyEpoch}, w.Blob)
+		if errors.Is(err, ErrUnknownFormat) {
+			return keyHandle{}, fmt.Errorf("crypto: master key: %w", err)
+		}
+		if err == nil {
+			return keyHandle{version: w.Version, key: master}, nil
+		}
+	}
+	return keyHandle{}, ErrRootKeyMismatch
 }
 
 // mintHierarchy is first startup: generate master, instance DEK and root

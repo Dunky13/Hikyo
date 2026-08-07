@@ -5,6 +5,7 @@ package keyring
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Dunky13/wenv/internal/crypto"
@@ -17,8 +18,8 @@ type Store struct{ DB *store.DB }
 
 var _ crypto.KeyStore = (*Store)(nil)
 
-func (s *Store) ActiveMaster(ctx context.Context) (crypto.WrappedKey, error) {
-	return s.DB.Read().Keys().ActiveMaster(ctx)
+func (s *Store) ActiveMasterWrappers(ctx context.Context) ([]crypto.WrappedKey, error) {
+	return s.DB.Read().Keys().ActiveMasterWrappers(ctx)
 }
 
 func (s *Store) ActiveTier3(ctx context.Context, p crypto.Purpose, orgID, projectID string) (crypto.WrappedKey, error) {
@@ -55,6 +56,22 @@ func (s *Store) CreateTier3(ctx context.Context, key crypto.WrappedKey) error {
 		keys := r.Keys()
 		if err := keys.AcquireHierarchyGeneration(ctx); err != nil {
 			return err
+		}
+		// The fence's teeth: with the hierarchy generation held, the key's
+		// wrapping master must still be the active one. A writer that sealed
+		// under a master a rotation has since retired is refused, never
+		// committed — CI invariant 9's race, structurally closed.
+		wrappers, err := keys.ActiveMasterWrappers(ctx)
+		if err != nil {
+			return err
+		}
+		if len(wrappers) == 0 {
+			return errors.New("store: no active master key — hierarchy missing")
+		}
+		for _, w := range wrappers {
+			if w.Version != key.MasterKeyVersion {
+				return crypto.ErrStaleMaster
+			}
 		}
 		if err := keys.InsertTier3(ctx, key); err != nil {
 			return err

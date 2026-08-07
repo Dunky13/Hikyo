@@ -4,24 +4,31 @@
 -- stored at all. State columns and generation counters are the rotation
 -- state-machine scaffolding; the five rotation operations land later.
 -- Roll-forward only: no Down section by policy.
+-- A row is one WRAPPER of one master version under one root epoch — not
+-- the master itself. The dual-wrapped transition state of rotate-root-key
+-- (encryption ADR § Rotation) is two active rows sharing a version with
+-- different epochs; startup accepts any wrapper the presented root opens.
 CREATE TABLE master_keys (
-    version BIGINT PRIMARY KEY,
+    version BIGINT NOT NULL,
     root_key_epoch BIGINT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('active', 'retiring', 'retired')),
     blob BYTEA NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (version, root_key_epoch)
 );
-CREATE UNIQUE INDEX master_keys_one_active ON master_keys (state) WHERE state = 'active';
+CREATE UNIQUE INDEX master_keys_one_active_per_epoch ON master_keys (root_key_epoch) WHERE state = 'active';
 
 -- purpose 'scanning' is reserved by the secret-scanning amendment; unused
--- until its ticket lands.
+-- until its ticket lands. master_key_version carries no FK: master versions
+-- are not unique rows once dual-wrapped; the keyring store verifies it
+-- against the active master inside the creation transaction instead.
 CREATE TABLE tier3_keys (
     id TEXT PRIMARY KEY,
     purpose TEXT NOT NULL CHECK (purpose IN ('project', 'instance', 'token', 'scanning')),
     org_id TEXT NOT NULL,
     project_id TEXT NOT NULL,
     version BIGINT NOT NULL,
-    master_key_version BIGINT NOT NULL REFERENCES master_keys (version),
+    master_key_version BIGINT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('active', 'retiring', 'retired')),
     blob BYTEA NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
