@@ -34,12 +34,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_read_cross_org", axis: axisCrossOrgHuman,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), bob, orgA, prjA1, envA1)
+			_, err := envs.Get(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), alice, orgA, prjA1, "env_missing")
+			_, err := envs.Get(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"})
 			return err
 		},
 	},
@@ -47,12 +47,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_read_cross_project_machine", axis: axisCrossProjectMachine,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), mchA1, orgA, prjA2, envA2)
+			_, err := envs.Get(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA2, Env: envA2})
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), mchA1, orgA, prjA1, "env_missing")
+			_, err := envs.Get(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"})
 			return err
 		},
 	},
@@ -60,12 +60,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_read_no_grants", axis: axisCapabilityDenial,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), nobody, orgA, prjA1, envA1)
+			_, err := envs.Get(tctx(t), nobody, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Get(tctx(t), alice, orgA, prjA1, "env_missing")
+			_, err := envs.Get(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"})
 			return err
 		},
 	},
@@ -73,34 +73,34 @@ var tenantProbes = []tenantProbe{
 		name: "env_update_note_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			return envs.UpdateNote(tctx(t), bob, orgA, prjA1, envA1, "pwned")
+			return envs.UpdateNote(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "pwned")
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			return envs.UpdateNote(tctx(t), alice, orgA, prjA1, "env_missing", "pwned")
+			return envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
 		},
 	},
 	{
 		name: "env_update_note_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			return envs.UpdateNote(tctx(t), mchA1, orgA, prjA2, envA2, "pwned")
+			return envs.UpdateNote(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA2, Env: envA2}, "pwned")
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			return envs.UpdateNote(tctx(t), mchA1, orgA, prjA1, "env_missing", "pwned")
+			return envs.UpdateNote(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA1, Env: "env_missing"}, "pwned")
 		},
 	},
 	{
 		name: "env_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Create(tctx(t), bob, orgA, prjA1, "intruder")
+			_, err := envs.Create(tctx(t), bob, domain.Scope{Org: orgA, Project: prjA1}, "intruder")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Create(tctx(t), alice, orgA, "prj_missing", "intruder")
+			_, err := envs.Create(tctx(t), alice, domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
 			return err
 		},
 	},
@@ -108,12 +108,12 @@ var tenantProbes = []tenantProbe{
 		name: "env_create_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Create(tctx(t), mchA1, orgA, prjA2, "intruder")
+			_, err := envs.Create(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA2}, "intruder")
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
 			_, _, envs := services(db)
-			_, err := envs.Create(tctx(t), mchA1, orgA, "prj_missing", "intruder")
+			_, err := envs.Create(tctx(t), mchA1, domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
 			return err
 		},
 	},
@@ -192,17 +192,17 @@ func runInstanceProbes(t *testing.T, db *store.DB) {
 func runPositiveControls(t *testing.T, db *store.DB) {
 	orgs, projects, envs := services(db)
 
-	got, err := envs.Get(tctx(t), alice, orgA, prjA1, envA1)
+	got, err := envs.Get(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1})
 	if err != nil {
 		t.Fatalf("alice reading her own env: %v", err)
 	}
 	if got.ID != string(envA1) || got.OrgID != string(orgA) || got.ProjectID != string(prjA1) {
 		t.Fatalf("env chain mismatch: %+v", got)
 	}
-	if _, err := envs.Get(tctx(t), mchA1, orgA, prjA1, envA1); err != nil {
+	if _, err := envs.Get(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); err != nil {
 		t.Fatalf("machine principal reading its own project's env: %v", err)
 	}
-	if err := envs.UpdateNote(tctx(t), alice, orgA, prjA1, envA1, "alice was here"); err != nil {
+	if err := envs.UpdateNote(tctx(t), alice, domain.Scope{Org: orgA, Project: prjA1, Env: envA1}, "alice was here"); err != nil {
 		t.Fatalf("alice updating note: %v", err)
 	}
 
@@ -214,7 +214,7 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 		t.Fatalf("created project's chain did not come from the proof (org_a rows = %d)", n)
 	}
 
-	env, err := envs.Create(tctx(t), mchA1, orgA, prjA1, "machine-env")
+	env, err := envs.Create(tctx(t), mchA1, domain.Scope{Org: orgA, Project: prjA1}, "machine-env")
 	if err != nil {
 		t.Fatalf("machine creating an env in its own project: %v", err)
 	}

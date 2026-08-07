@@ -1,5 +1,7 @@
 package authz
 
+import "maps"
+
 // The wire registry: the probe classification for every non-operation entry
 // point (tenant-isolation ADR, invariant 1). Service operations carry their
 // class in the operation registry; everything else that can be reached from
@@ -48,9 +50,5 @@ var wireRegistry = map[string]Class{
 
 // Wire returns the wire registry for the invariant tests.
 func (RegistryFacts) Wire() map[string]Class {
-	out := make(map[string]Class, len(wireRegistry))
-	for k, v := range wireRegistry {
-		out[k] = v
-	}
-	return out
+	return maps.Clone(wireRegistry)
 }

@@ -310,11 +310,13 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := envs.Create(t.Context(), tenant, domain.OrgID(org.ID), domain.ProjectID(proj.ID), "dev")
+	envScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID)}
+	created, err := envs.Create(t.Context(), tenant, envScope, "dev")
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := envs.Get(t.Context(), tenant, domain.OrgID(org.ID), domain.ProjectID(proj.ID), domain.EnvID(created.ID))
+	fullScope := domain.Scope{Org: domain.OrgID(org.ID), Project: domain.ProjectID(proj.ID), Env: domain.EnvID(created.ID)}
+	got, err := envs.Get(t.Context(), tenant, fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,10 +329,10 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 	if got.OrgID != org.ID || got.ProjectID != proj.ID {
 		t.Errorf("chain columns did not come from the proof: %+v", got)
 	}
-	if err := envs.UpdateNote(t.Context(), tenant, domain.OrgID(org.ID), domain.ProjectID(proj.ID), domain.EnvID(created.ID), "noted"); err != nil {
+	if err := envs.UpdateNote(t.Context(), tenant, fullScope, "noted"); err != nil {
 		t.Fatal(err)
 	}
-	got, err = envs.Get(t.Context(), tenant, domain.OrgID(org.ID), domain.ProjectID(proj.ID), domain.EnvID(created.ID))
+	got, err = envs.Get(t.Context(), tenant, fullScope)
 	if err != nil {
 		t.Fatal(err)
 	}

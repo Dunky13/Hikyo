@@ -169,6 +169,18 @@ func (RegistryFacts) Operations() map[Operation]Class {
 	return out
 }
 
+// TenantOperations lists each tenant-class operation with the chain depth it
+// addresses, for registry well-formedness checks.
+func (RegistryFacts) TenantOperations() map[Operation]domain.Level {
+	out := map[Operation]domain.Level{}
+	for op, spec := range operations {
+		if spec.class == ClassTenant {
+			out[op] = spec.level
+		}
+	}
+	return out
+}
+
 // StoreOps returns the union of store operations reachable through the
 // operation registry, keyed by which operations may invoke them.
 func (RegistryFacts) StoreOps() map[StoreOp][]Operation {

@@ -138,9 +138,14 @@ func evaluate(f Formula, chain domain.Scope, grants []domain.Grant) bool {
 	return true
 }
 
-// truncate cuts a resolved chain to the given level.
+// truncate cuts a resolved chain to the given level. Exhaustive over the
+// Level enum: LevelNone is the instance scope (empty chain), and an unknown
+// level is a registry programming error, per this package's loud-errors
+// doctrine (invariant 6 additionally validates atom levels statically).
 func truncate(s domain.Scope, l domain.Level) domain.Scope {
 	switch l {
+	case domain.LevelNone:
+		return domain.Scope{}
 	case domain.LevelOrg:
 		return domain.Scope{Org: s.Org}
 	case domain.LevelProject:
@@ -148,7 +153,7 @@ func truncate(s domain.Scope, l domain.Level) domain.Scope {
 	case domain.LevelEnv:
 		return s
 	default:
-		return domain.Scope{}
+		panic(fmt.Sprintf("authz: unknown scope level %d in a formula atom", l))
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // This file is analyzer 2 (tenant-isolation ADR, invariant 8): sqlc queries
@@ -292,11 +293,11 @@ func checkWhere(label, sql, upper string, chainCols []string) []string {
 	if strings.ContainsAny(where, "()") {
 		return []string{label + ": parenthesised predicate is an unprovable shape"}
 	}
-	conjuncts := regexp.MustCompile(`(?i)\s+AND\s+`).Split(where, -1)
+	conjuncts := andSplitRe.Split(where, -1)
 	present := map[string]bool{}
 	for _, c := range conjuncts {
 		c = strings.TrimSpace(c)
-		m := regexp.MustCompile(`^(\w+)\s*=\s*` + paramRe + `$`).FindStringSubmatch(c)
+		m := conjunctRe.FindStringSubmatch(c)
 		if m == nil {
 			return []string{fmt.Sprintf("%s: conjunct %q is not a provable `column = param` shape", label, c)}
 		}
@@ -343,7 +344,7 @@ func checkSet(label, sql, upper string, chainCols []string) []string {
 	immutable := append([]string{"id"}, chainCols...)
 	var out []string
 	for _, col := range immutable {
-		if regexp.MustCompile(`(?i)(^|,)\s*` + col + `\s*=`).MatchString(set) {
+		if setColRe(col).MatchString(set) {
 			out = append(out, fmt.Sprintf("%s: SET names immutable column %q — chain columns never mutate; re-parenting is a new row", label, col))
 		}
 	}
@@ -405,7 +406,27 @@ func eachSQLFile(dir string, fn func(path, src string) error) error {
 	return nil
 }
 
-var spaceRe = regexp.MustCompile(`\s+`)
+var (
+	andSplitRe = regexp.MustCompile(`(?i)\s+AND\s+`)
+	conjunctRe = regexp.MustCompile(`^(\w+)\s*=\s*` + paramRe + `$`)
+	spaceRe    = regexp.MustCompile(`\s+`)
+
+	setColRes  = map[string]*regexp.Regexp{}
+	setColResM sync.Mutex
+)
+
+// setColRe caches the per-column SET matcher instead of recompiling inside
+// the immutable-columns loop.
+func setColRe(col string) *regexp.Regexp {
+	setColResM.Lock()
+	defer setColResM.Unlock()
+	re, ok := setColRes[col]
+	if !ok {
+		re = regexp.MustCompile(`(?i)(^|,)\s*` + regexp.QuoteMeta(col) + `\s*=`)
+		setColRes[col] = re
+	}
+	return re
+}
 
 func normalizeSpace(s string) string {
 	return strings.TrimSpace(spaceRe.ReplaceAllString(s, " "))

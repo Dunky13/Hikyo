@@ -130,6 +130,18 @@ gen+domain) live in `internal/boundary`.
   so no production `SystemAuthority` call site exists yet. First real mint
   sites arrive with recovery mode (#54) and break-glass (#55); invariant 11
   pins today's empty sets.
+- **Uniformity is asserted at the error level, not HTTP bytes.** No tenant
+  HTTP routes exist yet, so invariant 3's "byte-identical status and body
+  shape" is delivered as sentinel + rendered-message equality at the service
+  layer (`assertUniformNotFound`). **#47/#48 inherit the byte-shape
+  obligation at the response layer** — the shared assertion helper must move
+  up to real wire responses when routes land.
+- **The chain-binding layer is hand-written, not generated.** The ADR says
+  "the binding map … is generated"; `internal/store/repos.go` is the
+  hand-written binding layer, with the intent held by analyzer 1 (no chain
+  params in signatures) plus empirical provenance assertions (positive
+  controls + conformance). Revisit codegen if the aggregate count makes the
+  hand-written map review-heavy.
 - **sqlite query files use positional `?`** — sqlc's sqlite engine
   mis-generates `sqlc.arg()` (and multibyte comment characters shift its
   statement offsets — keep query-file comments ASCII). Postgres keeps the

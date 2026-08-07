@@ -159,6 +159,7 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 			t.Errorf("registry names store operation %q but no such store method exists", op)
 		}
 	}
+	tenantLevels := facts.TenantOperations()
 	for op, formula := range facts.Formulas() {
 		if len(formula) == 0 {
 			t.Errorf("operation %q has an empty formula — deny-by-default means no formula, no operation", op)
@@ -166,6 +167,11 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 		for _, atom := range formula {
 			if atom.Cap == "" {
 				t.Errorf("operation %q has an atom with no capability", op)
+			}
+			// An atom cannot sit deeper than the chain the operation
+			// addresses — truncate() would have nothing to cut to.
+			if level, tenant := tenantLevels[op]; tenant && atom.At > level {
+				t.Errorf("operation %q (depth %d) has an atom at deeper level %d", op, level, atom.At)
 			}
 		}
 	}
