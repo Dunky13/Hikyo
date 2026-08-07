@@ -19,6 +19,23 @@ type MasterKey struct {
 	State        string
 	Blob         []byte
 	CreatedAt    pgtype.Timestamptz
+type Environment struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	Note      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Grant struct {
+	ID          string
+	PrincipalID string
+	Capability  string
+	OrgID       pgtype.Text
+	ProjectID   pgtype.Text
+	EnvID       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
 }
 
 type Org struct {
@@ -39,4 +56,15 @@ type Tier3Key struct {
 	State            string
 	Blob             []byte
 	CreatedAt        pgtype.Timestamptz
+type Principal struct {
+	ID        string
+	Kind      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
+	CreatedAt pgtype.Timestamptz
 }

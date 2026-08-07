@@ -14,10 +14,6 @@ import (
 	"github.com/Dunky13/wenv/internal/config"
 )
 
-// clientVerbs are the fixed client-side subcommands (system-architecture ADR
-// § Component set); each is a stub until its ticket lands.
-var clientVerbs = []string{"login", "run", "render", "sync", "adopt", "doctor", "definitions", "import"}
-
 // Set by GoReleaser. Development builds deliberately identify themselves as
 // unversioned instead of guessing from the local checkout.
 var (
@@ -48,7 +44,7 @@ func run() int {
 		return runServer(ctx, args)
 	case cmd == "migrate":
 		return runMigrate(ctx, args)
-	case slices.Contains(clientVerbs, cmd):
+	case slices.Contains(app.ClientVerbs, cmd):
 		fmt.Fprintf(os.Stderr, "wenv %s: not implemented yet\n", cmd)
 		return 2
 	default:
@@ -116,5 +112,5 @@ version:
 
 client verbs (not implemented yet):
   %v
-`, clientVerbs)
+`, app.ClientVerbs)
 }

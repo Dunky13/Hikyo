@@ -22,6 +22,12 @@ import (
 	"github.com/Dunky13/wenv/internal/store/migrate"
 )
 
+// ClientVerbs are the fixed client-side subcommands (system-architecture
+// ADR § Component set); each is a stub until its ticket lands. Exported so
+// the classification-totality invariant can enumerate them — a verb missing
+// from the wire registry fails the build.
+var ClientVerbs = []string{"login", "run", "render", "sync", "adopt", "doctor", "definitions", "import"}
+
 // Logger builds the process logger: text in dev, JSON in production.
 func Logger(dev bool) *slog.Logger {
 	if dev {

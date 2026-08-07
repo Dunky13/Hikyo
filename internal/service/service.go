@@ -1,6 +1,10 @@
 // Package service is the domain layer. Handlers cannot reach the datastore
 // directly: internal/store is importable only by this package (and its own
-// subpackages) — enforced by the import-boundary test.
+// subpackages) — enforced by the import-boundary test. Every data-touching
+// method takes the acting principal, opens a transaction, authorizes inside
+// it (single chokepoint, no cache), and only then calls the store with the
+// minted proof. Middleware extracts artifacts only; there is no
+// authenticated principal outside a transaction.
 package service
 
 import (
@@ -11,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Dunky13/wenv/internal/authz"
+	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/migrate"
 	"github.com/Dunky13/wenv/internal/store/tx"
@@ -34,26 +40,40 @@ func (s *System) Ready(ctx context.Context) error {
 	return migrate.Check(ctx, s.Store)
 }
 
-// Orgs is the demonstration aggregate's service.
+func newID(prefix string) (string, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return "", fmt.Errorf("service: generate %s id: %w", prefix, err)
+	}
+	return prefix + "_" + id.String(), nil
+}
+
+// Orgs is the demonstration aggregate's service. Org administration is
+// instance-scoped scaffolding (see the authz operation registry); the real
+// hierarchy surface lands with #48.
 type Orgs struct {
 	DB *store.DB
 }
 
 // Create publishes a new org through the transactional boundary.
-func (s *Orgs) Create(ctx context.Context, name string, active bool, metadata json.RawMessage) (store.Org, error) {
-	id, err := uuid.NewV7()
+func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name string, active bool, metadata json.RawMessage) (store.Org, error) {
+	id, err := newID("org")
 	if err != nil {
-		return store.Org{}, fmt.Errorf("service: generate org id: %w", err)
+		return store.Org{}, err
 	}
 	org := store.Org{
-		ID:        "org_" + id.String(),
+		ID:        id,
 		Name:      name,
 		Active:    active,
 		Metadata:  metadata,
 		CreatedAt: store.CanonTime(time.Now()),
 	}
-	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos) error {
-		return r.Orgs().Create(ctx, org)
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpOrgCreate, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		return r.Orgs().Create(ctx, p, org)
 	})
 	if err != nil {
 		return store.Org{}, err
@@ -61,14 +81,118 @@ func (s *Orgs) Create(ctx context.Context, name string, active bool, metadata js
 	return org, nil
 }
 
-func (s *Orgs) Get(ctx context.Context, id string) (store.Org, error) {
-	return s.DB.Read().Orgs().Get(ctx, id)
+func (s *Orgs) Get(ctx context.Context, principal domain.PrincipalID, id string) (store.Org, error) {
+	var out store.Org
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().Get(ctx, p, id)
+		return err
+	})
+	return out, err
 }
 
-func (s *Orgs) List(ctx context.Context) ([]store.Org, error) {
-	return s.DB.Read().Orgs().List(ctx)
+func (s *Orgs) List(ctx context.Context, principal domain.PrincipalID) ([]store.Org, error) {
+	var out []store.Org
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().List(ctx, p)
+		return err
+	})
+	return out, err
 }
 
-func (s *Orgs) Count(ctx context.Context) (int64, error) {
-	return s.DB.Read().Orgs().Count(ctx)
+func (s *Orgs) Count(ctx context.Context, principal domain.PrincipalID) (int64, error) {
+	var out int64
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().Count(ctx, p)
+		return err
+	})
+	return out, err
+}
+
+// Projects is the org-level tenant-scoped demonstration service.
+type Projects struct {
+	DB *store.DB
+}
+
+// Create makes a project inside org. The service addresses the scope; the
+// chain the store writes comes from the proof authorize() minted after
+// resolving that scope — never from these arguments.
+func (s *Projects) Create(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, name string) (store.Project, error) {
+	id, err := newID("prj")
+	if err != nil {
+		return store.Project{}, err
+	}
+	proj := store.NewProject{ID: id, Name: name, CreatedAt: store.CanonTime(time.Now())}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpProjectCreate, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		return r.Projects().Create(ctx, p, proj)
+	})
+	if err != nil {
+		return store.Project{}, err
+	}
+	return store.Project{ID: proj.ID, OrgID: string(org), Name: proj.Name, CreatedAt: proj.CreatedAt}, nil
+}
+
+// Environments is the project/env-level tenant-scoped demonstration service.
+type Environments struct {
+	DB *store.DB
+}
+
+func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, project domain.ProjectID, name string) (store.Environment, error) {
+	id, err := newID("env")
+	if err != nil {
+		return store.Environment{}, err
+	}
+	env := store.NewEnvironment{ID: id, Name: name, Note: "", CreatedAt: store.CanonTime(time.Now())}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpEnvCreate, domain.Scope{Org: org, Project: project})
+		if err != nil {
+			return err
+		}
+		return r.Environments().Create(ctx, p, env)
+	})
+	if err != nil {
+		return store.Environment{}, err
+	}
+	return store.Environment{
+		ID: env.ID, OrgID: string(org), ProjectID: string(project),
+		Name: env.Name, Note: env.Note, CreatedAt: env.CreatedAt,
+	}, nil
+}
+
+func (s *Environments) Get(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, project domain.ProjectID, env domain.EnvID) (store.Environment, error) {
+	var out store.Environment
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpEnvRead, domain.Scope{Org: org, Project: project, Env: env})
+		if err != nil {
+			return err
+		}
+		out, err = r.Environments().Get(ctx, p)
+		return err
+	})
+	return out, err
+}
+
+func (s *Environments) UpdateNote(ctx context.Context, principal domain.PrincipalID, org domain.OrgID, project domain.ProjectID, env domain.EnvID, note string) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		p, err := az.Authorize(ctx, principal, authz.OpEnvUpdateNote, domain.Scope{Org: org, Project: project, Env: env})
+		if err != nil {
+			return err
+		}
+		return r.Environments().UpdateNote(ctx, p, note)
+	})
 }
