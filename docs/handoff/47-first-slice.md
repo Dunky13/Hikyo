@@ -178,8 +178,20 @@ Full suite green on sqlite **and** postgres 18 (local container).
    `internal/lint.ResolutionSurfaceWriters` is now a **pinned enumerated
    list** — every proof-free writer named in one place, with a build failure
    behind anything unlisted. The property the "exactly one" protected is
-   preserved; the wording is not. **If review wants the letter, it needs an ADR
-   amendment naming the authority that writes these.**
+   preserved; the wording is not.
+
+   **Disposition (human, 2026-08-07): accept as-is; amend the ADR later.**
+   The property the "exactly one" protected — every proof-free write named in
+   one place behind a build-failing analyzer — is preserved and now
+   mechanically *stronger* than a count. The old check was fail-open: "exactly
+   one" was enforced only by there happening to be one, and a second writer
+   would have slipped in silently (which is precisely the round-2 finding).
+   Auth is irreducibly more than one bootstrap write — create-first-admin,
+   establish-credential, session lifecycle — so "exactly one" cannot be met
+   without hiding thirteen operations behind a single name, which makes review
+   worse, not better. audit-model.md's "single write path" clause gets an
+   amendment naming the human-auth authority when #54 lands; nothing in #54 is
+   blocked by the wording.
 
 2. **`wenv account establish-credential` is a spelling this ticket adds.** The
    ADR fixes the `account` family as `session`/`factor`/`recovery-codes`. The
