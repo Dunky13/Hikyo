@@ -10,6 +10,22 @@ import (
 	"database/sql"
 )
 
+const getPrincipalKind = `-- name: GetPrincipalKind :one
+
+SELECT kind FROM principals WHERE id = ?
+`
+
+// The denial writer's actor-class lookup (#45, audit-model ADR amendment
+// part 4): the flush transaction resolves the denied principal's kind for
+// the event's actor class. Runs only inside authn.WriteDenial.
+// wenv:authn-resolution
+func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPrincipalKind, id)
+	var kind string
+	err := row.Scan(&kind)
+	return kind, err
+}
+
 const listGrantsForPrincipal = `-- name: ListGrantsForPrincipal :many
 SELECT capability, org_id, project_id, env_id FROM grants
 WHERE principal_id = ?

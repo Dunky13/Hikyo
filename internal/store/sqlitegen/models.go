@@ -8,6 +8,54 @@ import (
 	"database/sql"
 )
 
+type AuditInstanceEvent struct {
+	Seq               int64
+	ID                string
+	Type              string
+	SchemaVersion     int64
+	OccurredAt        string
+	OccurredAsserted  int64
+	RecordedAt        string
+	ActorID           sql.NullString
+	ActorClass        string
+	ActorCredentialID sql.NullString
+	AuthorityID       sql.NullString
+	ObjectType        sql.NullString
+	ObjectID          sql.NullString
+	Outcome           string
+	CorrelationID     sql.NullString
+	SourceIp          sql.NullString
+	UserAgent         sql.NullString
+	Origin            string
+	Payload           string
+}
+
+type AuditTenantEvent struct {
+	Seq               int64
+	ID                string
+	Type              string
+	SchemaVersion     int64
+	OccurredAt        string
+	OccurredAsserted  int64
+	RecordedAt        string
+	ActorID           sql.NullString
+	ActorClass        string
+	ActorCredentialID sql.NullString
+	AuthorityID       sql.NullString
+	ScopeClass        string
+	OrgID             string
+	ProjectID         sql.NullString
+	EnvID             sql.NullString
+	ObjectType        sql.NullString
+	ObjectID          sql.NullString
+	Outcome           string
+	CorrelationID     sql.NullString
+	SourceIp          sql.NullString
+	UserAgent         sql.NullString
+	Origin            string
+	Payload           string
+}
+
 type Environment struct {
 	ID        string
 	OrgID     string

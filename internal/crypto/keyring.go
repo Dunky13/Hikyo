@@ -82,6 +82,7 @@ var masterKeyID = []byte("master")
 const dekCacheSize = 128
 
 type keyHandle struct {
+	redactor
 	id      string
 	version uint32
 	key     []byte
@@ -92,6 +93,7 @@ type keyHandle struct {
 // token key live unwrapped for the process lifetime; project DEKs are
 // unwrapped on demand into a bounded LRU.
 type Keyring struct {
+	redactor
 	ks  KeyStore
 	rnd io.Reader
 
@@ -105,6 +107,7 @@ type Keyring struct {
 }
 
 type dekEntry struct {
+	redactor
 	scope  string
 	handle keyHandle
 }
@@ -370,6 +373,7 @@ func (k *Keyring) ForInstance() *InstanceSealer {
 
 // ProjectSealer seals and opens ciphertext in one project's key domain.
 type ProjectSealer struct {
+	redactor
 	kr               *Keyring
 	orgID, projectID string
 	dek              keyHandle
@@ -415,6 +419,7 @@ func (s *ProjectSealer) OpenField(a ProjectFieldAAD, record []byte) ([]byte, err
 // DEK. It accepts only instance_field envelopes — the type system, not a
 // runtime branch, keeps project-owned material out of the instance domain.
 type InstanceSealer struct {
+	redactor
 	kr *Keyring
 }
 

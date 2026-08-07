@@ -1,0 +1,97 @@
+package lint
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// Analyzer 6 (audit-model ADR CI invariants 3 and 7): append-only audit
+// tables, and no session-level durability downgrade.
+//
+// The application layer holds INSERT and SELECT only on both audit tables.
+// The ADR licenses exactly two future deletion queries — the retention-
+// pruning job and the org-deletion cascade — each content-pinned like the
+// annotated-query allowlist. NEITHER EXISTS YET, so the allowlist ships
+// empty and this check is strictly tighter than the ADR until those tickets
+// land their pinned entries.
+
+var auditTables = []string{"audit_tenant_events", "audit_instance_events"}
+
+// auditDeletionAllowlist is the content-pinned licensed-deleter set:
+// query name → sha256 of its normalized SQL. Empty until the pruning job
+// (ops-spec ticket) and the org-deletion cascade land.
+var auditDeletionAllowlist = map[string]string{}
+
+// CheckAuditAppendOnly scans every query file on both engines.
+func CheckAuditAppendOnly(repoRoot string) []string {
+	var findings []string
+	for _, engine := range []string{"sqlite", "postgres"} {
+		queryDir := filepath.Join(repoRoot, "internal", "store", "queries", engine)
+		queries, err := ParseQueries(queryDir)
+		if err != nil {
+			return append(findings, "appendonly: "+err.Error())
+		}
+		for _, q := range queries {
+			upper := strings.ToUpper(normalizeSpace(q.SQL))
+			touchesAudit := false
+			for _, tbl := range auditTables {
+				if strings.Contains(strings.ToLower(q.SQL), tbl) {
+					touchesAudit = true
+				}
+			}
+			if !touchesAudit {
+				continue
+			}
+			if strings.HasPrefix(upper, "INSERT ") || strings.HasPrefix(upper, "SELECT ") {
+				continue
+			}
+			if want, ok := auditDeletionAllowlist[q.Name]; ok && q.Hash() == want {
+				continue
+			}
+			findings = append(findings, fmt.Sprintf(
+				"appendonly(%s): %s: statement on an audit table is neither INSERT nor SELECT nor a content-pinned licensed deleter — the trails are append-only at the application layer (audit-model ADR CI invariant 3)",
+				engine, q.Name))
+		}
+	}
+	findings = append(findings, checkNoSyncCommitDowngrade(repoRoot)...)
+	return findings
+}
+
+// syncCommitRe catches any attempt to downgrade commit durability at
+// session or transaction level — the audit-model ADR's boot check verifies
+// the server setting, and this ban keeps the store from quietly overriding
+// it (CI invariant 7).
+// The statement form requires the assignment (`= off` / `TO off`), so prose
+// merely naming the banned statement — like this comment — does not trip it.
+var syncCommitRe = regexp.MustCompile(`(?i)SET\s+(LOCAL\s+)?synchronous_commit\s*(=|TO\s)`)
+
+func checkNoSyncCommitDowngrade(repoRoot string) []string {
+	var findings []string
+	roots := []string{
+		filepath.Join(repoRoot, "internal", "store"),
+	}
+	for _, root := range roots {
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".sql") {
+				return nil
+			}
+			b, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return nil
+			}
+			if syncCommitRe.Match(b) {
+				findings = append(findings, fmt.Sprintf(
+					"appendonly: %s issues SET synchronous_commit — durability is a boot-verified server setting, never a session downgrade (audit-model ADR CI invariant 7)",
+					path))
+			}
+			return nil
+		})
+	}
+	return findings
+}

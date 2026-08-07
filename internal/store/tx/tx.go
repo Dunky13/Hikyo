@@ -106,11 +106,13 @@ func writeOnce(ctx context.Context, db *store.DB, fn WriteFn) error {
 			return err
 		}
 		az := authz.NewTxAuthorizer(authn.NewPG(pgtx), tok)
-		if err := fn(ctx, store.PGTxRepos(pgtx, tok), az); err != nil {
+		err = fn(ctx, store.PGTxRepos(pgtx, tok), az)
+		if err != nil {
 			_ = pgtx.Rollback(ctx)
-			return err
+		} else {
+			err = pgtx.Commit(ctx)
 		}
-		return pgtx.Commit(ctx)
+		return settleDenials(ctx, db, az, err)
 	}
 	// sqlite: the write pool's DSN carries _txlock=immediate, so BeginTx
 	// opens BEGIN IMMEDIATE — write intent acquired before reads.
@@ -119,11 +121,13 @@ func writeOnce(ctx context.Context, db *store.DB, fn WriteFn) error {
 		return err
 	}
 	az := authz.NewTxAuthorizer(authn.NewSQLite(sqtx), tok)
-	if err := fn(ctx, store.SQLiteTxRepos(sqtx, tok), az); err != nil {
+	err = fn(ctx, store.SQLiteTxRepos(sqtx, tok), az)
+	if err != nil {
 		_ = sqtx.Rollback()
-		return err
+	} else {
+		err = sqtx.Commit()
 	}
-	return sqtx.Commit()
+	return settleDenials(ctx, db, az, err)
 }
 
 func readOnce(ctx context.Context, db *store.DB, fn ReadFn) error {
@@ -146,11 +150,13 @@ func readOnce(ctx context.Context, db *store.DB, fn ReadFn) error {
 			return err
 		}
 		az := authz.NewTxAuthorizer(authn.NewPG(pgtx), tok)
-		if err := fn(ctx, store.PGTxReadRepos(pgtx, tok), az); err != nil {
+		err = fn(ctx, store.PGTxReadRepos(pgtx, tok), az)
+		if err != nil {
 			_ = pgtx.Rollback(ctx)
-			return err
+		} else {
+			err = pgtx.Commit(ctx)
 		}
-		return pgtx.Commit(ctx)
+		return settleDenials(ctx, db, az, err)
 	}
 	// sqlite: plain deferred BEGIN on the read pool (its DSN carries no
 	// _txlock=immediate, so a held read transaction never takes write
@@ -161,9 +167,73 @@ func readOnce(ctx context.Context, db *store.DB, fn ReadFn) error {
 		return err
 	}
 	az := authz.NewTxAuthorizer(authn.NewSQLite(sqtx), tok)
-	if err := fn(ctx, store.SQLiteTxReadRepos(sqtx, tok), az); err != nil {
+	err = fn(ctx, store.SQLiteTxReadRepos(sqtx, tok), az)
+	if err != nil {
 		_ = sqtx.Rollback()
+	} else {
+		err = sqtx.Commit()
+	}
+	return settleDenials(ctx, db, az, err)
+}
+
+// settleDenials makes every denial the attempt captured durable BEFORE the
+// attempt's outcome reaches the caller (audit-model ADR § Denials: the
+// denial event is durable before the error response is sent; no async path
+// exists). The attempt's transaction is already rolled back or committed —
+// ordering that matters on sqlite, whose single write connection must be
+// free before the flush transaction begins.
+//
+//   - Retryable attempt errors skip the flush: the retry re-runs
+//     authorize(), which re-captures; flushing here would duplicate events.
+//   - A flush failure is returned as a loud error wrapping both causes,
+//     never the uniform denial — a denial response without its durable
+//     record is exactly what fail-closed forbids (the A4 induced-commit-
+//     failure criterion).
+func settleDenials(ctx context.Context, db *store.DB, az *authz.TxAuthorizer, attemptErr error) error {
+	denials := az.PendingDenials()
+	if len(denials) == 0 || (attemptErr != nil && retryable(db.Engine(), attemptErr)) {
+		return attemptErr
+	}
+	flushErr := retryLoop(ctx, db.Engine(), func(ctx context.Context) error {
+		return flushOnce(ctx, db, denials)
+	})
+	if flushErr != nil {
+		// The suppressed outcome is reported as TEXT (%v), deliberately not
+		// wrapped: keeping ErrNotFound/ErrUnauthorized in the chain would let
+		// the response layer render the uniform denial after all — exactly
+		// the unrecorded-denial answer fail-closed forbids.
+		return fmt.Errorf("tx: denial audit record not durable — refusing to answer (flush: %w; suppressed outcome: %v)", flushErr, attemptErr)
+	}
+	return attemptErr
+}
+
+// flushOnce writes the captured denials through the resolution surface's
+// single write path (authn.WriteDenial) in one dedicated transaction.
+func flushOnce(ctx context.Context, db *store.DB, denials []authz.Denial) error {
+	if db.Engine() == store.EnginePostgres {
+		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+		if err != nil {
+			return err
+		}
+		w := authn.NewPG(pgtx)
+		for _, d := range denials {
+			if err := w.WriteDenial(ctx, d.Event, d.Trail, d.Scope); err != nil {
+				_ = pgtx.Rollback(ctx)
+				return err
+			}
+		}
+		return pgtx.Commit(ctx)
+	}
+	sqtx, err := db.SQLiteWrite().BeginTx(ctx, nil)
+	if err != nil {
 		return err
+	}
+	w := authn.NewSQLite(sqtx)
+	for _, d := range denials {
+		if err := w.WriteDenial(ctx, d.Event, d.Trail, d.Scope); err != nil {
+			_ = sqtx.Rollback()
+			return err
+		}
 	}
 	return sqtx.Commit()
 }

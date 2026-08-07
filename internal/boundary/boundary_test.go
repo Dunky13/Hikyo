@@ -171,6 +171,9 @@ func TestAuthnImportAllowlist(t *testing.T) {
 		module + "/internal/domain":          true,
 		module + "/internal/store/sqlitegen": true,
 		module + "/internal/store/pggen":     true,
+		// The audit vocabulary (leaf), for the denial writer — the surface's
+		// single write path (audit-model ADR amendment part 4).
+		module + "/internal/audit": true,
 	}
 	for _, p := range loadPackages(t) {
 		for _, imp := range allImports(p) {

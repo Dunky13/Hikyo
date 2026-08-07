@@ -1,5 +1,69 @@
 [
   {
+    "operation": "audit.export-env",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "audit-read@environment"
+    ]
+  },
+  {
+    "operation": "audit.export-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "audit-read@org"
+    ]
+  },
+  {
+    "operation": "audit.export-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "audit-read@project"
+    ]
+  },
+  {
+    "operation": "audit.instance-export",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "audit-read@instance"
+    ]
+  },
+  {
+    "operation": "audit.instance-query",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "audit-read@instance"
+    ]
+  },
+  {
+    "operation": "audit.query-env",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "audit-read@environment"
+    ]
+  },
+  {
+    "operation": "audit.query-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "audit-read@org"
+    ]
+  },
+  {
+    "operation": "audit.query-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "audit-read@project"
+    ]
+  },
+  {
     "operation": "environment.create",
     "class": "tenant",
     "level": "project",

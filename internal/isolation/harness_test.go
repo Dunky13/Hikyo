@@ -84,6 +84,13 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_rd_read', 'usr_reader', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
 	// root: the instance operator.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ic', 'usr_root', 'instance-config', NULL, NULL, NULL, ` + ts + `)`,
+	// alice additionally holds audit-read in org A (#45): the tenant-trail
+	// positive control. reader/bob/nobody deliberately do NOT hold it — the
+	// audit denial probes ride on them.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_ar', 'usr_alice', 'audit-read', 'org_a', NULL, NULL, ` + ts + `)`,
+	// root additionally holds instance-scope audit-read (#45): the instance
+	// trail is grant-evaluated, never route-implied.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ar', 'usr_root', 'audit-read', NULL, NULL, NULL, ` + ts + `)`,
 	// mch_a1: machine authority confined to project A1.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_read', 'mch_a1', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_edit', 'mch_a1', 'edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
@@ -178,6 +185,7 @@ func openPostgres(t *testing.T) *store.DB {
 	for _, table := range []string{
 		"grants", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
+		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",
 	} {
 		if _, err := pre.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {

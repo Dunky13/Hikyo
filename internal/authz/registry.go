@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/domain"
 )
 
@@ -25,6 +26,22 @@ const (
 	OpEnvCreate     Operation = "environment.create"
 	OpEnvRead       Operation = "environment.read"
 	OpEnvUpdateNote Operation = "environment.update-note"
+
+	// Audit trail reads (#45, audit-model ADR). One operation per addressed
+	// depth — the registry pins one depth per tenant operation, so the three
+	// depths are three rows sharing one service implementation; the formula
+	// atom is audit-read at the addressed depth (grants inherit downward, so
+	// an org-level audit-read covers all three). The instance trail is read
+	// under an instance-scope audit-read grant — grant-evaluated like every
+	// instance operation, never route-implied.
+	OpAuditQueryOrg      Operation = "audit.query-org"
+	OpAuditQueryProject  Operation = "audit.query-project"
+	OpAuditQueryEnv      Operation = "audit.query-env"
+	OpAuditExportOrg     Operation = "audit.export-org"
+	OpAuditExportProject Operation = "audit.export-project"
+	OpAuditExportEnv     Operation = "audit.export-env"
+	OpAuditInstanceQuery  Operation = "audit.instance-query"
+	OpAuditInstanceExport Operation = "audit.instance-export"
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -51,7 +68,33 @@ const (
 	StoreKeysInsertMaster               StoreOp = "keys.InsertMaster"
 	StoreKeysInsertTier3                StoreOp = "keys.InsertTier3"
 	StoreKeysInsertScopeGeneration      StoreOp = "keys.InsertScopeGeneration"
+
+	// Audit trails (#45). INSERT and SELECT only — the append-only invariant
+	// lives at the query layer; these are the only store doors to it. The
+	// denial writer does NOT pass through these: it is the authorization
+	// package's own enumerated write path (audit-model ADR amendment part 4)
+	// and runs with no proof to verify.
+	StoreAuditTenantInsert   StoreOp = "audit.InsertTenant"
+	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
+	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
+	StoreAuditInstancePage   StoreOp = "audit.PageInstance"
 )
+
+// readOnlyStoreOps pins which store operations mutate nothing — the
+// machine-checked half of the `audited: none` permit rule (audit-model ADR
+// CI invariant 2): an operation may skip audit mapping only when every store
+// op it can invoke is in this set. A wrongly listed op is caught by review
+// of this pinned table, exactly like the formula pins.
+var readOnlyStoreOps = map[StoreOp]bool{
+	StoreOrgsGet:                  true,
+	StoreOrgsList:                 true,
+	StoreOrgsCount:                true,
+	StoreEnvironmentsGet:          true,
+	StoreKeysActiveMasterWrappers: true,
+	StoreKeysActiveTier3:          true,
+	StoreAuditTenantPage:          true,
+	StoreAuditInstancePage:        true,
+}
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
 // names it verbatim — "boot to its pragma/keyring checks" — so the keyring
@@ -99,6 +142,15 @@ type opSpec struct {
 	level    domain.Level // tenant ops: the depth the request must address
 	formula  Formula
 	storeOps map[StoreOp]bool
+
+	// events maps the operation to the audit event type(s) it emits, or —
+	// exactly one of the two — auditedNone declares a proof-scoped pure read
+	// whose result the trail would only duplicate. auditedNone is
+	// default-deny (audit-model ADR CI invariant 2): the completeness
+	// invariant permits it only for tenant-class, formula-bare-`read`,
+	// non-mutating operations, and refuses it everywhere else.
+	events      []audit.EventType
+	auditedNone bool
 }
 
 // operations is the operation registry. The demonstration set exercises the
@@ -115,12 +167,17 @@ var operations = map[Operation]opSpec{
 	OpOrgCreate: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreOrgsCreate: true},
+		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOrgCreated},
 	},
 	OpOrgGet: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsGet: true},
+		// No events and no auditedNone: carried by the pinned scaffolding
+		// exemption fixture until #48 lands the real org surface (the
+		// completeness invariant refuses auditedNone to instance-class
+		// operations, and refuses silence to everything unpinned).
 	},
 	OpOrgList: {
 		class:    ClassInstance,
@@ -128,30 +185,98 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreOrgsList: true, StoreOrgsCount: true},
 	},
 
-	// Tenant-scoped demonstration operations, one per chain depth.
+	// Tenant-scoped demonstration operations, one per chain depth. Their
+	// domain events are committed in-transaction with the write (audit-model
+	// ADR durability discipline).
 	OpProjectCreate: {
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreProjectsCreate: true},
+		storeOps: map[StoreOp]bool{StoreProjectsCreate: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventProjectCreated},
 	},
 	OpEnvCreate: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreEnvironmentsCreate: true},
+		storeOps: map[StoreOp]bool{StoreEnvironmentsCreate: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventEnvCreated},
 	},
 	OpEnvRead: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{StoreEnvironmentsGet: true},
+		// A proof-scoped pure read whose result the trail would only
+		// duplicate — the exact (and only) shape the default-deny permit
+		// rule accepts.
+		auditedNone: true,
 	},
 	OpEnvUpdateNote: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
-		storeOps: map[StoreOp]bool{StoreEnvironmentsUpdateNote: true},
+		storeOps: map[StoreOp]bool{StoreEnvironmentsUpdateNote: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventEnvNoteChanged},
+	},
+
+	// Audit trail reads and exports (#45). Reading the trail is itself
+	// audited, unconditionally — no toggle exists (audit-model ADR): the
+	// query op emits its own event in the same transaction, the export pair
+	// takes the INTENT/OUTCOME shape.
+	OpAuditQueryOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditQuery},
+	},
+	OpAuditQueryProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditQuery},
+	},
+	OpAuditQueryEnv: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditQuery},
+	},
+	OpAuditExportOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
+	},
+	OpAuditExportProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
+	},
+	OpAuditExportEnv: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantPage: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
+	},
+	OpAuditInstanceQuery: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventAuditQuery},
+	},
+	OpAuditInstanceExport: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
 	},
 }
 
@@ -241,6 +366,40 @@ func (RegistryFacts) SystemSites() map[SystemSite][]StoreOp {
 			list = append(list, op)
 		}
 		out[site] = list
+	}
+	return out
+}
+
+// AuditMapping is one operation's audit linkage, for the completeness
+// invariant (audit-model ADR CI invariant 2).
+type AuditMapping struct {
+	Class       Class
+	Formula     Formula
+	Events      []audit.EventType
+	AuditedNone bool
+	// ReadOnly reports whether every store op the operation can invoke is in
+	// the pinned read-only set — the mutates-nothing half of the
+	// `audited: none` permit rule.
+	ReadOnly bool
+}
+
+// AuditMappings returns every registered operation's audit linkage.
+func (RegistryFacts) AuditMappings() map[Operation]AuditMapping {
+	out := make(map[Operation]AuditMapping, len(operations))
+	for op, spec := range operations {
+		ro := true
+		for so := range spec.storeOps {
+			if !readOnlyStoreOps[so] {
+				ro = false
+			}
+		}
+		out[op] = AuditMapping{
+			Class:       spec.class,
+			Formula:     append(Formula(nil), spec.formula...),
+			Events:      append([]audit.EventType(nil), spec.events...),
+			AuditedNone: spec.auditedNone,
+			ReadOnly:    ro,
+		}
 	}
 	return out
 }

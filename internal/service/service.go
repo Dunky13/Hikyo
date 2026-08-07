@@ -15,12 +15,34 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/migrate"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
+
+// domainEvent builds one success-outcome domain event for a demonstration
+// operation, committed in-transaction with its write (audit-model ADR
+// durability discipline: an internal operation without its durable audit
+// record does not complete).
+func domainEvent(ctx context.Context, typ audit.EventType, principal domain.PrincipalID, obj audit.Object, payload audit.Payload) (audit.Event, error) {
+	id, err := audit.NewEventID()
+	if err != nil {
+		return audit.Event{}, err
+	}
+	wire := audit.FromContext(ctx)
+	return audit.Event{
+		ID: id, Type: typ, SchemaVersion: 1,
+		OccurredAt: time.Now().UTC(),
+		Actor:      audit.Actor{ID: string(principal)},
+		Object:     obj,
+		Outcome:    audit.OutcomeSuccess,
+		SourceIP:   wire.SourceIP, UserAgent: wire.UserAgent, Origin: wire.Origin,
+		Payload: payload,
+	}, nil
+}
 
 // System answers operational questions for the HTTP layer.
 type System struct {
@@ -73,7 +95,16 @@ func (s *Orgs) Create(ctx context.Context, principal domain.PrincipalID, name st
 		if err != nil {
 			return err
 		}
-		return r.Orgs().Create(ctx, p, org)
+		if err := r.Orgs().Create(ctx, p, org); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgCreated, principal,
+			audit.Object{Type: "org", ID: org.ID},
+			audit.Payload{"org_id": org.ID, "org_name": audit.SanitizeFreeText(org.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Org{}, err
@@ -139,7 +170,16 @@ func (s *Projects) Create(ctx context.Context, principal domain.PrincipalID, org
 		if err != nil {
 			return err
 		}
-		return r.Projects().Create(ctx, p, proj)
+		if err := r.Projects().Create(ctx, p, proj); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventProjectCreated, principal,
+			audit.Object{Type: "project", ID: proj.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(proj.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Project{}, err
@@ -168,7 +208,16 @@ func (s *Environments) Create(ctx context.Context, principal domain.PrincipalID,
 		if err != nil {
 			return err
 		}
-		return r.Environments().Create(ctx, p, env)
+		if err := r.Environments().Create(ctx, p, env); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvCreated, principal,
+			audit.Object{Type: "environment", ID: env.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(env.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	if err != nil {
 		return store.Environment{}, err
@@ -198,6 +247,14 @@ func (s *Environments) UpdateNote(ctx context.Context, principal domain.Principa
 		if err != nil {
 			return err
 		}
-		return r.Environments().UpdateNote(ctx, p, note)
+		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvNoteChanged, principal,
+			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 }

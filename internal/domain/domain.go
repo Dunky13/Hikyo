@@ -29,6 +29,11 @@ const (
 	CapDefinitionsEdit Capability = "definitions-edit"
 	CapManageProjects  Capability = "manage-projects"
 	CapInstanceConfig  Capability = "instance-config"
+	// CapAuditRead is the audit-model ADR's amendment part 1: reading the
+	// trail is surveillance power over colleagues — its own capability, an
+	// ordinary additive downward-inheriting grant, never bundled into
+	// manage-members.
+	CapAuditRead Capability = "audit-read"
 )
 
 // Scope addresses a node in the tenant chain as the request names it:
