@@ -30,12 +30,12 @@ func runReadSnapshotStability(t *testing.T, db *store.DB) {
 	// Both attempts must see the same (empty) grant set.
 	var first, second error
 	err := tx.Read(t.Context(), db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
-		_, first = az.Authorize(ctx, late, authz.OpEnvRead, scope)
+		_, first = az.Authorize(ctx, authz.Identity{Principal: late}, authz.OpEnvRead, scope)
 
 		execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 			VALUES ('g_late_read', 'usr_late', 'read', 'org_a', NULL, NULL, `+ts+`)`)
 
-		_, second = az.Authorize(ctx, late, authz.OpEnvRead, scope)
+		_, second = az.Authorize(ctx, authz.Identity{Principal: late}, authz.OpEnvRead, scope)
 		return nil
 	})
 	if err != nil {

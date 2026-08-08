@@ -43,29 +43,46 @@ func NewTxAuthorizer(r *authn.Resolver, tok *TxToken) *TxAuthorizer {
 //   - Registry or addressing bugs (unknown operation, scope depth mismatch):
 //     loud errors, never uniform responses — these are programming errors,
 //     not probe outcomes.
-func (a *TxAuthorizer) Authorize(ctx context.Context, principal domain.PrincipalID, op Operation, scope domain.Scope) (Proof, error) {
+//
+// The caller is an Identity, not a bare principal, because the MFA-mandatory
+// rule is evaluated HERE, in the same transaction and after the grant check:
+// session assurance is a property of how this session authenticated, and the
+// chokepoint that mints the proof is the one place it cannot diverge from the
+// grant table. A session-less caller (Identity.SessionID == "") is local host
+// authority — bootstrap, break-glass, `wenv admin` — and is exempt, presenting
+// no session and therefore no factor.
+func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operation, scope domain.Scope) (Proof, error) {
 	spec, ok := operations[op]
 	if !ok {
 		return nil, fmt.Errorf("authz: operation %q is not in the operation registry", op)
 	}
-	if principal == "" {
+	if caller.Principal == "" {
 		return nil, errors.New("authz: empty principal")
 	}
 
 	switch spec.class {
 	case ClassTenant:
-		return a.authorizeTenant(ctx, principal, op, spec, scope)
+		return a.authorizeTenant(ctx, caller, op, spec, scope)
 	case ClassInstance:
 		if scope != (domain.Scope{}) {
 			return nil, fmt.Errorf("authz: instance operation %q addressed with a tenant scope", op)
 		}
-		return a.authorizeInstance(ctx, principal, op, spec)
+		return a.authorizeInstance(ctx, caller, op, spec)
 	default:
 		return nil, fmt.Errorf("authz: operation %q (class %d) does not mint proofs via Authorize", op, spec.class)
 	}
 }
 
-func (a *TxAuthorizer) authorizeTenant(ctx context.Context, principal domain.PrincipalID, op Operation, spec opSpec, scope domain.Scope) (Proof, error) {
+// assuranceInadequate reports whether an MFA-mandatory operation must be
+// refused for want of session assurance. It is evaluated only after the grant
+// check succeeds, so a caller who does not hold the capability never learns a
+// step-up is what they lack.
+func (a *TxAuthorizer) assuranceInadequate(caller Identity, op Operation) bool {
+	return AssuranceEnforced && caller.SessionID != "" && FormulaDemandsMFA(op) && !AdequateAssurance(caller.Assurance)
+}
+
+func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op Operation, spec opSpec, scope domain.Scope) (Proof, error) {
+	principal := caller.Principal
 	level, err := scope.Level()
 	if err != nil {
 		return nil, fmt.Errorf("authz: operation %q: %w", op, err)
@@ -99,10 +116,18 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, principal domain.Pri
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
 		return nil, domain.ErrNotFound
 	}
+	if a.assuranceInadequate(caller, op) {
+		// The grant is held; only the session's assurance is short. Revealing
+		// the object's existence is fine — they can reach it — so this is a
+		// grant-class refusal (ErrUnauthorized), not the nonexistent mask.
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
+		return nil, domain.ErrUnauthorized
+	}
 	return &proof{kind: kindTenant, op: op, chain: chain, tok: a.tok}, nil
 }
 
-func (a *TxAuthorizer) authorizeInstance(ctx context.Context, principal domain.PrincipalID, op Operation, spec opSpec) (Proof, error) {
+func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, op Operation, spec opSpec) (Proof, error) {
+	principal := caller.Principal
 	grants, err := a.r.Grants(ctx, principal)
 	if err != nil {
 		return nil, err
@@ -110,6 +135,10 @@ func (a *TxAuthorizer) authorizeInstance(ctx context.Context, principal domain.P
 	if !evaluate(spec.formula, domain.Scope{}, grants) {
 		// Instance-scoped grant refusal: no tenant object exists, the
 		// denial lands in the instance trail.
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
+		return nil, domain.ErrUnauthorized
+	}
+	if a.assuranceInadequate(caller, op) {
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}

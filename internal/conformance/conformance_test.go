@@ -237,7 +237,7 @@ func scenarioRollback(t *testing.T, db *store.DB) {
 	}
 	sentinel := fmt.Errorf("sentinel")
 	err = tx.Write(t.Context(), db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, admin, authz.OpOrgCreate, domain.Scope{})
+		p, err := az.Authorize(ctx, authz.Identity{Principal: admin}, authz.OpOrgCreate, domain.Scope{})
 		if err != nil {
 			return err
 		}

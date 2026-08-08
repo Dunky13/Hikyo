@@ -147,6 +147,83 @@ func (a *TxAuthorizer) CreateGrant(ctx context.Context, id string, p domain.Prin
 	return a.r.CreateGrant(ctx, id, p, g, at)
 }
 
+// Factor seam (#54). TOTP, recovery codes and step-up rotation reach the
+// resolution surface through the same in-transaction authorizer, for the same
+// reason the login writers do: they mutate the artifacts that decide how a
+// caller authenticated, which is resolution rather than authorization.
+
+// TOTPCredential is a resolved TOTP factor.
+type TOTPCredential = authn.TOTPCredential
+
+// NewTOTPCredential is the TOTP insert carrier.
+type NewTOTPCredential = authn.NewTOTPCredential
+
+// RecoveryBatch is a resolved recovery-code batch.
+type RecoveryBatch = authn.RecoveryBatch
+
+// ConfirmedTOTP resolves an account's confirmed TOTP factor.
+func (a *TxAuthorizer) ConfirmedTOTP(ctx context.Context, accountID string) (TOTPCredential, error) {
+	return a.r.ConfirmedTOTP(ctx, accountID)
+}
+
+// PendingTOTP resolves an account's in-progress enrolment.
+func (a *TxAuthorizer) PendingTOTP(ctx context.Context, accountID string) (TOTPCredential, error) {
+	return a.r.PendingTOTP(ctx, accountID)
+}
+
+// CreateTOTP inserts a pending TOTP enrolment.
+func (a *TxAuthorizer) CreateTOTP(ctx context.Context, c NewTOTPCredential) error {
+	return a.r.CreateTOTP(ctx, c)
+}
+
+// ConfirmTOTP promotes and consumes a step in one CAS; false means the row
+// moved or the step was not beyond the last.
+func (a *TxAuthorizer) ConfirmTOTP(ctx context.Context, id string, rowVersion, step int64, at time.Time) (bool, error) {
+	return a.r.ConfirmTOTP(ctx, id, rowVersion, step, at)
+}
+
+// AdvanceTOTPStep consumes a code's step; false means it was not beyond the last.
+func (a *TxAuthorizer) AdvanceTOTPStep(ctx context.Context, id string, rowVersion, step int64) (bool, error) {
+	return a.r.AdvanceTOTPStep(ctx, id, rowVersion, step)
+}
+
+// RemoveTOTPForAccount deletes every TOTP row of an account.
+func (a *TxAuthorizer) RemoveTOTPForAccount(ctx context.Context, accountID string) error {
+	return a.r.DeleteTOTPForAccount(ctx, accountID)
+}
+
+// ClearPendingTOTP removes only in-progress enrolments.
+func (a *TxAuthorizer) ClearPendingTOTP(ctx context.Context, accountID string) error {
+	return a.r.DeletePendingTOTPForAccount(ctx, accountID)
+}
+
+// RecoveryCodesFor resolves an account's batch.
+func (a *TxAuthorizer) RecoveryCodesFor(ctx context.Context, accountID string) (RecoveryBatch, error) {
+	return a.r.RecoveryCodes(ctx, accountID)
+}
+
+// WriteRecoveryCodes writes the first batch for an account.
+func (a *TxAuthorizer) WriteRecoveryCodes(ctx context.Context, b RecoveryBatch, at time.Time) error {
+	return a.r.CreateRecoveryCodes(ctx, b, at)
+}
+
+// ReplaceRecoveryCodes compare-and-swaps the batch; false means it moved.
+func (a *TxAuthorizer) ReplaceRecoveryCodes(ctx context.Context, b RecoveryBatch, at time.Time) (bool, error) {
+	return a.r.UpdateRecoveryCodes(ctx, b, at)
+}
+
+// RotateSessionFactors rotates the acting session token and rewrites its
+// factor set on step-up, preserving the original authentication attribution.
+func (a *TxAuthorizer) RotateSessionFactors(ctx context.Context, id string, verifier []byte, factors string) error {
+	return a.r.RotateSessionFactors(ctx, id, verifier, factors)
+}
+
+// ConsumeOutstandingAuthorities marks every unconsumed authority of an account
+// consumed, in the same transaction as a fresh mint or consumption.
+func (a *TxAuthorizer) ConsumeOutstandingAuthorities(ctx context.Context, accountID string, at time.Time) error {
+	return a.r.ConsumeOutstandingAuthorities(ctx, accountID, at)
+}
+
 // RecordAuthEvent writes an authentication audit event through the resolution
 // surface's proof-free path. Authentication events cannot carry a proof: they
 // are what produces the principal a proof would be minted for, and credential

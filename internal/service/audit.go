@@ -119,7 +119,7 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 	}
 	var page []store.AuditEvent
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, principal, op, scope)
+		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID, f store.AuditFilter) ([]store.AuditEvent, error) {
 	var page []store.AuditEvent
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, principal, authz.OpAuditInstanceQuery, domain.Scope{})
+		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, authz.OpAuditInstanceQuery, domain.Scope{})
 		if err != nil {
 			return err
 		}
@@ -293,7 +293,7 @@ func (s *Audits) export(
 	// forever (postgres allocates seq before commit) AND makes the export a
 	// terminating snapshot instead of a chase of live writes.
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, principal, op, scope)
+		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 		if err != nil {
 			return err
 		}
@@ -319,7 +319,7 @@ func (s *Audits) export(
 			return err
 		}
 		return tx.Write(terminalCtx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-			p, err := az.Authorize(ctx, principal, op, scope)
+			p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 			if err != nil {
 				return err
 			}
@@ -338,7 +338,7 @@ func (s *Audits) export(
 		pf.AfterSeq = cursor
 		pf.Limit = pageSize
 		err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
-			p, err := az.Authorize(ctx, principal, op, scope)
+			p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 			if err != nil {
 				return err
 			}

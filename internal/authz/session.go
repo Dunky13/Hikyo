@@ -55,17 +55,36 @@ var MFAMandatory = map[domain.Capability]bool{
 // AssuranceEnforced reports whether the chokepoint refuses an MFA-mandatory
 // operation from a single-factor session.
 //
-// It is FALSE in this slice, deliberately and visibly. No factor exists yet —
-// TOTP, WebAuthn and recovery codes are #54 — so enforcing the rule now would
-// mean a freshly bootstrapped administrator could never perform the very
-// operations that administer the instance, with no in-product path to enrol
-// out of it. The assurance record is written from day one so no migration is
-// needed when the check turns on.
+// The GATE is plumbed (Authorize threads the caller's Identity and consults
+// assuranceInadequate after the grant check, so only a capability-holder ever
+// learns a step-up is required; session-less local host authority is exempt).
+// The constant stays FALSE until the factor endpoints land in the same PR: the
+// moment a factor beyond a password becomes mintable — signalled by any factor
+// audit event registering — this flips to true and the demo/bootstrap flows
+// enrol a factor. Flipping it before an enrolment path exists would strand a
+// freshly bootstrapped administrator with no way to satisfy the rule.
 //
-// isolation.TestAssuranceEnforcementCannotBeForgotten fails the build the
-// moment any factor beyond a password becomes mintable, so this cannot decay
-// into a permanent hole.
+// isolation.TestAssuranceEnforcementCannotBeForgotten fails the build if a
+// factor event registers while this is still false, so the flip cannot be
+// forgotten. See docs/handoff/54-human-auth-full.md.
 const AssuranceEnforced = false
+
+// AdequateAssurance reports whether a session's assurance record satisfies the
+// MFA-mandatory rule: two distinct factor classes, or a WebAuthn assertion
+// (user-verifying, inherently two-factor). OIDC sessions whose provider policy
+// asserted multi-factor are handled where that policy is recorded (#54 OIDC
+// slice); here a single-factor session — password only, or an unelevated OIDC
+// login — is inadequate.
+func AdequateAssurance(a Assurance) bool {
+	distinct := map[string]bool{}
+	for _, f := range a.Factors {
+		if f == "webauthn" {
+			return true
+		}
+		distinct[f] = true
+	}
+	return len(distinct) >= 2
+}
 
 // Authenticate resolves a presented artifact into a live identity inside this
 // transaction.
