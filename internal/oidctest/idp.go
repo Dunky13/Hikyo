@@ -58,6 +58,16 @@ type IdP struct {
 	// ACR and AMR, when set, are asserted in the ID token.
 	ACR string
 	AMR []string
+	// IAT, when non-zero, overrides the `iat` claim (else now); OmitIAT drops
+	// it entirely. Fixtures use them to assert the relying party refuses a
+	// future or missing iat.
+	IAT     time.Time
+	OmitIAT bool
+	// OnToken, when set, runs at the start of the token endpoint — i.e. during
+	// the relying party's code exchange (Phase B), between the callback's Phase
+	// A snapshot and its Phase C write. A race fixture uses it to reconfigure
+	// the provider mid-exchange and assert the stale evaluation is refused.
+	OnToken func()
 }
 
 // New starts a fake IdP. Callers own Close via t.Cleanup.
@@ -152,7 +162,11 @@ func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	p.TokenEndpointHits++
+	hook := p.OnToken
 	p.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return
@@ -195,6 +209,12 @@ func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, v := range c.Claims {
 		claims[k] = v
+	}
+	if !p.IAT.IsZero() {
+		claims["iat"] = p.IAT.Unix()
+	}
+	if p.OmitIAT {
+		delete(claims, "iat")
 	}
 	idToken, err := p.signJWT(claims)
 	if err != nil {

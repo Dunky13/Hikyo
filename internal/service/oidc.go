@@ -66,7 +66,37 @@ const (
 	causeJITRefused      = "jit-refused"
 	causeReconciliation  = "reconciliation"
 	causeWindowClosed    = "window-zero"
+	causeNoPossession    = "no-possession"
+	causeDowngrade       = "downgrade"
 )
+
+// possessionAMR is the closed set of RFC 8176 amr values wenv accepts as
+// evidence of a possession factor for a reauth: a hardware key, a software key,
+// a one-time password, or a self-asserted multi-factor. "pwd"/"pin" (knowledge)
+// and biometric-only values are deliberately excluded, so a password-only token
+// can never open a reveal reauth window even when it satisfies a policy that
+// keyed on acr alone.
+var possessionAMR = map[string]bool{"hwk": true, "swk": true, "otp": true, "mfa": true}
+
+// hasPossessionAMR reports whether the token asserted a recognized possession
+// factor, INDEPENDENTLY of policy satisfaction. Policy satisfaction (an acr
+// match or an amr set) alone must not imply possession.
+func hasPossessionAMR(amr []string) bool {
+	for _, m := range amr {
+		if possessionAMR[m] {
+			return true
+		}
+	}
+	return false
+}
+
+// ptrEq reports whether two optional JSON-policy pointers carry the same value.
+func ptrEq(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
 
 // Loud, structural OIDC refusals for callers acting on their own instance
 // config or account - not the uniform pre-auth mask.

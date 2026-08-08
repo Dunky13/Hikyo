@@ -32,6 +32,10 @@ var allowedAlgs = []string{
 	oidc.PS256, oidc.PS384, oidc.PS512,
 }
 
+// allowedSkew is the clock tolerance for the iat freshness check: an IdP whose
+// clock runs slightly ahead is tolerated up to this bound, further is refused.
+const allowedSkew = 2 * time.Minute
+
 // Sentinel refusals, mapped by the service to closed audit causes. Every one is
 // a refusal, never a downgrade.
 var (
@@ -90,8 +94,9 @@ func (p *Provider) config(clientID, clientSecret, redirectURI, scopes string) oa
 // AuthCodeURL builds the authorization request URL with PKCE S256 always, the
 // state and nonce, and - for reauth - prompt=login and max_age=0, which the
 // caller passes via extra. It never derives the redirect from a request header.
-func (p *Provider) AuthCodeURL(clientID, clientSecret, redirectURI, scopes, state, nonce, pkceVerifier string, extra map[string]string) string {
-	cfg := p.config(clientID, clientSecret, redirectURI, scopes)
+// The client secret is not part of an authorization request, so none is taken.
+func (p *Provider) AuthCodeURL(clientID, redirectURI, scopes, state, nonce, pkceVerifier string, extra map[string]string) string {
+	cfg := p.config(clientID, "", redirectURI, scopes)
 	opts := []oauth2.AuthCodeOption{
 		oauth2.S256ChallengeOption(pkceVerifier),
 		oidc.Nonce(nonce),
@@ -104,9 +109,16 @@ func (p *Provider) AuthCodeURL(clientID, clientSecret, redirectURI, scopes, stat
 
 // Exchange trades the authorization code for tokens at the RECORDED provider's
 // token endpoint only, presenting the PKCE verifier, and returns the raw ID
-// token. The client secret is used here and nowhere else.
-func (p *Provider) Exchange(ctx context.Context, clientID, clientSecret, redirectURI, scopes, code, pkceVerifier string) (string, error) {
-	cfg := p.config(clientID, clientSecret, redirectURI, scopes)
+// token. The client secret is used here and nowhere else, and arrives as bytes
+// so the plaintext window is the exchange call alone.
+//
+// ponytail: oauth2.Config.ClientSecret is an immutable string, so the
+// conversion below leaves one plaintext copy the GC owns and we cannot zero —
+// the residual ceiling. It lives only for this exchange and is not retained by
+// the caller. Removing it entirely needs an oauth2 client that accepts a
+// []byte secret (none exists); revisit if x/oauth2 ever grows one.
+func (p *Provider) Exchange(ctx context.Context, clientID string, clientSecret []byte, redirectURI, scopes, code, pkceVerifier string) (string, error) {
+	cfg := p.config(clientID, string(clientSecret), redirectURI, scopes)
 	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(pkceVerifier))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrExchange, err)
@@ -155,6 +167,17 @@ func (p *Provider) Verify(ctx context.Context, clientID, rawIDToken string, now 
 	}
 	if tok.Subject == "" {
 		return Claims{}, ErrEmptySubject
+	}
+	// iat must be present, not from the future beyond the skew, and not after
+	// exp: go-oidc validates exp but leaves iat sanity to the caller.
+	if tok.IssuedAt.IsZero() {
+		return Claims{}, fmt.Errorf("%w: token carries no iat", ErrTokenInvalid)
+	}
+	if tok.IssuedAt.After(now().Add(allowedSkew)) {
+		return Claims{}, fmt.Errorf("%w: token iat is in the future", ErrTokenInvalid)
+	}
+	if tok.IssuedAt.After(tok.Expiry) {
+		return Claims{}, fmt.Errorf("%w: token iat is after exp", ErrTokenInvalid)
 	}
 	var extra struct {
 		ACR      string   `json:"acr"`

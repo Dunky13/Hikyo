@@ -58,6 +58,21 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 		return OIDCStartResult{}, ErrReauthNoEnvironment
 	}
 
+	// Login is the only anonymous purpose, so its admission runs BEFORE provider
+	// resolution: an unknown slug pays the same per-IP admission cost as a
+	// configured one, so the refusal timing does not enumerate provider config.
+	// link and reauth are authenticated and ride the per-account factor budget
+	// (below), which needs the resolved account.
+	var release func()
+	if purpose == purposeLogin {
+		var rerr error
+		release, rerr = s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
+		if rerr != nil {
+			return OIDCStartResult{}, rerr
+		}
+		defer release()
+	}
+
 	// Phase 1 - resolve the provider and, for a session-bound purpose, the
 	// acting session and account.
 	var (
@@ -98,19 +113,15 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 		return OIDCStartResult{}, ErrReauthNoPolicy // A5, fail fast (also enforced at callback)
 	}
 
-	// Admission: login is a pre-auth path (per-IP); link/reauth ride the
-	// per-account factor budget so a stolen session cannot be an unthrottled
-	// Argon2 oracle.
-	var release func()
-	if purpose == purposeLogin {
-		release, err = s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
-	} else {
+	// link/reauth ride the per-account factor budget so a stolen session cannot
+	// be an unthrottled Argon2 oracle (login's per-IP admission was taken above).
+	if purpose != purposeLogin {
 		release, err = s.enterFactorBudget(ctx, account.ID)
+		if err != nil {
+			return OIDCStartResult{}, err
+		}
+		defer release()
 	}
-	if err != nil {
-		return OIDCStartResult{}, err
-	}
-	defer release()
 
 	// Link: verify the account-security proof (the pre-existing password, since
 	// the credential being added never authorizes its own addition).
@@ -158,7 +169,7 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 		// checks auth_time and acr/amr against policy.
 		extra = map[string]string{"prompt": "login", "max_age": "0"}
 	}
-	authURL := rp.AuthCodeURL(provider.ClientID, "", provider.RedirectURI, provider.Scopes, state, nonce, pkce, extra)
+	authURL := rp.AuthCodeURL(provider.ClientID, provider.RedirectURI, provider.Scopes, state, nonce, pkce, extra)
 
 	txID, err := newID("oidctx")
 	if err != nil {
@@ -369,7 +380,7 @@ func (s *Auth) exchangeAndVerify(ctx context.Context, prov authz.OIDCProvider, t
 	if err != nil {
 		return oidcrp.Claims{}, causeIDPError
 	}
-	rawIDToken, err := rp.Exchange(ctx, prov.ClientID, string(plainSecret), txn.RedirectURI, prov.Scopes, code, txn.PKCEVerifier)
+	rawIDToken, err := rp.Exchange(ctx, prov.ClientID, plainSecret, txn.RedirectURI, prov.Scopes, code, txn.PKCEVerifier)
 	if err != nil {
 		return oidcrp.Claims{}, causeIDPError
 	}
@@ -390,6 +401,28 @@ func (s *Auth) exchangeAndVerify(ctx context.Context, prov authz.OIDCProvider, t
 	return claims, ""
 }
 
+// revalidateProvider re-reads the pinned provider inside a Phase-C write tx and
+// returns a refusal cause if it moved since the Phase-A snapshot (deleted,
+// disabled, issuer changed, JIT/assurance policy tightened, or any row_version
+// bump). The snapshot was taken before the network exchange, so a concurrent
+// reconfigure could have swept sessions and narrowed policy while the exchange
+// was in flight; re-reading here makes the sweep always win the race (A4) — a
+// stale evaluation cannot mint an account, identity, session or window.
+func (s *Auth) revalidateProvider(ctx context.Context, az *authz.TxAuthorizer, snapshot authz.OIDCProvider) (string, error) {
+	cur, err := az.ProviderForCallback(ctx, snapshot.ID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return causeReconciliation, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !cur.Enabled || cur.Issuer != snapshot.Issuer || cur.RowVersion != snapshot.RowVersion ||
+		!ptrEq(cur.AssurancePolicy, snapshot.AssurancePolicy) || !ptrEq(cur.JITPolicy, snapshot.JITPolicy) {
+		return causeReconciliation, nil
+	}
+	return "", nil
+}
+
 // completeLogin resolves the identity three ways (live / epoch-inert / unknown,
 // A8) and mints a browser session, provisions via JIT policy, or refuses
 // uniformly. An epoch-inert identity is terminal and never a JIT input.
@@ -401,6 +434,15 @@ func (s *Auth) completeLogin(ctx context.Context, prov authz.OIDCProvider, txn a
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		refused = nil
 		now := s.now()
+		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
+			return e
+		} else if cause != "" {
+			if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
+			return nil
+		}
 		epoch, e := az.CredentialEpoch(ctx)
 		if e != nil {
 			return e
@@ -548,9 +590,22 @@ func (s *Auth) jitProvision(ctx context.Context, az *authz.TxAuthorizer, prov au
 // transaction (A6), so here the mutation reissues the acting session from that
 // proof, deleting every prior session.
 func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims) (OIDCCallbackResult, error) {
-	var result LoginResult
+	var (
+		result  LoginResult
+		refused error
+	)
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		refused = nil
 		now := s.now()
+		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
+			return e
+		} else if cause != "" {
+			if aerr := s.stageOIDCRefuse(ctx, az, cause, prov.ID); aerr != nil {
+				return aerr
+			}
+			refused = domain.ErrUnauthenticated
+			return nil
+		}
 		epoch, e := az.CredentialEpoch(ctx)
 		if e != nil {
 			return e
@@ -589,15 +644,22 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 	if err != nil {
 		return OIDCCallbackResult{}, err
 	}
+	if refused != nil {
+		return OIDCCallbackResult{}, refused
+	}
 	return OIDCCallbackResult{Login: result, Purpose: purposeLink}, nil
 }
 
 // completeReauth validates a fresh federated authentication and opens a
-// reauthentication window over the transaction's environment. It refuses when
-// the provider has no assurance policy (A5), when auth_time is absent or stale
-// (A7), when the returned identity is not the account's (B15), when the amr
-// carries no possession factor (A5/B5), or when the effective window is 0 (only
-// WebAuthn opens a 0-window gate). On success the acting session token rotates.
+// reauthentication window over the transaction's environment. It is at least as
+// strict as completeLogin: it refuses when the pinned provider moved during the
+// exchange (A4 TOCTOU), when the provider has no assurance policy (A5), when
+// auth_time is absent or stale (A7), when the returned identity is not the
+// account's (B15), when the identity is epoch-inert (B2) or recorded against a
+// superseded provider (A3), when the policy is unsatisfied or the amr carries no
+// recognized possession factor (A5/B5), when the evidence is weaker than the
+// session it re-authorizes (a downgrade), or when the effective window is 0
+// (only WebAuthn opens a 0-window gate). On success the acting session rotates.
 func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims, presented string) (OIDCCallbackResult, error) {
 	var (
 		result  LoginResult
@@ -612,6 +674,11 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 			}
 			refused = domain.ErrUnauthenticated
 			return nil
+		}
+		if cause, e := s.revalidateProvider(ctx, az, prov); e != nil {
+			return e
+		} else if cause != "" {
+			return reject(cause)
 		}
 		if prov.AssurancePolicy == nil {
 			return reject(causeNoPolicy)
@@ -629,12 +696,45 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		if e != nil && !errors.Is(e, domain.ErrNotFound) {
 			return e
 		}
+		epoch, e := az.CredentialEpoch(ctx)
+		if e != nil {
+			return e
+		}
+		// B2: an epoch-inert (restored) identity is terminal, exactly as
+		// completeLogin refuses it — never opens a window.
+		if identity.CredentialEpoch != epoch {
+			return reject(causeEpoch)
+		}
+		// A3: the identity must be recorded against the currently enabled
+		// provider for this issuer (which is prov). A mismatch is a
+		// restored/superseded link after a provider replacement.
+		if identity.ProviderID != prov.ID {
+			return reject(causeReconciliation)
+		}
 		mfa, e := evaluateAssurance(prov.AssurancePolicy, claims.ACR, claims.AMR)
 		if e != nil {
 			return e
 		}
 		if !mfa {
-			return reject(causeNoPolicy) // amr carries no possession factor
+			return reject(causeNoPolicy) // policy not satisfied
+		}
+		// Possession is checked INDEPENDENTLY of policy satisfaction (A5/B5): an
+		// acr match or a knowledge-only amr set can satisfy a policy without any
+		// possession factor, and a reveal reauth demands one.
+		if !hasPossessionAMR(claims.AMR) {
+			return reject(causeNoPossession)
+		}
+
+		// Authenticate the initiating session inside this tx and refuse a
+		// downgrade: a reauth may not re-authorize a session established with a
+		// stronger (phishing-resistant) credential than this federated evidence.
+		id, e := az.Authenticate(ctx, presented, now)
+		if e != nil || id.SessionID != txn.InitiatingSessionID {
+			return reject(causeBinding)
+		}
+		evidence := authz.Assurance{Factors: oidcFactors(mfa)}
+		if authz.AssuranceRank(id.Assurance) > authz.AssuranceRank(evidence) {
+			return reject(causeDowngrade)
 		}
 		if s.ReauthWindow <= 0 {
 			// A 0-window gate requires WebAuthn: OIDC cannot bind the enumerated
@@ -648,10 +748,6 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 
 		// Rotate the acting session token (every reauth rotates) preserving its
 		// factor set, and open the window over the recorded environment.
-		id, e := az.Authenticate(ctx, presented, now)
-		if e != nil {
-			return reject(causeBinding)
-		}
 		factors, e := json.Marshal(id.Assurance.Factors)
 		if e != nil {
 			return e
@@ -661,10 +757,6 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 			return e
 		}
 		if e := az.RotateSessionFactors(ctx, id.SessionID, verifier, string(factors)); e != nil {
-			return e
-		}
-		epoch, e := az.CredentialEpoch(ctx)
-		if e != nil {
 			return e
 		}
 		windowID, e := newID("raw")

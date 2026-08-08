@@ -74,11 +74,18 @@ func (a *API) OidcStart(ctx context.Context, req apigen.OidcStartRequestObject) 
 }
 
 func oidcStartError(a *API, ctx context.Context, err error) apigen.OidcStartResponseObject {
+	// Every expected start refusal collapses to one uniform 401 body: an
+	// unknown or disabled slug, a bad purpose, and a reauth against a
+	// policy-less provider or with no environment all look identical to an
+	// unauthenticated link/reauth, so a pre-auth prober cannot enumerate
+	// provider config by status (the timing is uniform too — login admission
+	// runs before provider resolution in the service).
 	switch {
-	case errors.Is(err, service.ErrProviderNotFound):
-		return apigen.OidcStart404JSONResponse{NotFoundJSONResponse: apigen.NotFoundJSONResponse(errorBody(apigen.ErrorCodeNotFound, ""))}
-	case errors.Is(err, service.ErrBadPurpose), errors.Is(err, service.ErrReauthNoPolicy):
-		return apigen.OidcStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}
+	case errors.Is(err, service.ErrProviderNotFound),
+		errors.Is(err, service.ErrBadPurpose),
+		errors.Is(err, service.ErrReauthNoPolicy),
+		errors.Is(err, service.ErrReauthNoEnvironment):
+		return apigen.OidcStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}
 	}
 	switch classify(err) {
 	case apigen.ErrorCodeUnauthenticated:
@@ -117,15 +124,20 @@ func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestOb
 	}
 	result, err := a.Auth.OIDCCallback(ctx, string(req.Provider), code, state, iss, idpErr, bindingCookie, bearer(ctx))
 	if err != nil {
+		// Every expected callback refusal is one uniform 401 body: a closed
+		// reauth window, an unknown/expired/wrong-purpose state, and every
+		// oidc_refused cause are indistinguishable on the wire, so a stolen or
+		// observed state cannot be probed for the transaction's purpose or
+		// lifecycle. Only a true fault is 500.
+		if errors.Is(err, service.ErrReauthWindowClosed) {
+			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+		}
 		switch classify(err) {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		case apigen.ErrorCodeTooManyRequests:
 			return apigen.OidcCallback429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
 		default:
-			if errors.Is(err, service.ErrReauthWindowClosed) {
-				return apigen.OidcCallback400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
-			}
 			a.fault(ctx, "oidc callback", err)
 			return apigen.OidcCallback500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 		}

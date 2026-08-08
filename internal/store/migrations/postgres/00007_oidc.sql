@@ -100,10 +100,18 @@ CREATE TABLE oidc_transactions (
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
-    -- The binding discriminator has no default branch: exactly the matching
-    -- column is required.
-    CHECK (binding_kind <> 'session' OR initiating_session_id IS NOT NULL),
-    CHECK (binding_kind <> 'browser-cookie' OR browser_binding_verifier IS NOT NULL),
+    -- The binding discriminator has no default branch and no ambiguous row:
+    -- exactly the matching column is set and the other is NULL. One exhaustive
+    -- CHECK, so a corrupt writer cannot leave both bindings attached at once.
+    CHECK (
+        (binding_kind = 'session'
+            AND initiating_session_id IS NOT NULL
+            AND browser_binding_verifier IS NULL)
+        OR
+        (binding_kind = 'browser-cookie'
+            AND initiating_session_id IS NULL
+            AND browser_binding_verifier IS NOT NULL)
+    ),
     -- link and reauth bind an account; link additionally binds the proof
     -- ceremony; reauth additionally binds the environment its window scopes.
     CHECK (purpose <> 'link' OR (account_id IS NOT NULL AND ceremony_id IS NOT NULL)),

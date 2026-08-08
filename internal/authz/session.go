@@ -86,6 +86,29 @@ func AdequateAssurance(a Assurance) bool {
 	return len(distinct) >= 2
 }
 
+// AssuranceRank orders assurance tiers so a step-up (e.g. an OIDC reauth) can
+// refuse to re-establish a session with weaker evidence than it already holds:
+//
+//	2 — phishing-resistant (a WebAuthn assertion)
+//	1 — multi-factor (two distinct factor classes)
+//	0 — single-factor
+//
+// A reauth may only proceed with evidence of rank >= the session's rank. OIDC
+// evidence is capped at rank 1 by construction (oidcFactors never yields
+// "webauthn"): wenv cannot verify the phishing-resistance of a federated
+// ceremony, so a federated token can never re-authorize a WebAuthn session.
+func AssuranceRank(a Assurance) int {
+	for _, f := range a.Factors {
+		if f == "webauthn" {
+			return 2
+		}
+	}
+	if AdequateAssurance(a) {
+		return 1
+	}
+	return 0
+}
+
 // Authenticate resolves a presented artifact into a live identity inside this
 // transaction.
 //

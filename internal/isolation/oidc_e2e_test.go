@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/oidctest"
@@ -435,3 +436,336 @@ func TestOIDCProviderChangeSweepsSQLite(t *testing.T) {
 func TestOIDCProviderChangeSweepsPostgres(t *testing.T) {
 	runOIDCProviderChangeSweeps(t, seededDB(t, openPostgres))
 }
+
+// --- reauth assurance fixtures (#54 cross-model review R1) ---
+//
+// The reauth path must be at least as strict as completeLogin: a reveal reauth
+// window is opened only for evidence that carries a recognized possession
+// factor, is live (current credential epoch), is recorded against the currently
+// enabled provider, and is not weaker than the session it re-authorizes.
+
+// linkOn links an external identity for the given subject on the given provider
+// slug, using the admin's password as the account-security proof.
+func linkOn(t *testing.T, auth *service.Auth, ctx context.Context, slug, subject, password string) {
+	t.Helper()
+	login, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatalf("login for link: %v", err)
+	}
+	ls, err := auth.OIDCStart(ctx, slug, "link", "", login.SessionToken, password)
+	if err != nil {
+		t.Fatalf("link start: %v", err)
+	}
+	lc, lst := driveIdP(t, ls.AuthURL+"&sub="+subject)
+	if _, err := auth.OIDCCallback(ctx, slug, lc, lst, "", "", "", login.SessionToken); err != nil {
+		t.Fatalf("link callback: %v", err)
+	}
+}
+
+// reauthOn drives a reauth callback for the given subject on the given provider
+// slug with the given acting session, returning the callback error.
+func reauthOn(t *testing.T, auth *service.Auth, ctx context.Context, slug, subject, session string) error {
+	t.Helper()
+	rs, err := auth.OIDCStart(ctx, slug, "reauth", "env_prod", session, "")
+	if err != nil {
+		t.Fatalf("reauth start: %v", err)
+	}
+	rc, rst := driveIdP(t, rs.AuthURL+"&sub="+subject)
+	_, err = auth.OIDCCallback(ctx, slug, rc, rst, "", "", "", session)
+	return err
+}
+
+// runOIDCReauthPossession: a token that satisfies the assurance policy but
+// carries no recognized possession amr (only "pwd") is refused (A5/B5), whether
+// the policy keyed on an amr set or on acr. Policy satisfaction alone must never
+// imply possession.
+func runOIDCReauthPossession(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, password := oidcAdmin(t, db)
+	auth.ReauthWindow = time.Minute
+
+	// (a) amr_sets [["pwd"]] satisfied by amr=["pwd"] — possession absent.
+	_, amrIdP := configureProvider(t, auth, ctx, admin, "pwd-amr", service.ProviderInput{
+		DisplayName: "pwd-amr", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"amr_sets":[["pwd"]]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "pwd-amr", "pwd-user", password)
+	amrIdP.AuthTime = time.Now()
+	amrIdP.AMR = []string{"pwd"}
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := oidcRefusedCount(t, db, "no-possession")
+	if err := reauthOn(t, auth, ctx, "pwd-amr", "pwd-user", relogin.SessionToken); !isUnauth(err) {
+		t.Fatalf("pwd-only amr reauth should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "no-possession") != before+1 {
+		t.Fatalf("pwd-only amr refusal was not audited cause=no-possession")
+	}
+
+	// (b) acr-satisfied policy with amr=["pwd"] — the case evaluateAssurance
+	// alone can never catch, since acr matches with no amr at all.
+	_, acrIdP := configureProvider(t, auth, ctx, admin, "acr-only", service.ProviderInput{
+		DisplayName: "acr-only", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"acr_values":["urn:strong"]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "acr-only", "acr-user", password)
+	acrIdP.AuthTime = time.Now()
+	acrIdP.ACR = "urn:strong"
+	acrIdP.AMR = []string{"pwd"}
+	relogin2, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before = oidcRefusedCount(t, db, "no-possession")
+	if err := reauthOn(t, auth, ctx, "acr-only", "acr-user", relogin2.SessionToken); !isUnauth(err) {
+		t.Fatalf("acr-satisfied pwd-amr reauth should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "no-possession") != before+1 {
+		t.Fatalf("acr-satisfied refusal was not audited cause=no-possession")
+	}
+}
+
+func TestOIDCReauthPossessionSQLite(t *testing.T) {
+	runOIDCReauthPossession(t, seededDB(t, openSQLite))
+}
+func TestOIDCReauthPossessionPostgres(t *testing.T) {
+	runOIDCReauthPossession(t, seededDB(t, openPostgres))
+}
+
+// runOIDCReauthEpochInert: an epoch-inert (restored) identity is terminally
+// refused, never opens a window (B2), matching completeLogin.
+func runOIDCReauthEpochInert(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, password := oidcAdmin(t, db)
+	auth.ReauthWindow = time.Minute
+	_, idp := configureProvider(t, auth, ctx, admin, "strict", service.ProviderInput{
+		DisplayName: "strict", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "strict", "epoch-user", password)
+	// Restore the identity to an earlier epoch WITHOUT bumping the instance
+	// epoch (which would trip the Phase-A epoch check first); this exercises the
+	// reauth-branch epoch check directly.
+	execRaw(t, db, "UPDATE external_identities SET credential_epoch = credential_epoch - 1 WHERE subject = 'epoch-user'")
+	idp.AuthTime = time.Now()
+	idp.AMR = []string{"mfa"}
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := oidcRefusedCount(t, db, "epoch")
+	if err := reauthOn(t, auth, ctx, "strict", "epoch-user", relogin.SessionToken); !isUnauth(err) {
+		t.Fatalf("epoch-inert reauth should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "epoch") != before+1 {
+		t.Fatalf("epoch-inert refusal was not audited cause=epoch")
+	}
+}
+
+func TestOIDCReauthEpochInertSQLite(t *testing.T) {
+	runOIDCReauthEpochInert(t, seededDB(t, openSQLite))
+}
+func TestOIDCReauthEpochInertPostgres(t *testing.T) {
+	runOIDCReauthEpochInert(t, seededDB(t, openPostgres))
+}
+
+// runOIDCReauthProviderRebind: after a provider is replaced for the same
+// byte-exact issuer, an identity recorded against the OLD provider must not
+// authenticate through the replacement (A3, provider_id mismatch).
+func runOIDCReauthProviderRebind(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, password := oidcAdmin(t, db)
+	auth.ReauthWindow = time.Minute
+	idp, err := oidctest.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(idp.Close)
+	providers := &service.Providers{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
+	policy := strptr(`{"amr_sets":[["mfa"]]}`)
+	if _, err := providers.Put(ctx, service.LocalPrincipal(admin), "p1", service.ProviderInput{
+		DisplayName: "p1", Issuer: idp.Issuer(), ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: policy, Enabled: true,
+	}); err != nil {
+		t.Fatalf("put p1: %v", err)
+	}
+	linkOn(t, auth, ctx, "p1", "rebind-user", password)
+	// Delete p1 (identity survives — provider_id is provenance, not an FK; the
+	// tx rows cascade) then recreate the SAME issuer as a new provider p2.
+	if err := providers.Delete(ctx, service.LocalPrincipal(admin), "p1"); err != nil {
+		t.Fatalf("delete p1: %v", err)
+	}
+	if _, err := providers.Put(ctx, service.LocalPrincipal(admin), "p2", service.ProviderInput{
+		DisplayName: "p2", Issuer: idp.Issuer(), ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: policy, Enabled: true,
+	}); err != nil {
+		t.Fatalf("put p2: %v", err)
+	}
+	idp.AuthTime = time.Now()
+	idp.AMR = []string{"mfa"}
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := oidcRefusedCount(t, db, "reconciliation")
+	if err := reauthOn(t, auth, ctx, "p2", "rebind-user", relogin.SessionToken); !isUnauth(err) {
+		t.Fatalf("reauth through a replacement provider should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "reconciliation") != before+1 {
+		t.Fatalf("provider-rebind refusal was not audited cause=reconciliation")
+	}
+}
+
+func TestOIDCReauthProviderRebindSQLite(t *testing.T) {
+	runOIDCReauthProviderRebind(t, seededDB(t, openSQLite))
+}
+func TestOIDCReauthProviderRebindPostgres(t *testing.T) {
+	runOIDCReauthProviderRebind(t, seededDB(t, openPostgres))
+}
+
+// runOIDCReauthDowngrade: a reauth must be same-or-stronger than the session it
+// re-authorizes. A phishing-resistant (WebAuthn) session cannot be
+// re-authorized by federated evidence (capped at multi-factor); a single-factor
+// session can (positive control).
+func runOIDCReauthDowngrade(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, password := oidcAdmin(t, db)
+	auth.ReauthWindow = time.Minute
+	_, idp := configureProvider(t, auth, ctx, admin, "strict", service.ProviderInput{
+		DisplayName: "strict", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "strict", "down-user", password)
+	idp.AuthTime = time.Now()
+	idp.AMR = []string{"mfa"}
+
+	// A rank-2 (WebAuthn) session: OIDC evidence is rank 1, so this is a
+	// downgrade. Forge the factor set directly — the rank comparison is under
+	// test, not the WebAuthn ceremony.
+	strong, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, "UPDATE sessions SET factors = '[\"webauthn\"]' WHERE id = '"+strong.SessionID+"'")
+	before := oidcRefusedCount(t, db, "downgrade")
+	if err := reauthOn(t, auth, ctx, "strict", "down-user", strong.SessionToken); !isUnauth(err) {
+		t.Fatalf("federated reauth of a WebAuthn session should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "downgrade") != before+1 {
+		t.Fatalf("downgrade refusal was not audited cause=downgrade")
+	}
+
+	// Positive control: a single-factor (password) session is re-authorized.
+	weak, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reauthOn(t, auth, ctx, "strict", "down-user", weak.SessionToken); err != nil {
+		t.Fatalf("federated reauth of a single-factor session should succeed: %v", err)
+	}
+}
+
+func TestOIDCReauthDowngradeSQLite(t *testing.T) {
+	runOIDCReauthDowngrade(t, seededDB(t, openSQLite))
+}
+func TestOIDCReauthDowngradePostgres(t *testing.T) {
+	runOIDCReauthDowngrade(t, seededDB(t, openPostgres))
+}
+
+// runOIDCReauthProviderRace: a provider reconfigure that lands during the code
+// exchange (Phase B) must make the Phase-C write refuse — the sweep always wins
+// the race, so a stale policy evaluation cannot open a window (A4/TOCTOU).
+func runOIDCReauthProviderRace(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, password := oidcAdmin(t, db)
+	auth.ReauthWindow = time.Minute
+	providers, idp := configureProvider(t, auth, ctx, admin, "race", service.ProviderInput{
+		DisplayName: "race", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "race", "race-user", password)
+	idp.AuthTime = time.Now()
+	idp.AMR = []string{"mfa"}
+	// The acting session is a LOCAL login (provider_id NULL) so the mid-exchange
+	// sweep does not delete it — the point is the Phase-C revalidation, not the
+	// sweep reaching this session.
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Tighten the provider's policy mid-exchange (bumps row_version, sweeps).
+	fired := false
+	idp.OnToken = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := providers.Put(ctx, service.LocalPrincipal(admin), "race", service.ProviderInput{
+			DisplayName: "race", Issuer: idp.Issuer(), ClientID: "c", ClientSecret: "s", Scopes: "openid",
+			AssurancePolicy: strptr(`{"amr_sets":[["hwk"]]}`), Enabled: true,
+		}); err != nil {
+			t.Errorf("mid-exchange provider Put: %v", err)
+		}
+	}
+	before := oidcRefusedCount(t, db, "reconciliation")
+	if err := reauthOn(t, auth, ctx, "race", "race-user", relogin.SessionToken); !isUnauth(err) {
+		t.Fatalf("reauth racing a provider change should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "reconciliation") != before+1 {
+		t.Fatalf("provider-race refusal was not audited cause=reconciliation")
+	}
+}
+
+func TestOIDCReauthProviderRaceSQLite(t *testing.T) {
+	runOIDCReauthProviderRace(t, seededDB(t, openSQLite))
+}
+func TestOIDCReauthProviderRacePostgres(t *testing.T) {
+	runOIDCReauthProviderRace(t, seededDB(t, openPostgres))
+}
+
+// runOIDCIATRejected: an ID token whose iat is in the future beyond the skew is
+// refused (A validation completeness), audited cause=signature.
+func runOIDCIATRejected(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, _ := oidcAdmin(t, db)
+	_, idp := configureProvider(t, auth, ctx, admin, "idp", service.ProviderInput{
+		DisplayName: "IdP", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		JITPolicy: strptr(`{"claim":"sub","values":["iat-user"]}`), Enabled: true,
+	})
+	// (a) iat far beyond the 2m skew.
+	idp.IAT = time.Now().Add(time.Hour)
+	start, err := auth.OIDCStart(ctx, "idp", "login", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, state := driveIdP(t, start.AuthURL+"&sub=iat-user")
+	before := oidcRefusedCount(t, db, "signature")
+	if _, err := auth.OIDCCallback(ctx, "idp", code, state, "", "", start.BindingCookie, ""); !isUnauth(err) {
+		t.Fatalf("a future-iat token should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "signature") != before+1 {
+		t.Fatalf("future-iat refusal was not audited cause=signature")
+	}
+
+	// (b) iat absent entirely (go-oidc's expiry check passes it through to the
+	// relying party's zero-check).
+	idp.IAT = time.Time{}
+	idp.OmitIAT = true
+	start2, err := auth.OIDCStart(ctx, "idp", "login", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code2, state2 := driveIdP(t, start2.AuthURL+"&sub=iat-user")
+	before = oidcRefusedCount(t, db, "signature")
+	if _, err := auth.OIDCCallback(ctx, "idp", code2, state2, "", "", start2.BindingCookie, ""); !isUnauth(err) {
+		t.Fatalf("a missing-iat token should refuse: %v", err)
+	}
+	if oidcRefusedCount(t, db, "signature") != before+1 {
+		t.Fatalf("missing-iat refusal was not audited cause=signature")
+	}
+}
+
+func TestOIDCIATRejectedSQLite(t *testing.T)   { runOIDCIATRejected(t, seededDB(t, openSQLite)) }
+func TestOIDCIATRejectedPostgres(t *testing.T) { runOIDCIATRejected(t, seededDB(t, openPostgres)) }
