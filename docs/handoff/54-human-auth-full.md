@@ -72,12 +72,27 @@ chokepoint now refuses MFA-mandatory ops from inadequate session-backed
 callers); six wire endpoints + regen + classify; CLI factor verbs with rotated
 tokens persisted; demo E2E enrols + steps up before `org create`;
 `factors_e2e_test.go` carries the A1 fixtures. Full suite green on sqlite,
-built by an Opus 5 subagent, reviewed on the main thread. Blocking Codex
-cross-model pass in progress (round cap 3). Three main-thread findings to fold:
-(1) MEDIUM — step-up/confirm TOTP verification has no per-account backoff
-(authenticated online brute-force of the 6-digit code); (2) LOW — recovery
-mints an authority without an `auth.credential_authority_minted` event; (3)
-LOW — recovery success does extra write work vs failure (residual timing).
+built by an Opus 5 subagent, reviewed on the main thread.
+
+**Blocking Codex cross-model pass: COMPLETE, verdict CLEAN (R3 of the 3-round
+cap).** R1 returned 5 HIGH / 2 MEDIUM / 1 LOW; the substantive HIGHs were real
+and are fixed: (a) every TOTP-code and Argon2-password ceremony now rides the
+admission budget with per-account backoff keyed on the canonical account id +
+the throttle-crossing event (closed an authenticated online brute-force of the
+6-digit code and an unthrottled Argon2 oracle/DoS from a stolen session); (b)
+confirm/remove/recovery-gen re-authenticate the presented token inside the
+write tx (a revoked session can no longer win the phase gap and reissue
+itself); (c) the CAS consumes the row whose seed was verified in phase 1, not a
+re-read row, and the pending-enrolment expiry is re-checked inside the write tx
+(future-stamped rows refused). R1 MEDIUM/LOW also fixed: recovery negative-path
+timing equalised via a cached dummy envelope open, the missing
+`auth.credential_authority_minted` event emitted on the recovery mint
+(delivery=response) and declared in wireEvents, and all decrypted recovery
+plaintext / verifier buffers zeroed. R2 verified the HIGHs held and caught five
+completeness gaps (throttle-event audit declaration, write-tx expiry recheck,
+unreadable-path timing, residual zeroing); all folded. R3 confirmed every item
+CLOSED with no new regression → CLEAN. Commits: `e97a461` (vertical), `e877a1a`
+(R1 fixes), `825730b` (R2 fixes). Review artifacts in `.xreview/54-factors-r*`.
 
 **Then the later verticals:** OIDC (migration + `internal/oidcrp` + provider
 admin + mix-up fixtures), WebAuthn (migration + `internal/webauthnrp` +
