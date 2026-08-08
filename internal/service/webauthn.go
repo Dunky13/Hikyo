@@ -717,16 +717,19 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 		if hardCap <= 0 {
 			hardCap = effWin
 		}
+		hardExpires := now.Add(hardCap)
+		// A sliding window must never exceed the hard cap, even on open — clamp it
+		// exactly as the TOTP/OIDC openers do (A2). A single-decision 0-window still
+		// needs a bounded life; the flag, not the clock, limits it to one decision
+		// (#7 consumes it), so it too lives to the hard cap.
 		windowExpires := now.Add(effWin)
-		if single {
-			// A single-decision 0-window still needs a bounded life; the flag,
-			// not the clock, is what limits it to one decision (#7 consumes it).
-			windowExpires = now.Add(hardCap)
+		if single || windowExpires.After(hardExpires) {
+			windowExpires = hardExpires
 		}
 		if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
 			ID: windowID, SessionID: ceremony.SessionID, EnvironmentID: ceremony.EnvironmentID,
 			CeremonyID: ceremony.ID, FactorClass: "webauthn", SingleDecision: single,
-			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: now.Add(hardCap),
+			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
 			CredentialEpoch: epoch, CreatedAt: now,
 		}); err != nil {
 			return err

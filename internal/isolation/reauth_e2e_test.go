@@ -188,6 +188,117 @@ func runReauthConsumeSlidingHardCap(t *testing.T, db *store.DB) {
 	}
 }
 
+func TestReauthWebAuthnOpenClampsHardCapSQLite(t *testing.T) {
+	runReauthWebAuthnOpenClampsHardCap(t, seededDB(t, openSQLite))
+}
+func TestReauthWebAuthnOpenClampsHardCapPostgres(t *testing.T) {
+	runReauthWebAuthnOpenClampsHardCap(t, seededDB(t, openPostgres))
+}
+
+// runReauthWebAuthnOpenClampsHardCap (A2 residual): the WebAuthn opener clamps
+// window_expires_at to hard_expires_at on OPEN, exactly as the TOTP/OIDC openers
+// do — a sliding window must never exceed the hard cap even at the moment it
+// opens. The effective window (30m) exceeds the hard cap (10m), so the clamp is
+// load-bearing: without it the row would open to +30m, past its +10m cap.
+func runReauthWebAuthnOpenClampsHardCap(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	auth.ReauthWindow = 30 * time.Minute
+	auth.ReauthHardCap = 10 * time.Minute
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
+	token = stepUpPasskey(t, auth, ctx, token, dev)
+
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	if err != nil {
+		t.Fatalf("reauth start: %v", err)
+	}
+	rresp, err := dev.Assert(ropts)
+	if err != nil {
+		t.Fatalf("device assert: %v", err)
+	}
+	reauth, err := auth.ReauthPasskeyFinish(ctx, token, rresp)
+	if err != nil {
+		t.Fatalf("reauth finish: %v", err)
+	}
+	if reauth.SingleDecision {
+		t.Fatal("a 30m effective window must open a sliding window, not single-decision")
+	}
+	// No row exceeds its hard cap, and this window sits exactly at it: the opener
+	// clamped the 30m idle window down to the 10m cap. Column-vs-column comparison
+	// is dialect-neutral (no timestamp text parsing).
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE environment_id = 'env_prod' AND window_expires_at > hard_expires_at"); n != 0 {
+		t.Errorf("%d reauth window(s) have window_expires_at past hard_expires_at — the open clamp failed", n)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE environment_id = 'env_prod' AND window_expires_at = hard_expires_at"); n != 1 {
+		t.Error("the WebAuthn window was not clamped to the hard cap on open")
+	}
+}
+
+func TestReauthSlideUsesEffectiveWindowSQLite(t *testing.T) {
+	runReauthSlideUsesEffectiveWindow(t, seededDB(t, openSQLite))
+}
+func TestReauthSlideUsesEffectiveWindowPostgres(t *testing.T) {
+	runReauthSlideUsesEffectiveWindow(t, seededDB(t, openPostgres))
+}
+
+// runReauthSlideUsesEffectiveWindow (NEW HIGH): the slide amount is resolved
+// through effectiveReauthWindow — the SAME seam the openers use — never the
+// global s.ReauthWindow. Lowering the effective window (as #55 will) both makes
+// a sliding window non-extendable at effective-0 (fail closed) and, above 0,
+// bounds the slide to the lowered value rather than the value the window opened
+// with. The seam is thus the single source shared by open and consume.
+func runReauthSlideUsesEffectiveWindow(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	base := time.Now().UTC().Truncate(time.Second)
+	clk := base
+	auth.Now = func() time.Time { return clk }
+	auth.ReauthWindow = 5 * time.Minute
+	auth.ReauthHardCap = 30 * time.Minute
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
+	token = stepUpPasskey(t, auth, ctx, token, dev)
+
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	if err != nil {
+		t.Fatalf("reauth start: %v", err)
+	}
+	rresp, err := dev.Assert(ropts)
+	if err != nil {
+		t.Fatalf("device assert: %v", err)
+	}
+	if _, err := auth.ReauthPasskeyFinish(ctx, token, rresp); err != nil {
+		t.Fatalf("reauth finish: %v", err)
+	}
+	sessionID := queryString(t, db, "SELECT session_id FROM reauth_windows WHERE environment_id = 'env_prod'")
+
+	// #55 lowers env_prod's effective window to 0. The consume path reads the same
+	// seam the opener did: a live sliding window (opened to base+5m) is now NOT
+	// extendable — the only valid 0-window is a single_decision WebAuthn one, which
+	// is consumed not slid — so a disclosure at +1m fails closed WITHOUT sliding.
+	auth.ReauthWindow = 0
+	if err := consumeWindow(t, auth, db, sessionID, "env_prod", nil, base.Add(1*time.Minute)); !errors.Is(err, service.ErrReauthWindowExpired) {
+		t.Fatalf("consume a sliding window at effective-0: %v, want ErrReauthWindowExpired (non-extendable, fail closed)", err)
+	}
+
+	// #55 now sets a lower non-zero effective window (2m). The window was NOT slid
+	// above, so it still sits at base+5m. A disclosure at +4m slides by the 2m
+	// effective value -> base+6m, NOT the 5m the window opened with (which would be
+	// base+9m).
+	auth.ReauthWindow = 2 * time.Minute
+	if err := consumeWindow(t, auth, db, sessionID, "env_prod", nil, base.Add(4*time.Minute)); err != nil {
+		t.Fatalf("consume at +4m under a 2m effective window: %v", err)
+	}
+	// +6m30s is past the base+6m the 2m slide produced: fail closed. Had the slide
+	// used the 5m the window opened with it would sit at base+9m and this would
+	// wrongly succeed — so this failure proves the slide read effectiveReauthWindow
+	// at consume time, not the opener's s.ReauthWindow.
+	if err := consumeWindow(t, auth, db, sessionID, "env_prod", nil, base.Add(6*time.Minute+30*time.Second)); !errors.Is(err, service.ErrReauthWindowExpired) {
+		t.Fatalf("consume at +6m30s: %v, want ErrReauthWindowExpired (slide bounded by the 2m effective window)", err)
+	}
+}
+
 func TestReauthConsumeInvalidationFailsClosedSQLite(t *testing.T) {
 	runReauthConsumeInvalidationFailsClosed(t, seededDB(t, openSQLite))
 }

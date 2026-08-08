@@ -91,16 +91,29 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		}
 		return nil
 	}
-	// Sliding window: refresh the idle clock, capped at the hard cap. A losing
-	// CAS — the slide matches 0 rows because a concurrent LowerEffectiveWindow
-	// invalidation or a single-decision claim deleted/consumed the window between
-	// the liveness read above and this update — means the window this disclosure
-	// read is no longer live, so the disclosure fails closed rather than proceeding
-	// against an invalidated window (A1).
-	windowExpires := now.Add(s.ReauthWindow)
+	// Sliding window: refresh the idle clock by the environment's EFFECTIVE window,
+	// resolved through the same seam the openers use — never the global
+	// s.ReauthWindow (A2). Once #55 lowers an environment, the slide cannot extend
+	// the window past that environment's effective idle policy. At effective-0 a
+	// sliding window is not extendable at all: the only valid 0-window is a
+	// single_decision WebAuthn one, which is consumed above, not slid — so fail
+	// closed rather than sliding it into the future.
+	effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
+	if err != nil {
+		return err
+	}
+	if effWin <= 0 {
+		return ErrReauthWindowExpired
+	}
+	windowExpires := now.Add(effWin)
 	if windowExpires.After(w.HardExpiresAt) {
 		windowExpires = w.HardExpiresAt
 	}
+	// A losing CAS — the slide matches 0 rows because a concurrent
+	// LowerEffectiveWindow invalidation or a single-decision claim deleted/consumed
+	// the window between the liveness read above and this update — means the window
+	// this disclosure read is no longer live, so the disclosure fails closed rather
+	// than proceeding against an invalidated window (A1).
 	slid, err := az.SlideReauthWindow(ctx, w.ID, windowExpires)
 	if err != nil {
 		return err
