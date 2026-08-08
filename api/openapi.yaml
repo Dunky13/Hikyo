@@ -232,6 +232,228 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/totp/enrol/start:
+    post:
+      operationId: enrolTotpStart
+      tags: [auth]
+      summary: Begin TOTP enrolment; returns the otpauth URI once.
+      description: |
+        An account-security proof up front (the pre-existing password, since no
+        possession factor stands yet — human-auth ADR § Account-security
+        mutations). Stages a sealed seed as a pending, inert enrolment and
+        returns the `otpauth://` URI exactly once. It confirms nothing and
+        mutates no session: `enrol/confirm` completes the enrolment. A confirmed
+        factor already standing is refused (`400`).
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpEnrolStartRequest"
+      responses:
+        "200":
+          description: The provisioning URI, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrolStartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp/enrol/confirm:
+    post:
+      operationId: enrolTotpConfirm
+      tags: [auth]
+      summary: Confirm TOTP enrolment with a code; reissues the session.
+      description: |
+        Consumes a valid code against the pending seed (single-use) and
+        completes the enrolment as an account-security mutation: the generation
+        advances, every session is deleted, and the acting session is reissued
+        carrying ONLY the proof class — NOT `totp`. The user steps up separately
+        to present the factor they just enrolled. The reissued token is returned
+        and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: Enrolment confirmed. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp/step-up:
+    post:
+      operationId: stepUpTotp
+      tags: [auth]
+      summary: Elevate the acting session by presenting a TOTP code.
+      description: |
+        A valid code consumes its step (single-use) and appends `totp` to the
+        acting session's factor set, rotating its token — not an
+        account-security mutation, so no generation advance and no session
+        deletion, and the original authenticated_at is preserved (human-auth ADR
+        § Assurance). The rotated token is returned and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: Session elevated. The rotated token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp:
+    delete:
+      operationId: removeTotp
+      tags: [auth]
+      summary: Remove the confirmed TOTP factor.
+      description: |
+        An account-security mutation authorized by the password: the factor
+        being removed is excluded from the proof set, so a stolen phone alone
+        cannot drop the very factor it is (human-auth ADR § Account-security
+        mutations, finding B7). Reissues the acting session carrying only the
+        password class; the reissued token is returned.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpProofRequest"
+      responses:
+        "200":
+          description: Factor removed. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/recovery-codes/regenerate:
+    post:
+      operationId: regenerateRecoveryCodes
+      tags: [auth]
+      summary: Replace the recovery-code batch; returns the codes once.
+      description: |
+        An account-security mutation proved by the confirmed TOTP code where one
+        stands, else the password (recovery codes never authorize their own
+        regeneration). Replaces the batch atomically and returns the plaintext
+        codes exactly once. Reissues the acting session; the reissued token is
+        returned and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoveryProofRequest"
+      responses:
+        "200":
+          description: New batch. The codes are displayed once and never again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/recovery/begin:
+    post:
+      operationId: beginRecovery
+      tags: [auth]
+      summary: Consume a recovery code for a credential-establishment authority.
+      description: |
+        The pre-auth break-in-glass path. Consumes a single-use recovery code
+        and mints a credential-establishment authority that may only ever
+        establish a password (human-auth ADR § Recovery). It creates **no
+        session, no assurance, no reauthentication window** — the holder
+        establishes a new password with the authority and then logs in.
+
+        Rides the instance-wide admission budget; an unknown username, an absent
+        batch, a stale epoch and a non-matching code all answer the same `401`.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoveryBeginRequest"
+      responses:
+        "200":
+          description: A session-less credential-establishment authority, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryBeginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs:
     get:
       operationId: listOrgs
@@ -332,6 +554,703 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/methods:
+    get:
+      operationId: authMethods
+      tags: [auth]
+      summary: Enabled login methods for this instance.
+      description: |
+        Public discovery: the enabled OIDC provider slugs and display names, and
+        whether local login is enabled. Instance-level, never per-account, so it
+        discloses nothing about which accounts or factors exist. Under the
+        discovery admission bucket.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The enabled login methods.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMethods"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/{provider}/start:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    post:
+      operationId: oidcStart
+      tags: [auth]
+      summary: Begin an OIDC transaction (login, link or reauth).
+      description: |
+        Creates a single-use server-side transaction (PKCE S256 always) and
+        returns the IdP authorization URL. `login` is anonymous and bound by a
+        `__Host-` browser-binding cookie set on this response (A2/A16); `link`
+        and `reauth` require an authenticated session and are session-bound, and
+        `link` verifies the account-security proof up front (A6).
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OidcStartRequest"
+      responses:
+        "200":
+          description: The IdP authorization URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcStartResult"
+        # Every expected start refusal (unknown or disabled slug, bad purpose,
+        # policy-less or environment-less reauth, unauthenticated link/reauth,
+        # and a missing body) collapses to one uniform 401 so a pre-auth prober
+        # cannot enumerate provider config. 429/500 are the cross-cutting
+        # admission and fault responses.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/{provider}/callback:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    get:
+      operationId: oidcCallback
+      tags: [auth]
+      summary: Complete an OIDC transaction from the IdP redirect.
+      description: |
+        Per-provider distinct callback path (mix-up defence leg 1): the path
+        provider must equal the transaction's provider, refused BEFORE any token
+        is fetched (A1). The transaction is consumed single-use, the code is
+        exchanged only at the recorded provider, the ID token validated
+        completely, and the purpose wall is structural. Returns the minted or
+        rotated session.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string, maxLength: 4096 }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, maxLength: 512 }
+        - name: iss
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2048 }
+        - name: error
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: The minted or rotated session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities:
+    get:
+      operationId: listIdentities
+      tags: [auth]
+      summary: List the caller's linked external identities.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The caller's linked identities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities/link:
+    post:
+      operationId: linkIdentity
+      tags: [auth]
+      summary: Begin linking an external identity (OIDC purpose=link).
+      description: |
+        An account-security mutation: verifies the pre-existing password up
+        front and starts an OIDC link transaction bound to the acting session.
+        Returns the IdP authorization URL; the link lands at the callback.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityLinkRequest"
+      responses:
+        "200":
+          description: The IdP authorization URL for the link.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcStartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdentityID"
+    delete:
+      operationId: unlinkIdentity
+      tags: [auth]
+      summary: Unlink an external identity.
+      description: |
+        An account-security mutation proved by the pre-existing password. Refuses
+        removing the last remaining credential; deletes the identity's sessions;
+        reissues the acting session. The reissued token replaces the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityUnlinkRequest"
+      responses:
+        "200":
+          description: Unlinked. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/accounts/{principal}/credential-reset:
+    parameters:
+      - $ref: "#/components/parameters/ResetTargetPrincipal"
+    post:
+      operationId: resetCredential
+      tags: [accounts]
+      summary: Issue a credential-establishment authority for another account.
+      description: |
+        Administrator-issued credential reset (human-auth ADR § Recovery). A
+        credential-reset holder mints a single-use, hashed, expiring
+        credential-establishment authority for a target, returned once and
+        transmitted out of band. The reset advances the target's session
+        generation and revokes its sessions in the same transaction.
+
+        Org-scoped credential-reset reaches only a target whose grants lie
+        entirely within that org and who holds no instance capability; the
+        org-bounded test is evaluated in one serializable transaction with the
+        target's grant set (a concurrent grant landing conflicts with the
+        in-flight reset). A target holding an instance capability has no network
+        reset path at all — break-glass only. This route dispatches between the
+        org-scoped and instance-scoped credential-reset operations by that
+        classification. Every failure that could enumerate the
+        target — an unknown or non-human principal, a caller lacking
+        credential-reset, an org-P holder reaching an org-O target, and a target
+        holding an instance capability (break-glass only) — answers a single
+        uniform `401`; the true cause is durable in the audit trail, never on the
+        wire.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: A session-less credential-establishment authority, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialResetResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/enrol/start:
+    post:
+      operationId: enrolPasskeyStart
+      tags: [auth]
+      summary: Begin passkey enrolment; returns opaque creation options.
+      description: |
+        Verifies the account-security proof up front (the pre-existing password
+        or a confirmed TOTP code, where one stands) and opens a registration
+        ceremony, returning the browser-generated creation options verbatim.
+        `enrol/finish` completes the enrolment.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnEnrolStartRequest"
+      responses:
+        "200":
+          description: Opaque WebAuthn creation options for the browser.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebauthnOptions"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/enrol/finish:
+    post:
+      operationId: enrolPasskeyFinish
+      tags: [auth]
+      summary: Complete passkey enrolment from the attestation response.
+      description: |
+        Validates the opaque attestation response against the live ceremony,
+        stores the credential, and reissues the acting session. A browser
+        session's reissued token is delivered on the `__Host-wenv` cookie.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnResponse"
+      responses:
+        "200":
+          description: Enrolled. The reissued session replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/login/start:
+    post:
+      operationId: passkeyLoginStart
+      tags: [auth]
+      summary: Begin a discoverable-credential passkey login.
+      description: |
+        Fully pre-auth: opens a discoverable-credential request ceremony and
+        returns the opaque request options. Discloses nothing about which
+        accounts or credentials exist.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: Opaque WebAuthn request options for the browser.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebauthnOptions"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/login/finish:
+    post:
+      operationId: passkeyLoginFinish
+      tags: [auth]
+      summary: Complete a passkey login from the assertion response.
+      description: |
+        Validates the opaque assertion against the live ceremony and mints a
+        browser session carrying WebAuthn assurance, delivered on the
+        `__Host-wenv` cookie. A signature-count regression disables the cloned
+        credential (audited) and refuses.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnResponse"
+      responses:
+        "200":
+          description: The minted browser session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/step-up/start:
+    post:
+      operationId: stepUpPasskeyStart
+      tags: [auth]
+      summary: Begin a passkey step-up for the acting session.
+      description: |
+        Opens a non-discoverable ceremony scoped to the acting account's
+        credentials and returns opaque request options. `step-up/finish`
+        elevates the session.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: Opaque WebAuthn request options for the browser.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebauthnOptions"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/step-up/finish:
+    post:
+      operationId: stepUpPasskeyFinish
+      tags: [auth]
+      summary: Elevate the acting session by presenting a passkey.
+      description: |
+        Validates the opaque assertion and appends `webauthn` to the acting
+        session's factor set, rotating its token (delivered on the `__Host-wenv`
+        cookie for a browser session). The original authenticated_at is
+        preserved.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnResponse"
+      responses:
+        "200":
+          description: Session elevated. The rotated token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/reauth/start:
+    post:
+      operationId: reauthPasskeyStart
+      tags: [auth]
+      summary: Begin a passkey reauthentication bound to an operation unit.
+      description: |
+        Opens a ceremony whose challenge is bound to the enumerated unit
+        (environment plus the sorted credential ids), so the assertion
+        authorizes exactly that unit. `reauth/finish` opens the window.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnReauthStartRequest"
+      responses:
+        "200":
+          description: Opaque WebAuthn request options for the browser.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebauthnOptions"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/reauth/finish:
+    post:
+      operationId: reauthPasskeyFinish
+      tags: [auth]
+      summary: Complete a passkey reauthentication; opens the window.
+      description: |
+        Validates the opaque assertion and opens a reauthentication window over
+        the bound environment (single-decision where the effective window is
+        zero). The reauth rotates the acting session; a browser session's
+        rotated token is delivered on the `__Host-wenv` cookie.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnResponse"
+      responses:
+        "200":
+          description: The window this reauthentication opened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebauthnReauthResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/credentials:
+    get:
+      operationId: listPasskeys
+      tags: [auth]
+      summary: List the caller's enrolled passkeys.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The caller's enrolled credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasskeyList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/webauthn/credentials/{id}:
+    parameters:
+      - $ref: "#/components/parameters/WebauthnCredentialID"
+    delete:
+      operationId: removePasskey
+      tags: [auth]
+      summary: Remove an enrolled passkey.
+      description: |
+        An account-security mutation proved by the pre-existing password or a
+        TOTP code (never the credential being removed, B7). Refuses a removal
+        that would drop a passwordless account below the passkey-only floor;
+        reissues the acting session. A browser session's reissued token is
+        delivered on the `__Host-wenv` cookie.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebauthnCredentialProofRequest"
+      responses:
+        "200":
+          description: Removed. The reissued session replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/oidc-providers:
+    get:
+      operationId: listOidcProviders
+      tags: [instance]
+      summary: List configured OIDC providers.
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.list
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The configured providers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/oidc-providers/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlugPath"
+    get:
+      operationId: getOidcProvider
+      tags: [instance]
+      summary: Read one OIDC provider.
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.get
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProvider"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: putOidcProvider
+      tags: [instance]
+      summary: Create or reconfigure an OIDC provider.
+      description: |
+        The issuer is immutable after create (A3): a changed issuer is refused.
+        Discovery is re-run and the document's issuer must byte-equal the
+        configured one. A reconfigure sweeps every session authenticated through
+        the provider (A4).
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.put
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OidcProviderInput"
+      responses:
+        "200":
+          description: The created or reconfigured provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProvider"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteOidcProvider
+      tags: [instance]
+      summary: Delete an OIDC provider.
+      description: |
+        Sweeps every session authenticated through the provider (A4); its live
+        transactions cascade (A14).
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.delete
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     wenvSession:
@@ -349,6 +1268,47 @@ components:
       in: path
       required: true
       description: Organisation identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ProviderSlug:
+      name: provider
+      in: path
+      required: true
+      description: OIDC provider slug.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+    ProviderSlugPath:
+      name: slug
+      in: path
+      required: true
+      description: OIDC provider slug.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+    IdentityID:
+      name: id
+      in: path
+      required: true
+      description: External identity identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    WebauthnCredentialID:
+      name: id
+      in: path
+      required: true
+      description: Enrolled passkey credential identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ResetTargetPrincipal:
+      name: principal
+      in: path
+      required: true
+      description: The target principal whose credential is being reset.
       schema:
         $ref: "#/components/schemas/ID"
 
@@ -534,7 +1494,7 @@ components:
 
     LoginResult:
       type: object
-      required: [session_token, session, principal]
+      required: [session, principal]
       properties:
         session_token:
           type: string
@@ -542,7 +1502,10 @@ components:
             The bearer value, returned exactly once. A replayable credential:
             cookie attributes constrain browsers, not an attacker holding the
             value, which is why lifetimes are short and revocation is a
-            delete.
+            delete. OMITTED for a browser-artifact session: that token is
+            delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+            same-origin script cannot read it. A CLI-artifact session, which has
+            no cookie channel, still carries it here.
         session:
           $ref: "#/components/schemas/Session"
         principal:
@@ -556,6 +1519,118 @@ components:
           $ref: "#/components/schemas/Session"
         principal:
           $ref: "#/components/schemas/Principal"
+
+    TotpEnrolStartRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: |
+            The account-security proof: the pre-existing password. Verified
+            before a pending seed is staged; never logged, never echoed.
+          minLength: 1
+          maxLength: 1024
+
+    TotpEnrolStartResult:
+      type: object
+      additionalProperties: false
+      required: [otpauth_uri]
+      properties:
+        otpauth_uri:
+          type: string
+          description: |
+            The `otpauth://totp/...` provisioning URI, returned exactly once.
+            The seed is never re-retrievable.
+
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: A TOTP code from the enrolled authenticator.
+          minLength: 6
+          maxLength: 10
+
+    TotpProofRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: The account-security proof for removing the factor.
+          minLength: 1
+          maxLength: 1024
+
+    RecoveryProofRequest:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof:
+          type: string
+          description: |
+            The account-security proof: the confirmed TOTP code where one
+            stands, else the password.
+          minLength: 1
+          maxLength: 1024
+
+    RecoveryCodesResult:
+      type: object
+      required: [recovery_codes, login]
+      properties:
+        recovery_codes:
+          type: array
+          description: The plaintext single-use codes, displayed once and never again.
+          items:
+            type: string
+        login:
+          $ref: "#/components/schemas/LoginResult"
+
+    RecoveryBeginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, code]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        code:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    RecoveryBeginResult:
+      type: object
+      additionalProperties: false
+      required: [authority, expires_at]
+      properties:
+        authority:
+          type: string
+          description: |
+            The single-use credential-establishment authority, returned once.
+            It creates no session: establish a password with it, then log in.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    CredentialResetResult:
+      type: object
+      additionalProperties: false
+      required: [authority, expires_at]
+      properties:
+        authority:
+          type: string
+          description: |
+            The single-use credential-establishment authority for the target,
+            returned once. It creates no session and may only ever establish a
+            password; hand it to the target out of band.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
 
     Session:
       type: object
@@ -688,6 +1763,275 @@ components:
           type: integer
           minimum: 0
           description: Total rows matching, which for an unpaged list equals `items` length.
+
+    AuthMethods:
+      type: object
+      additionalProperties: false
+      required: [providers, local_login_enabled]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthMethodProvider"
+        local_login_enabled:
+          type: boolean
+
+    AuthMethodProvider:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name]
+      properties:
+        slug:
+          type: string
+        display_name:
+          type: string
+
+    OidcStartRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          enum: [login, link, reauth]
+        environment_id:
+          type: string
+          maxLength: 64
+          description: Required for reauth; the window scope.
+        proof:
+          type: string
+          maxLength: 1024
+          description: Required for link; the pre-existing password.
+
+    OidcStartResult:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url:
+          type: string
+          description: The IdP authorization URL to redirect the browser to.
+
+    IdentityLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [provider, proof]
+      properties:
+        provider:
+          type: string
+          maxLength: 64
+        proof:
+          type: string
+          maxLength: 1024
+
+    IdentityUnlinkRequest:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof:
+          type: string
+          maxLength: 1024
+
+    ExternalIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, issuer, subject, provider_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        issuer:
+          type: string
+        subject:
+          type: string
+        provider_id:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    IdentityList:
+      type: object
+      additionalProperties: false
+      required: [identities]
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalIdentity"
+
+    OidcProviderInput:
+      type: object
+      additionalProperties: false
+      required: [display_name, issuer, client_id, client_secret, scopes, enabled]
+      properties:
+        display_name:
+          type: string
+          maxLength: 256
+        issuer:
+          type: string
+          maxLength: 2048
+          description: Byte-exact, immutable after create (A3).
+        client_id:
+          type: string
+          maxLength: 1024
+        client_secret:
+          type: string
+          maxLength: 4096
+          description: Envelope-encrypted at rest; never returned.
+        scopes:
+          type: string
+          maxLength: 1024
+        jit_policy:
+          type: [string, "null"]
+          maxLength: 4096
+          description: JSON `{claim, values[]}`; absent means no JIT.
+        assurance_policy:
+          type: [string, "null"]
+          maxLength: 4096
+          description: JSON `{acr_values[], amr_sets[][]}`; absent means single-factor.
+        enabled:
+          type: boolean
+
+    OidcProvider:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name, issuer, client_id, scopes, redirect_uri, enabled]
+      properties:
+        slug:
+          type: string
+        display_name:
+          type: string
+        issuer:
+          type: string
+        client_id:
+          type: string
+        scopes:
+          type: string
+        redirect_uri:
+          type: string
+        jit_policy:
+          type: [string, "null"]
+        assurance_policy:
+          type: [string, "null"]
+        enabled:
+          type: boolean
+
+    OidcProviderList:
+      type: object
+      additionalProperties: false
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/OidcProvider"
+
+    WebauthnOptions:
+      type: object
+      additionalProperties: true
+      description: |
+        Opaque WebAuthn ceremony options (creation or request), generated by
+        the relying party and handed to the browser `navigator.credentials`
+        API verbatim. The server treats the blob as raw bytes; the base64url
+        fields the authenticator signs over are preserved by round-tripping.
+
+    WebauthnResponse:
+      type: object
+      additionalProperties: true
+      description: |
+        Opaque WebAuthn authenticator response (attestation or assertion) as
+        produced by the browser, passed to the relying party as raw bytes.
+
+    WebauthnEnrolStartRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        The account-security proof, where the account has one to give. Both
+        members are optional so a passwordless, factorless account can open a
+        ceremony; the service enforces which proof it requires.
+      properties:
+        password:
+          type: string
+          maxLength: 1024
+          description: The pre-existing password proof.
+        code:
+          type: string
+          maxLength: 16
+          description: A confirmed TOTP code proof.
+
+    WebauthnReauthStartRequest:
+      type: object
+      additionalProperties: false
+      required: [environment_id, key_ids]
+      properties:
+        environment_id:
+          type: string
+          maxLength: 64
+        key_ids:
+          type: array
+          description: The credential ids the reauthentication is bound to.
+          items:
+            type: string
+            maxLength: 256
+
+    WebauthnCredentialProofRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        The account-security proof for removing a credential — the pre-existing
+        password or a TOTP code, never the credential being removed (B7). Both
+        optional; the service selects and enforces the required proof.
+      properties:
+        password:
+          type: string
+          maxLength: 1024
+        code:
+          type: string
+          maxLength: 16
+
+    WebauthnReauthResult:
+      type: object
+      additionalProperties: false
+      required: [session_id, environment_id, single_decision, window_expires]
+      properties:
+        session_id:
+          $ref: "#/components/schemas/ID"
+        environment_id:
+          type: string
+        single_decision:
+          type: boolean
+          description: True where the effective window is zero — the window authorizes exactly one decision.
+        window_expires:
+          $ref: "#/components/schemas/Timestamp"
+
+    PasskeyList:
+      type: object
+      additionalProperties: false
+      required: [passkeys]
+      properties:
+        passkeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/Passkey"
+
+    Passkey:
+      type: object
+      additionalProperties: false
+      required: [id, label, discoverable, disabled, created_at, last_used_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        label:
+          type: string
+        discoverable:
+          type: boolean
+        disabled:
+          type: boolean
+          description: True for a credential disabled after a signature-count clone was detected.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        last_used_at:
+          $ref: "#/components/schemas/Timestamp"
 
 security:
   - wenvSession: []

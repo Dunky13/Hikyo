@@ -367,6 +367,47 @@ func TestDenialWriterIsSoleWriter(t *testing.T) {
 	}
 }
 
+func TestGrantLockRepo(t *testing.T) {
+	pkgs, err := LoadRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range CheckGrantLock(pkgs, repoRoot(t)) {
+		t.Error(f)
+	}
+}
+
+func TestGrantLockCatchesLocklessWriter(t *testing.T) {
+	pkgs, err := Load("./testdata/badgrant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface := Module + "/internal/lint/testdata/badgrant"
+	writers, err := GrantWriters(repoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !writers["InsertGrant"] {
+		t.Fatal("GrantWriters omits InsertGrant — the analyzer would not enforce the grant surface")
+	}
+	findings := CheckGrantLockIn(pkgs, surface, writers, lockName)
+	assertFindings(t, findings, []string{
+		"LocklessWriter writes a grant table but does not take the LockPrincipalRow principal-row lock",
+		// The decoy proves the lock match is type-resolved, not name-only: a
+		// same-named LockPrincipalRow on an unrelated type does not satisfy it.
+		"DecoyLockWriter writes a grant table but does not take the LockPrincipalRow principal-row lock",
+	})
+	for _, f := range findings {
+		if strings.Contains(f, "LockedWriter") || strings.Contains(f, "GrantReadIsFine") {
+			t.Errorf("analyzer flagged a locked writer or a read: %s", f)
+		}
+	}
+	// Scoping: the same package is silent when it is not the named surface.
+	if f := CheckGrantLockIn(pkgs, Module+"/internal/store/authn", writers, lockName); len(f) != 0 {
+		t.Errorf("analyzer fired outside the named surface: %v", f)
+	}
+}
+
 func TestDenialWriterCatchesSecondWriter(t *testing.T) {
 	pkgs, err := Load("./testdata/badauthn")
 	if err != nil {

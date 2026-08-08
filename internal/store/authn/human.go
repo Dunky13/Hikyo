@@ -113,6 +113,13 @@ type NewSession struct {
 	AbsoluteExpiresAt time.Time
 	SourceIP          string
 	UserAgent         string
+	// ProviderID is the federated-session sweep key (A4): the OIDC provider a
+	// session authenticated through, empty for local sessions.
+	ProviderID string
+	// CSRFVerifier is the fast-hash verifier of a browser session's synchronizer
+	// token (A9), nil for CLI sessions (a cookie's attributes protect nothing on
+	// a non-browser client).
+	CSRFVerifier []byte
 }
 
 // CredentialAuthority is a resolved credential-establishment authority.
@@ -159,13 +166,13 @@ func (r *Resolver) AccountByUsername(ctx context.Context, username string) (Acco
 		if err != nil {
 			return Account{}, notFoundOr(err)
 		}
-		return sqliteAccount(row)
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
 	}
 	row, err := r.pg.GetAccountByUsername(ctx, username)
 	if err != nil {
 		return Account{}, notFoundOr(err)
 	}
-	return pgAccount(row), nil
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
 }
 
 // AccountByID resolves an account for the whoami and reset paths.
@@ -175,13 +182,32 @@ func (r *Resolver) AccountByID(ctx context.Context, id string) (Account, error) 
 		if err != nil {
 			return Account{}, notFoundOr(err)
 		}
-		return sqliteAccount(row)
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
 	}
 	row, err := r.pg.GetAccountByID(ctx, id)
 	if err != nil {
 		return Account{}, notFoundOr(err)
 	}
-	return pgAccount(row), nil
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
+}
+
+// AccountByPrincipal resolves the account a session's principal owns — the
+// bridge every factor path needs, since a session is keyed by principal but a
+// factor row (password, TOTP, recovery) is keyed by account. A human principal
+// owns exactly one account.
+func (r *Resolver) AccountByPrincipal(ctx context.Context, p domain.PrincipalID) (Account, error) {
+	if r.sq != nil {
+		row, err := r.sq.GetAccountByPrincipal(ctx, string(p))
+		if err != nil {
+			return Account{}, notFoundOr(err)
+		}
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
+	}
+	row, err := r.pg.GetAccountByPrincipal(ctx, string(p))
+	if err != nil {
+		return Account{}, notFoundOr(err)
+	}
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
 }
 
 // AccountCount answers the bootstrap path's one question: is this a fresh
@@ -330,6 +356,14 @@ func (r *Resolver) CreateGrant(ctx context.Context, id string, p domain.Principa
 	if _, err := g.Scope.Level(); err != nil {
 		return err
 	}
+	// Grant-lock obligation (#54 B14): take the target principal's row lock
+	// before the insert so the credential-reset org-bounded test — which locks
+	// the same row — serializes against a concurrent grant landing. A future
+	// grant writer (#55) inherits this obligation, pinned by the grant-lock
+	// analyzer. sqlite serializes on its single writer; postgres holds FOR UPDATE.
+	if err := r.LockPrincipalRow(ctx, p); err != nil {
+		return err
+	}
 	if r.sq != nil {
 		return r.sq.InsertGrant(ctx, sqlitegen.InsertGrantParams{
 			ID: id, PrincipalID: string(p), Capability: string(g.Capability),
@@ -428,7 +462,8 @@ func (r *Resolver) CreateSession(ctx context.Context, s NewSession) error {
 			AuthenticatedAt: encodeTime(s.AuthenticatedAt), CeremonyID: nullString(s.CeremonyID),
 			CreatedAt: encodeTime(s.CreatedAt), LastSeenAt: encodeTime(s.CreatedAt),
 			IdleExpiresAt: encodeTime(s.IdleExpiresAt), AbsoluteExpiresAt: encodeTime(s.AbsoluteExpiresAt),
-			SourceIp: s.SourceIP, UserAgent: s.UserAgent,
+			SourceIp: s.SourceIP, UserAgent: s.UserAgent, ProviderID: nullString(s.ProviderID),
+			CsrfVerifier: s.CSRFVerifier,
 		})
 	}
 	return r.pg.InsertSession(ctx, pggen.InsertSessionParams{
@@ -438,7 +473,8 @@ func (r *Resolver) CreateSession(ctx context.Context, s NewSession) error {
 		AuthenticatedAt: pgTime(s.AuthenticatedAt), CeremonyID: pgText(s.CeremonyID),
 		CreatedAt: pgTime(s.CreatedAt), LastSeenAt: pgTime(s.CreatedAt),
 		IdleExpiresAt: pgTime(s.IdleExpiresAt), AbsoluteExpiresAt: pgTime(s.AbsoluteExpiresAt),
-		SourceIp: s.SourceIP, UserAgent: s.UserAgent,
+		SourceIp: s.SourceIP, UserAgent: s.UserAgent, ProviderID: pgText(s.ProviderID),
+		CsrfVerifier: s.CSRFVerifier,
 	})
 }
 
@@ -493,21 +529,26 @@ func pgText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}
 }
 
-func sqliteAccount(row sqlitegen.Account) (Account, error) {
-	created, err := decodeTime(row.CreatedAt)
+// sqliteAccount and pgAccount build an Account from the five columns every
+// account read selects. They take scalars rather than a row type because the
+// accounts table gained webauthn_user_handle (#54): sqlc now emits a distinct
+// Row type per query instead of the shared model, and a scalar signature reads
+// them all.
+func sqliteAccount(id, principalID, username, displayName, createdAt string) (Account, error) {
+	created, err := decodeTime(createdAt)
 	if err != nil {
 		return Account{}, err
 	}
 	return Account{
-		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID),
-		Username: row.Username, DisplayName: row.DisplayName, CreatedAt: created,
+		ID: id, PrincipalID: domain.PrincipalID(principalID),
+		Username: username, DisplayName: displayName, CreatedAt: created,
 	}, nil
 }
 
-func pgAccount(row pggen.Account) Account {
+func pgAccount(id, principalID, username, displayName string, createdAt time.Time) Account {
 	return Account{
-		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID),
-		Username: row.Username, DisplayName: row.DisplayName, CreatedAt: row.CreatedAt.Time,
+		ID: id, PrincipalID: domain.PrincipalID(principalID),
+		Username: username, DisplayName: displayName, CreatedAt: createdAt,
 	}
 }
 

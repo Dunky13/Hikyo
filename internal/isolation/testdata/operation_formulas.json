@@ -64,6 +64,22 @@
     ]
   },
   {
+    "operation": "credential-reset.instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "credential-reset@instance"
+    ]
+  },
+  {
+    "operation": "credential-reset.org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "credential-reset@org"
+    ]
+  },
+  {
     "operation": "environment.create",
     "class": "tenant",
     "level": "project",
@@ -85,6 +101,38 @@
     "level": "environment",
     "formula": [
       "edit@environment"
+    ]
+  },
+  {
+    "operation": "oidc-provider.delete",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "oidc-provider.get",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "oidc-provider.list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "oidc-provider.put",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
     ]
   },
   {

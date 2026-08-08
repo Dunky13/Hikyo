@@ -98,6 +98,7 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"org without a subverb", []string{"org"}, cli.ExitUsage},
 		{"org list with no session", []string{"org", "list", "--instance", "unknown-ref"}, cli.ExitRefused},
 		{"account without the subverb", []string{"account"}, cli.ExitUsage},
+		{"passkey enrol refuses by name", []string{"account", "passkey", "enrol"}, cli.ExitRefused},
 	}
 	var report strings.Builder
 	for _, tc := range cases {

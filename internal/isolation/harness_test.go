@@ -185,7 +185,16 @@ func openPostgres(t *testing.T) *store.DB {
 	// human-authentication tables with #47 (sessions and accounts reference
 	// principals, so they drop first).
 	for _, table := range []string{
-		"credential_authorities", "password_credentials", "sessions", "accounts",
+		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
+		// so they drop first — a stale one fails the next re-migration's CREATE.
+		"webauthn_ceremonies", "webauthn_credentials",
+		"oidc_transactions", "external_identities",
+		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
+		"credential_authorities", "password_credentials", "sessions",
+		// oidc_providers is a PARENT of sessions (sessions.provider_id
+		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
+		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
+		"oidc_providers", "accounts",
 		"auth_instance_state",
 		"grants", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",

@@ -55,6 +55,11 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE id = $1;
 
 -- wenv:authn-resolution
+-- name: GetAccountByPrincipal :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE principal_id = $1;
+
+-- wenv:authn-resolution
 -- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts;
 
@@ -134,8 +139,9 @@ WHERE account_id = $8 AND row_version = $9;
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
-     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
+     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
+     provider_id, csrf_verifier)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
 
 -- wenv:authn-resolution
 -- name: TouchSession :exec
@@ -154,3 +160,260 @@ DELETE FROM sessions WHERE principal_id = $1;
 -- wenv:authn-resolution
 -- name: AdvancePrincipalGeneration :exec
 UPDATE principals SET session_generation = session_generation + 1 WHERE id = $1;
+
+-- Factors (#54, human-auth ADR). TOTP, recovery codes and the session-rotation
+-- writers join the enumerated resolution surface for the same reason the login
+-- writers did: they mutate the artifacts that decide how strongly a caller
+-- authenticated, which is resolved rather than authorized.
+
+-- wenv:authn-resolution
+-- name: GetConfirmedTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NOT NULL;
+
+-- wenv:authn-resolution
+-- name: GetPendingTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: InsertTOTP :exec
+INSERT INTO totp_credentials
+    (id, account_id, seed, dek_version, credential_epoch, row_version,
+     last_step, created_step, confirmed_at, created_at)
+VALUES ($1, $2, $3, $4, $5, 1, $6, $7, NULL, $8);
+
+-- Confirmation is the account-security mutation's write: it promotes the
+-- pending seed and consumes the confirming step in one CAS.
+-- wenv:authn-resolution
+-- name: ConfirmTOTP :execrows
+UPDATE totp_credentials
+SET confirmed_at = $1, last_step = $2, row_version = row_version + 1
+WHERE id = $3 AND row_version = $4 AND confirmed_at IS NULL AND last_step < $5;
+
+-- Single-use per (account, step): a code is consumed only if its step is
+-- strictly beyond the last one, which the CAS enforces atomically.
+-- wenv:authn-resolution
+-- name: AdvanceTOTPStep :execrows
+UPDATE totp_credentials SET last_step = $1, row_version = row_version + 1
+WHERE id = $2 AND row_version = $3 AND last_step < $4;
+
+-- wenv:authn-resolution
+-- name: DeleteTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = $1;
+
+-- wenv:authn-resolution
+-- name: DeletePendingTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: GetRecoveryCodes :one
+SELECT account_id, batch, dek_version, credential_epoch, row_version, generated_at
+FROM recovery_codes WHERE account_id = $1;
+
+-- wenv:authn-resolution
+-- name: InsertRecoveryCodes :exec
+INSERT INTO recovery_codes
+    (account_id, batch, dek_version, credential_epoch, row_version, generated_at)
+VALUES ($1, $2, $3, $4, 1, $5);
+
+-- Regeneration and consumption both rewrite the batch under a CAS, so a
+-- concurrent second presentation of the same code loses and fails closed.
+-- wenv:authn-resolution
+-- name: UpdateRecoveryCodesCAS :execrows
+UPDATE recovery_codes
+SET batch = $1, dek_version = $2, credential_epoch = $3,
+    row_version = row_version + 1, generated_at = $4
+WHERE account_id = $5 AND row_version = $6;
+
+-- Step-up rotates the session token and rewrites its factor set; the original
+-- authenticated_at and ceremony_id are preserved so absolute-age attribution
+-- cannot be reset by repeated step-ups.
+-- wenv:authn-resolution
+-- name: RotateSessionFactors :exec
+UPDATE sessions SET verifier = $1, factors = $2 WHERE id = $3;
+
+-- Minting an establishment authority for an account consumes every other
+-- outstanding one, so a second live reset token cannot linger past the point
+-- the operator believes the flow completed.
+-- wenv:authn-resolution
+-- name: ConsumeOutstandingAuthoritiesForAccount :exec
+UPDATE credential_authorities SET consumed_at = $1
+WHERE account_id = $2 AND consumed_at IS NULL;
+
+-- OIDC login/link/reauth resolution (#54, human-auth ADR -- The OIDC
+-- transaction). These read providers, transactions and external identities
+-- with request-supplied identifiers, and write the transaction/identity/session
+-- rows that decide who a caller is: the resolution surface, proof-free, for the
+-- same reason the login writers are.
+
+-- wenv:authn-resolution
+-- name: GetEnabledProviderByIssuer :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE kind = $1 AND issuer = $2 AND enabled = 1;
+
+-- The recorded provider a callback exchanges at (A11): loaded by the id the
+-- transaction pinned, so the exchange happens only at that provider.
+-- wenv:authn-resolution
+-- name: GetProviderForCallback :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE id = $1;
+
+-- wenv:authn-resolution
+-- name: InsertOIDCTransaction :exec
+INSERT INTO oidc_transactions
+    (id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+     purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+     account_id, environment_id, ceremony_id, credential_epoch, created_at,
+     expires_at, consumed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NULL);
+
+-- wenv:authn-resolution
+-- name: GetOIDCTransactionByState :one
+SELECT id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+       purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+       account_id, environment_id, ceremony_id, credential_epoch, created_at,
+       expires_at, consumed_at
+FROM oidc_transactions WHERE state_verifier = $1;
+
+-- Single-use consumption: the NULL guard is the atomic claim, so a callback
+-- cannot be replayed and two concurrent callbacks cannot both consume one tx.
+-- wenv:authn-resolution
+-- name: ConsumeOIDCTransaction :execrows
+UPDATE oidc_transactions SET consumed_at = $1
+WHERE id = $2 AND consumed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: GetExternalIdentity :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE kind = $1 AND issuer = $2 AND subject = $3;
+
+-- wenv:authn-resolution
+-- name: GetExternalIdentityByID :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE id = $1;
+
+-- wenv:authn-resolution
+-- name: ListExternalIdentitiesForAccount :many
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE account_id = $1 ORDER BY created_at;
+
+-- wenv:authn-resolution
+-- name: InsertExternalIdentity :exec
+INSERT INTO external_identities
+    (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- wenv:authn-resolution
+-- name: DeleteExternalIdentity :exec
+DELETE FROM external_identities WHERE id = $1;
+
+-- The federated-session sweep (A4): every session minted through a provider
+-- dies when the provider's issuer/client/assurance policy changes or the
+-- provider is disabled or deleted. reauth_windows cascade from the session.
+-- wenv:authn-resolution
+-- name: DeleteSessionsForProvider :execrows
+DELETE FROM sessions WHERE provider_id = $1;
+
+-- A reauthentication window opened by a possession-factor ceremony. OIDC reauth
+-- opens one only where the effective window is > 0; a WebAuthn ceremony can bind
+-- the enumerated unit, so at a 0 effective window it opens a single_decision
+-- window (B11) consumed by exactly one enumerated decision. Keyed by session,
+-- cascading with it.
+-- wenv:authn-resolution
+-- name: InsertReauthWindow :exec
+INSERT INTO reauth_windows
+    (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+     authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+     consumed_at, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11);
+
+-- Start resolves the provider by slug for an enabled provider only: a login,
+-- link or reauth may only begin against a provider that is currently serving.
+-- wenv:authn-resolution
+-- name: GetEnabledProviderBySlug :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE slug = $1 AND enabled = 1;
+
+-- Reauth-window consumption at disclosure (#54, human-auth ADR - Reauthentication).
+-- A disclosure on environment E requires a live window for (session, E). These
+-- read the window, slide its sliding clock (never past the hard cap the service
+-- enforces), and claim a single_decision window exactly once via the consumed_at
+-- NULL guard. There is no reveal operation to call these yet (#50/#58); they ship
+-- as the library those verticals consume, exercised directly by fixtures.
+-- wenv:authn-resolution
+-- name: GetReauthWindow :one
+SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+       authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+       consumed_at, created_at
+FROM reauth_windows WHERE session_id = $1 AND environment_id = $2;
+
+-- Slide the idle window clock on a sliding (non single-decision) window. The hard
+-- cap is enforced by the service, which passes min(now+window, hard_expires_at);
+-- the NULL guard keeps a concurrently-claimed window from sliding.
+-- wenv:authn-resolution
+-- name: SlideReauthWindow :execrows
+UPDATE reauth_windows SET window_expires_at = $1
+WHERE id = $2 AND single_decision = 0 AND consumed_at IS NULL;
+
+-- Claim a single_decision window exactly once: the NULL guard is the atomic
+-- claim, so a second disclosure loses and is refused (B11 double-spend).
+-- wenv:authn-resolution
+-- name: ConsumeSingleDecisionWindow :execrows
+UPDATE reauth_windows SET consumed_at = $1
+WHERE id = $2 AND single_decision = 1 AND consumed_at IS NULL;
+
+-- Invalidate every open window on one environment: the first of LowerEffective
+-- Window's five ADR items on the effective-window transition (#54 B6).
+-- wenv:authn-resolution
+-- name: DeleteReauthWindowsForEnvironment :execrows
+DELETE FROM reauth_windows WHERE environment_id = $1;
+
+-- Stranded-principal enumeration for LowerEffectiveWindow (#54 B6): principals
+-- holding reveal/reveal-history covering environment E (a grant at E, its project,
+-- its org, or the instance) who have no enabled WebAuthn authenticator, so a 0
+-- effective window fails their disclosure closed until they enrol one.
+-- wenv:authn-resolution
+-- name: StrandedRevealPrincipalsForEnvironment :many
+SELECT DISTINCT g.principal_id
+FROM grants g
+WHERE g.capability IN ('reveal', 'reveal-history')
+  AND (g.org_id IS NULL
+       OR (g.org_id = sqlc.arg(org) AND g.project_id IS NULL)
+       OR (g.org_id = sqlc.arg(org) AND g.project_id = sqlc.arg(project) AND g.env_id IS NULL)
+       OR (g.org_id = sqlc.arg(org) AND g.project_id = sqlc.arg(project) AND g.env_id = sqlc.arg(env)))
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_credentials w
+      JOIN accounts a ON a.id = w.account_id
+      WHERE a.principal_id = g.principal_id AND w.disabled_at IS NULL);
+
+-- The target principal's grant set, for the credential-reset org-bounded test
+-- (#54 credential-reset, ADR - Recovery): reset reaches only a target whose grants
+-- lie entirely within one org and who holds no instance capability.
+-- wenv:authn-resolution
+-- name: ListGrantsForResetTarget :many
+SELECT capability, org_id, project_id, env_id FROM grants
+WHERE principal_id = $1;
+
+-- Principal row lock (#54 B14): every grant writer takes it so the credential-
+-- reset org-bounded test serializes against a concurrent grant landing. sqlite's
+-- single writer serializes trivially; postgres takes FOR UPDATE. The grant-lock
+-- analyzer pins that this sits inside every grant writer.
+-- wenv:authn-resolution
+-- name: LockPrincipalRow :one
+SELECT id FROM principals WHERE id = $1 FOR UPDATE;
+
+-- Resolve an environment's chain from its id alone, for LowerEffectiveWindow's
+-- stranded-principal query (#54 B6): the denormalized chain columns make the row
+-- self-describing, so the grant-coverage predicate can be built from an env id.
+-- wenv:authn-resolution
+-- name: EnvironmentChainByID :one
+SELECT org_id, project_id, id FROM environments WHERE id = $1;

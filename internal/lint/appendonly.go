@@ -151,6 +151,61 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"DeleteSession":              true,
 	"DeleteSessionsForPrincipal": true,
 	"AdvanceGeneration":          true,
+	// Factors (#54): TOTP enrolment/confirmation/removal, recovery-code batch
+	// writes, step-up session rotation, and the outstanding-authority sweep.
+	// None can hold a proof — they mutate the artifacts that decide how a
+	// caller authenticated, which is resolution, not authorization.
+	"CreateTOTP":                    true,
+	"ConfirmTOTP":                   true,
+	"AdvanceTOTPStep":               true,
+	"DeleteTOTPForAccount":          true,
+	"DeletePendingTOTPForAccount":   true,
+	"CreateRecoveryCodes":           true,
+	"UpdateRecoveryCodes":           true,
+	"RotateSessionFactors":          true,
+	"ConsumeOutstandingAuthorities": true,
+	// OIDC (#54): the transaction, external-identity, federated-session-sweep
+	// and reauth-window writers. None can hold a proof - they mutate the
+	// artifacts that decide who a caller is and how they authenticated, which is
+	// resolution, not authorization. Provider administration is proof-bound and
+	// lives on the repository surface, not here.
+	"CreateOIDCTransaction":     true,
+	"ConsumeOIDCTransaction":    true,
+	"CreateExternalIdentity":    true,
+	"DeleteExternalIdentity":    true,
+	"DeleteSessionsForProvider": true,
+	"CreateReauthWindow":        true,
+	// The Phase-C mint guard: a no-op CAS write that locks the pinned provider
+	// row so a concurrent reconfigure serializes behind it (A4 TOCTOU). It is a
+	// proof-free write on the resolution surface for the same reason the other
+	// OIDC writers are.
+	"GuardProviderForMint": true,
+	// OIDC provider administration writes to a class=authn table, so the write
+	// rides the resolution surface even though the mutation is authorized at the
+	// chokepoint (OpProviderPut/Delete) before it runs.
+	"CreateProvider": true,
+	"UpdateProvider": true,
+	"DeleteProvider": true,
+	// WebAuthn (#54): credential, ceremony and user-handle writers, plus the
+	// clone session sweep. None can hold a proof — they mutate the artifacts that
+	// decide who a caller is and how strongly they authenticated, which is
+	// resolution, not authorization.
+	"CreateWebAuthnCredential":            true,
+	"AdvanceWebAuthnSignCount":            true,
+	"DisableWebAuthnCredential":           true,
+	"DeleteWebAuthnCredential":            true,
+	"DeleteSessionsForWebAuthnCredential": true,
+	"CreateWebAuthnCeremony":              true,
+	"ConsumeWebAuthnCeremony":             true,
+	"SetWebAuthnUserHandle":               true,
+	// Reauth-window consumption at disclosure and the effective-window transition
+	// (#54): slide the sliding clock, claim a single-decision window once, and
+	// invalidate every window on an environment when its effective window is
+	// lowered. Proof-free like every other window writer — they mutate the
+	// artifact that decides whether a disclosure may proceed.
+	"SlideReauthWindow":                 true,
+	"ConsumeSingleDecisionWindow":       true,
+	"DeleteReauthWindowsForEnvironment": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

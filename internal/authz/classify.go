@@ -47,6 +47,63 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/logout":               ClassUnauthenticated,
 	"http:GET /api/v1/auth/whoami":                ClassUnauthenticated,
 
+	// Factor endpoints (#54). Unauthenticated-class like logout/whoami: they
+	// take a session but an unresolvable one is exactly the case they must not
+	// distinguish, so their probe contract is enumeration uniformity, not
+	// tenancy. `recovery/begin` is fully pre-auth. None reaches an authz
+	// operation — the account-security mutations resolve and rotate the acting
+	// session, which is resolution rather than authorization, so their audit
+	// obligation is discharged directly through wireEvents like every other
+	// authentication-surface endpoint.
+	"http:POST /api/v1/auth/totp/enrol/start":          ClassUnauthenticated,
+	"http:POST /api/v1/auth/totp/enrol/confirm":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/totp/step-up":              ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/totp":                    ClassUnauthenticated,
+	"http:POST /api/v1/auth/recovery-codes/regenerate": ClassUnauthenticated,
+	"http:POST /api/v1/auth/recovery/begin":            ClassUnauthenticated,
+
+	// OIDC (#54). Login/callback are pre-auth; link/reauth take a session but an
+	// unresolvable one is exactly the case they must not distinguish, so all are
+	// unauthenticated-class (enumeration uniformity). methods is public
+	// discovery. Provider administration is instance-config (below).
+	"http:GET /api/v1/auth/methods":                  ClassUnauthenticated,
+	"http:POST /api/v1/auth/oidc/{provider}/start":   ClassUnauthenticated,
+	"http:GET /api/v1/auth/oidc/{provider}/callback": ClassUnauthenticated,
+	"http:GET /api/v1/auth/identities":               ClassUnauthenticated,
+	"http:POST /api/v1/auth/identities/link":         ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/identities/{id}":       ClassUnauthenticated,
+	// WebAuthn / passkeys (#54). Enrolment, login, step-up, reauth, removal and
+	// the credential inventory. Login is fully pre-auth; the rest take a session
+	// but an unresolvable one is exactly the case they must not distinguish, so
+	// all are unauthenticated-class (enumeration uniformity). None reaches an
+	// authz operation — the mutations resolve and rotate the acting session,
+	// which is resolution rather than authorization, so their audit obligation
+	// is discharged directly through wireEvents.
+	"http:POST /api/v1/auth/webauthn/enrol/start":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/enrol/finish":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/start":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/finish":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/start":      ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/finish":     ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/start":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/finish":      ClassUnauthenticated,
+	"http:GET /api/v1/auth/webauthn/credentials":         ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": ClassUnauthenticated,
+	"http:GET /api/v1/instance/oidc-providers":           ClassInstance,
+	"http:GET /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
+	"http:PUT /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
+	"http:DELETE /api/v1/instance/oidc-providers/{slug}": ClassInstance,
+
+	// Credential reset (#54). Unauthenticated-class for its probe contract:
+	// the target-principal path parameter makes enumeration uniformity the
+	// dominant concern, so every failure that could reveal the target's grant
+	// shape answers a uniform 401 (the instance-capability refusal is the one
+	// named 403, reached only after the caller is authorized at instance scope).
+	// The route dispatches at runtime between two credential-reset operations, so
+	// it names no single operation in wireRoutes; its audit obligation is
+	// discharged through wireEvents like the account-security surface.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": ClassUnauthenticated,
+
 	// Org administration is instance-scoped: the probe contract is grant
 	// refusal, not tenancy, because no tenant object exists whose
 	// nonexistence could be mimicked.
@@ -110,8 +167,15 @@ var wireRegistry = map[string]Class{
 // the completeness invariant reads this table beside the operation registry
 // rather than letting an unaudited pre-auth path hide behind "no operation".
 //
-// A wire entry that appears here and also reaches a registered operation is a
-// modelling mistake, and the completeness invariant says so.
+// Most wire entries are either operation-backed (wireRoutes) or declare their
+// events directly here (the authentication surface). The credential-reset route
+// (#54) is deliberately BOTH: it is listed in wireRoutes against the two
+// operations it dispatches between at runtime — so the operation linkage records
+// that it reaches CapCredentialReset (MFA-mandatory) — AND declares its events
+// here, because its writes and audit ride the resolution surface (like the
+// account-security mutations) rather than a single operation row. It names no
+// single x-wenv-operation in the contract, since two ops of different classes
+// cannot be carried by one row; the completeness invariant unions both sources.
 var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -123,31 +187,156 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthCredentialEstablished,
 		audit.EventAuthAuthorityRefused,
 	},
+
+	// Factor endpoints (#54). The account-security mutations emit their
+	// mutation event plus auth.session_created for the reissued session; step-up
+	// emits auth.reauthenticated (it rotates, mints no new session row);
+	// recovery/begin emits recovery_code_consumed (success and failure) and
+	// mints an establishment authority whose consumption is recorded by the
+	// establish path.
+	// Each factor ceremony validates a proof under the per-account backoff, so
+	// a crossed threshold is an event it can emit — declared here so the
+	// audit-completeness contract covers it.
+	"http:POST /api/v1/auth/totp/enrol/start": {audit.EventAuthThrottleCrossed},
+	"http:POST /api/v1/auth/totp/enrol/confirm": {
+		audit.EventAuthFactorEnrolled,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/totp/step-up": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:DELETE /api/v1/auth/totp": {
+		audit.EventAuthFactorRemoved,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/recovery-codes/regenerate": {
+		audit.EventAuthRecoveryCodesGenerated,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/recovery/begin": {
+		audit.EventAuthRecoveryCodeConsumed,
+		// A successful consume mints a recovery-issued credential-establishment
+		// authority; the authority coming into existence is its own record.
+		audit.EventAuthAuthorityMinted,
+		// Pre-auth like login: a crossed per-account backoff threshold is its
+		// own event, emitted directly by recordThrottleCrossing.
+		audit.EventAuthThrottleCrossed,
+	},
 	// whoami resolves a session and reports it. It writes nothing and its
 	// result duplicates what the login event already recorded, so it is the
 	// one auth path with no event of its own — pinned in the exemption
 	// fixture with that reason rather than silently absent.
 
+	// OIDC (#54). start emits only a throttle crossing directly; the callback
+	// is where a login/link/reauth lands, so it carries the family of outcomes
+	// (login success, refusal by cause, link, JIT, the reissued/rotated session,
+	// reauth). link start mirrors start; unlink emits the unlink plus the
+	// reissued session. Provider administration is operation-modeled (wireRoutes).
+	"http:POST /api/v1/auth/oidc/{provider}/start": {audit.EventAuthThrottleCrossed},
+	"http:GET /api/v1/auth/oidc/{provider}/callback": {
+		audit.EventOIDCLogin,
+		audit.EventOIDCRefused,
+		audit.EventIdentityLinked,
+		audit.EventJITProvisioned,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthReauthenticated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/identities/link": {audit.EventAuthThrottleCrossed},
+	"http:DELETE /api/v1/auth/identities/{id}": {
+		audit.EventIdentityUnlinked,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+
+	// Credential reset (#54). A successful reset mints a credential-establishment
+	// authority (its own record, factors MEDIUM-7) and records the reset issuance
+	// naming the tier. See the exception note above for why this route audits here
+	// rather than through an operation row.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": {
+		audit.EventAuthCredentialResetIssued,
+		audit.EventAuthAuthorityMinted,
+	},
+
+	// WebAuthn / passkeys (#54). The three start ceremonies and the credential
+	// read emit nothing directly and are exemption-pinned; the finish endpoints
+	// carry the outcomes. enrol validates a proof under the per-account backoff
+	// (a crossed threshold is its own event) and adds a credential + reissues
+	// the session; login mints a session and, on a signature-count regression,
+	// disables the cloned credential; step-up and reauth append the factor
+	// (reauthenticated) and can likewise detect a clone; removal removes the
+	// credential and reissues the session.
+	"http:POST /api/v1/auth/webauthn/enrol/start": {audit.EventAuthThrottleCrossed},
+	"http:POST /api/v1/auth/webauthn/enrol/finish": {
+		audit.EventAuthPasskeyAdded,
+		audit.EventAuthSessionCreated,
+	},
+	"http:POST /api/v1/auth/webauthn/login/finish": {
+		audit.EventAuthLogin,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthPasskeyCloned,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/webauthn/step-up/finish": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthPasskeyCloned,
+	},
+	"http:POST /api/v1/auth/webauthn/reauth/finish": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthPasskeyCloned,
+	},
+	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": {
+		audit.EventAuthPasskeyRemoved,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+
 	// The bootstrap verb, running on the server's own host under local
 	// authority. Its mint is audited including the DELIVERY MODE, because a
 	// token that reached a log shipper is a different event from one written
-	// to a root-owned file.
-	"cli:admin": {audit.EventAuthAuthorityMinted},
+	// to a root-owned file. `wenv admin reset-credential` (#54 break-glass) is the
+	// same local-authority verb group and emits the reset issuance beside the mint.
+	"cli:admin": {audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued},
 }
 
-// wireRoutes maps an HTTP entry point to the registered operation it reaches.
+// wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
 // The audit-completeness invariant follows it so a domain route inherits its
 // operation's audit mapping instead of needing a second declaration that
-// could drift from the first.
-var wireRoutes = map[string]Operation{
-	"http:POST /api/v1/orgs":      OpOrgCreate,
-	"http:GET /api/v1/orgs":       OpOrgList,
-	"http:GET /api/v1/orgs/{org}": OpOrgGet,
+// could drift from the first. Most routes reach exactly one operation; a route
+// that dispatches at runtime between operations (credential reset) lists them
+// all, so the linkage records every operation the route can reach.
+var wireRoutes = map[string][]Operation{
+	"http:POST /api/v1/orgs":      {OpOrgCreate},
+	"http:GET /api/v1/orgs":       {OpOrgList},
+	"http:GET /api/v1/orgs/{org}": {OpOrgGet},
+
+	// OIDC provider administration (#54), instance-config.
+	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},
+	"http:GET /api/v1/instance/oidc-providers/{slug}":    {OpProviderGet},
+	"http:PUT /api/v1/instance/oidc-providers/{slug}":    {OpProviderPut},
+	"http:DELETE /api/v1/instance/oidc-providers/{slug}": {OpProviderDelete},
+
+	// Credential reset (#54). ONE route dispatches at runtime between the
+	// org-scoped and instance-scoped credential-reset operations by the target's
+	// grant classification, resolved under the target-row lock inside the
+	// handler's tx. Both are mapped here so the operation linkage records that
+	// this route reaches CapCredentialReset (MFA-mandatory): the chokepoint —
+	// authorize(), which the service calls on the chosen op inside that tx —
+	// enforces capability + MFA + assurance. The route keeps its unauthenticated
+	// probe class (enumeration uniformity is its dominant contract, reinforced by
+	// B2's uniform refusal) and carries no single x-wenv-operation, since two ops
+	// of different classes cannot be named by one contract row; its audit events
+	// also ride wireEvents below.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": {OpCredentialReset, OpCredentialResetInstance},
 }
 
-// WireRoutes returns the route→operation mapping for the invariant tests and
+// WireRoutes returns the route→operation(s) mapping for the invariant tests and
 // the contract cross-check.
-func (RegistryFacts) WireRoutes() map[string]Operation {
+func (RegistryFacts) WireRoutes() map[string][]Operation {
 	return maps.Clone(wireRoutes)
 }
 

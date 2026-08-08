@@ -63,6 +63,70 @@ const (
 	// crossed, so a distributed attempt is visible rather than merely slowed.
 	EventAuthThrottleCrossed EventType = "auth.throttle_crossed"
 
+	// auth.* factor events (#54, human-auth ADR § Factors, § Account-security
+	// mutations). Registering ANY of these is the tripwire that forces
+	// authz.AssuranceEnforced to flip: a factor beyond a password now exists,
+	// so the chokepoint must enforce the MFA-mandatory rule (see
+	// isolation.TestAssuranceEnforcementCannotBeForgotten).
+	//
+	// auth.factor_enrolled / auth.factor_removed record a TOTP factor coming
+	// into or out of existence, naming the credential class that authorized the
+	// account-security mutation.
+	EventAuthFactorEnrolled EventType = "auth.factor_enrolled"
+	EventAuthFactorRemoved  EventType = "auth.factor_removed"
+	// auth.recovery_codes_generated records a display-once batch replacing the
+	// previous one.
+	EventAuthRecoveryCodesGenerated EventType = "auth.recovery_codes_generated"
+	// auth.recovery_code_consumed records the pre-auth break-in-glass path,
+	// including its failures (the ADR requires the failures, uniform response
+	// notwithstanding).
+	EventAuthRecoveryCodeConsumed EventType = "auth.recovery_code_consumed"
+	// auth.reauthenticated records a step-up: the acting session presented a
+	// possession factor and gained a factor class.
+	EventAuthReauthenticated EventType = "auth.reauthenticated"
+	// auth.passkey_added / auth.passkey_removed record a WebAuthn credential
+	// coming into or out of existence, naming the credential class that
+	// authorized the account-security mutation (#54). auth.passkey_cloned is the
+	// clone-detection security event: a real sign-count regression on a
+	// non-backup credential disabled it and swept its sessions (B9).
+	EventAuthPasskeyAdded   EventType = "auth.passkey_added"
+	EventAuthPasskeyRemoved EventType = "auth.passkey_removed"
+	EventAuthPasskeyCloned  EventType = "auth.passkey_cloned"
+
+	// auth.* OIDC events (#54, human-auth ADR - Login methods, Identity
+	// linking, The OIDC transaction). auth.oidc_login records a federated login
+	// or reauth success with its method and the assurance the provider policy
+	// yielded; auth.oidc_refused records every transaction failure BY CAUSE
+	// (the ADR requires the failures, uniform response notwithstanding), with a
+	// closed cause enum covering mix-up, nonce, purpose, state, issuer,
+	// audience, signature, epoch and IdP-error refusals.
+	EventOIDCLogin   EventType = "auth.oidc_login"
+	EventOIDCRefused EventType = "auth.oidc_refused"
+	// auth.identity_linked / auth.identity_unlinked record an external identity
+	// bound to or removed from an account - account-security mutations both.
+	EventIdentityLinked   EventType = "auth.identity_linked"
+	EventIdentityUnlinked EventType = "auth.identity_unlinked"
+	// auth.jit_provisioned records a JIT account creation, naming the verified
+	// claim that admitted it - the evidence, never an email allowlist.
+	EventJITProvisioned EventType = "auth.jit_provisioned"
+	// auth.provider_changed records a provider configuration change and the
+	// count of federated sessions it swept (A3/A4). auth.provider_read records
+	// the instance-scoped provider reads (audit-model default-deny refuses
+	// audited:none to instance-class operations).
+	EventOIDCProviderChanged EventType = "auth.provider_changed"
+	EventOIDCProviderRead    EventType = "auth.provider_read"
+
+	// auth.credential_reset_issued records an administrator-issued or break-glass
+	// credential-establishment authority minted for a target (#54, human-auth ADR
+	// - Recovery), naming the issuer tier and whether it ran under network
+	// (credential-reset) or local host (break-glass) authority.
+	EventAuthCredentialResetIssued EventType = "auth.credential_reset_issued"
+	// auth.effective_window_lowered records an environment's effective
+	// reauthentication window being lowered, the count of windows it invalidated,
+	// and the principals the transition strands (reveal holders there without a
+	// WebAuthn authenticator), so the trail carries the surfaced list (#54 B6).
+	EventAuthEffectiveWindowLowered EventType = "auth.effective_window_lowered"
+
 	// settings.* — scaffolding domain events for the demonstration
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
@@ -208,8 +272,8 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"authority_id": {Kind: KindString, Required: true},
 			"account_id":   {Kind: KindString, Required: true},
-			"issued_by":    {Kind: KindString, Required: true}, // bootstrap | credential-reset | break-glass
-			"delivery":     {Kind: KindString, Required: true}, // file | terminal
+			"issued_by":    {Kind: KindString, Required: true}, // bootstrap | credential-reset | break-glass | recovery
+			"delivery":     {Kind: KindString, Required: true}, // file | terminal | response
 		},
 	},
 	EventAuthCredentialEstablished: {
@@ -244,6 +308,216 @@ var registry = map[EventType]TypeSpec{
 			"scope":            {Kind: KindString, Required: true}, // account | source-ip | instance
 			"subject_resolved": {Kind: KindBool, Required: true},
 			"account_id":       {Kind: KindString},
+		},
+	},
+	EventAuthFactorEnrolled: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"factor":                 {Kind: KindString, Required: true}, // totp
+			"account_id":             {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true}, // the proof class
+		},
+	},
+	EventAuthFactorRemoved: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"factor":                 {Kind: KindString, Required: true},
+			"account_id":             {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthRecoveryCodesGenerated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"count":                  {Kind: KindInt, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthRecoveryCodeConsumed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"subject_resolved": {Kind: KindBool, Required: true},
+			"account_id":       {Kind: KindString},
+			"authority_id":     {Kind: KindString}, // success only
+			"cause":            {Kind: KindString}, // failures only, by class
+		},
+	},
+	EventAuthReauthenticated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"factor":     {Kind: KindString, Required: true}, // totp
+		},
+	},
+	EventAuthPasskeyAdded: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"credential_id":          {Kind: KindString, Required: true}, // the surrogate row id
+			"authorizing_credential": {Kind: KindString, Required: true}, // the proof class
+			"discoverable":           {Kind: KindBool, Required: true},   // login-capable (B13)
+		},
+	},
+	EventAuthPasskeyRemoved: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"credential_id":          {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthPasskeyCloned: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":     {Kind: KindString, Required: true},
+			"credential_id":  {Kind: KindString, Required: true},
+			"sessions_swept": {Kind: KindInt, Required: true},
+		},
+	},
+	EventOIDCLogin: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"method":               {Kind: KindString, Required: true}, // oidc:<issuer>
+			"purpose":              {Kind: KindString, Required: true}, // login | reauth
+			"account_id":           {Kind: KindString, Required: true},
+			"assurance":            {Kind: KindString, Required: true}, // single-factor | multi-factor
+			"provider_id":          {Kind: KindString, Required: true},
+			"acr":                  {Kind: KindString},              // provider-asserted, raw (A12)
+			"amr":                  {Kind: KindString},              // provider-asserted, raw joined (A12)
+			"provider_row_version": {Kind: KindInt, Required: true}, // policy read in the mint tx (A12)
+		},
+	},
+	EventOIDCRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// Closed cause enum, by class never by detail: mixup | nonce |
+			// purpose | state | issuer | audience | signature | epoch |
+			// idp-error | expired | unknown-identity | no-assurance-policy |
+			// no-auth-time | binding | jit-refused | reconciliation.
+			"cause":       {Kind: KindString, Required: true},
+			"provider_id": {Kind: KindString},
+		},
+	},
+	EventIdentityLinked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"identity_id":            {Kind: KindString, Required: true},
+			"provider_id":            {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventIdentityUnlinked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"identity_id":            {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventJITProvisioned: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":  {Kind: KindString, Required: true},
+			"provider_id": {Kind: KindString, Required: true},
+			"claim":       {Kind: KindString, Required: true}, // the verified claim name
+		},
+	},
+	EventOIDCProviderChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id":    {Kind: KindString, Required: true},
+			"change":         {Kind: KindString, Required: true}, // created | updated | deleted
+			"sessions_swept": {Kind: KindInt, Required: true},    // federated sessions deleted (A3/A4)
+		},
+	},
+	EventOIDCProviderRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"query":     {Kind: KindString, Required: true}, // get | list
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventAuthCredentialResetIssued: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		// Failures are audited too (ADR - Recovery: "including failures"): a
+		// network reset of an instance-capability target, or of an unknown
+		// principal, records the attempt with its cause while the wire stays
+		// uniform. The mint-specific fields are success-only.
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:   map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"target_principal": {Kind: KindString, Required: true},
+			"issued_by":        {Kind: KindString, Required: true}, // credential-reset | break-glass
+			"authority":        {Kind: KindString, Required: true}, // network | local-host
+			"target_account":   {Kind: KindString},                 // absent for an unknown-target failure
+			"authority_id":     {Kind: KindString},                 // success only
+			"delivery":         {Kind: KindString},                 // success only
+			"sessions_revoked": {Kind: KindBool},                   // success only
+			"cause":            {Kind: KindString},                 // failures only, by class
+		},
+	},
+	EventAuthEffectiveWindowLowered: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"environment_id":      {Kind: KindString, Required: true},
+			"new_window_seconds":  {Kind: KindInt, Required: true},
+			"windows_invalidated": {Kind: KindInt, Required: true},
+			"stranded_count":      {Kind: KindInt, Required: true},
+			// The stranded-principal list the ADR requires the event to carry.
+			// Principal ids are trusted vocabulary (prefixed UUIDs), joined with a
+			// comma; empty when nothing is stranded.
+			"stranded_principals": {Kind: KindString},
 		},
 	},
 	EventOrgRead: {

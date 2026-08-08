@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Dunky13/wenv/internal/admission"
@@ -13,8 +14,10 @@ import (
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/oidcrp"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/wenv/internal/webauthnrp"
 )
 
 // Human authentication: the local floor and credential establishment (#47,
@@ -58,7 +61,12 @@ const (
 )
 
 // Authentication methods, matching the wire enum.
-const MethodLocalPassword = "local-password"
+const (
+	MethodLocalPassword = "local-password"
+	// MethodLocalPasskey is a discoverable WebAuthn login: user-verifying and
+	// inherently multi-factor.
+	MethodLocalPasskey = "local-passkey"
+)
 
 // ErrWeakPassword is a loud, specific refusal — password policy is evaluated
 // at set time, where naming the rule helps the human and reveals nothing.
@@ -82,10 +90,34 @@ type Auth struct {
 	Admission *admission.Limiter
 	// Now is injectable for tests; nil means time.Now.
 	Now func() time.Time
+	// ExternalOrigin is the instance's public origin; the OIDC callback validates
+	// the redirect it replays against the per-provider registered URI (A1).
+	ExternalOrigin string
+	// OIDCDiscover replaces go-oidc discovery in tests, so a fixture can point an
+	// httptest IdP's discovery at a byte-variant issuer. Nil means oidcrp.Discover.
+	OIDCDiscover func(ctx context.Context, issuer string) (*oidcrp.Provider, error)
+	// WebAuthn is the relying party: RP ID + expected origins are immutable
+	// instance config derived from ExternalOrigin, never a request header (§5).
+	// Nil means WebAuthn routes refuse (the RP could not be configured at boot).
+	WebAuthn *webauthnrp.RP
+	// ReauthWindow is the effective reauthentication window (default 0). OIDC
+	// reauth opens a window only where it is > 0; a 0-window gate needs WebAuthn
+	// (finding B18). #55's project-settings knob sets it per environment.
+	ReauthWindow time.Duration
+	// ReauthHardCap bounds the absolute age of a reauth window, never extended by
+	// activity. Zero means the idle window value.
+	ReauthHardCap time.Duration
 	// Log records server-side faults that must not reach the caller — an
 	// unreadable verifier answers the uniform refusal, and the reason it was
 	// unreadable belongs in the process log and nowhere else.
 	Log *slog.Logger
+
+	// dummyRecoverySealed is a batch sealed once and opened on every
+	// non-matching recovery path, so a miss costs the same envelope decrypt +
+	// JSON decode + set scan as a hit — the recovery analogue of the login
+	// dummy verifier, closing the account/batch existence timing oracle.
+	dummyRecoveryOnce   sync.Once
+	dummyRecoverySealed []byte
 }
 
 func (s *Auth) now() time.Time {
@@ -150,6 +182,9 @@ type LoginResult struct {
 	AccountID    string
 	DisplayName  string
 	Assurance    Assurance
+	// CSRFToken is the synchronizer token for a browser session, returned once
+	// at mint (A9). Empty for CLI sessions.
+	CSRFToken string
 }
 
 // LocalLogin is the local floor: password verification against an

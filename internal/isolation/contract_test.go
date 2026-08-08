@@ -2,6 +2,7 @@ package isolation
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -122,10 +123,12 @@ func TestContractFormulasMatchTheOperationRegistry(t *testing.T) {
 		}
 		// The route→operation map must agree with the document, so the audit
 		// completeness invariant and the contract cannot name different
-		// operations for one route.
+		// operations for one route. A route that dispatches between operations
+		// lists them all; the contract's single named operation must be one of
+		// them.
 		key := wireKey(op.Method, chiPath(op.Path))
-		if mapped, ok := routes[key]; ok && mapped != operation {
-			t.Errorf("%s: the contract names %q but the route map names %q", id, operation, mapped)
+		if mapped, ok := routes[key]; ok && !slices.Contains(mapped, operation) {
+			t.Errorf("%s: the contract names %q but the route map names %v", id, operation, mapped)
 		}
 	}
 }

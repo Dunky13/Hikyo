@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CreateOrgData, CreateOrgErrors, CreateOrgResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOrgData, GetOrgErrors, GetOrgResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -118,6 +118,130 @@ export const whoami = <ThrowOnError extends boolean = false>(options?: Options<W
 });
 
 /**
+ * Begin TOTP enrolment; returns the otpauth URI once.
+ *
+ * An account-security proof up front (the pre-existing password, since no
+ * possession factor stands yet — human-auth ADR § Account-security
+ * mutations). Stages a sealed seed as a pending, inert enrolment and
+ * returns the `otpauth://` URI exactly once. It confirms nothing and
+ * mutates no session: `enrol/confirm` completes the enrolment. A confirmed
+ * factor already standing is refused (`400`).
+ *
+ */
+export const enrolTotpStart = <ThrowOnError extends boolean = false>(options: Options<EnrolTotpStartData, ThrowOnError>) => (options.client ?? client).post<EnrolTotpStartResponses, EnrolTotpStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/totp/enrol/start',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Confirm TOTP enrolment with a code; reissues the session.
+ *
+ * Consumes a valid code against the pending seed (single-use) and
+ * completes the enrolment as an account-security mutation: the generation
+ * advances, every session is deleted, and the acting session is reissued
+ * carrying ONLY the proof class — NOT `totp`. The user steps up separately
+ * to present the factor they just enrolled. The reissued token is returned
+ * and MUST replace the old one.
+ *
+ */
+export const enrolTotpConfirm = <ThrowOnError extends boolean = false>(options: Options<EnrolTotpConfirmData, ThrowOnError>) => (options.client ?? client).post<EnrolTotpConfirmResponses, EnrolTotpConfirmErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/totp/enrol/confirm',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Elevate the acting session by presenting a TOTP code.
+ *
+ * A valid code consumes its step (single-use) and appends `totp` to the
+ * acting session's factor set, rotating its token — not an
+ * account-security mutation, so no generation advance and no session
+ * deletion, and the original authenticated_at is preserved (human-auth ADR
+ * § Assurance). The rotated token is returned and MUST replace the old one.
+ *
+ */
+export const stepUpTotp = <ThrowOnError extends boolean = false>(options: Options<StepUpTotpData, ThrowOnError>) => (options.client ?? client).post<StepUpTotpResponses, StepUpTotpErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/totp/step-up',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Remove the confirmed TOTP factor.
+ *
+ * An account-security mutation authorized by the password: the factor
+ * being removed is excluded from the proof set, so a stolen phone alone
+ * cannot drop the very factor it is (human-auth ADR § Account-security
+ * mutations, finding B7). Reissues the acting session carrying only the
+ * password class; the reissued token is returned.
+ *
+ */
+export const removeTotp = <ThrowOnError extends boolean = false>(options: Options<RemoveTotpData, ThrowOnError>) => (options.client ?? client).delete<RemoveTotpResponses, RemoveTotpErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/totp',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Replace the recovery-code batch; returns the codes once.
+ *
+ * An account-security mutation proved by the confirmed TOTP code where one
+ * stands, else the password (recovery codes never authorize their own
+ * regeneration). Replaces the batch atomically and returns the plaintext
+ * codes exactly once. Reissues the acting session; the reissued token is
+ * returned and MUST replace the old one.
+ *
+ */
+export const regenerateRecoveryCodes = <ThrowOnError extends boolean = false>(options: Options<RegenerateRecoveryCodesData, ThrowOnError>) => (options.client ?? client).post<RegenerateRecoveryCodesResponses, RegenerateRecoveryCodesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/recovery-codes/regenerate',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Consume a recovery code for a credential-establishment authority.
+ *
+ * The pre-auth break-in-glass path. Consumes a single-use recovery code
+ * and mints a credential-establishment authority that may only ever
+ * establish a password (human-auth ADR § Recovery). It creates **no
+ * session, no assurance, no reauthentication window** — the holder
+ * establishes a new password with the authority and then logs in.
+ *
+ * Rides the instance-wide admission budget; an unknown username, an absent
+ * batch, a stale epoch and a non-matching code all answer the same `401`.
+ *
+ */
+export const beginRecovery = <ThrowOnError extends boolean = false>(options: Options<BeginRecoveryData, ThrowOnError>) => (options.client ?? client).post<BeginRecoveryResponses, BeginRecoveryErrors, ThrowOnError>({
+    url: '/api/v1/auth/recovery/begin',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * List organisations.
  *
  * An instance-scoped operator read of cross-tenant metadata, and
@@ -160,4 +284,346 @@ export const getOrg = <ThrowOnError extends boolean = false>(options: Options<Ge
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}',
     ...options
+});
+
+/**
+ * Enabled login methods for this instance.
+ *
+ * Public discovery: the enabled OIDC provider slugs and display names, and
+ * whether local login is enabled. Instance-level, never per-account, so it
+ * discloses nothing about which accounts or factors exist. Under the
+ * discovery admission bucket.
+ *
+ */
+export const authMethods = <ThrowOnError extends boolean = false>(options?: Options<AuthMethodsData, ThrowOnError>) => (options?.client ?? client).get<AuthMethodsResponses, AuthMethodsErrors, ThrowOnError>({ url: '/api/v1/auth/methods', ...options });
+
+/**
+ * Begin an OIDC transaction (login, link or reauth).
+ *
+ * Creates a single-use server-side transaction (PKCE S256 always) and
+ * returns the IdP authorization URL. `login` is anonymous and bound by a
+ * `__Host-` browser-binding cookie set on this response (A2/A16); `link`
+ * and `reauth` require an authenticated session and are session-bound, and
+ * `link` verifies the account-security proof up front (A6).
+ *
+ */
+export const oidcStart = <ThrowOnError extends boolean = false>(options: Options<OidcStartData, ThrowOnError>) => (options.client ?? client).post<OidcStartResponses, OidcStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/oidc/{provider}/start',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Complete an OIDC transaction from the IdP redirect.
+ *
+ * Per-provider distinct callback path (mix-up defence leg 1): the path
+ * provider must equal the transaction's provider, refused BEFORE any token
+ * is fetched (A1). The transaction is consumed single-use, the code is
+ * exchanged only at the recorded provider, the ID token validated
+ * completely, and the purpose wall is structural. Returns the minted or
+ * rotated session.
+ *
+ */
+export const oidcCallback = <ThrowOnError extends boolean = false>(options: Options<OidcCallbackData, ThrowOnError>) => (options.client ?? client).get<OidcCallbackResponses, OidcCallbackErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/oidc/{provider}/callback',
+    ...options
+});
+
+/**
+ * List the caller's linked external identities.
+ */
+export const listIdentities = <ThrowOnError extends boolean = false>(options?: Options<ListIdentitiesData, ThrowOnError>) => (options?.client ?? client).get<ListIdentitiesResponses, ListIdentitiesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/identities',
+    ...options
+});
+
+/**
+ * Begin linking an external identity (OIDC purpose=link).
+ *
+ * An account-security mutation: verifies the pre-existing password up
+ * front and starts an OIDC link transaction bound to the acting session.
+ * Returns the IdP authorization URL; the link lands at the callback.
+ *
+ */
+export const linkIdentity = <ThrowOnError extends boolean = false>(options: Options<LinkIdentityData, ThrowOnError>) => (options.client ?? client).post<LinkIdentityResponses, LinkIdentityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/identities/link',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Unlink an external identity.
+ *
+ * An account-security mutation proved by the pre-existing password. Refuses
+ * removing the last remaining credential; deletes the identity's sessions;
+ * reissues the acting session. The reissued token replaces the old one.
+ *
+ */
+export const unlinkIdentity = <ThrowOnError extends boolean = false>(options: Options<UnlinkIdentityData, ThrowOnError>) => (options.client ?? client).delete<UnlinkIdentityResponses, UnlinkIdentityErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/identities/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Issue a credential-establishment authority for another account.
+ *
+ * Administrator-issued credential reset (human-auth ADR § Recovery). A
+ * credential-reset holder mints a single-use, hashed, expiring
+ * credential-establishment authority for a target, returned once and
+ * transmitted out of band. The reset advances the target's session
+ * generation and revokes its sessions in the same transaction.
+ *
+ * Org-scoped credential-reset reaches only a target whose grants lie
+ * entirely within that org and who holds no instance capability; the
+ * org-bounded test is evaluated in one serializable transaction with the
+ * target's grant set (a concurrent grant landing conflicts with the
+ * in-flight reset). A target holding an instance capability has no network
+ * reset path at all — break-glass only. This route dispatches between the
+ * org-scoped and instance-scoped credential-reset operations by that
+ * classification. Every failure that could enumerate the
+ * target — an unknown or non-human principal, a caller lacking
+ * credential-reset, an org-P holder reaching an org-O target, and a target
+ * holding an instance capability (break-glass only) — answers a single
+ * uniform `401`; the true cause is durable in the audit trail, never on the
+ * wire.
+ *
+ */
+export const resetCredential = <ThrowOnError extends boolean = false>(options: Options<ResetCredentialData, ThrowOnError>) => (options.client ?? client).post<ResetCredentialResponses, ResetCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/accounts/{principal}/credential-reset',
+    ...options
+});
+
+/**
+ * Begin passkey enrolment; returns opaque creation options.
+ *
+ * Verifies the account-security proof up front (the pre-existing password
+ * or a confirmed TOTP code, where one stands) and opens a registration
+ * ceremony, returning the browser-generated creation options verbatim.
+ * `enrol/finish` completes the enrolment.
+ *
+ */
+export const enrolPasskeyStart = <ThrowOnError extends boolean = false>(options: Options<EnrolPasskeyStartData, ThrowOnError>) => (options.client ?? client).post<EnrolPasskeyStartResponses, EnrolPasskeyStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/enrol/start',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Complete passkey enrolment from the attestation response.
+ *
+ * Validates the opaque attestation response against the live ceremony,
+ * stores the credential, and reissues the acting session. A browser
+ * session's reissued token is delivered on the `__Host-wenv` cookie.
+ *
+ */
+export const enrolPasskeyFinish = <ThrowOnError extends boolean = false>(options: Options<EnrolPasskeyFinishData, ThrowOnError>) => (options.client ?? client).post<EnrolPasskeyFinishResponses, EnrolPasskeyFinishErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/enrol/finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Begin a discoverable-credential passkey login.
+ *
+ * Fully pre-auth: opens a discoverable-credential request ceremony and
+ * returns the opaque request options. Discloses nothing about which
+ * accounts or credentials exist.
+ *
+ */
+export const passkeyLoginStart = <ThrowOnError extends boolean = false>(options?: Options<PasskeyLoginStartData, ThrowOnError>) => (options?.client ?? client).post<PasskeyLoginStartResponses, PasskeyLoginStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/login/start',
+    ...options
+});
+
+/**
+ * Complete a passkey login from the assertion response.
+ *
+ * Validates the opaque assertion against the live ceremony and mints a
+ * browser session carrying WebAuthn assurance, delivered on the
+ * `__Host-wenv` cookie. A signature-count regression disables the cloned
+ * credential (audited) and refuses.
+ *
+ */
+export const passkeyLoginFinish = <ThrowOnError extends boolean = false>(options: Options<PasskeyLoginFinishData, ThrowOnError>) => (options.client ?? client).post<PasskeyLoginFinishResponses, PasskeyLoginFinishErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/login/finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Begin a passkey step-up for the acting session.
+ *
+ * Opens a non-discoverable ceremony scoped to the acting account's
+ * credentials and returns opaque request options. `step-up/finish`
+ * elevates the session.
+ *
+ */
+export const stepUpPasskeyStart = <ThrowOnError extends boolean = false>(options?: Options<StepUpPasskeyStartData, ThrowOnError>) => (options?.client ?? client).post<StepUpPasskeyStartResponses, StepUpPasskeyStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/step-up/start',
+    ...options
+});
+
+/**
+ * Elevate the acting session by presenting a passkey.
+ *
+ * Validates the opaque assertion and appends `webauthn` to the acting
+ * session's factor set, rotating its token (delivered on the `__Host-wenv`
+ * cookie for a browser session). The original authenticated_at is
+ * preserved.
+ *
+ */
+export const stepUpPasskeyFinish = <ThrowOnError extends boolean = false>(options: Options<StepUpPasskeyFinishData, ThrowOnError>) => (options.client ?? client).post<StepUpPasskeyFinishResponses, StepUpPasskeyFinishErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/step-up/finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Begin a passkey reauthentication bound to an operation unit.
+ *
+ * Opens a ceremony whose challenge is bound to the enumerated unit
+ * (environment plus the sorted credential ids), so the assertion
+ * authorizes exactly that unit. `reauth/finish` opens the window.
+ *
+ */
+export const reauthPasskeyStart = <ThrowOnError extends boolean = false>(options: Options<ReauthPasskeyStartData, ThrowOnError>) => (options.client ?? client).post<ReauthPasskeyStartResponses, ReauthPasskeyStartErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/reauth/start',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Complete a passkey reauthentication; opens the window.
+ *
+ * Validates the opaque assertion and opens a reauthentication window over
+ * the bound environment (single-decision where the effective window is
+ * zero). The reauth rotates the acting session; a browser session's
+ * rotated token is delivered on the `__Host-wenv` cookie.
+ *
+ */
+export const reauthPasskeyFinish = <ThrowOnError extends boolean = false>(options: Options<ReauthPasskeyFinishData, ThrowOnError>) => (options.client ?? client).post<ReauthPasskeyFinishResponses, ReauthPasskeyFinishErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/reauth/finish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List the caller's enrolled passkeys.
+ */
+export const listPasskeys = <ThrowOnError extends boolean = false>(options?: Options<ListPasskeysData, ThrowOnError>) => (options?.client ?? client).get<ListPasskeysResponses, ListPasskeysErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/credentials',
+    ...options
+});
+
+/**
+ * Remove an enrolled passkey.
+ *
+ * An account-security mutation proved by the pre-existing password or a
+ * TOTP code (never the credential being removed, B7). Refuses a removal
+ * that would drop a passwordless account below the passkey-only floor;
+ * reissues the acting session. A browser session's reissued token is
+ * delivered on the `__Host-wenv` cookie.
+ *
+ */
+export const removePasskey = <ThrowOnError extends boolean = false>(options: Options<RemovePasskeyData, ThrowOnError>) => (options.client ?? client).delete<RemovePasskeyResponses, RemovePasskeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/webauthn/credentials/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List configured OIDC providers.
+ */
+export const listOidcProviders = <ThrowOnError extends boolean = false>(options?: Options<ListOidcProvidersData, ThrowOnError>) => (options?.client ?? client).get<ListOidcProvidersResponses, ListOidcProvidersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/oidc-providers',
+    ...options
+});
+
+/**
+ * Delete an OIDC provider.
+ *
+ * Sweeps every session authenticated through the provider (A4); its live
+ * transactions cascade (A14).
+ *
+ */
+export const deleteOidcProvider = <ThrowOnError extends boolean = false>(options: Options<DeleteOidcProviderData, ThrowOnError>) => (options.client ?? client).delete<DeleteOidcProviderResponses, DeleteOidcProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/oidc-providers/{slug}',
+    ...options
+});
+
+/**
+ * Read one OIDC provider.
+ */
+export const getOidcProvider = <ThrowOnError extends boolean = false>(options: Options<GetOidcProviderData, ThrowOnError>) => (options.client ?? client).get<GetOidcProviderResponses, GetOidcProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/oidc-providers/{slug}',
+    ...options
+});
+
+/**
+ * Create or reconfigure an OIDC provider.
+ *
+ * The issuer is immutable after create (A3): a changed issuer is refused.
+ * Discovery is re-run and the document's issuer must byte-equal the
+ * configured one. A reconfigure sweeps every session authenticated through
+ * the provider (A4).
+ *
+ */
+export const putOidcProvider = <ThrowOnError extends boolean = false>(options: Options<PutOidcProviderData, ThrowOnError>) => (options.client ?? client).put<PutOidcProviderResponses, PutOidcProviderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/oidc-providers/{slug}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });

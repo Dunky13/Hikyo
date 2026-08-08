@@ -102,19 +102,18 @@ func Bearer(artifact string) Actor { return Actor{bearer: artifact} }
 // transport that could build one could authorize as anybody.
 func LocalPrincipal(p domain.PrincipalID) Actor { return Actor{principal: p} }
 
-// resolve turns an Actor into a principal, inside the caller's transaction.
-func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (domain.PrincipalID, error) {
+// resolve returns the caller's live Identity. A LocalPrincipal actor is local
+// host authority: it carries no session, so its Identity has an empty SessionID
+// and is exempt from the MFA-mandatory assurance check at authorize(). A bearer
+// actor resolves to the full session assurance the chokepoint enforces.
+func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (authz.Identity, error) {
 	if a.principal != "" {
-		return a.principal, nil
+		return authz.Identity{Principal: a.principal}, nil
 	}
 	if a.bearer == "" {
-		return "", domain.ErrUnauthenticated
+		return authz.Identity{}, domain.ErrUnauthenticated
 	}
-	id, err := az.Authenticate(ctx, a.bearer, now)
-	if err != nil {
-		return "", err
-	}
-	return id.Principal, nil
+	return az.Authenticate(ctx, a.bearer, now)
 }
 
 func newID(prefix string) (string, error) {
@@ -163,18 +162,18 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 		CreatedAt: store.CanonTime(time.Now()),
 	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpOrgCreate, domain.Scope{})
+		p, err := az.Authorize(ctx, caller, authz.OpOrgCreate, domain.Scope{})
 		if err != nil {
 			return err
 		}
 		if err := r.Orgs().Create(ctx, p, org); err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventOrgCreated, principal,
+		ev, err := domainEvent(ctx, audit.EventOrgCreated, caller.Principal,
 			audit.Object{Type: "org", ID: org.ID},
 			audit.Payload{"org_id": org.ID, "org_name": audit.SanitizeFreeText(org.Name)})
 		if err != nil {
@@ -196,11 +195,11 @@ func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool
 func (s *Orgs) Get(ctx context.Context, actor Actor, id string) (Org, error) {
 	var out store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpOrgGet, domain.Scope{})
+		p, err := az.Authorize(ctx, caller, authz.OpOrgGet, domain.Scope{})
 		if err != nil {
 			return err
 		}
@@ -208,7 +207,7 @@ func (s *Orgs) Get(ctx context.Context, actor Actor, id string) (Org, error) {
 		if err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventOrgRead, principal,
+		ev, err := domainEvent(ctx, audit.EventOrgRead, caller.Principal,
 			audit.Object{Type: "org", ID: out.ID},
 			audit.Payload{"query": "get", "row_count": 1})
 		if err != nil {
@@ -222,11 +221,11 @@ func (s *Orgs) Get(ctx context.Context, actor Actor, id string) (Org, error) {
 func (s *Orgs) List(ctx context.Context, actor Actor) ([]Org, error) {
 	var out []store.Org
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
+		p, err := az.Authorize(ctx, caller, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
@@ -234,7 +233,7 @@ func (s *Orgs) List(ctx context.Context, actor Actor) ([]Org, error) {
 		if err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+		ev, err := domainEvent(ctx, audit.EventOrgRead, caller.Principal, audit.Object{},
 			audit.Payload{"query": "list", "row_count": len(out)})
 		if err != nil {
 			return err
@@ -254,11 +253,11 @@ func (s *Orgs) List(ctx context.Context, actor Actor) ([]Org, error) {
 func (s *Orgs) Count(ctx context.Context, actor Actor) (int64, error) {
 	var out int64
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpOrgList, domain.Scope{})
+		p, err := az.Authorize(ctx, caller, authz.OpOrgList, domain.Scope{})
 		if err != nil {
 			return err
 		}
@@ -266,7 +265,7 @@ func (s *Orgs) Count(ctx context.Context, actor Actor) (int64, error) {
 		if err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventOrgRead, principal, audit.Object{},
+		ev, err := domainEvent(ctx, audit.EventOrgRead, caller.Principal, audit.Object{},
 			audit.Payload{"query": "count", "row_count": int(out)})
 		if err != nil {
 			return err
@@ -291,18 +290,18 @@ func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, na
 	}
 	proj := store.NewProject{ID: id, Name: name, CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpProjectCreate, domain.Scope{Org: org})
+		p, err := az.Authorize(ctx, caller, authz.OpProjectCreate, domain.Scope{Org: org})
 		if err != nil {
 			return err
 		}
 		if err := r.Projects().Create(ctx, p, proj); err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventProjectCreated, principal,
+		ev, err := domainEvent(ctx, audit.EventProjectCreated, caller.Principal,
 			audit.Object{Type: "project", ID: proj.ID},
 			audit.Payload{"name": audit.SanitizeFreeText(proj.Name)})
 		if err != nil {
@@ -333,18 +332,18 @@ func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Sco
 	}
 	env := store.NewEnvironment{ID: id, Name: name, Note: "", CreatedAt: store.CanonTime(time.Now())}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpEnvCreate, scope)
+		p, err := az.Authorize(ctx, caller, authz.OpEnvCreate, scope)
 		if err != nil {
 			return err
 		}
 		if err := r.Environments().Create(ctx, p, env); err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventEnvCreated, principal,
+		ev, err := domainEvent(ctx, audit.EventEnvCreated, caller.Principal,
 			audit.Object{Type: "environment", ID: env.ID},
 			audit.Payload{"name": audit.SanitizeFreeText(env.Name)})
 		if err != nil {
@@ -364,11 +363,11 @@ func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Sco
 func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope) (store.Environment, error) {
 	var out store.Environment
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpEnvRead, scope)
+		p, err := az.Authorize(ctx, caller, authz.OpEnvRead, scope)
 		if err != nil {
 			return err
 		}
@@ -380,18 +379,18 @@ func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope)
 
 func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		principal, err := actor.resolve(ctx, az, time.Now().UTC())
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		p, err := az.Authorize(ctx, principal, authz.OpEnvUpdateNote, scope)
+		p, err := az.Authorize(ctx, caller, authz.OpEnvUpdateNote, scope)
 		if err != nil {
 			return err
 		}
 		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
 			return err
 		}
-		ev, err := domainEvent(ctx, audit.EventEnvNoteChanged, principal,
+		ev, err := domainEvent(ctx, audit.EventEnvNoteChanged, caller.Principal,
 			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{})
 		if err != nil {
 			return err

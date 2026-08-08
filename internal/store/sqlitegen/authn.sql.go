@@ -20,6 +20,65 @@ func (q *Queries) AdvancePrincipalGeneration(ctx context.Context, id string) err
 	return err
 }
 
+const advanceTOTPStep = `-- name: AdvanceTOTPStep :execrows
+UPDATE totp_credentials SET last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND last_step < ?
+`
+
+type AdvanceTOTPStepParams struct {
+	LastStep   int64
+	ID         string
+	RowVersion int64
+	LastStep_2 int64
+}
+
+// Single-use per (account, step): a code is consumed only if its step is
+// strictly beyond the last one, which the CAS enforces atomically.
+// wenv:authn-resolution
+func (q *Queries) AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advanceTOTPStep,
+		arg.LastStep,
+		arg.ID,
+		arg.RowVersion,
+		arg.LastStep_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const confirmTOTP = `-- name: ConfirmTOTP :execrows
+UPDATE totp_credentials
+SET confirmed_at = ?, last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND confirmed_at IS NULL AND last_step < ?
+`
+
+type ConfirmTOTPParams struct {
+	ConfirmedAt sql.NullString
+	LastStep    int64
+	ID          string
+	RowVersion  int64
+	LastStep_2  int64
+}
+
+// Confirmation is the account-security mutation's write: it promotes the
+// pending seed and consumes the confirming step in one CAS.
+// wenv:authn-resolution
+func (q *Queries) ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, confirmTOTP,
+		arg.ConfirmedAt,
+		arg.LastStep,
+		arg.ID,
+		arg.RowVersion,
+		arg.LastStep_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const consumeCredentialAuthority = `-- name: ConsumeCredentialAuthority :execrows
 UPDATE credential_authorities SET consumed_at = ?
 WHERE id = ? AND consumed_at IS NULL
@@ -41,6 +100,67 @@ func (q *Queries) ConsumeCredentialAuthority(ctx context.Context, arg ConsumeCre
 	return result.RowsAffected()
 }
 
+const consumeOIDCTransaction = `-- name: ConsumeOIDCTransaction :execrows
+UPDATE oidc_transactions SET consumed_at = ?
+WHERE id = ? AND consumed_at IS NULL
+`
+
+type ConsumeOIDCTransactionParams struct {
+	ConsumedAt sql.NullString
+	ID         string
+}
+
+// Single-use consumption: the NULL guard is the atomic claim, so a callback
+// cannot be replayed and two concurrent callbacks cannot both consume one tx.
+// wenv:authn-resolution
+func (q *Queries) ConsumeOIDCTransaction(ctx context.Context, arg ConsumeOIDCTransactionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeOIDCTransaction, arg.ConsumedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const consumeOutstandingAuthoritiesForAccount = `-- name: ConsumeOutstandingAuthoritiesForAccount :exec
+UPDATE credential_authorities SET consumed_at = ?
+WHERE account_id = ? AND consumed_at IS NULL
+`
+
+type ConsumeOutstandingAuthoritiesForAccountParams struct {
+	ConsumedAt sql.NullString
+	AccountID  string
+}
+
+// Minting an establishment authority for an account consumes every other
+// outstanding one, so a second live reset token cannot linger past the point
+// the operator believes the flow completed.
+// wenv:authn-resolution
+func (q *Queries) ConsumeOutstandingAuthoritiesForAccount(ctx context.Context, arg ConsumeOutstandingAuthoritiesForAccountParams) error {
+	_, err := q.db.ExecContext(ctx, consumeOutstandingAuthoritiesForAccount, arg.ConsumedAt, arg.AccountID)
+	return err
+}
+
+const consumeSingleDecisionWindow = `-- name: ConsumeSingleDecisionWindow :execrows
+UPDATE reauth_windows SET consumed_at = ?
+WHERE id = ? AND single_decision = 1 AND consumed_at IS NULL
+`
+
+type ConsumeSingleDecisionWindowParams struct {
+	ConsumedAt sql.NullString
+	ID         string
+}
+
+// Claim a single_decision window exactly once: the NULL guard is the atomic
+// claim, so a second disclosure loses and is refused (B11 double-spend).
+// wenv:authn-resolution
+func (q *Queries) ConsumeSingleDecisionWindow(ctx context.Context, arg ConsumeSingleDecisionWindowParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeSingleDecisionWindow, arg.ConsumedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts
 `
@@ -51,6 +171,41 @@ func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteExternalIdentity = `-- name: DeleteExternalIdentity :exec
+DELETE FROM external_identities WHERE id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeleteExternalIdentity(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteExternalIdentity, id)
+	return err
+}
+
+const deletePendingTOTPForAccount = `-- name: DeletePendingTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeletePendingTOTPForAccount(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingTOTPForAccount, accountID)
+	return err
+}
+
+const deleteReauthWindowsForEnvironment = `-- name: DeleteReauthWindowsForEnvironment :execrows
+DELETE FROM reauth_windows WHERE environment_id = ?
+`
+
+// Invalidate every open window on one environment: the first of LowerEffective
+// Window's five ADR items on the effective-window transition (#54 B6).
+// wenv:authn-resolution
+func (q *Queries) DeleteReauthWindowsForEnvironment(ctx context.Context, environmentID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteReauthWindowsForEnvironment, environmentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -75,15 +230,97 @@ func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID st
 	return err
 }
 
+const deleteSessionsForProvider = `-- name: DeleteSessionsForProvider :execrows
+DELETE FROM sessions WHERE provider_id = ?
+`
+
+// The federated-session sweep (A4): every session minted through a provider
+// dies when the provider's issuer/client/assurance policy changes or the
+// provider is disabled or deleted. reauth_windows cascade from the session.
+// wenv:authn-resolution
+func (q *Queries) DeleteSessionsForProvider(ctx context.Context, providerID sql.NullString) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSessionsForProvider, providerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteTOTPForAccount = `-- name: DeleteTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeleteTOTPForAccount(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deleteTOTPForAccount, accountID)
+	return err
+}
+
+const environmentChainByID = `-- name: EnvironmentChainByID :one
+SELECT org_id, project_id, id FROM environments WHERE id = ?
+`
+
+type EnvironmentChainByIDRow struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+}
+
+// Resolve an environment's chain from its id alone, for LowerEffectiveWindow's
+// stranded-principal query (#54 B6): the denormalized chain columns make the row
+// self-describing, so the grant-coverage predicate can be built from an env id.
+// wenv:authn-resolution
+func (q *Queries) EnvironmentChainByID(ctx context.Context, id string) (EnvironmentChainByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, environmentChainByID, id)
+	var i EnvironmentChainByIDRow
+	err := row.Scan(&i.OrgID, &i.ProjectID, &i.ID)
+	return i, err
+}
+
 const getAccountByID = `-- name: GetAccountByID :one
 SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE id = ?
 `
 
+type GetAccountByIDRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   string
+}
+
 // wenv:authn-resolution
-func (q *Queries) GetAccountByID(ctx context.Context, id string) (Account, error) {
+func (q *Queries) GetAccountByID(ctx context.Context, id string) (GetAccountByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getAccountByID, id)
-	var i Account
+	var i GetAccountByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Username,
+		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAccountByPrincipal = `-- name: GetAccountByPrincipal :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE principal_id = ?
+`
+
+type GetAccountByPrincipalRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   string
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetAccountByPrincipal(ctx context.Context, principalID string) (GetAccountByPrincipalRow, error) {
+	row := q.db.QueryRowContext(ctx, getAccountByPrincipal, principalID)
+	var i GetAccountByPrincipalRow
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
@@ -99,15 +336,53 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE username = ?
 `
 
+type GetAccountByUsernameRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   string
+}
+
 // wenv:authn-resolution
-func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (Account, error) {
+func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (GetAccountByUsernameRow, error) {
 	row := q.db.QueryRowContext(ctx, getAccountByUsername, username)
-	var i Account
+	var i GetAccountByUsernameRow
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
 		&i.Username,
 		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getConfirmedTOTPForAccount = `-- name: GetConfirmedTOTPForAccount :one
+
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NOT NULL
+`
+
+// Factors (#54, human-auth ADR). TOTP, recovery codes and the session-rotation
+// writers join the enumerated resolution surface for the same reason the login
+// writers did: they mutate the artifacts that decide how strongly a caller
+// authenticated, which is resolved rather than authorized.
+// wenv:authn-resolution
+func (q *Queries) GetConfirmedTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getConfirmedTOTPForAccount, accountID)
+	var i TotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Seed,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.LastStep,
+		&i.CreatedStep,
+		&i.ConfirmedAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -165,6 +440,168 @@ func (q *Queries) GetCredentialEpoch(ctx context.Context) (int64, error) {
 	return credential_epoch, err
 }
 
+const getEnabledProviderByIssuer = `-- name: GetEnabledProviderByIssuer :one
+
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE kind = ? AND issuer = ? AND enabled = 1
+`
+
+type GetEnabledProviderByIssuerParams struct {
+	Kind   string
+	Issuer string
+}
+
+// OIDC login/link/reauth resolution (#54, human-auth ADR -- The OIDC
+// transaction). These read providers, transactions and external identities
+// with request-supplied identifiers, and write the transaction/identity/session
+// rows that decide who a caller is: the resolution surface, proof-free, for the
+// same reason the login writers are.
+// wenv:authn-resolution
+func (q *Queries) GetEnabledProviderByIssuer(ctx context.Context, arg GetEnabledProviderByIssuerParams) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEnabledProviderByIssuer, arg.Kind, arg.Issuer)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEnabledProviderBySlug = `-- name: GetEnabledProviderBySlug :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE slug = ? AND enabled = 1
+`
+
+// Start resolves the provider by slug for an enabled provider only: a login,
+// link or reauth may only begin against a provider that is currently serving.
+// wenv:authn-resolution
+func (q *Queries) GetEnabledProviderBySlug(ctx context.Context, slug string) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEnabledProviderBySlug, slug)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExternalIdentity = `-- name: GetExternalIdentity :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE kind = ? AND issuer = ? AND subject = ?
+`
+
+type GetExternalIdentityParams struct {
+	Kind    string
+	Issuer  string
+	Subject string
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetExternalIdentity(ctx context.Context, arg GetExternalIdentityParams) (ExternalIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getExternalIdentity, arg.Kind, arg.Issuer, arg.Subject)
+	var i ExternalIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Kind,
+		&i.Issuer,
+		&i.Subject,
+		&i.ProviderID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getExternalIdentityByID = `-- name: GetExternalIdentityByID :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetExternalIdentityByID(ctx context.Context, id string) (ExternalIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getExternalIdentityByID, id)
+	var i ExternalIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Kind,
+		&i.Issuer,
+		&i.Subject,
+		&i.ProviderID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOIDCTransactionByState = `-- name: GetOIDCTransactionByState :one
+SELECT id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+       purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+       account_id, environment_id, ceremony_id, credential_epoch, created_at,
+       expires_at, consumed_at
+FROM oidc_transactions WHERE state_verifier = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetOIDCTransactionByState(ctx context.Context, stateVerifier []byte) (OidcTransaction, error) {
+	row := q.db.QueryRowContext(ctx, getOIDCTransactionByState, stateVerifier)
+	var i OidcTransaction
+	err := row.Scan(
+		&i.ID,
+		&i.StateVerifier,
+		&i.Nonce,
+		&i.PkceVerifier,
+		&i.ProviderID,
+		&i.Issuer,
+		&i.RedirectUri,
+		&i.Purpose,
+		&i.BindingKind,
+		&i.InitiatingSessionID,
+		&i.BrowserBindingVerifier,
+		&i.AccountID,
+		&i.EnvironmentID,
+		&i.CeremonyID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const getPasswordCredential = `-- name: GetPasswordCredential :one
 SELECT account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
        dek_version, credential_epoch, row_version, updated_at
@@ -185,6 +622,31 @@ func (q *Queries) GetPasswordCredential(ctx context.Context, accountID string) (
 		&i.CredentialEpoch,
 		&i.RowVersion,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPendingTOTPForAccount = `-- name: GetPendingTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetPendingTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getPendingTOTPForAccount, accountID)
+	var i TotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Seed,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.LastStep,
+		&i.CreatedStep,
+		&i.ConfirmedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -215,6 +677,99 @@ func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, erro
 	var kind string
 	err := row.Scan(&kind)
 	return kind, err
+}
+
+const getProviderForCallback = `-- name: GetProviderForCallback :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE id = ?
+`
+
+// The recorded provider a callback exchanges at (A11): loaded by the id the
+// transaction pinned, so the exchange happens only at that provider.
+// wenv:authn-resolution
+func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getProviderForCallback, id)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getReauthWindow = `-- name: GetReauthWindow :one
+SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+       authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+       consumed_at, created_at
+FROM reauth_windows WHERE session_id = ? AND environment_id = ?
+`
+
+type GetReauthWindowParams struct {
+	SessionID     string
+	EnvironmentID string
+}
+
+// Reauth-window consumption at disclosure (#54, human-auth ADR - Reauthentication).
+// A disclosure on environment E requires a live window for (session, E). These
+// read the window, slide its sliding clock (never past the hard cap the service
+// enforces), and claim a single_decision window exactly once via the consumed_at
+// NULL guard. There is no reveal operation to call these yet (#50/#58); they ship
+// as the library those verticals consume, exercised directly by fixtures.
+// wenv:authn-resolution
+func (q *Queries) GetReauthWindow(ctx context.Context, arg GetReauthWindowParams) (ReauthWindow, error) {
+	row := q.db.QueryRowContext(ctx, getReauthWindow, arg.SessionID, arg.EnvironmentID)
+	var i ReauthWindow
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.EnvironmentID,
+		&i.CeremonyID,
+		&i.FactorClass,
+		&i.SingleDecision,
+		&i.AuthenticatedAt,
+		&i.WindowExpiresAt,
+		&i.HardExpiresAt,
+		&i.CredentialEpoch,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRecoveryCodes = `-- name: GetRecoveryCodes :one
+SELECT account_id, batch, dek_version, credential_epoch, row_version, generated_at
+FROM recovery_codes WHERE account_id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetRecoveryCodes(ctx context.Context, accountID string) (RecoveryCode, error) {
+	row := q.db.QueryRowContext(ctx, getRecoveryCodes, accountID)
+	var i RecoveryCode
+	err := row.Scan(
+		&i.AccountID,
+		&i.Batch,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.GeneratedAt,
+	)
+	return i, err
 }
 
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
@@ -319,6 +874,38 @@ func (q *Queries) InsertCredentialAuthority(ctx context.Context, arg InsertCrede
 	return err
 }
 
+const insertExternalIdentity = `-- name: InsertExternalIdentity :exec
+INSERT INTO external_identities
+    (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertExternalIdentityParams struct {
+	ID              string
+	AccountID       string
+	Kind            string
+	Issuer          string
+	Subject         string
+	ProviderID      string
+	CredentialEpoch int64
+	CreatedAt       string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertExternalIdentity(ctx context.Context, arg InsertExternalIdentityParams) error {
+	_, err := q.db.ExecContext(ctx, insertExternalIdentity,
+		arg.ID,
+		arg.AccountID,
+		arg.Kind,
+		arg.Issuer,
+		arg.Subject,
+		arg.ProviderID,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertGrant = `-- name: InsertGrant :exec
 INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -344,6 +931,59 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) error 
 		arg.ProjectID,
 		arg.EnvID,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertOIDCTransaction = `-- name: InsertOIDCTransaction :exec
+INSERT INTO oidc_transactions
+    (id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+     purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+     account_id, environment_id, ceremony_id, credential_epoch, created_at,
+     expires_at, consumed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+`
+
+type InsertOIDCTransactionParams struct {
+	ID                     string
+	StateVerifier          []byte
+	Nonce                  []byte
+	PkceVerifier           string
+	ProviderID             string
+	Issuer                 string
+	RedirectUri            string
+	Purpose                string
+	BindingKind            string
+	InitiatingSessionID    sql.NullString
+	BrowserBindingVerifier []byte
+	AccountID              sql.NullString
+	EnvironmentID          sql.NullString
+	CeremonyID             sql.NullString
+	CredentialEpoch        int64
+	CreatedAt              string
+	ExpiresAt              string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertOIDCTransaction(ctx context.Context, arg InsertOIDCTransactionParams) error {
+	_, err := q.db.ExecContext(ctx, insertOIDCTransaction,
+		arg.ID,
+		arg.StateVerifier,
+		arg.Nonce,
+		arg.PkceVerifier,
+		arg.ProviderID,
+		arg.Issuer,
+		arg.RedirectUri,
+		arg.Purpose,
+		arg.BindingKind,
+		arg.InitiatingSessionID,
+		arg.BrowserBindingVerifier,
+		arg.AccountID,
+		arg.EnvironmentID,
+		arg.CeremonyID,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -400,12 +1040,84 @@ func (q *Queries) InsertPrincipal(ctx context.Context, arg InsertPrincipalParams
 	return err
 }
 
+const insertReauthWindow = `-- name: InsertReauthWindow :exec
+INSERT INTO reauth_windows
+    (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+     authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+     consumed_at, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+`
+
+type InsertReauthWindowParams struct {
+	ID              string
+	SessionID       string
+	EnvironmentID   string
+	CeremonyID      string
+	FactorClass     string
+	SingleDecision  int64
+	AuthenticatedAt string
+	WindowExpiresAt string
+	HardExpiresAt   string
+	CredentialEpoch int64
+	CreatedAt       string
+}
+
+// A reauthentication window opened by a possession-factor ceremony. OIDC reauth
+// opens one only where the effective window is > 0; a WebAuthn ceremony can bind
+// the enumerated unit, so at a 0 effective window it opens a single_decision
+// window (B11) consumed by exactly one enumerated decision. Keyed by session,
+// cascading with it.
+// wenv:authn-resolution
+func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindowParams) error {
+	_, err := q.db.ExecContext(ctx, insertReauthWindow,
+		arg.ID,
+		arg.SessionID,
+		arg.EnvironmentID,
+		arg.CeremonyID,
+		arg.FactorClass,
+		arg.SingleDecision,
+		arg.AuthenticatedAt,
+		arg.WindowExpiresAt,
+		arg.HardExpiresAt,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertRecoveryCodes = `-- name: InsertRecoveryCodes :exec
+INSERT INTO recovery_codes
+    (account_id, batch, dek_version, credential_epoch, row_version, generated_at)
+VALUES (?, ?, ?, ?, 1, ?)
+`
+
+type InsertRecoveryCodesParams struct {
+	AccountID       string
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	GeneratedAt     string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error {
+	_, err := q.db.ExecContext(ctx, insertRecoveryCodes,
+		arg.AccountID,
+		arg.Batch,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.GeneratedAt,
+	)
+	return err
+}
+
 const insertSession = `-- name: InsertSession :exec
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
-     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
+     provider_id, csrf_verifier)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -425,6 +1137,8 @@ type InsertSessionParams struct {
 	AbsoluteExpiresAt string
 	SourceIp          string
 	UserAgent         string
+	ProviderID        sql.NullString
+	CsrfVerifier      []byte
 }
 
 // wenv:authn-resolution
@@ -446,8 +1160,81 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.AbsoluteExpiresAt,
 		arg.SourceIp,
 		arg.UserAgent,
+		arg.ProviderID,
+		arg.CsrfVerifier,
 	)
 	return err
+}
+
+const insertTOTP = `-- name: InsertTOTP :exec
+INSERT INTO totp_credentials
+    (id, account_id, seed, dek_version, credential_epoch, row_version,
+     last_step, created_step, confirmed_at, created_at)
+VALUES (?, ?, ?, ?, ?, 1, ?, ?, NULL, ?)
+`
+
+type InsertTOTPParams struct {
+	ID              string
+	AccountID       string
+	Seed            []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	LastStep        int64
+	CreatedStep     int64
+	CreatedAt       string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertTOTP(ctx context.Context, arg InsertTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, insertTOTP,
+		arg.ID,
+		arg.AccountID,
+		arg.Seed,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.LastStep,
+		arg.CreatedStep,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const listExternalIdentitiesForAccount = `-- name: ListExternalIdentitiesForAccount :many
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE account_id = ? ORDER BY created_at
+`
+
+// wenv:authn-resolution
+func (q *Queries) ListExternalIdentitiesForAccount(ctx context.Context, accountID string) ([]ExternalIdentity, error) {
+	rows, err := q.db.QueryContext(ctx, listExternalIdentitiesForAccount, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalIdentity
+	for rows.Next() {
+		var i ExternalIdentity
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Kind,
+			&i.Issuer,
+			&i.Subject,
+			&i.ProviderID,
+			&i.CredentialEpoch,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGrantsForPrincipal = `-- name: ListGrantsForPrincipal :many
@@ -489,6 +1276,66 @@ func (q *Queries) ListGrantsForPrincipal(ctx context.Context, principalID string
 		return nil, err
 	}
 	return items, nil
+}
+
+const listGrantsForResetTarget = `-- name: ListGrantsForResetTarget :many
+SELECT capability, org_id, project_id, env_id FROM grants
+WHERE principal_id = ?
+`
+
+type ListGrantsForResetTargetRow struct {
+	Capability string
+	OrgID      sql.NullString
+	ProjectID  sql.NullString
+	EnvID      sql.NullString
+}
+
+// The target principal's grant set, for the credential-reset org-bounded test
+// (#54 credential-reset, ADR - Recovery): reset reaches only a target whose grants
+// lie entirely within one org and who holds no instance capability.
+// wenv:authn-resolution
+func (q *Queries) ListGrantsForResetTarget(ctx context.Context, principalID string) ([]ListGrantsForResetTargetRow, error) {
+	rows, err := q.db.QueryContext(ctx, listGrantsForResetTarget, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGrantsForResetTargetRow
+	for rows.Next() {
+		var i ListGrantsForResetTargetRow
+		if err := rows.Scan(
+			&i.Capability,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPrincipalRow = `-- name: LockPrincipalRow :one
+SELECT id FROM principals WHERE id = ?
+`
+
+// Principal row lock (#54 B14): every grant writer takes it so the credential-
+// reset org-bounded test serializes against a concurrent grant landing. sqlite's
+// single writer serializes trivially; postgres takes FOR UPDATE. The grant-lock
+// analyzer pins that this sits inside every grant writer.
+// wenv:authn-resolution
+func (q *Queries) LockPrincipalRow(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockPrincipalRow, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const resolveEnvChain = `-- name: ResolveEnvChain :one
@@ -560,6 +1407,95 @@ func (q *Queries) ResolveProjectChain(ctx context.Context, arg ResolveProjectCha
 	return i, err
 }
 
+const rotateSessionFactors = `-- name: RotateSessionFactors :exec
+UPDATE sessions SET verifier = ?, factors = ? WHERE id = ?
+`
+
+type RotateSessionFactorsParams struct {
+	Verifier []byte
+	Factors  string
+	ID       string
+}
+
+// Step-up rotates the session token and rewrites its factor set; the original
+// authenticated_at and ceremony_id are preserved so absolute-age attribution
+// cannot be reset by repeated step-ups.
+// wenv:authn-resolution
+func (q *Queries) RotateSessionFactors(ctx context.Context, arg RotateSessionFactorsParams) error {
+	_, err := q.db.ExecContext(ctx, rotateSessionFactors, arg.Verifier, arg.Factors, arg.ID)
+	return err
+}
+
+const slideReauthWindow = `-- name: SlideReauthWindow :execrows
+UPDATE reauth_windows SET window_expires_at = ?
+WHERE id = ? AND single_decision = 0 AND consumed_at IS NULL
+`
+
+type SlideReauthWindowParams struct {
+	WindowExpiresAt string
+	ID              string
+}
+
+// Slide the idle window clock on a sliding (non single-decision) window. The hard
+// cap is enforced by the service, which passes min(now+window, hard_expires_at);
+// the NULL guard keeps a concurrently-claimed window from sliding.
+// wenv:authn-resolution
+func (q *Queries) SlideReauthWindow(ctx context.Context, arg SlideReauthWindowParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, slideReauthWindow, arg.WindowExpiresAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const strandedRevealPrincipalsForEnvironment = `-- name: StrandedRevealPrincipalsForEnvironment :many
+SELECT DISTINCT g.principal_id
+FROM grants g
+WHERE g.capability IN ('reveal', 'reveal-history')
+  AND (g.org_id IS NULL
+       OR (g.org_id = ?1 AND g.project_id IS NULL)
+       OR (g.org_id = ?1 AND g.project_id = ?2 AND g.env_id IS NULL)
+       OR (g.org_id = ?1 AND g.project_id = ?2 AND g.env_id = ?3))
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_credentials w
+      JOIN accounts a ON a.id = w.account_id
+      WHERE a.principal_id = g.principal_id AND w.disabled_at IS NULL)
+`
+
+type StrandedRevealPrincipalsForEnvironmentParams struct {
+	Org     sql.NullString
+	Project sql.NullString
+	Env     sql.NullString
+}
+
+// Stranded-principal enumeration for LowerEffectiveWindow (#54 B6): principals
+// holding reveal/reveal-history covering environment E (a grant at E, its project,
+// its org, or the instance) who have no enabled WebAuthn authenticator, so a 0
+// effective window fails their disclosure closed until they enrol one.
+// wenv:authn-resolution
+func (q *Queries) StrandedRevealPrincipalsForEnvironment(ctx context.Context, arg StrandedRevealPrincipalsForEnvironmentParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, strandedRevealPrincipalsForEnvironment, arg.Org, arg.Project, arg.Env)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var principal_id string
+		if err := rows.Scan(&principal_id); err != nil {
+			return nil, err
+		}
+		items = append(items, principal_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const touchSession = `-- name: TouchSession :exec
 UPDATE sessions SET last_seen_at = ?, idle_expires_at = ? WHERE id = ?
 `
@@ -609,6 +1545,40 @@ func (q *Queries) UpdatePasswordCredentialCAS(ctx context.Context, arg UpdatePas
 		arg.DekVersion,
 		arg.CredentialEpoch,
 		arg.UpdatedAt,
+		arg.AccountID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateRecoveryCodesCAS = `-- name: UpdateRecoveryCodesCAS :execrows
+UPDATE recovery_codes
+SET batch = ?, dek_version = ?, credential_epoch = ?,
+    row_version = row_version + 1, generated_at = ?
+WHERE account_id = ? AND row_version = ?
+`
+
+type UpdateRecoveryCodesCASParams struct {
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	GeneratedAt     string
+	AccountID       string
+	RowVersion      int64
+}
+
+// Regeneration and consumption both rewrite the batch under a CAS, so a
+// concurrent second presentation of the same code loses and fails closed.
+// wenv:authn-resolution
+func (q *Queries) UpdateRecoveryCodesCAS(ctx context.Context, arg UpdateRecoveryCodesCASParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRecoveryCodesCAS,
+		arg.Batch,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.GeneratedAt,
 		arg.AccountID,
 		arg.RowVersion,
 	)

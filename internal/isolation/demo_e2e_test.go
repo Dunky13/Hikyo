@@ -37,6 +37,25 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	auth := authService(t, db)
 	orgs := &service.Orgs{DB: db}
 
+	// A controllable server clock: after the assurance flip, `org create`
+	// (instance-config, MFA-mandatory) needs a stepped-up session, and TOTP
+	// confirm and step-up must present codes from later time steps than
+	// enrolment consumed. The clock is mutex-guarded because the post-response
+	// idle-clock slide reads it from a detached goroutine.
+	base := time.Now().UTC()
+	var clockMu sync.Mutex
+	clk := base
+	auth.Now = func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clk
+	}
+	advanceClock := func(d time.Duration) {
+		clockMu.Lock()
+		clk = clk.Add(d)
+		clockMu.Unlock()
+	}
+
 	httpSrv := httptest.NewServer(server.New(&service.System{DB: db}, &server.API{
 		Auth: auth, Orgs: orgs, Version: "e2e",
 	}))
@@ -145,6 +164,65 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	if whoami.Session.Assurance.Method != "local-password" ||
 		len(whoami.Session.Assurance.Factors) != 1 || whoami.Session.Assurance.Factors[0] != "password" {
 		t.Errorf("assurance %+v: the record must say truthfully what was presented", whoami.Session.Assurance)
+	}
+
+	// After the assurance flip a password-only session is refused instance-config:
+	// `org create` needs a stepped-up session. The admin enrols TOTP, confirms,
+	// and steps up before it can administer — the in-product path out of the
+	// bootstrap's single-factor state.
+	//
+	// The password-only session is refused the MFA-mandatory operation.
+	if code := cli.Run(t.Context(), ios(), []string{"org", "create", "--name", "premature"}); code != cli.ExitRefused {
+		t.Fatalf("a password-only session created an org (exit %d); the assurance gate is not enforcing", code)
+	}
+
+	// Enrol TOTP: the URI (carrying the seed) is delivered through the print
+	// triad's file leg, and the test plays the authenticator app.
+	totpFile := filepath.Join(workDir, "totp.uri")
+	prompts["to authorize enrolment"] = password
+	if code := cli.Run(t.Context(), ios(), []string{
+		"account", "factor", "enrol-totp", "--output-file", totpFile,
+	}); code != cli.ExitOK {
+		t.Fatalf("factor enrol-totp exited %d", code)
+	}
+	uriBytes, err := os.ReadFile(totpFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otpauthURI := strings.TrimSpace(string(uriBytes))
+
+	// Confirm with a code from a later step than enrolment consumed.
+	advanceClock(30 * time.Second)
+	prompts["to confirm"] = totpCode(t, otpauthURI, base.Add(30*time.Second))
+	if code := cli.Run(t.Context(), ios(), []string{"account", "factor", "confirm-totp"}); code != cli.ExitOK {
+		t.Fatalf("factor confirm-totp exited %d", code)
+	}
+
+	// Step up to present the factor; the token rotates and the CLI persists it.
+	advanceClock(30 * time.Second)
+	prompts["authenticator:"] = totpCode(t, otpauthURI, base.Add(60*time.Second))
+	if code := cli.Run(t.Context(), ios(), []string{"account", "factor", "step-up"}); code != cli.ExitOK {
+		t.Fatalf("factor step-up exited %d", code)
+	}
+
+	// whoami now reports two factor classes: the step-up is recorded truthfully.
+	stepUp := &strings.Builder{}
+	whoUp := ios()
+	whoUp.Stdout = stepUp
+	if code := cli.Run(t.Context(), whoUp, []string{"whoami", "-o", "json"}); code != cli.ExitOK {
+		t.Fatalf("whoami (post step-up) exited %d", code)
+	}
+	var elevated struct {
+		Session struct {
+			Assurance struct{ Factors []string }
+		}
+	}
+	if err := json.Unmarshal([]byte(stepUp.String()), &elevated); err != nil {
+		t.Fatalf("whoami output: %v\n%s", err, stepUp.String())
+	}
+	if got := elevated.Session.Assurance.Factors; len(got) != 2 ||
+		!(got[0] == "password" && got[1] == "totp") {
+		t.Errorf("post-step-up assurance factors %v, want [password totp]", got)
 	}
 
 	// The authenticated, audited API call — the demo's last step. It goes

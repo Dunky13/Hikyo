@@ -94,10 +94,11 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 		}
 		_, exemptEntry := ex.Wire[entry]
 		events := wireEvents[entry]
-		if op, ok := facts.WireRoutes()[entry]; ok {
+		for _, op := range facts.WireRoutes()[entry] {
 			// A route that reaches a registered operation inherits that
 			// operation's audit mapping; declaring it twice is how the two
-			// declarations drift apart.
+			// declarations drift apart. A route that dispatches between several
+			// operations inherits from every one it can reach.
 			m, known := mappings[op]
 			if !known {
 				t.Errorf("wire entry %s names unregistered operation %q", entry, op)
@@ -143,7 +144,16 @@ func TestInvariantAuditRegistryClosure(t *testing.T) {
 	// Every registered type is emitted by some operation or is the denial
 	// event (emitted by the authorization package, which has no operation
 	// row): a registered-but-unemittable type is dead catalogue.
-	emitted := map[audit.EventType]bool{audit.EventGrantDenied: true}
+	emitted := map[audit.EventType]bool{
+		audit.EventGrantDenied: true,
+		// auth.effective_window_lowered is emitted by the LowerEffectiveWindow
+		// library (#54 B6), which has no operation row and no wire entry: it is
+		// the ceremony #55's project-settings knob calls, shipped here ahead of
+		// its caller. Like the denial event above, a non-operation emitter that
+		// the completeness model cannot see through an operation/wire row. #55
+		// binds it to the settings-mutation wire entry when that lands.
+		audit.EventAuthEffectiveWindowLowered: true,
+	}
 	for _, m := range facts.AuditMappings() {
 		for _, et := range m.Events {
 			emitted[et] = true

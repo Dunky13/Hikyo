@@ -9,11 +9,12 @@ import (
 )
 
 type Account struct {
-	ID          string
-	PrincipalID string
-	Username    string
-	DisplayName string
-	CreatedAt   pgtype.Timestamptz
+	ID                 string
+	PrincipalID        string
+	Username           string
+	DisplayName        string
+	CreatedAt          pgtype.Timestamptz
+	WebauthnUserHandle []byte
 }
 
 type AuditInstanceEvent struct {
@@ -71,15 +72,16 @@ type AuthInstanceState struct {
 }
 
 type CredentialAuthority struct {
-	ID              string
-	Verifier        []byte
-	AccountID       string
-	Purpose         string
-	IssuedBy        string
-	CredentialEpoch int64
-	ExpiresAt       pgtype.Timestamptz
-	ConsumedAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
+	ID                        string
+	Verifier                  []byte
+	AccountID                 string
+	Purpose                   string
+	IssuedBy                  string
+	EstablishedCredentialKind string
+	CredentialEpoch           int64
+	ExpiresAt                 pgtype.Timestamptz
+	ConsumedAt                pgtype.Timestamptz
+	CreatedAt                 pgtype.Timestamptz
 }
 
 type Environment struct {
@@ -89,6 +91,17 @@ type Environment struct {
 	Name      string
 	Note      string
 	CreatedAt pgtype.Timestamptz
+}
+
+type ExternalIdentity struct {
+	ID              string
+	AccountID       string
+	Kind            string
+	Issuer          string
+	Subject         string
+	ProviderID      string
+	CredentialEpoch int64
+	CreatedAt       pgtype.Timestamptz
 }
 
 type Grant struct {
@@ -112,6 +125,46 @@ type MasterKey struct {
 	State        string
 	Blob         []byte
 	CreatedAt    pgtype.Timestamptz
+}
+
+type OidcProvider struct {
+	ID              string
+	Slug            string
+	DisplayName     string
+	Kind            string
+	Issuer          string
+	ClientID        string
+	ClientSecret    []byte
+	Scopes          string
+	RedirectUri     string
+	JitPolicy       pgtype.Text
+	AssurancePolicy pgtype.Text
+	Enabled         int64
+	DekVersion      int64
+	RowVersion      int64
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type OidcTransaction struct {
+	ID                     string
+	StateVerifier          []byte
+	Nonce                  []byte
+	PkceVerifier           string
+	ProviderID             string
+	Issuer                 string
+	RedirectUri            string
+	Purpose                string
+	BindingKind            string
+	InitiatingSessionID    pgtype.Text
+	BrowserBindingVerifier []byte
+	AccountID              pgtype.Text
+	EnvironmentID          pgtype.Text
+	CeremonyID             pgtype.Text
+	CredentialEpoch        int64
+	CreatedAt              pgtype.Timestamptz
+	ExpiresAt              pgtype.Timestamptz
+	ConsumedAt             pgtype.Timestamptz
 }
 
 type Org struct {
@@ -148,6 +201,30 @@ type Project struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type ReauthWindow struct {
+	ID              string
+	SessionID       string
+	EnvironmentID   string
+	CeremonyID      string
+	FactorClass     string
+	SingleDecision  int64
+	AuthenticatedAt pgtype.Timestamptz
+	WindowExpiresAt pgtype.Timestamptz
+	HardExpiresAt   pgtype.Timestamptz
+	CredentialEpoch int64
+	ConsumedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type RecoveryCode struct {
+	AccountID       string
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	GeneratedAt     pgtype.Timestamptz
+}
+
 type Session struct {
 	ID                string
 	PrincipalID       string
@@ -165,6 +242,8 @@ type Session struct {
 	AbsoluteExpiresAt pgtype.Timestamptz
 	SourceIp          string
 	UserAgent         string
+	CsrfVerifier      []byte
+	ProviderID        pgtype.Text
 }
 
 type Tier3Key struct {
@@ -177,4 +256,65 @@ type Tier3Key struct {
 	State            string
 	Blob             []byte
 	CreatedAt        pgtype.Timestamptz
+}
+
+type TotpChallenge struct {
+	ID               string
+	AccountID        string
+	SessionID        pgtype.Text
+	Purpose          string
+	OperationBinding pgtype.Text
+	EnvironmentID    pgtype.Text
+	CredentialEpoch  int64
+	ExpiresAt        pgtype.Timestamptz
+	ConsumedAt       pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+}
+
+type TotpCredential struct {
+	ID              string
+	AccountID       string
+	Seed            []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	LastStep        int64
+	CreatedStep     int64
+	ConfirmedAt     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type WebauthnCeremony struct {
+	ID                string
+	ChallengeVerifier []byte
+	SessionData       []byte
+	AccountID         pgtype.Text
+	SessionID         pgtype.Text
+	Purpose           string
+	OperationBinding  pgtype.Text
+	EnvironmentID     pgtype.Text
+	CredentialID      pgtype.Text
+	CredentialEpoch   int64
+	ExpiresAt         pgtype.Timestamptz
+	ConsumedAt        pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+}
+
+type WebauthnCredential struct {
+	ID              string
+	AccountID       string
+	CredentialID    []byte
+	PublicKey       []byte
+	Aaguid          []byte
+	SignCount       int64
+	Transports      string
+	Discoverable    int64
+	BackupEligible  int64
+	BackupState     int64
+	Label           string
+	CredentialEpoch int64
+	RowVersion      int64
+	DisabledAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
 }

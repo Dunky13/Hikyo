@@ -7,6 +7,7 @@ package isolation
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,11 +19,13 @@ import (
 
 	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
+	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/keyring"
+	"github.com/Dunky13/wenv/internal/store/tx"
 )
 
 // authService builds a real Auth against the harness database: a live
@@ -401,9 +404,40 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			t.Fatalf("a revoked session still resolves: %v", err)
 		}
 
+		// The full factor lifecycle, so every factor audit event is emitted by
+		// code before the emitter check below reads the trail: recovery
+		// generate/consume, TOTP enrol/confirm, step-up, remove.
+		runFactorLifecycle(t, auth, ctx, "e2e-admin", password)
+
+		// The full OIDC lifecycle, so every OIDC audit event is emitted by code
+		// before the emitter check: provider config + read, link, federated
+		// login, JIT provisioning, a refusal, and unlink.
+		runOIDCLifecycle(t, auth, ctx, boot.PrincipalID, "e2e-admin", password)
+
+		// The full WebAuthn lifecycle, so passkey_added, passkey_cloned and
+		// passkey_removed are emitted before the emitter check.
+		runWebAuthnLifecycle(t, auth, ctx, "e2e-admin", password)
+
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
 			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")
+		}
+
+		// Credential reset (#54): break-glass on the host reaches any target,
+		// including this instance-capability admin, emitting the reset issuance
+		// and the authority mint. Runs after the flows above because it advances
+		// the admin's generation and revokes its sessions.
+		if _, err := auth.BreakGlassResetCredential(ctx, string(boot.PrincipalID), "terminal"); err != nil {
+			t.Fatalf("break-glass reset: %v", err)
+		}
+		// Lowering an effective window emits auth.effective_window_lowered. The #54
+		// B6 library takes the caller's transaction (#55's project-settings knob is
+		// the arriving caller); exercised directly here as it has no operation row.
+		if err := tx.Write(ctx, db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+			_, _, e := auth.LowerEffectiveWindow(ctx, az, "env_e2e_window", time.Minute, time.Now())
+			return e
+		}); err != nil {
+			t.Fatalf("lower effective window: %v", err)
 		}
 	})
 

@@ -55,17 +55,59 @@ var MFAMandatory = map[domain.Capability]bool{
 // AssuranceEnforced reports whether the chokepoint refuses an MFA-mandatory
 // operation from a single-factor session.
 //
-// It is FALSE in this slice, deliberately and visibly. No factor exists yet —
-// TOTP, WebAuthn and recovery codes are #54 — so enforcing the rule now would
-// mean a freshly bootstrapped administrator could never perform the very
-// operations that administer the instance, with no in-product path to enrol
-// out of it. The assurance record is written from day one so no migration is
-// needed when the check turns on.
+// ENFORCED (#54): the factor endpoints have landed, so a session that presented
+// only a password is refused an MFA-mandatory operation and must step up. The
+// gate is consulted in assuranceInadequate AFTER the grant check, so only a
+// capability-holder ever learns a step-up is required; session-less local host
+// authority (bootstrap, break-glass, `wenv admin`) presents no session and is
+// exempt. Enrolment and step-up endpoints are themselves never MFA-gated (they
+// are the path out), so a freshly bootstrapped administrator can always reach
+// them.
 //
-// isolation.TestAssuranceEnforcementCannotBeForgotten fails the build the
-// moment any factor beyond a password becomes mintable, so this cannot decay
-// into a permanent hole.
-const AssuranceEnforced = false
+// isolation.TestAssuranceEnforcementCannotBeForgotten held the flip to the
+// registration of the first factor audit event, which has now happened. See
+// docs/handoff/54-human-auth-full.md.
+const AssuranceEnforced = true
+
+// AdequateAssurance reports whether a session's assurance record satisfies the
+// MFA-mandatory rule: two distinct factor classes, or a WebAuthn assertion
+// (user-verifying, inherently two-factor). OIDC sessions whose provider policy
+// asserted multi-factor are handled where that policy is recorded (#54 OIDC
+// slice); here a single-factor session — password only, or an unelevated OIDC
+// login — is inadequate.
+func AdequateAssurance(a Assurance) bool {
+	distinct := map[string]bool{}
+	for _, f := range a.Factors {
+		if f == "webauthn" {
+			return true
+		}
+		distinct[f] = true
+	}
+	return len(distinct) >= 2
+}
+
+// AssuranceRank orders assurance tiers so a step-up (e.g. an OIDC reauth) can
+// refuse to re-establish a session with weaker evidence than it already holds:
+//
+//	2 — phishing-resistant (a WebAuthn assertion)
+//	1 — multi-factor (two distinct factor classes)
+//	0 — single-factor
+//
+// A reauth may only proceed with evidence of rank >= the session's rank. OIDC
+// evidence is capped at rank 1 by construction (oidcFactors never yields
+// "webauthn"): wenv cannot verify the phishing-resistance of a federated
+// ceremony, so a federated token can never re-authorize a WebAuthn session.
+func AssuranceRank(a Assurance) int {
+	for _, f := range a.Factors {
+		if f == "webauthn" {
+			return 2
+		}
+	}
+	if AdequateAssurance(a) {
+		return 1
+	}
+	return 0
+}
 
 // Authenticate resolves a presented artifact into a live identity inside this
 // transaction.
@@ -78,8 +120,14 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 	// The grammar check is local and constant-cost, and a value that fails it
 	// cannot correspond to any row, so short-circuiting here reveals only
 	// that the caller sent something that is not a wenv artifact — a fact
-	// they already knew.
-	if presented == "" || crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil {
+	// they already knew. Both session artifact types are accepted here (A10):
+	// a CLI session ("cli") and a browser session ("br"). The transport decides
+	// which leg a value arrived on (header vs cookie) and enforces the CSRF
+	// requirement there; the verifier scheme is identical, so resolution does
+	// not branch on the type.
+	if presented == "" ||
+		(crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil &&
+			crypto.ParseArtifact(presented, crypto.ArtifactBrowserSession) != nil) {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 

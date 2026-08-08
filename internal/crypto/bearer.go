@@ -36,6 +36,26 @@ const (
 	ArtifactCLISession ArtifactType = "cli"
 	// ArtifactBootstrap is a credential-establishment authority.
 	ArtifactBootstrap ArtifactType = "bs"
+	// ArtifactBrowserSession is a human browser session, carried in the
+	// `__Host-wenv` cookie — a distinct artifact type with its own lifetime
+	// and revocation surface, listed separately from CLI sessions.
+	ArtifactBrowserSession ArtifactType = "br"
+	// ArtifactRecoveryCode is a single-use recovery code. The grammar buys
+	// the audit redaction filter and offline checksum validation; the batch
+	// is stored as hashes sealed under the instance DEK.
+	ArtifactRecoveryCode ArtifactType = "rc"
+	// ArtifactOIDCState is the `state` value of an OIDC transaction; the row
+	// it resolves to holds the transaction record, and the value crosses the
+	// IdP redirect, so it carries full artifact entropy and redacts like any
+	// other bearer value.
+	ArtifactOIDCState ArtifactType = "st"
+	// ArtifactOIDCBinding is the browser-binding cookie value minted at an
+	// anonymous OIDC start — the callback must present it before the
+	// transaction is consumed, closing forced-login/fixation.
+	ArtifactOIDCBinding ArtifactType = "ob"
+	// ArtifactCSRF is the synchronizer token bound to a browser session,
+	// required on state-changing cookie-authenticated requests.
+	ArtifactCSRF ArtifactType = "cs"
 )
 
 // artifactFormatVersion is the grammar's `version` field. It exists so a
@@ -69,6 +89,17 @@ func NewArtifact(t ArtifactType) (value string, verifier []byte, err error) {
 	Zero(raw)
 	value = "ew_" + artifactFormatVersion + "_" + string(t) + "_" + body + checksum(body)
 	return value, ArtifactVerifier(value), nil
+}
+
+// RandomBytes returns n cryptographically random bytes. It is the source for
+// opaque identifiers that are not bearer artifacts — the WebAuthn user handle
+// (#54), an opaque per-account value that must never be a username, email or id.
+func RandomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return nil, fmt.Errorf("crypto: random bytes: %w", err)
+	}
+	return b, nil
 }
 
 // ArtifactVerifier is the stored form: an unsalted SHA-256 of the whole

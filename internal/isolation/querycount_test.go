@@ -93,7 +93,7 @@ func countedAuthorize(t *testing.T, db *store.DB, principal domain.PrincipalID, 
 		var dbtx sqlitegen.DBTX = countingSqliteTx{tx: sqtx, n: &count}
 		r = authn.NewSQLite(dbtx)
 	}
-	_, err := authz.NewTxAuthorizer(r, tok).Authorize(ctx, principal, authz.OpEnvRead, scope)
+	_, err := authz.NewTxAuthorizer(r, tok).Authorize(ctx, authz.Identity{Principal: principal}, authz.OpEnvRead, scope)
 	return count, err
 }
 
@@ -179,7 +179,7 @@ func runProofLifecycleE2E(t *testing.T, db *store.DB) {
 	var capturedRepos store.Repos
 	var capturedProof authz.Proof
 	err := tx.Write(ctx, db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, alice, authz.OpEnvRead, scope)
+		p, err := az.Authorize(ctx, authz.Identity{Principal: alice}, authz.OpEnvRead, scope)
 		if err != nil {
 			return err
 		}
@@ -200,7 +200,7 @@ func runProofLifecycleE2E(t *testing.T, db *store.DB) {
 
 	sentinel := errors.New("rollback")
 	err = tx.Write(ctx, db, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		p, err := az.Authorize(ctx, alice, authz.OpEnvRead, scope)
+		p, err := az.Authorize(ctx, authz.Identity{Principal: alice}, authz.OpEnvRead, scope)
 		if err != nil {
 			return err
 		}

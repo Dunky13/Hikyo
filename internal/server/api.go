@@ -30,6 +30,41 @@ type AuthService interface {
 	Identity(ctx context.Context, presented string) (service.Identity, error)
 	Logout(ctx context.Context, presented string) error
 	SlideIdleClock(ctx context.Context, presented string) error
+	EnrolTOTPStart(ctx context.Context, presented, password string) (string, error)
+	EnrolTOTPConfirm(ctx context.Context, presented, code string) (service.LoginResult, error)
+	StepUpTOTP(ctx context.Context, presented, code string) (service.LoginResult, error)
+	RemoveTOTP(ctx context.Context, presented, password string) (service.LoginResult, error)
+	GenerateRecoveryCodes(ctx context.Context, presented, proof string) ([]string, service.LoginResult, error)
+	ConsumeRecoveryCode(ctx context.Context, username, code string) (service.RecoveryResult, error)
+	AuthMethods(ctx context.Context) ([]service.AuthMethodProvider, bool, error)
+	OIDCStart(ctx context.Context, slug, purpose, environmentID, presented, proof string) (service.OIDCStartResult, error)
+	OIDCCallback(ctx context.Context, slug, code, state, iss, idpError, bindingCookie, presented string) (service.OIDCCallbackResult, error)
+	ListIdentities(ctx context.Context, presented string) ([]authnIdentity, error)
+	UnlinkIdentity(ctx context.Context, presented, identityID, proof string) (service.LoginResult, error)
+	EnrolPasskeyStart(ctx context.Context, presented, password, code string) ([]byte, error)
+	EnrolPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
+	PasskeyLoginStart(ctx context.Context) ([]byte, error)
+	PasskeyLoginFinish(ctx context.Context, responseJSON []byte) (service.LoginResult, error)
+	StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error)
+	StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
+	ReauthPasskeyStart(ctx context.Context, presented, environmentID string, keyIDs []string) ([]byte, error)
+	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
+	RemovePasskey(ctx context.Context, presented, credentialID, password, code string) (service.LoginResult, error)
+	ListPasskeys(ctx context.Context, presented string) ([]service.PasskeyView, error)
+	ResetCredential(ctx context.Context, actor service.Actor, targetPrincipal, delivery string) (service.ResetResult, error)
+}
+
+// authnIdentity is the transport's view of a linked identity (the service
+// returns authz.ExternalIdentity; this alias keeps internal/server off the
+// authz import, which the boundary test forbids).
+type authnIdentity = service.ExternalIdentityView
+
+// ProviderService is the OIDC provider administration surface.
+type ProviderService interface {
+	Put(ctx context.Context, actor service.Actor, slug string, in service.ProviderInput) (service.ProviderView, error)
+	Get(ctx context.Context, actor service.Actor, slug string) (service.ProviderView, error)
+	List(ctx context.Context, actor service.Actor) ([]service.ProviderView, error)
+	Delete(ctx context.Context, actor service.Actor, slug string) error
 }
 
 // OrgService is the domain surface this slice exposes.
@@ -50,8 +85,9 @@ type OrgService interface {
 
 // API implements the generated strict server.
 type API struct {
-	Auth AuthService
-	Orgs OrgService
+	Auth      AuthService
+	Orgs      OrgService
+	Providers ProviderService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP
@@ -132,7 +168,7 @@ func (a *API) LocalLogin(ctx context.Context, req apigen.LocalLoginRequestObject
 		}
 	}
 	return apigen.LocalLogin200JSONResponse{
-		SessionToken: result.SessionToken,
+		SessionToken: optional(result.SessionToken),
 		Session: apigen.Session{
 			Id:                result.SessionID,
 			Artifact:          result.Artifact,
@@ -217,6 +253,211 @@ func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.
 		return apigen.Logout500JSONResponse{
 			InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
 		}, nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Factor endpoints (#54)
+// ---------------------------------------------------------------------------
+//
+// These carry the raw bearer via the Actor pattern and resolve it only at the
+// chokepoint, like every other authenticated surface. The account-security
+// mutations reissue the acting session and step-up rotates it, so each returns
+// a fresh token the client must persist in place of the old one.
+
+// factorPrecondition reports a loud structural refusal — a caller acting on
+// their OWN authenticated account, so the state (already enrolled, nothing to
+// confirm, no factor) is theirs to know and 400 names it. A bad code or
+// password stays the uniform 401.
+func factorPrecondition(err error) bool {
+	return errors.Is(err, service.ErrTOTPAlreadyEnrolled) ||
+		errors.Is(err, service.ErrNoPendingTOTP) ||
+		errors.Is(err, service.ErrNoTOTPFactor) ||
+		errors.Is(err, service.ErrNoProofCredential)
+}
+
+func (a *API) EnrolTotpStart(ctx context.Context, req apigen.EnrolTotpStartRequestObject) (apigen.EnrolTotpStartResponseObject, error) {
+	uri, err := a.Auth.EnrolTOTPStart(ctx, bearer(ctx), req.Body.Password)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.EnrolTotpStart400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.EnrolTotpStart401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.EnrolTotpStart429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp enrol start", err)
+			return apigen.EnrolTotpStart500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.EnrolTotpStart200JSONResponse{OtpauthUri: uri}, nil
+}
+
+func (a *API) EnrolTotpConfirm(ctx context.Context, req apigen.EnrolTotpConfirmRequestObject) (apigen.EnrolTotpConfirmResponseObject, error) {
+	result, err := a.Auth.EnrolTOTPConfirm(ctx, bearer(ctx), req.Body.Code)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.EnrolTotpConfirm400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.EnrolTotpConfirm401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.EnrolTotpConfirm429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp enrol confirm", err)
+			return apigen.EnrolTotpConfirm500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.EnrolTotpConfirm200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject) (apigen.StepUpTotpResponseObject, error) {
+	result, err := a.Auth.StepUpTOTP(ctx, bearer(ctx), req.Body.Code)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.StepUpTotp400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.StepUpTotp401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.StepUpTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp step-up", err)
+			return apigen.StepUpTotp500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.StepUpTotp200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject) (apigen.RemoveTotpResponseObject, error) {
+	result, err := a.Auth.RemoveTOTP(ctx, bearer(ctx), req.Body.Password)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.RemoveTotp400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.RemoveTotp401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.RemoveTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp remove", err)
+			return apigen.RemoveTotp500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.RemoveTotp200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.RegenerateRecoveryCodesRequestObject) (apigen.RegenerateRecoveryCodesResponseObject, error) {
+	codes, result, err := a.Auth.GenerateRecoveryCodes(ctx, bearer(ctx), req.Body.Proof)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.RegenerateRecoveryCodes400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.RegenerateRecoveryCodes401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.RegenerateRecoveryCodes429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "recovery codes regenerate", err)
+			return apigen.RegenerateRecoveryCodes500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.RegenerateRecoveryCodes200JSONResponse{
+		RecoveryCodes: codes,
+		Login:         loginResultOf(result),
+	}, nil
+}
+
+func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequestObject) (apigen.BeginRecoveryResponseObject, error) {
+	result, err := a.Auth.ConsumeRecoveryCode(ctx, req.Body.Username, req.Body.Code)
+	if err != nil {
+		// The passkey-only floor refusal (A1): consuming the last code on a
+		// passwordless account is refused loudly. Only a caller holding a VALID
+		// code reaches it, so naming the structural state reveals nothing an
+		// enumerator could not already learn — and the refusal is non-destructive.
+		if errors.Is(err, service.ErrPasskeyOnlyViolation) {
+			return apigen.BeginRecovery400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.BeginRecovery401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.BeginRecovery429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "recovery begin", err)
+			return apigen.BeginRecovery500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.BeginRecovery200JSONResponse{
+		Authority: result.Authority,
+		ExpiresAt: result.ExpiresAt,
+	}, nil
+}
+
+// loginResultOf renders a freshly minted or rotated session for the wire. A
+// browser-artifact token is delivered ONLY on the __Host-wenv HttpOnly cookie
+// and is never echoed into the script-readable body (B2); a CLI artifact has no
+// cookie channel, so its token stays in the body.
+func loginResultOf(r service.LoginResult) apigen.LoginResult {
+	var token *string
+	if r.Artifact != service.ArtifactBrowser {
+		token = optional(r.SessionToken)
+	}
+	return apigen.LoginResult{
+		SessionToken: token,
+		Session: apigen.Session{
+			Id:                r.SessionID,
+			Artifact:          r.Artifact,
+			CreatedAt:         r.CreatedAt,
+			IdleExpiresAt:     r.IdleExpires,
+			AbsoluteExpiresAt: r.AbsExpires,
+			Assurance:         assuranceOf(r.Assurance),
+		},
+		Principal: apigen.Principal{
+			Id:          string(r.Principal),
+			Kind:        apigen.Human,
+			DisplayName: optional(r.DisplayName),
+		},
 	}
 }
 
@@ -318,9 +559,47 @@ func (a *API) GetOrg(ctx context.Context, req apigen.GetOrgRequestObject) (apige
 func (a *API) Middleware() []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		a.wireContext,
+		a.stashRequest,
 		a.extractBearer,
 		a.validateAgainstContract,
 	}
+}
+
+// requestKey carries the raw request so the OIDC handlers can read cookies (the
+// browser-binding cookie and the __Host-wenv session cookie), which the strict
+// server does not thread into a handler.
+type requestKey struct{}
+
+func (a *API) stashRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestKey{}, r)))
+	})
+}
+
+func requestFrom(ctx context.Context) *http.Request {
+	r, _ := ctx.Value(requestKey{}).(*http.Request)
+	return r
+}
+
+// browserSessionCookie is the __Host- browser session cookie name.
+const browserSessionCookie = "__Host-wenv"
+
+// oidcBindingCookiePrefix is the per-transaction browser-binding cookie name
+// prefix (A16): the suffix is derived from the state so concurrent tabs do not
+// clobber each other's binding.
+const oidcBindingCookiePrefix = "__Host-wenv-oidc-tx-"
+
+// bindingCookieName derives the per-transaction binding cookie name from the
+// state value, deterministically at both start and callback.
+func bindingCookieName(state string) string {
+	suffix := state
+	if i := strings.LastIndex(state, "_"); i >= 0 && i+1 < len(state) {
+		suffix = state[i+1:]
+	}
+	if len(suffix) > 24 {
+		suffix = suffix[:24]
+	}
+	return oidcBindingCookiePrefix + suffix
 }
 
 // wireContext attaches the per-request metadata every audit event records.
@@ -395,9 +674,33 @@ func (a *API) trusted(addr string) bool {
 // chokepoint reads the row it points at, inside a transaction.
 func (a *API) extractBearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if value, ok := strings.CutPrefix(header, "Bearer "); ok {
-			r = r.WithContext(withBearer(r.Context(), strings.TrimSpace(value)))
+		var headerVal string
+		if value, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			headerVal = strings.TrimSpace(value)
+		}
+		var cookieVal string
+		if c, err := r.Cookie(browserSessionCookie); err == nil {
+			cookieVal = strings.TrimSpace(c.Value)
+		}
+		// A10: a request carrying BOTH a cookie session and a bearer header is
+		// refused. The two legs are distinct artifact types with distinct CSRF
+		// contracts; accepting both would let a caller pick which contract
+		// applies. The refusal is uniform.
+		if headerVal != "" && cookieVal != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(errorBody(apigen.ErrorCodeUnauthenticated, ""))
+			return
+		}
+		// The cookie leg maps to the same raw artifact path; it is resolved only
+		// at the chokepoint like the header leg. CSRF for cookie-authenticated
+		// state-changing requests is #56's SPA surface (the token is delivered
+		// via whoami, A9); the browser-binding of the OIDC transaction, which is
+		// the load-bearing anti-fixation control, is enforced in the service.
+		if headerVal != "" {
+			r = r.WithContext(withBearer(r.Context(), headerVal))
+		} else if cookieVal != "" {
+			r = r.WithContext(withBearer(r.Context(), cookieVal))
 		}
 		next.ServeHTTP(w, r)
 	})

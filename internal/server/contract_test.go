@@ -31,10 +31,12 @@ import (
 // internal/isolation; what these prove is the TRANSPORT's contract, which is
 // a different claim and needs a different fixture.
 type stubAuth struct {
-	login    func(ctx context.Context, u, p string) (service.LoginResult, error)
-	identity func(ctx context.Context, presented string) (service.Identity, error)
-	logout   func(ctx context.Context, presented string) error
-	estab    func(ctx context.Context, authority, password string) error
+	login         func(ctx context.Context, u, p string) (service.LoginResult, error)
+	identity      func(ctx context.Context, presented string) (service.Identity, error)
+	logout        func(ctx context.Context, presented string) error
+	estab         func(ctx context.Context, authority, password string) error
+	passkeyStart  func(ctx context.Context) ([]byte, error)
+	passkeyFinish func(ctx context.Context, response []byte) (service.LoginResult, error)
 }
 
 func (s stubAuth) LocalLogin(ctx context.Context, u, p string) (service.LoginResult, error) {
@@ -66,6 +68,121 @@ func (s stubAuth) Logout(ctx context.Context, presented string) error {
 }
 
 func (s stubAuth) SlideIdleClock(context.Context, string) error { return nil }
+
+// Factor endpoints (#54): the transport contract for these is exercised in the
+// isolation suite end to end; the stubs here keep the interface satisfied and
+// default to the uniform refusal.
+func (s stubAuth) EnrolTOTPStart(context.Context, string, string) (string, error) {
+	return "", domain.ErrUnauthenticated
+}
+
+func (s stubAuth) EnrolTOTPConfirm(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) StepUpTOTP(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) RemoveTOTP(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) GenerateRecoveryCodes(context.Context, string, string) ([]string, service.LoginResult, error) {
+	return nil, service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ConsumeRecoveryCode(context.Context, string, string) (service.RecoveryResult, error) {
+	return service.RecoveryResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) AuthMethods(context.Context) ([]service.AuthMethodProvider, bool, error) {
+	return nil, true, nil
+}
+
+func (s stubAuth) OIDCStart(context.Context, string, string, string, string, string) (service.OIDCStartResult, error) {
+	return service.OIDCStartResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) OIDCCallback(context.Context, string, string, string, string, string, string, string) (service.OIDCCallbackResult, error) {
+	return service.OIDCCallbackResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ListIdentities(context.Context, string) ([]service.ExternalIdentityView, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) UnlinkIdentity(context.Context, string, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+// WebAuthn (#54): the transport contract for the opaque-JSON bridging is
+// smoke-tested through PasskeyLoginStart; the rest keep the interface satisfied
+// and default to the uniform refusal.
+func (s stubAuth) EnrolPasskeyStart(context.Context, string, string, string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) EnrolPasskeyFinish(context.Context, string, []byte) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) PasskeyLoginStart(ctx context.Context) ([]byte, error) {
+	if s.passkeyStart == nil {
+		return nil, domain.ErrUnauthenticated
+	}
+	return s.passkeyStart(ctx)
+}
+
+func (s stubAuth) PasskeyLoginFinish(ctx context.Context, response []byte) (service.LoginResult, error) {
+	if s.passkeyFinish == nil {
+		return service.LoginResult{}, domain.ErrUnauthenticated
+	}
+	return s.passkeyFinish(ctx, response)
+}
+
+func (s stubAuth) StepUpPasskeyStart(context.Context, string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) StepUpPasskeyFinish(context.Context, string, []byte) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ReauthPasskeyStart(context.Context, string, string, []string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.ReauthResult, error) {
+	return service.ReauthResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) RemovePasskey(context.Context, string, string, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ListPasskeys(context.Context, string) ([]service.PasskeyView, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ResetCredential(context.Context, service.Actor, string, string) (service.ResetResult, error) {
+	return service.ResetResult{}, domain.ErrUnauthenticated
+}
+
+type stubProviders struct{}
+
+func (stubProviders) Put(context.Context, service.Actor, string, service.ProviderInput) (service.ProviderView, error) {
+	return service.ProviderView{}, domain.ErrUnauthorized
+}
+func (stubProviders) Get(context.Context, service.Actor, string) (service.ProviderView, error) {
+	return service.ProviderView{}, domain.ErrUnauthorized
+}
+func (stubProviders) List(context.Context, service.Actor) ([]service.ProviderView, error) {
+	return nil, domain.ErrUnauthorized
+}
+func (stubProviders) Delete(context.Context, service.Actor, string) error {
+	return domain.ErrUnauthorized
+}
 
 type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
@@ -116,7 +233,7 @@ var liveIdentity = service.Identity{
 func newTestServer(t *testing.T, auth server.AuthService, orgs server.OrgService) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
-		Auth: auth, Orgs: orgs, Version: "test",
+		Auth: auth, Orgs: orgs, Providers: stubProviders{}, Version: "test",
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -319,7 +436,7 @@ func TestSuccessfulLoginMatchesTheContract(t *testing.T) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.SessionToken == "" {
+	if result.SessionToken == nil || *result.SessionToken == "" {
 		t.Error("the response carries no session token")
 	}
 }
@@ -400,3 +517,83 @@ func TestHealthProbesSitOutsideTheAPIStack(t *testing.T) {
 }
 
 func liveIdentityFn(context.Context, string) (service.Identity, error) { return liveIdentity, nil }
+
+func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
+	// The one end-to-end check of the opaque-JSON wire bridging: the service
+	// returns raw options bytes, the handler round-trips them through the
+	// free-form object, and the response satisfies the contract (validated by
+	// call()). The base64url fields the authenticator signs over must survive.
+	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"wenv.example","timeout":60000}}`)
+	srv := newTestServer(t, stubAuth{
+		passkeyStart: func(context.Context) ([]byte, error) { return opts, nil },
+	}, stubOrgs{})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/webauthn/login/start", "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, payload)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("response is not a JSON object: %v (%s)", err, payload)
+	}
+	pk, ok := got["publicKey"].(map[string]any)
+	if !ok {
+		t.Fatalf("options lost their publicKey member: %s", payload)
+	}
+	if pk["challenge"] != "Y2hhbGxlbmdl" {
+		t.Fatalf("the signed-over challenge did not round-trip: %v", pk["challenge"])
+	}
+}
+
+// TestBrowserPasskeyLoginTokenOnlyOnCookie is the B2 regression: a passkey login
+// mints a BROWSER session, whose token must reach the caller ONLY on the
+// __Host-wenv HttpOnly cookie — never echoed into the script-readable JSON body
+// where injected same-origin script could exfiltrate the bearer.
+func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
+	const token = "ew_1_browser_stub"
+	srv := newTestServer(t, stubAuth{
+		passkeyFinish: func(context.Context, []byte) (service.LoginResult, error) {
+			return service.LoginResult{
+				SessionToken: token, SessionID: liveIdentity.SessionID,
+				Artifact: "browser", CreatedAt: liveIdentity.CreatedAt,
+				IdleExpires: liveIdentity.IdleExpiresAt, AbsExpires: liveIdentity.AbsoluteExpiresAt,
+				Principal: liveIdentity.Principal, DisplayName: "Admin",
+				Assurance: liveIdentity.Assurance,
+			}, nil
+		},
+	}, stubOrgs{})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/webauthn/login/finish", "",
+		map[string]any{"id": "cred", "response": map[string]any{}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, payload)
+	}
+
+	// The body carries the session and principal but NOT the token.
+	var result apigen.LoginResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SessionToken != nil {
+		t.Errorf("a browser-artifact login body must omit session_token, got %q", *result.SessionToken)
+	}
+	// The raw bytes must not contain the token anywhere either.
+	if bytes.Contains(payload, []byte(token)) {
+		t.Errorf("the session token leaked into the response body: %s", payload)
+	}
+
+	// The token is delivered on the __Host-wenv cookie, HttpOnly + Secure.
+	var got *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == "__Host-wenv" {
+			got = c
+		}
+	}
+	if got == nil {
+		t.Fatal("no __Host-wenv session cookie was set")
+	}
+	if got.Value != token {
+		t.Errorf("cookie token = %q, want %q", got.Value, token)
+	}
+	if !got.HttpOnly || !got.Secure {
+		t.Errorf("session cookie must be HttpOnly+Secure, got HttpOnly=%v Secure=%v", got.HttpOnly, got.Secure)
+	}
+}
