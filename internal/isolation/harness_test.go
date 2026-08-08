@@ -33,7 +33,7 @@ import (
 const (
 	alice  = domain.PrincipalID("usr_alice")  // human, org A: read/edit/definitions-edit/manage-projects
 	bob    = domain.PrincipalID("usr_bob")    // human, org B: same shape — the cross-org prober
-	root   = domain.PrincipalID("usr_root")   // human, instance-config at instance scope
+	root   = domain.PrincipalID("usr_root")   // human, instance-config + read at instance scope
 	nobody = domain.PrincipalID("usr_nobody") // human, no grants at all
 	mchA1  = domain.PrincipalID("mch_a1")     // machine, confined to (org A, project A1) — the cross-project prober
 	reader = domain.PrincipalID("usr_reader") // human, org A, exactly `read` — the least-privilege prober
@@ -59,9 +59,14 @@ var fixtureSQL = []string{
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_a1', 'org_a', 'a1', ` + ts + `)`,
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_a2', 'org_a', 'a2', ` + ts + `)`,
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_b1', 'org_b', 'b1', ` + ts + `)`,
-	`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_a1', 'org_a', 'prj_a1', 'dev', '', ` + ts + `)`,
-	`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_a2', 'org_a', 'prj_a2', 'dev', '', ` + ts + `)`,
-	`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_b1', 'org_b', 'prj_b1', 'dev', '', ` + ts + `)`,
+	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a1', 'org_a', 'prj_a1', 'dev', '', ` + ts + `, 0)`,
+	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a2', 'org_a', 'prj_a2', 'dev', '', ` + ts + `, 0)`,
+	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_b1', 'org_b', 'prj_b1', 'dev', '', ` + ts + `, 0)`,
+	// Folders (#48): one per fixture project, so a folder probe addresses a row
+	// that genuinely exists and fails only at the boundary.
+	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_a1', 'org_a', 'prj_a1', 'shared', ` + ts + `)`,
+	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_a2', 'org_a', 'prj_a2', 'shared', ` + ts + `)`,
+	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_b1', 'org_b', 'prj_b1', 'shared', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_alice', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_bob', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_root', 'human', ` + ts + `)`,
@@ -84,6 +89,10 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_rd_read', 'usr_reader', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
 	// root: the instance operator.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ic', 'usr_root', 'instance-config', NULL, NULL, NULL, ` + ts + `)`,
+	// root also holds instance-scope `read`, exactly as the bootstrap admin
+	// template seeds it (#47): org.get is tenant-class at org depth (#48), so
+	// instance-config alone no longer reads an org row.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_read', 'usr_root', 'read', NULL, NULL, NULL, ` + ts + `)`,
 	// alice additionally holds audit-read in org A (#45): the tenant-trail
 	// positive control. reader/bob/nobody deliberately do NOT hold it — the
 	// audit denial probes ride on them.
@@ -120,6 +129,46 @@ func execRawErr(t *testing.T, db *store.DB, stmt string) error {
 	return err
 }
 
+// queryStrings concatenates a single-column text query's rows. It exists for the
+// mutation probes' content snapshot: comparing rendered content is what catches
+// an unauthorized write that commits and then answers ErrNotFound, which a row
+// count cannot see. `||` and ORDER BY behave identically on both engines.
+func queryStrings(t *testing.T, db *store.DB, q string) string {
+	t.Helper()
+	var out strings.Builder
+	scan := func(next func() bool, get func(*string) error) {
+		for next() {
+			var v string
+			if err := get(&v); err != nil {
+				t.Fatalf("query %q: %v", q, err)
+			}
+			out.WriteString(v)
+		}
+	}
+	if db.Engine() == store.EnginePostgres {
+		rows, err := db.PG().Query(t.Context(), q)
+		if err != nil {
+			t.Fatalf("query %q: %v", q, err)
+		}
+		defer rows.Close()
+		scan(rows.Next, func(v *string) error { return rows.Scan(v) })
+		if err := rows.Err(); err != nil {
+			t.Fatalf("query %q: %v", q, err)
+		}
+		return out.String()
+	}
+	rows, err := db.SQLiteRead().QueryContext(t.Context(), q)
+	if err != nil {
+		t.Fatalf("query %q: %v", q, err)
+	}
+	defer rows.Close()
+	scan(rows.Next, func(v *string) error { return rows.Scan(v) })
+	if err := rows.Err(); err != nil {
+		t.Fatalf("query %q: %v", q, err)
+	}
+	return out.String()
+}
+
 func queryInt(t *testing.T, db *store.DB, q string) int64 {
 	t.Helper()
 	var n int64
@@ -135,7 +184,7 @@ func queryInt(t *testing.T, db *store.DB, q string) int64 {
 	return n
 }
 
-var fixtureTables = []string{"orgs", "projects", "environments", "principals", "grants"}
+var fixtureTables = []string{"orgs", "projects", "environments", "folders", "principals", "grants"}
 
 // rowCounts is the row-diff half of the no-side-effect assertion.
 func rowCounts(t *testing.T, db *store.DB) map[string]int64 {
@@ -196,7 +245,7 @@ func openPostgres(t *testing.T) *store.DB {
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
 		"oidc_providers", "accounts",
 		"auth_instance_state",
-		"grants", "environments", "projects", "principals",
+		"grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",
@@ -276,6 +325,20 @@ func assertUniformNotFound(t *testing.T, probe, missing error) {
 
 func services(db *store.DB) (*service.Orgs, *service.Projects, *service.Environments) {
 	return &service.Orgs{DB: db}, &service.Projects{DB: db}, &service.Environments{DB: db}
+}
+
+// folderSvc is the fourth hierarchy service; it is separate from services()
+// only so the existing three-value call sites stay untouched.
+func folderSvc(db *store.DB) *service.Folders { return &service.Folders{DB: db} }
+
+// Fixture scopes, so a probe reads as "who, addressing what" rather than as a
+// struct literal repeated forty times.
+func scopeProject(org domain.OrgID, project domain.ProjectID) domain.Scope {
+	return domain.Scope{Org: org, Project: project}
+}
+
+func scopeEnv(org domain.OrgID, project domain.ProjectID, env domain.EnvID) domain.Scope {
+	return domain.Scope{Org: org, Project: project, Env: env}
 }
 
 // ctx shorthand for probes that need a context off the test.

@@ -14,6 +14,7 @@ import (
 	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
+	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 )
 
@@ -79,15 +80,20 @@ type ProviderService interface {
 // clothes.
 type OrgService interface {
 	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
-	Get(ctx context.Context, actor service.Actor, id string) (service.Org, error)
+	Get(ctx context.Context, actor service.Actor, org domain.OrgID) (service.Org, error)
 	List(ctx context.Context, actor service.Actor) ([]service.Org, error)
+	Rename(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Org, error)
+	Delete(ctx context.Context, actor service.Actor, org domain.OrgID) error
 }
 
 // API implements the generated strict server.
 type API struct {
-	Auth      AuthService
-	Orgs      OrgService
-	Providers ProviderService
+	Auth         AuthService
+	Orgs         OrgService
+	Projects     ProjectService
+	Environments EnvironmentService
+	Folders      FolderService
+	Providers    ProviderService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP
@@ -153,19 +159,7 @@ func (a *API) GetMeta(ctx context.Context, _ apigen.GetMetaRequestObject) (apige
 func (a *API) LocalLogin(ctx context.Context, req apigen.LocalLoginRequestObject) (apigen.LocalLoginResponseObject, error) {
 	result, err := a.Auth.LocalLogin(ctx, req.Body.Username, req.Body.Password)
 	if err != nil {
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.LocalLogin401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.LocalLogin429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "local login", err)
-			return apigen.LocalLogin500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.LocalLogin200JSONResponse{
 		SessionToken: optional(result.SessionToken),
@@ -198,33 +192,13 @@ func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCrede
 			BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "password")),
 		}, nil
 	}
-	switch classify(err) {
-	case apigen.ErrorCodeUnauthenticated:
-		return apigen.EstablishCredential401JSONResponse{
-			UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-		}, nil
-	case apigen.ErrorCodeTooManyRequests:
-		return apigen.EstablishCredential429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-	default:
-		a.fault(ctx, "establish credential", err)
-		return apigen.EstablishCredential500JSONResponse{
-			InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-		}, nil
-	}
+	return nil, err
 }
 
 func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.WhoamiResponseObject, error) {
 	id, err := a.Auth.Identity(ctx, bearer(ctx))
 	if err != nil {
-		if classify(err) == apigen.ErrorCodeUnauthenticated {
-			return apigen.Whoami401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		}
-		a.fault(ctx, "whoami", err)
-		return apigen.Whoami500JSONResponse{
-			InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-		}, nil
+		return nil, err
 	}
 	return apigen.Whoami200JSONResponse{
 		Session: apigen.Session{
@@ -240,20 +214,10 @@ func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.
 }
 
 func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.LogoutResponseObject, error) {
-	err := a.Auth.Logout(ctx, bearer(ctx))
-	switch {
-	case err == nil:
-		return apigen.Logout204Response{}, nil
-	case classify(err) == apigen.ErrorCodeUnauthenticated:
-		return apigen.Logout401JSONResponse{
-			UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-		}, nil
-	default:
-		a.fault(ctx, "logout", err)
-		return apigen.Logout500JSONResponse{
-			InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-		}, nil
+	if err := a.Auth.Logout(ctx, bearer(ctx)); err != nil {
+		return nil, err
 	}
+	return apigen.Logout204Response{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -284,19 +248,7 @@ func (a *API) EnrolTotpStart(ctx context.Context, req apigen.EnrolTotpStartReque
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
 			}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.EnrolTotpStart401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.EnrolTotpStart429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "totp enrol start", err)
-			return apigen.EnrolTotpStart500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.EnrolTotpStart200JSONResponse{OtpauthUri: uri}, nil
 }
@@ -309,19 +261,7 @@ func (a *API) EnrolTotpConfirm(ctx context.Context, req apigen.EnrolTotpConfirmR
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
 			}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.EnrolTotpConfirm401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.EnrolTotpConfirm429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "totp enrol confirm", err)
-			return apigen.EnrolTotpConfirm500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.EnrolTotpConfirm200JSONResponse(loginResultOf(result)), nil
 }
@@ -334,19 +274,7 @@ func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
 			}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.StepUpTotp401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.StepUpTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "totp step-up", err)
-			return apigen.StepUpTotp500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.StepUpTotp200JSONResponse(loginResultOf(result)), nil
 }
@@ -359,19 +287,7 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
 			}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.RemoveTotp401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.RemoveTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "totp remove", err)
-			return apigen.RemoveTotp500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.RemoveTotp200JSONResponse(loginResultOf(result)), nil
 }
@@ -384,19 +300,7 @@ func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.Regenerate
 				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
 			}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.RegenerateRecoveryCodes401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.RegenerateRecoveryCodes429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "recovery codes regenerate", err)
-			return apigen.RegenerateRecoveryCodes500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.RegenerateRecoveryCodes200JSONResponse{
 		RecoveryCodes: codes,
@@ -414,19 +318,7 @@ func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequest
 		if errors.Is(err, service.ErrPasskeyOnlyViolation) {
 			return apigen.BeginRecovery400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.BeginRecovery401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.BeginRecovery429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "recovery begin", err)
-			return apigen.BeginRecovery500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.BeginRecovery200JSONResponse{
 		Authority: result.Authority,
@@ -478,23 +370,10 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 	}
 	org, err := a.Orgs.Create(ctx, service.Bearer(bearer(ctx)), req.Body.Name, active, metadata)
 	if err != nil {
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.CreateOrg401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeForbidden:
-			return apigen.CreateOrg403JSONResponse{
-				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),
-			}, nil
-		case apigen.ErrorCodeTooManyRequests:
-			return apigen.CreateOrg429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
-		default:
-			a.fault(ctx, "create org", err)
-			return apigen.CreateOrg500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		// Everything but the metadata leg above goes through the one uniform
+		// writer, so a refusal class added later (conflict, for a duplicate name)
+		// cannot fall through a switch and answer 500 by omission.
+		return nil, err
 	}
 	return apigen.CreateOrg201JSONResponse(wireOrg(org)), nil
 }
@@ -502,21 +381,7 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (apigen.ListOrgsResponseObject, error) {
 	orgs, err := a.Orgs.List(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.ListOrgs401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeForbidden:
-			return apigen.ListOrgs403JSONResponse{
-				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),
-			}, nil
-		default:
-			a.fault(ctx, "list orgs", err)
-			return apigen.ListOrgs500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	items := make([]apigen.Org, 0, len(orgs))
 	for _, o := range orgs {
@@ -525,28 +390,15 @@ func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (api
 	return apigen.ListOrgs200JSONResponse{Items: items, Count: len(items)}, nil
 }
 
+// GetOrg reads one organisation. It is tenant-scoped at org depth (#48), so
+// there is no 403 leg: a caller who may not reach the org gets the same 404 as
+// one asking after an org that never existed. The refusal is rendered by the
+// uniform writer through the strict server's error leg, like the rest of the
+// hierarchy surface — see internal/server/hierarchy.go.
 func (a *API) GetOrg(ctx context.Context, req apigen.GetOrgRequestObject) (apigen.GetOrgResponseObject, error) {
-	org, err := a.Orgs.Get(ctx, service.Bearer(bearer(ctx)), req.Org)
+	org, err := a.Orgs.Get(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org))
 	if err != nil {
-		switch classify(err) {
-		case apigen.ErrorCodeUnauthenticated:
-			return apigen.GetOrg401JSONResponse{
-				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
-			}, nil
-		case apigen.ErrorCodeForbidden:
-			return apigen.GetOrg403JSONResponse{
-				ForbiddenJSONResponse: apigen.ForbiddenJSONResponse(errorBody(apigen.ErrorCodeForbidden, "")),
-			}, nil
-		case apigen.ErrorCodeNotFound:
-			return apigen.GetOrg404JSONResponse{
-				NotFoundJSONResponse: apigen.NotFoundJSONResponse(errorBody(apigen.ErrorCodeNotFound, "")),
-			}, nil
-		default:
-			a.fault(ctx, "get org", err)
-			return apigen.GetOrg500JSONResponse{
-				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
-			}, nil
-		}
+		return nil, err
 	}
 	return apigen.GetOrg200JSONResponse(wireOrg(org)), nil
 }

@@ -1,0 +1,11 @@
+{
+  "count": 1,
+  "items": [
+    {
+      "active": true,
+      "created_at": "2026-01-02T03:04:05Z",
+      "id": "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+      "name": "acme"
+    }
+  ]
+}

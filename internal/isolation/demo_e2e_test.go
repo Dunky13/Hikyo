@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -56,9 +57,35 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		clockMu.Unlock()
 	}
 
-	httpSrv := httptest.NewServer(server.New(&service.System{DB: db}, &server.API{
-		Auth: auth, Orgs: orgs, Version: "e2e",
-	}))
+	// requests records every request the CLI actually makes. It is what turns
+	// "the command refused" into "the command refused BEFORE reaching the
+	// server": exit 4 alone cannot tell a client-side confirmation refusal from a
+	// server-side conflict, and both are exit 4 on this surface.
+	var wireMu sync.Mutex
+	var requests []string
+	recorded := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			wireMu.Lock()
+			requests = append(requests, r.Method+" "+r.URL.Path)
+			wireMu.Unlock()
+			next.ServeHTTP(w, r)
+		})
+	}
+	takeRequests := func() []string {
+		wireMu.Lock()
+		defer wireMu.Unlock()
+		out := requests
+		requests = nil
+		return out
+	}
+
+	httpSrv := httptest.NewServer(recorded(server.New(&service.System{DB: db}, &server.API{
+		Auth: auth, Orgs: orgs,
+		Projects:     &service.Projects{DB: db},
+		Environments: &service.Environments{DB: db},
+		Folders:      &service.Folders{DB: db},
+		Version:      "e2e",
+	})))
 	t.Cleanup(httpSrv.Close)
 
 	// Fresh install: the first administrator is minted on the host, never
@@ -239,6 +266,12 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		t.Fatalf("org.created audit events: %d -> %d, want exactly one more", before, after)
 	}
 
+	// The hierarchy demo (#48), through the real CLI over the socket:
+	// create org -> project -> environments -> folders, then list and rename
+	// them. This is the acceptance criterion's demo, executed rather than
+	// described.
+	runHierarchyDemo(t, db, ios, takeRequests)
+
 	// Logging out revokes the artifact; the next call is refused with the
 	// authentication exit code, not a stale success.
 	if code := cli.Run(t.Context(), ios(), []string{"logout"}); code != cli.ExitOK {
@@ -328,4 +361,223 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 			t.Fatalf("write %d blocked behind a login derivation: %v", i, err)
 		}
 	}
+}
+
+// runHierarchyDemo is #48's acceptance demo, driven through the real CLI
+// against the real server: create org → project → envs → folders, list and
+// rename them. It asserts on the CLI's own `-o json` output, because that is
+// the surface the criterion names and the one scripts consume.
+func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string) {
+	t.Helper()
+
+	run := func(args ...string) string {
+		t.Helper()
+		out := &strings.Builder{}
+		io := ios()
+		io.Stdout = out
+		if code := cli.Run(t.Context(), io, args); code != cli.ExitOK {
+			t.Fatalf("wenv %s exited %d\n%s", strings.Join(args, " "), code, out.String())
+		}
+		return out.String()
+	}
+	decode := func(raw string, into any) {
+		t.Helper()
+		if err := json.Unmarshal([]byte(raw), into); err != nil {
+			t.Fatalf("output is not JSON: %v\n%s", err, raw)
+		}
+	}
+	type row struct {
+		Id           string
+		Name         string
+		Path         string
+		DisplayOrder int `json:"display_order"`
+	}
+	type list struct {
+		Items []row
+		Count int
+	}
+
+	var org row
+	decode(run("org", "create", "--name", "hierarchy-demo", "-o", "json"), &org)
+
+	var project row
+	decode(run("project", "create", "--org", org.Id, "--name", "checkout", "-o", "json"), &project)
+
+	// Environments, created in order, appended to the display order.
+	var envs []row
+	for _, name := range []string{"dev", "staging", "prod"} {
+		var env row
+		decode(run("env", "create", "--org", org.Id, "--project", project.Id, "--name", name, "-o", "json"), &env)
+		envs = append(envs, env)
+	}
+	var envList list
+	decode(run("env", "list", "--org", org.Id, "--project", project.Id, "-o", "json"), &envList)
+	// BOTH the count and the items: a body with `count: 3, items: []` would
+	// otherwise satisfy the count check and skip every assertion in the loop.
+	if envList.Count != 3 || len(envList.Items) != 3 {
+		t.Fatalf("env list count = %d, items = %d, want 3 and 3", envList.Count, len(envList.Items))
+	}
+	for i, e := range envList.Items {
+		if e.DisplayOrder != i {
+			t.Fatalf("env %q display_order = %d, want %d", e.Name, e.DisplayOrder, i)
+		}
+	}
+
+	// Reorder the whole set through the CLI, then read it back.
+	reordered := run("env", "reorder", "--org", org.Id, "--project", project.Id,
+		strings.Join([]string{envs[2].Id, envs[0].Id, envs[1].Id}, ","), "-o", "json")
+	decode(reordered, &envList)
+	if len(envList.Items) != 3 {
+		t.Fatalf("reorder returned %d items, want 3", len(envList.Items))
+	}
+	if envList.Items[0].Id != envs[2].Id || envList.Items[0].DisplayOrder != 0 {
+		t.Fatalf("reorder did not take: %+v", envList.Items)
+	}
+
+	// Folders.
+	var folder row
+	decode(run("folder", "create", "--org", org.Id, "--project", project.Id, "--path", "services/api", "-o", "json"), &folder)
+	var folderList list
+	decode(run("folder", "list", "--org", org.Id, "--project", project.Id, "-o", "json"), &folderList)
+	if folderList.Count != 1 || folderList.Items[0].Path != "services/api" {
+		t.Fatalf("folder list = %+v", folderList)
+	}
+
+	// Rename at every level, and read each one back.
+	decode(run("org", "rename", org.Id, "--name", "hierarchy-demo-renamed", "-o", "json"), &org)
+	if org.Name != "hierarchy-demo-renamed" {
+		t.Fatalf("org rename returned %q", org.Name)
+	}
+	decode(run("project", "rename", "--org", org.Id, project.Id, "--name", "checkout-v2", "-o", "json"), &project)
+	if project.Name != "checkout-v2" {
+		t.Fatalf("project rename returned %q", project.Name)
+	}
+	var env row
+	decode(run("env", "rename", "--org", org.Id, "--project", project.Id, envs[0].Id, "--name", "development", "-o", "json"), &env)
+	if env.Name != "development" {
+		t.Fatalf("env rename returned %q", env.Name)
+	}
+	decode(run("folder", "rename", "--org", org.Id, "--project", project.Id, folder.Id, "--path", "services/gateway", "-o", "json"), &folder)
+	if folder.Path != "services/gateway" {
+		t.Fatalf("folder rename returned %q", folder.Path)
+	}
+
+	var shown row
+	decode(run("org", "show", org.Id, "-o", "json"), &shown)
+	if shown.Name != "hierarchy-demo-renamed" {
+		t.Fatalf("org show after rename = %q", shown.Name)
+	}
+	decode(run("project", "show", "--org", org.Id, project.Id, "-o", "json"), &shown)
+	if shown.Name != "checkout-v2" {
+		t.Fatalf("project show after rename = %q", shown.Name)
+	}
+
+	// Every rename left a durable trail entry with both names.
+	for _, typ := range []string{
+		"settings.org_renamed", "settings.project_renamed",
+		"settings.environment_renamed", "settings.folder_renamed",
+		"settings.environment_reordered",
+	} {
+		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type = '"+typ+"'"); n == 0 {
+			t.Errorf("%s left no audit record", typ)
+		}
+	}
+
+	// Reads at every level, through the CLI, so a wrong path or method in any
+	// of these handlers cannot stay green.
+	var orgList, projectList list
+	decode(run("org", "list", "-o", "json"), &orgList)
+	if orgList.Count == 0 {
+		t.Fatal("org list returned nothing")
+	}
+	decode(run("project", "list", "--org", org.Id, "-o", "json"), &projectList)
+	if projectList.Count != 1 || projectList.Items[0].Id != project.Id {
+		t.Fatalf("project list = %+v", projectList)
+	}
+	var shownEnv, shownFolder row
+	decode(run("env", "show", "--org", org.Id, "--project", project.Id, envs[0].Id, "-o", "json"), &shownEnv)
+	if shownEnv.Id != envs[0].Id || shownEnv.Name != "development" {
+		t.Fatalf("env show = %+v", shownEnv)
+	}
+	decode(run("folder", "show", "--org", org.Id, "--project", project.Id, folder.Id, "-o", "json"), &shownFolder)
+	if shownFolder.Path != "services/gateway" {
+		t.Fatalf("folder show = %+v", shownFolder)
+	}
+
+	// Project deletion carries the permission model's locked confirmation naming
+	// the project. Exit 4 alone proves nothing here — a non-empty-parent conflict
+	// is also exit 4 — so each case asserts WHICH REQUESTS it made. Remove the
+	// confirmation guard and the first two cases fail on the request log, not on
+	// the exit code.
+	takeRequests()
+	absent := ios()
+	absent.Stdout = &strings.Builder{}
+	if code := cli.Run(t.Context(), absent, []string{"project", "delete", "--org", org.Id, project.Id}); code != cli.ExitRefused {
+		t.Fatalf("delete without --confirm exited %d, want %d", code, cli.ExitRefused)
+	}
+	if got := takeRequests(); len(got) != 0 {
+		t.Fatalf("delete without --confirm reached the server: %v", got)
+	}
+
+	stale := ios()
+	stale.Stdout = &strings.Builder{}
+	if code := cli.Run(t.Context(), stale, []string{
+		"project", "delete", "--org", org.Id, project.Id, "--confirm", "checkout", // the pre-rename name
+	}); code != cli.ExitRefused {
+		t.Fatalf("delete with a stale --confirm exited %d, want %d", code, cli.ExitRefused)
+	}
+	got := takeRequests()
+	if len(got) != 1 || !strings.HasPrefix(got[0], "GET ") {
+		t.Fatalf("delete with a stale --confirm made %v, want exactly one GET (the name it compares against)", got)
+	}
+
+	// The correct name reaches the server — where deletes never cascade, so a
+	// project still holding environments and a folder is refused THERE.
+	blocked := ios()
+	blocked.Stdout = &strings.Builder{}
+	if code := cli.Run(t.Context(), blocked, []string{
+		"project", "delete", "--org", org.Id, project.Id, "--confirm", project.Name,
+	}); code == cli.ExitOK {
+		t.Fatal("deleting a project that still holds environments succeeded")
+	}
+	if got := takeRequests(); len(got) != 2 || !strings.HasPrefix(got[0], "GET ") || !strings.HasPrefix(got[1], "DELETE ") {
+		t.Fatalf("delete with the right name made %v, want GET then DELETE", got)
+	}
+
+	// Empty it through the CLI — successful deletes at every level, which nothing
+	// else in this suite exercises end to end — then the project delete succeeds.
+	for _, e := range envList.Items {
+		if code := cli.Run(t.Context(), delIO(ios), []string{
+			"env", "delete", "--org", org.Id, "--project", project.Id, e.Id,
+		}); code != cli.ExitOK {
+			t.Fatalf("env delete %s exited %d", e.Id, code)
+		}
+	}
+	if code := cli.Run(t.Context(), delIO(ios), []string{
+		"folder", "delete", "--org", org.Id, "--project", project.Id, folder.Id,
+	}); code != cli.ExitOK {
+		t.Fatal("folder delete failed")
+	}
+	takeRequests()
+	if code := cli.Run(t.Context(), delIO(ios), []string{
+		"project", "delete", "--org", org.Id, project.Id, "--confirm", project.Name,
+	}); code != cli.ExitOK {
+		t.Fatal("deleting the now-empty project failed")
+	}
+	if got := takeRequests(); len(got) != 2 || !strings.HasPrefix(got[0], "GET ") || !strings.HasPrefix(got[1], "DELETE ") {
+		t.Fatalf("the successful delete made %v, want GET then DELETE", got)
+	}
+	var afterDelete list
+	decode(run("project", "list", "--org", org.Id, "-o", "json"), &afterDelete)
+	if afterDelete.Count != 0 {
+		t.Fatalf("the project survived its own delete: %+v", afterDelete)
+	}
+}
+
+// delIO is a throwaway IO whose stdout is discarded — the delete verbs report on
+// stderr and return no document.
+func delIO(ios func() cli.IO) cli.IO {
+	io := ios()
+	io.Stdout = &strings.Builder{}
+	return io
 }

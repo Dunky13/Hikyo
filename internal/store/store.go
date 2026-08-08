@@ -38,10 +38,12 @@ type Config struct {
 	DSN    string
 }
 
-// Org is the demonstration aggregate for the walking skeleton. Its
-// operations are instance-scoped (org administration is cross-tenant by
-// definition), so callers address orgs by id — unlike tenant-owned
-// aggregates, whose addressing comes exclusively from the proof's chain.
+// Org is the tenancy boundary. Creation, listing and counting are
+// instance-scoped (cross-tenant by definition: a create has no parent tenant
+// and an enumeration spans all of them). Every BY-ID operation is tenant-owned
+// at org depth — the addressed id comes from the proof's chain like any other
+// tenant address, which is what makes an org the caller may not reach
+// indistinguishable from one that does not exist (#48, mvp-boundary C1).
 type Org struct {
 	ID        string
 	Name      string
@@ -70,21 +72,48 @@ type NewProject struct {
 }
 
 // Environment is a tenant-owned aggregate (chain: org, project).
+//
+// DisplayOrder is the user-defined display position within the project. There
+// is deliberately no `base` field and no defaults layer of any kind: the
+// flat-model ADR deletes both, and a dormant column would be the structure it
+// forbids.
 type Environment struct {
-	ID        string
-	OrgID     string
-	ProjectID string
-	Name      string
-	Note      string
-	CreatedAt time.Time
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	DisplayOrder int64
+	CreatedAt    time.Time
 }
 
 // NewEnvironment carries the caller-suppliable fields of an environment
 // insert; chain columns are bound from the proof, as with NewProject.
 type NewEnvironment struct {
+	ID           string
+	Name         string
+	Note         string
+	DisplayOrder int64
+	CreatedAt    time.Time
+}
+
+// Folder is a tenant-owned aggregate (chain: org, project), organizational
+// only: namespace + display grouping. No folder-scoped grants exist
+// (permission-model ADR) and no value ever attaches to one (domain-model), so
+// the row carries its path and nothing else.
+type Folder struct {
 	ID        string
-	Name      string
-	Note      string
+	OrgID     string
+	ProjectID string
+	Path      string
+	CreatedAt time.Time
+}
+
+// NewFolder carries the caller-suppliable fields of a folder insert; chain
+// columns are bound from the proof, as with NewProject.
+type NewFolder struct {
+	ID        string
+	Path      string
 	CreatedAt time.Time
 }
 
@@ -95,9 +124,11 @@ type NewEnvironment struct {
 // the addressed chain comes out of the proof, which authorize() resolved
 // in this same transaction.
 
-// OrgReader is the read side of the demonstration aggregate's repository.
+// OrgReader is the read side of the orgs aggregate. Get takes no id: the org
+// it returns is the one the proof's chain addresses. List and Count are the
+// instance-scoped enumerations and carry no address at all.
 type OrgReader interface {
-	Get(ctx context.Context, p authz.Proof, id string) (Org, error)
+	Get(ctx context.Context, p authz.Proof) (Org, error)
 	List(ctx context.Context, p authz.Proof) ([]Org, error)
 	Count(ctx context.Context, p authz.Proof) (int64, error)
 }
@@ -107,18 +138,49 @@ type OrgReader interface {
 type OrgRepo interface {
 	OrgReader
 	Create(ctx context.Context, p authz.Proof, org Org) error
+	// Rename and Delete address the org through the proof's chain. Rename
+	// touches the mutable name only — identity is the immutable id, so a
+	// rename never breaks a reference.
+	Rename(ctx context.Context, p authz.Proof, name string) error
+	Delete(ctx context.Context, p authz.Proof) error
 }
 
-// ProjectRepo is the projects aggregate (writes only for now; the CRUD
-// surface lands with #48).
+// ProjectReader is the read side of the projects aggregate.
+type ProjectReader interface {
+	// Get returns the project addressed by the proof's resolved chain.
+	Get(ctx context.Context, p authz.Proof) (Project, error)
+	// List returns every project in the org the proof addresses.
+	List(ctx context.Context, p authz.Proof) ([]Project, error)
+}
+
+// ProjectRepo is the full projects aggregate.
 type ProjectRepo interface {
+	ProjectReader
 	Create(ctx context.Context, p authz.Proof, proj NewProject) error
+	Rename(ctx context.Context, p authz.Proof, name string) error
+	Delete(ctx context.Context, p authz.Proof) error
+	// Lock takes the project row for the rest of the transaction, so every
+	// mutation of that project's environment SET serializes: the cap check and
+	// the append position are both read-then-write, and postgres would
+	// otherwise let two transactions at cap-1 both pass. ErrNotFound when the
+	// project is gone — the uniform outcome, as everywhere.
+	Lock(ctx context.Context, p authz.Proof) error
 }
 
 // EnvironmentReader is the read side of the environments aggregate.
 type EnvironmentReader interface {
 	// Get returns the environment addressed by the proof's resolved chain.
 	Get(ctx context.Context, p authz.Proof) (Environment, error)
+	// List returns the project's environments in display order.
+	List(ctx context.Context, p authz.Proof) ([]Environment, error)
+	// Count is the environment-count cap's input, read inside the same
+	// transaction as the insert it bounds.
+	Count(ctx context.Context, p authz.Proof) (int64, error)
+	// NextOrder is the append position: one past the highest display order in
+	// use. It is NOT the count — deleting an environment leaves a gap on
+	// purpose, so a count would hand the next create a position another row
+	// already holds.
+	NextOrder(ctx context.Context, p authz.Proof) (int64, error)
 }
 
 // EnvironmentRepo is the full environments aggregate.
@@ -129,6 +191,29 @@ type EnvironmentRepo interface {
 	// addressed by the proof's chain. Chain columns are immutable —
 	// re-parenting is a new row (tenant-isolation ADR).
 	UpdateNote(ctx context.Context, p authz.Proof, note string) error
+	Rename(ctx context.Context, p authz.Proof, name string) error
+	// SetOrder writes one environment's display position. The whole ordered
+	// set is rewritten by one authorized operation in one transaction, so a
+	// partial reorder cannot be observed.
+	SetOrder(ctx context.Context, p authz.Proof, id string, order int64) error
+	Delete(ctx context.Context, p authz.Proof) error
+}
+
+// FolderReader is the read side of the folders aggregate. A folder is
+// addressed by (proof chain, id): the scope lattice has no folder level, so
+// the id is an ordinary argument that can only ever resolve inside the
+// project the proof already authorized.
+type FolderReader interface {
+	Get(ctx context.Context, p authz.Proof, id string) (Folder, error)
+	List(ctx context.Context, p authz.Proof) ([]Folder, error)
+}
+
+// FolderRepo is the full folders aggregate.
+type FolderRepo interface {
+	FolderReader
+	Create(ctx context.Context, p authz.Proof, folder NewFolder) error
+	Rename(ctx context.Context, p authz.Proof, id, path string) error
+	Delete(ctx context.Context, p authz.Proof, id string) error
 }
 
 // Repos bundles the full repositories bound to one write transaction.
@@ -137,6 +222,7 @@ type Repos interface {
 	Keys() KeyRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
+	Folders() FolderRepo
 	Audit() AuditRepo
 }
 
@@ -146,7 +232,9 @@ type Repos interface {
 type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
+	Projects() ProjectReader
 	Environments() EnvironmentReader
+	Folders() FolderReader
 	Audit() AuditReader
 }
 
@@ -154,6 +242,10 @@ type ReadRepos interface {
 // domain so every layer shares one sentinel for the unauthorized ≡
 // nonexistent rule without importing the store.
 var ErrNotFound = domain.ErrNotFound
+
+// ErrConflict is the canonical cross-engine constraint refusal — a duplicate
+// name among live siblings, or a parent still referenced by children.
+var ErrConflict = domain.ErrConflict
 
 // DB holds the open datastore. SQLite keeps a single write connection
 // (pool of one) and a separate read pool, per the boot-enforced connection

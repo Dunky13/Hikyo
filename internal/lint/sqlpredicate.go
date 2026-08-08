@@ -28,7 +28,7 @@ import (
 //	-- wenv:instance-scoped    cross-tenant by definition (operator surface)
 //	-- wenv:authn-resolution   the authorization package's bootstrap reads
 type TableRule struct {
-	Class string   // org | project | environment | instance | authn | system
+	Class string   // org | project | environment | folder | instance | authn | system
 	Chain []string // chain columns required as top-level conjuncts ("-" = none)
 }
 
@@ -49,9 +49,15 @@ func (q Query) Hash() string {
 
 var (
 	directiveRe = regexp.MustCompile(`(?m)^--\s*wenv:table\s+(\S+)\s+class=(\S+)\s+chain=(\S+)\s*$`)
-	createRe    = regexp.MustCompile(`(?im)^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)`)
-	nameRe      = regexp.MustCompile(`^--\s*name:\s+(\w+)\s+:(\w+)\s*$`)
-	annotRe     = regexp.MustCompile(`^--\s*wenv:(instance-scoped|authn-resolution)\s*$`)
+	// One alternation so create / drop / rename are replayed in source order;
+	// three separate scans would lose the ordering the final state depends on.
+	tableStatementRe = regexp.MustCompile(`(?im)^\s*(?:` +
+		`CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)` +
+		`|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)` +
+		`|ALTER\s+TABLE\s+(\w+)\s+RENAME\s+TO\s+(\w+)` +
+		`)`)
+	nameRe  = regexp.MustCompile(`^--\s*name:\s+(\w+)\s+:(\w+)\s*$`)
+	annotRe = regexp.MustCompile(`^--\s*wenv:(instance-scoped|authn-resolution)\s*$`)
 	// A bindable parameter: sqlite positional, postgres positional, or the
 	// sqlc named form (the reserved chain_* parameters use it on postgres).
 	paramRe = `(\?|\$\d+|SQLCARG_\w+)`
@@ -80,7 +86,7 @@ func ParseScopeDirectives(dir string) (map[string]TableRule, error) {
 				rule.Chain = strings.Split(chain, ",")
 			}
 			switch class {
-			case "org", "project", "environment", "instance", "authn", "system":
+			case "org", "project", "environment", "folder", "instance", "authn", "system":
 			default:
 				return fmt.Errorf("%s: table %q has unknown scope class %q", path, table, class)
 			}
@@ -93,19 +99,50 @@ func ParseScopeDirectives(dir string) (map[string]TableRule, error) {
 	return out, nil
 }
 
-// CollectTables returns every table created across the migration files.
-func CollectTables(dir string) ([]string, error) {
-	var out []string
+// CollectTables replays the migration set's table statements in version order
+// and returns two sets: the tables that exist at rest (`live`), and every name
+// a CREATE ever mentioned (`named`).
+//
+// They differ because of the sqlite rebuild — create a twin, copy, drop the
+// original, rename the twin over it — which is the only way that engine reaches
+// a column with no default, since it can neither add a NOT NULL column without
+// one nor drop one afterwards (migration 00006 established the shape, 00009
+// reuses it). The two sets exist because the two checks that consume them want
+// opposite things: "every table is classified" must ask about live tables only,
+// or it would demand a directive for a name that is gone by commit; "no
+// directive dangles" must ask about every name, or declaring the twin — which
+// 00006 does on both engines — would look like a stale entry.
+func CollectTables(dir string) (live, named []string, err error) {
+	alive := map[string]bool{}
+	seen := map[string]bool{}
 	if err := eachSQLFile(dir, func(_, src string) error {
-		for _, m := range createRe.FindAllStringSubmatch(src, -1) {
-			out = append(out, m[1])
+		for _, stmt := range tableStatementRe.FindAllStringSubmatch(src, -1) {
+			switch {
+			case stmt[1] != "": // CREATE TABLE x
+				alive[stmt[1]] = true
+				seen[stmt[1]] = true
+			case stmt[2] != "": // DROP TABLE x
+				delete(alive, stmt[2])
+			default: // ALTER TABLE x RENAME TO y
+				delete(alive, stmt[3])
+				alive[stmt[4]] = true
+				seen[stmt[4]] = true
+			}
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	return sortedSet(alive), sortedSet(seen), nil
+}
+
+func sortedSet(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
-	return out, nil
+	return out
 }
 
 // ParseQueries reads every sqlc query block in dir, with its wenv
@@ -165,21 +202,21 @@ func CheckSQLPredicates(repoRoot string) []string {
 		if err != nil {
 			return append(findings, "sqlpredicate: "+err.Error())
 		}
-		tables, err := CollectTables(migDir)
+		live, named, err := CollectTables(migDir)
 		if err != nil {
 			return append(findings, "sqlpredicate: "+err.Error())
 		}
-		for _, t := range tables {
+		for _, t := range live {
 			if _, ok := rules[t]; !ok {
 				findings = append(findings, fmt.Sprintf("sqlpredicate(%s): table %q has no wenv:table scope directive — the derived registry must be total", engine, t))
 			}
 		}
-		created := map[string]bool{}
-		for _, t := range tables {
-			created[t] = true
+		everNamed := map[string]bool{}
+		for _, t := range named {
+			everNamed[t] = true
 		}
 		for t := range rules {
-			if !created[t] {
+			if !everNamed[t] {
 				findings = append(findings, fmt.Sprintf("sqlpredicate(%s): scope directive for %q names no created table", engine, t))
 			}
 		}
@@ -287,8 +324,13 @@ func checkWhere(label, sql, upper string, chainCols []string) []string {
 		return []string{fmt.Sprintf("%s: tenant-owned table queried without a WHERE clause", label)}
 	}
 	where := sql[idx+len(" WHERE "):]
-	if end := strings.Index(strings.ToUpper(where), " ORDER BY "); end >= 0 {
-		where = where[:end]
+	// Trailing clauses that are not predicates get cut before the conjunct
+	// walk. FOR UPDATE is a row-lock request, ORDER BY a sort; neither narrows
+	// which rows the chain conjuncts already confined.
+	for _, tail := range []string{" ORDER BY ", " FOR UPDATE"} {
+		if end := strings.Index(strings.ToUpper(where), tail); end >= 0 {
+			where = where[:end]
+		}
 	}
 	if strings.ContainsAny(where, "()") {
 		return []string{label + ": parenthesised predicate is an unprovable shape"}

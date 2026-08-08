@@ -198,6 +198,9 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	api := &server.API{
 		Auth:           authSvc,
 		Orgs:           &service.Orgs{DB: db},
+		Projects:       &service.Projects{DB: db},
+		Environments:   &service.Environments{DB: db},
+		Folders:        &service.Folders{DB: db},
 		Providers:      &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
 		Admission:      limiter,
 		Version:        Version,

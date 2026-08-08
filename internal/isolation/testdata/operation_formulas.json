@@ -88,6 +88,22 @@
     ]
   },
   {
+    "operation": "environment.delete",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "environment.list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
     "operation": "environment.read",
     "class": "tenant",
     "level": "environment",
@@ -96,11 +112,67 @@
     ]
   },
   {
+    "operation": "environment.rename",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "environment.reorder",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
     "operation": "environment.update-note",
     "class": "tenant",
     "level": "environment",
     "formula": [
       "edit@environment"
+    ]
+  },
+  {
+    "operation": "folder.create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "folder.delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "folder.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "folder.list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "folder.rename",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
     ]
   },
   {
@@ -144,11 +216,19 @@
     ]
   },
   {
-    "operation": "org.get",
-    "class": "instance",
-    "level": "instance",
+    "operation": "org.delete",
+    "class": "tenant",
+    "level": "org",
     "formula": [
       "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "org.get",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "read@org"
     ]
   },
   {
@@ -160,9 +240,49 @@
     ]
   },
   {
+    "operation": "org.rename",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
     "operation": "project.create",
     "class": "tenant",
     "level": "org",
+    "formula": [
+      "manage-projects@org"
+    ]
+  },
+  {
+    "operation": "project.delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-projects@org"
+    ]
+  },
+  {
+    "operation": "project.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "project.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "read@org"
+    ]
+  },
+  {
+    "operation": "project.rename",
+    "class": "tenant",
+    "level": "project",
     "formula": [
       "manage-projects@org"
     ]

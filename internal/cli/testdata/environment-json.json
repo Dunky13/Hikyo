@@ -1,0 +1,13 @@
+{
+  "count": 1,
+  "items": [
+    {
+      "created_at": "2026-01-02T03:04:05Z",
+      "display_order": 0,
+      "id": "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+      "name": "prod",
+      "org_id": "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+      "project_id": "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22"
+    }
+  ]
+}

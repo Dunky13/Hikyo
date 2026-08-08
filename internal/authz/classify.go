@@ -104,12 +104,39 @@ var wireRegistry = map[string]Class{
 	// discharged through wireEvents like the account-security surface.
 	"http:POST /api/v1/accounts/{principal}/credential-reset": ClassUnauthenticated,
 
-	// Org administration is instance-scoped: the probe contract is grant
-	// refusal, not tenancy, because no tenant object exists whose
-	// nonexistence could be mimicked.
-	"http:GET /api/v1/orgs":       ClassInstance,
-	"http:POST /api/v1/orgs":      ClassInstance,
-	"http:GET /api/v1/orgs/{org}": ClassInstance,
+	// Org creation and enumeration are instance-scoped: the probe contract is
+	// grant refusal, not tenancy, because no tenant object exists whose
+	// nonexistence could be mimicked — a create has no parent tenant and a
+	// list of every org spans all of them.
+	"http:GET /api/v1/orgs":  ClassInstance,
+	"http:POST /api/v1/orgs": ClassInstance,
+
+	// The hierarchy surface (#48). EVERY by-id route is tenant-class, org
+	// included: mvp-boundary C1 requires the uniform nonexistent shape at each
+	// level, and an org route that answered 403 on grant refusal would leak the
+	// existence of every org an operator cannot reach.
+	"http:GET /api/v1/orgs/{org}":    ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}":  ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}": ClassTenant,
+
+	"http:GET /api/v1/orgs/{org}/projects":              ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects":             ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}":    ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}":  ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}": ClassTenant,
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments":                  ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments":                 ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/order":            ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}":    ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment}":  ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}": ClassTenant,
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/folders":             ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/folders":            ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/folders/{folder}":    ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder}":  ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/folders/{folder}": ClassTenant,
 
 	// `wenv admin create`: the bootstrap member of the closed local-authority
 	// exception set. System class, whose probe contract is network
@@ -141,7 +168,15 @@ var wireRegistry = map[string]Class{
 	// `context` is entirely client-local: the trust store and the named
 	// contexts live on this box and reach no server.
 	"cli:context": ClassUnauthenticated,
+	// `org` still reaches the instance-scoped create/list as well as the
+	// tenant-scoped by-id routes, so it carries the wider of the two classes:
+	// a verb whose class understated its reach would let an instance-scoped
+	// call ride in under a tenant probe contract. `project`, `env` and `folder`
+	// reach tenant routes exclusively.
 	"cli:org":     ClassInstance,
+	"cli:project": ClassTenant,
+	"cli:env":     ClassTenant,
+	"cli:folder":  ClassTenant,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
@@ -310,9 +345,31 @@ var wireEvents = map[string][]audit.EventType{
 // that dispatches at runtime between operations (credential reset) lists them
 // all, so the linkage records every operation the route can reach.
 var wireRoutes = map[string][]Operation{
-	"http:POST /api/v1/orgs":      {OpOrgCreate},
-	"http:GET /api/v1/orgs":       {OpOrgList},
-	"http:GET /api/v1/orgs/{org}": {OpOrgGet},
+	"http:POST /api/v1/orgs":         {OpOrgCreate},
+	"http:GET /api/v1/orgs":          {OpOrgList},
+	"http:GET /api/v1/orgs/{org}":    {OpOrgGet},
+	"http:PATCH /api/v1/orgs/{org}":  {OpOrgRename},
+	"http:DELETE /api/v1/orgs/{org}": {OpOrgDelete},
+
+	// The hierarchy surface (#48).
+	"http:GET /api/v1/orgs/{org}/projects":              {OpProjectList},
+	"http:POST /api/v1/orgs/{org}/projects":             {OpProjectCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}":    {OpProjectGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}":  {OpProjectRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}": {OpProjectDelete},
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments":                  {OpEnvList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments":                 {OpEnvCreate},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/order":            {OpEnvReorder},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}":    {OpEnvRead},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment}":  {OpEnvRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}": {OpEnvDelete},
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/folders":             {OpFolderList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/folders":            {OpFolderCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/folders/{folder}":    {OpFolderGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder}":  {OpFolderRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/folders/{folder}": {OpFolderDelete},
 
 	// OIDC provider administration (#54), instance-config.
 	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},

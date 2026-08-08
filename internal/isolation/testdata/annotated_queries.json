@@ -229,12 +229,6 @@
   },
   {
     "engine": "postgres",
-    "name": "GetOrg",
-    "annotation": "instance-scoped",
-    "hash": "4a4e28b0093acaf4c67487f0e19157cecbee480d5d2bd51e88e88074eb70e47d"
-  },
-  {
-    "engine": "postgres",
     "name": "GetPasswordCredential",
     "annotation": "authn-resolution",
     "hash": "b9305f60d3277b60befea01d7a8cf3271d3cd152ebead1a361e85c2e2017208a"
@@ -736,12 +730,6 @@
     "name": "GetOIDCTransactionByState",
     "annotation": "authn-resolution",
     "hash": "867b1f518723fb3932135954b28f542a0fb053487a0943e2942536cd23a96ba8"
-  },
-  {
-    "engine": "sqlite",
-    "name": "GetOrg",
-    "annotation": "instance-scoped",
-    "hash": "1f5399c8a18f2b8b804f8fcfb4552f19506b2df88063b896f702223ce2423742"
   },
   {
     "engine": "sqlite",

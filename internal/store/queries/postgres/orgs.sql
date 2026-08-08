@@ -1,16 +1,21 @@
--- The demonstration Org aggregate's statements are instance-scoped
--- operations (org creation/listing is cross-tenant by definition); each is
--- annotated and content-pinned in the allowlist fixture (tenant-isolation
--- ADR invariant 13).
+-- The Org aggregate. Creation, listing and counting are instance-scoped
+-- operations (they are cross-tenant by definition: a create has no parent
+-- tenant and an enumeration spans all of them); each is annotated and
+-- content-pinned in the allowlist fixture (tenant-isolation ADR invariant 13).
+--
+-- The by-id statements are NOT annotated: an org row is its own tenant root
+-- (scope class org, chain=id), so they carry the chain conjunct like any other
+-- tenant statement and the binding layer takes `id` from the proof. That is
+-- what makes an org nobody may reach indistinguishable from a missing one
+-- (#48, mvp-boundary C1).
 
 -- wenv:instance-scoped
 -- name: CreateOrg :exec
 INSERT INTO orgs (id, name, active, metadata, created_at)
 VALUES ($1, $2, $3, $4, $5);
 
--- wenv:instance-scoped
 -- name: GetOrg :one
-SELECT id, name, active, metadata, created_at FROM orgs WHERE id = $1;
+SELECT id, name, active, metadata, created_at FROM orgs WHERE id = sqlc.arg(chain_org_id);
 
 -- wenv:instance-scoped
 -- name: ListOrgs :many
@@ -19,3 +24,9 @@ SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name;
 -- wenv:instance-scoped
 -- name: CountOrgs :one
 SELECT COUNT(*) FROM orgs;
+
+-- name: RenameOrg :execrows
+UPDATE orgs SET name = sqlc.arg(name) WHERE id = sqlc.arg(chain_org_id);
+
+-- name: DeleteOrg :execrows
+DELETE FROM orgs WHERE id = sqlc.arg(chain_org_id);

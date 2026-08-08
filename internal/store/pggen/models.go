@@ -85,12 +85,13 @@ type CredentialAuthority struct {
 }
 
 type Environment struct {
-	ID        string
-	OrgID     string
-	ProjectID string
-	Name      string
-	Note      string
-	CreatedAt pgtype.Timestamptz
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	CreatedAt    pgtype.Timestamptz
+	DisplayOrder int64
 }
 
 type ExternalIdentity struct {
@@ -102,6 +103,14 @@ type ExternalIdentity struct {
 	ProviderID      string
 	CredentialEpoch int64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type Folder struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Path      string
+	CreatedAt pgtype.Timestamptz
 }
 
 type Grant struct {

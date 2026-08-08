@@ -37,10 +37,16 @@ type CreateOrgParams struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-// The demonstration Org aggregate's statements are instance-scoped
-// operations (org creation/listing is cross-tenant by definition); each is
-// annotated and content-pinned in the allowlist fixture (tenant-isolation
-// ADR invariant 13).
+// The Org aggregate. Creation, listing and counting are instance-scoped
+// operations (they are cross-tenant by definition: a create has no parent
+// tenant and an enumeration spans all of them); each is annotated and
+// content-pinned in the allowlist fixture (tenant-isolation ADR invariant 13).
+//
+// The by-id statements are NOT annotated: an org row is its own tenant root
+// (scope class org, chain=id), so they carry the chain conjunct like any other
+// tenant statement and the binding layer takes `id` from the proof. That is
+// what makes an org nobody may reach indistinguishable from a missing one
+// (#48, mvp-boundary C1).
 // wenv:instance-scoped
 func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	_, err := q.db.Exec(ctx, createOrg,
@@ -53,13 +59,24 @@ func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	return err
 }
 
+const deleteOrg = `-- name: DeleteOrg :execrows
+DELETE FROM orgs WHERE id = $1
+`
+
+func (q *Queries) DeleteOrg(ctx context.Context, chainOrgID string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOrg, chainOrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getOrg = `-- name: GetOrg :one
 SELECT id, name, active, metadata, created_at FROM orgs WHERE id = $1
 `
 
-// wenv:instance-scoped
-func (q *Queries) GetOrg(ctx context.Context, id string) (Org, error) {
-	row := q.db.QueryRow(ctx, getOrg, id)
+func (q *Queries) GetOrg(ctx context.Context, chainOrgID string) (Org, error) {
+	row := q.db.QueryRow(ctx, getOrg, chainOrgID)
 	var i Org
 	err := row.Scan(
 		&i.ID,
@@ -100,4 +117,21 @@ func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const renameOrg = `-- name: RenameOrg :execrows
+UPDATE orgs SET name = $1 WHERE id = $2
+`
+
+type RenameOrgParams struct {
+	Name       string
+	ChainOrgID string
+}
+
+func (q *Queries) RenameOrg(ctx context.Context, arg RenameOrgParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameOrg, arg.Name, arg.ChainOrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

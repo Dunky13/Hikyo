@@ -12,4 +12,27 @@ wenv context list -o yaml -> 2 usage
 wenv org -> 2 usage
 wenv org list --instance unknown-ref -> 4 refused
 wenv account -> 2 usage
+wenv project -> 2 usage
+wenv project warp -> 2 usage
+wenv env -> 2 usage
+wenv env warp -> 2 usage
+wenv folder -> 2 usage
+wenv folder warp -> 2 usage
+wenv project list --instance unknown-ref --org org_x -> 4 refused
+wenv env list --instance unknown-ref -> 4 refused
+wenv folder create --instance unknown-ref -> 2 usage
+wenv folder show --instance unknown-ref -> 2 usage
+wenv env rename env_x --instance unknown-ref -> 2 usage
+wenv env reorder --instance unknown-ref -> 2 usage
+wenv folder delete fld_x typo --instance unknown-ref -> 2 usage
+wenv folder list stray --instance unknown-ref -> 2 usage
+wenv project create stray --name p --instance unknown-ref -> 2 usage
+wenv env list stray --instance unknown-ref -> 2 usage
+wenv org list stray --instance unknown-ref -> 2 usage
+wenv org warp -> 2 usage
+wenv org create --instance unknown-ref -> 2 usage
+wenv org rename org_x --instance unknown-ref -> 2 usage
+wenv org show org_a --org org_b --instance unknown-ref -> 2 usage
+wenv project show prj_a --project prj_b --instance unknown-ref -> 2 usage
+wenv project delete prj_x --org org_x --instance unknown-ref -> 4 refused
 wenv account passkey enrol -> 4 refused

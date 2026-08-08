@@ -11,10 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEnvironments = `-- name: CountEnvironments :one
+SELECT COUNT(*) FROM environments WHERE org_id = $1 AND project_id = $2
+`
+
+type CountEnvironmentsParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+func (q *Queries) CountEnvironments(ctx context.Context, arg CountEnvironmentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEnvironments, arg.ChainOrgID, arg.ChainProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEnvironment = `-- name: CreateEnvironment :exec
 
-INSERT INTO environments (id, org_id, project_id, name, note, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO environments (id, org_id, project_id, name, note, display_order, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateEnvironmentParams struct {
@@ -23,6 +39,7 @@ type CreateEnvironmentParams struct {
 	ChainProjectID string
 	Name           string
 	Note           string
+	DisplayOrder   int64
 	CreatedAt      pgtype.Timestamptz
 }
 
@@ -36,13 +53,32 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		arg.ChainProjectID,
 		arg.Name,
 		arg.Note,
+		arg.DisplayOrder,
 		arg.CreatedAt,
 	)
 	return err
 }
 
+const deleteEnvironment = `-- name: DeleteEnvironment :execrows
+DELETE FROM environments WHERE org_id = $1 AND project_id = $2 AND id = $3
+`
+
+type DeleteEnvironmentParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+func (q *Queries) DeleteEnvironment(ctx context.Context, arg DeleteEnvironmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEnvironment, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getEnvironment = `-- name: GetEnvironment :one
-SELECT id, org_id, project_id, name, note, created_at FROM environments
+SELECT id, org_id, project_id, name, note, created_at, display_order FROM environments
 WHERE org_id = $1 AND project_id = $2 AND id = $3
 `
 
@@ -62,8 +98,123 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.Name,
 		&i.Note,
 		&i.CreatedAt,
+		&i.DisplayOrder,
 	)
 	return i, err
+}
+
+const listEnvironments = `-- name: ListEnvironments :many
+SELECT id, org_id, project_id, name, note, created_at, display_order FROM environments
+WHERE org_id = $1 AND project_id = $2 ORDER BY display_order, name
+`
+
+type ListEnvironmentsParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]Environment, error) {
+	rows, err := q.db.Query(ctx, listEnvironments, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Environment
+	for rows.Next() {
+		var i Environment
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Note,
+			&i.CreatedAt,
+			&i.DisplayOrder,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const nextEnvironmentOrder = `-- name: NextEnvironmentOrder :one
+SELECT CAST(COALESCE(MAX(display_order) + 1, 0) AS BIGINT) FROM environments
+WHERE org_id = $1 AND project_id = $2
+`
+
+type NextEnvironmentOrderParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+// NextEnvironmentOrder is the append position: one past the highest order in
+// use, NOT the row count. Deleting an environment deliberately leaves a gap, so
+// a count would hand the next create a position another row already holds.
+func (q *Queries) NextEnvironmentOrder(ctx context.Context, arg NextEnvironmentOrderParams) (int64, error) {
+	row := q.db.QueryRow(ctx, nextEnvironmentOrder, arg.ChainOrgID, arg.ChainProjectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const renameEnvironment = `-- name: RenameEnvironment :execrows
+UPDATE environments SET name = $1
+WHERE org_id = $2 AND project_id = $3 AND id = $4
+`
+
+type RenameEnvironmentParams struct {
+	Name           string
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+func (q *Queries) RenameEnvironment(ctx context.Context, arg RenameEnvironmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameEnvironment,
+		arg.Name,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setEnvironmentOrder = `-- name: SetEnvironmentOrder :execrows
+UPDATE environments SET display_order = $1
+WHERE org_id = $2 AND project_id = $3 AND id = $4
+`
+
+type SetEnvironmentOrderParams struct {
+	DisplayOrder   int64
+	ChainOrgID     string
+	ChainProjectID string
+	ID             string
+}
+
+// Reorder is authorized at PROJECT depth (it rewrites the project's whole
+// ordered set), so the proof carries no environment id and `id` is an ordinary
+// caller argument - deliberately not spelled chain_env_id, which would name a
+// proof field the proof does not have. The chain conjuncts confine it: an id
+// from another project matches no row, which is the uniform nonexistent
+// outcome the reorder service turns into a refusal.
+func (q *Queries) SetEnvironmentOrder(ctx context.Context, arg SetEnvironmentOrderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setEnvironmentOrder,
+		arg.DisplayOrder,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateEnvironmentNote = `-- name: UpdateEnvironmentNote :execrows

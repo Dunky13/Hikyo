@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -264,7 +264,8 @@ export const listOrgs = <ThrowOnError extends boolean = false>(options?: Options
  * `org.created` audit event commits in that same transaction — a write
  * without its durable record does not complete.
  *
- * Not idempotent: each call creates a distinct organisation.
+ * Not idempotent: each call creates a distinct organisation. The name must
+ * be unused among live organisations; a collision is a `conflict`.
  *
  */
 export const createOrg = <ThrowOnError extends boolean = false>(options: Options<CreateOrgData, ThrowOnError>) => (options.client ?? client).post<CreateOrgResponses, CreateOrgErrors, ThrowOnError>({
@@ -278,12 +279,290 @@ export const createOrg = <ThrowOnError extends boolean = false>(options: Options
 });
 
 /**
+ * Delete an organisation.
+ *
+ * Never cascades. An organisation that still holds projects, or grants
+ * pointing into it, is refused with `conflict` — emptying a tenant is
+ * explicit, separately audited work and not a side effect of one call.
+ *
+ */
+export const deleteOrg = <ThrowOnError extends boolean = false>(options: Options<DeleteOrgData, ThrowOnError>) => (options.client ?? client).delete<DeleteOrgResponses, DeleteOrgErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}',
+    ...options
+});
+
+/**
  * Read one organisation.
+ *
+ * Tenant-scoped at org depth, unlike the create and list operations
+ * above: an organisation the caller may not reach answers exactly like
+ * one that does not exist, which is what "unauthorized access at each
+ * level returns the uniform nonexistent shape" requires of the top level
+ * too. There is therefore no `403` on this route — a refusal is a `404`.
+ *
  */
 export const getOrg = <ThrowOnError extends boolean = false>(options: Options<GetOrgData, ThrowOnError>) => (options.client ?? client).get<GetOrgResponses, GetOrgErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}',
     ...options
+});
+
+/**
+ * Rename an organisation.
+ *
+ * Instance operator work: the permission model's closed capability set
+ * holds no org-lifecycle atom (`manage-projects` is explicitly "create
+ * and delete projects"), so the formula sits at instance scope while the
+ * operation addresses org depth. An organisation administrator therefore
+ * cannot rename the organisation they administer, and learns nothing from
+ * trying — the refusal is the uniform `404`.
+ *
+ */
+export const renameOrg = <ThrowOnError extends boolean = false>(options: Options<RenameOrgData, ThrowOnError>) => (options.client ?? client).patch<RenameOrgResponses, RenameOrgErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List the organisation's projects.
+ *
+ * A proof-scoped read at org depth. Unpaged: the hierarchy is bounded by
+ * the ops spec's own caps (50 environments per project) and an
+ * organisation's project list is administrative, not a data feed.
+ *
+ */
+export const listProjects = <ThrowOnError extends boolean = false>(options: Options<ListProjectsData, ThrowOnError>) => (options.client ?? client).get<ListProjectsResponses, ListProjectsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects',
+    ...options
+});
+
+/**
+ * Create a project.
+ *
+ * Not idempotent: each call creates a distinct project. The name must be
+ * unused among the organisation's live projects; a collision is a
+ * `conflict`, decided after authorization so it discloses nothing a
+ * caller could not already read.
+ *
+ */
+export const createProject = <ThrowOnError extends boolean = false>(options: Options<CreateProjectData, ThrowOnError>) => (options.client ?? client).post<CreateProjectResponses, CreateProjectErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete a project.
+ *
+ * Never cascades. A project that still holds environments or folders is
+ * refused with `conflict`; emptying it is the caller's explicit,
+ * separately audited work.
+ *
+ */
+export const deleteProject = <ThrowOnError extends boolean = false>(options: Options<DeleteProjectData, ThrowOnError>) => (options.client ?? client).delete<DeleteProjectResponses, DeleteProjectErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}',
+    ...options
+});
+
+/**
+ * Read one project.
+ */
+export const getProject = <ThrowOnError extends boolean = false>(options: Options<GetProjectData, ThrowOnError>) => (options.client ?? client).get<GetProjectResponses, GetProjectErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}',
+    ...options
+});
+
+/**
+ * Rename a project.
+ *
+ * Changes the mutable name only. Identity is the immutable id, so a
+ * rename never breaks a reference. Idempotent: renaming to the current
+ * name succeeds and changes nothing.
+ *
+ */
+export const renameProject = <ThrowOnError extends boolean = false>(options: Options<RenameProjectData, ThrowOnError>) => (options.client ?? client).patch<RenameProjectResponses, RenameProjectErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List the project's environments, in display order.
+ *
+ * Ordered by `display_order`, ties broken by name so the sequence is
+ * deterministic before any reorder has happened.
+ *
+ */
+export const listEnvironments = <ThrowOnError extends boolean = false>(options: Options<ListEnvironmentsData, ThrowOnError>) => (options.client ?? client).get<ListEnvironmentsResponses, ListEnvironmentsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments',
+    ...options
+});
+
+/**
+ * Create an environment.
+ *
+ * Environments are user-defined per project and appended at the end of
+ * the display order; `PUT .../environments/order` moves them. There is no
+ * `base` pointer and no defaults layer to inherit from — every value is
+ * explicit per environment (flat-model ADR).
+ *
+ * A project holds at most 50 environments; the 51st is refused by name
+ * with `limit_exceeded`, decided against a count read inside the creating
+ * transaction.
+ *
+ */
+export const createEnvironment = <ThrowOnError extends boolean = false>(options: Options<CreateEnvironmentData, ThrowOnError>) => (options.client ?? client).post<CreateEnvironmentResponses, CreateEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Rewrite the project's environment display order.
+ *
+ * Takes the WHOLE ordered set, not one position: a single transaction
+ * then cannot leave two environments sharing a position or a gap in the
+ * sequence, and a concurrent reorder serializes behind it.
+ *
+ * The list must name exactly the project's environments, once each.
+ * Anything else — a short list, a duplicate, an id from elsewhere — is one
+ * `bad_request` with one fixed message, so a foreign id discloses nothing.
+ *
+ * Idempotent: applying the same order twice changes nothing.
+ *
+ */
+export const reorderEnvironments = <ThrowOnError extends boolean = false>(options: Options<ReorderEnvironmentsData, ThrowOnError>) => (options.client ?? client).put<ReorderEnvironmentsResponses, ReorderEnvironmentsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/order',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete an environment.
+ *
+ * The remaining environments keep their positions: display order is a
+ * property of each row, not an invariant over the set, so a gap is not a
+ * defect and closing it would be an unrequested write.
+ *
+ */
+export const deleteEnvironment = <ThrowOnError extends boolean = false>(options: Options<DeleteEnvironmentData, ThrowOnError>) => (options.client ?? client).delete<DeleteEnvironmentResponses, DeleteEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}',
+    ...options
+});
+
+/**
+ * Read one environment.
+ */
+export const getEnvironment = <ThrowOnError extends boolean = false>(options: Options<GetEnvironmentData, ThrowOnError>) => (options.client ?? client).get<GetEnvironmentResponses, GetEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}',
+    ...options
+});
+
+/**
+ * Rename an environment.
+ *
+ * Environment topology, so it carries `definitions-edit` rather than
+ * `edit`: renaming is a change to the project's shape, not to a value.
+ *
+ */
+export const renameEnvironment = <ThrowOnError extends boolean = false>(options: Options<RenameEnvironmentData, ThrowOnError>) => (options.client ?? client).patch<RenameEnvironmentResponses, RenameEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * List the project's folders.
+ */
+export const listFolders = <ThrowOnError extends boolean = false>(options: Options<ListFoldersData, ThrowOnError>) => (options.client ?? client).get<ListFoldersResponses, ListFoldersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/folders',
+    ...options
+});
+
+/**
+ * Create a folder.
+ *
+ * A folder is organizational only in v1: namespace and display grouping.
+ * No grant is ever scoped to one and no value ever attaches to one.
+ *
+ */
+export const createFolder = <ThrowOnError extends boolean = false>(options: Options<CreateFolderData, ThrowOnError>) => (options.client ?? client).post<CreateFolderResponses, CreateFolderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/folders',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete a folder.
+ */
+export const deleteFolder = <ThrowOnError extends boolean = false>(options: Options<DeleteFolderData, ThrowOnError>) => (options.client ?? client).delete<DeleteFolderResponses, DeleteFolderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/folders/{folder}',
+    ...options
+});
+
+/**
+ * Read one folder.
+ */
+export const getFolder = <ThrowOnError extends boolean = false>(options: Options<GetFolderData, ThrowOnError>) => (options.client ?? client).get<GetFolderResponses, GetFolderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/folders/{folder}',
+    ...options
+});
+
+/**
+ * Move a folder to a new path.
+ *
+ * Renames exactly the folder named. A v1 folder is a flat namespace
+ * label, not a tree node with children to carry along, so there is no
+ * cascade.
+ *
+ */
+export const renameFolder = <ThrowOnError extends boolean = false>(options: Options<RenameFolderData, ThrowOnError>) => (options.client ?? client).patch<RenameFolderResponses, RenameFolderErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/folders/{folder}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**

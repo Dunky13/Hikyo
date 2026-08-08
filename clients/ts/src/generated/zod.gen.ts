@@ -20,6 +20,8 @@ export const zErrorCode = z.enum([
     'unauthenticated',
     'forbidden',
     'not_found',
+    'conflict',
+    'limit_exceeded',
     'too_many_requests',
     'internal'
 ]);
@@ -200,6 +202,108 @@ export const zOrgList = z.object({
     count: z.int().gte(0)
 });
 
+/**
+ * A display name for an organisation, project or environment. Identity is
+ * the immutable id, so this is a label and a rename never breaks a
+ * reference. The 128-byte bound is the one the organisation contract has
+ * carried since the first slice, adopted for every entity so there is one
+ * number rather than four; no ADR fixes a per-entity name length. The
+ * grammar itself (non-empty, no control characters, no surrounding
+ * whitespace) is enforced in the domain rather than restated as a pattern
+ * here — two grammars would be two things to keep in sync.
+ *
+ * **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+ * `maxLength` below counts Unicode code points, which is the only length
+ * JSON Schema can express, so a name of 100 emoji satisfies this schema
+ * and is still refused by the server with `bad_request`. Clients that want
+ * to pre-validate must measure the UTF-8 encoding, not the string length.
+ *
+ */
+export const zEntityName = z.string().min(1).max(128);
+
+export const zRenameRequest = z.object({
+    name: zEntityName
+});
+
+export const zCreateProjectRequest = z.object({
+    name: zEntityName
+});
+
+export const zProject = z.object({
+    id: zId,
+    org_id: zId,
+    name: z.string(),
+    created_at: zTimestamp
+});
+
+export const zProjectList = z.object({
+    items: z.array(zProject),
+    count: z.int().gte(0)
+});
+
+export const zCreateEnvironmentRequest = z.object({
+    name: zEntityName
+});
+
+/**
+ * An environment carries NO `base` pointer and no defaults layer, here or
+ * anywhere: the flat-model ADR deleted both, and every value is explicit
+ * per environment.
+ *
+ */
+export const zEnvironment = z.object({
+    id: zId,
+    org_id: zId,
+    project_id: zId,
+    name: z.string(),
+    display_order: z.int().gte(0),
+    created_at: zTimestamp
+});
+
+export const zEnvironmentList = z.object({
+    items: z.array(zEnvironment),
+    count: z.int().gte(0)
+});
+
+export const zEnvironmentOrderRequest = z.object({
+    environment_ids: z.array(zId).min(0).max(50)
+});
+
+/**
+ * A slash-separated namespace: no leading or trailing separator, no empty
+ * segment, no `.` or `..` segment, at most 32 segments. Organizational
+ * only — no grant is scoped to a folder and no value attaches to one.
+ *
+ * **Two bounds the schema cannot express, both server-authoritative and
+ * both measured in UTF-8 BYTES:** the whole path is at most 256 bytes
+ * (`maxLength` below counts code points), and EACH SEGMENT is at most 128
+ * bytes — the same bound entity names carry. A 129-character ASCII segment
+ * satisfies this schema and is refused with `bad_request`.
+ *
+ */
+export const zFolderPath = z.string().min(1).max(256);
+
+export const zCreateFolderRequest = z.object({
+    path: zFolderPath
+});
+
+export const zRenameFolderRequest = z.object({
+    path: zFolderPath
+});
+
+export const zFolder = z.object({
+    id: zId,
+    org_id: zId,
+    project_id: zId,
+    path: zFolderPath,
+    created_at: zTimestamp
+});
+
+export const zFolderList = z.object({
+    items: z.array(zFolder),
+    count: z.int().gte(0)
+});
+
 export const zAuthMethodProvider = z.object({
     slug: z.string(),
     display_name: z.string()
@@ -351,6 +455,21 @@ export const zPasskeyList = z.object({
  * Organisation identifier.
  */
 export const zOrgId = zId;
+
+/**
+ * Project identifier.
+ */
+export const zProjectId = zId;
+
+/**
+ * Environment identifier.
+ */
+export const zEnvironmentId = zId;
+
+/**
+ * Folder identifier.
+ */
+export const zFolderId = zId;
 
 /**
  * OIDC provider slug.
@@ -520,6 +639,19 @@ export const zCreateOrgData = z.object({
  */
 export const zCreateOrgResponse = zOrg;
 
+export const zDeleteOrgData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteOrgResponse = z.void();
+
 export const zGetOrgData = z.object({
     body: z.optional(z.never()),
     path: z.object({
@@ -532,6 +664,247 @@ export const zGetOrgData = z.object({
  * The organisation.
  */
 export const zGetOrgResponse = zOrg;
+
+export const zRenameOrgData = z.object({
+    body: zRenameRequest,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The renamed organisation.
+ */
+export const zRenameOrgResponse = zOrg;
+
+export const zListProjectsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The projects in this organisation, by name.
+ */
+export const zListProjectsResponse = zProjectList;
+
+export const zCreateProjectData = z.object({
+    body: zCreateProjectRequest,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created project.
+ */
+export const zCreateProjectResponse = zProject;
+
+export const zDeleteProjectData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteProjectResponse = z.void();
+
+export const zGetProjectData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project.
+ */
+export const zGetProjectResponse = zProject;
+
+export const zRenameProjectData = z.object({
+    body: zRenameRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The renamed project.
+ */
+export const zRenameProjectResponse = zProject;
+
+export const zListEnvironmentsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's environments, in display order.
+ */
+export const zListEnvironmentsResponse = zEnvironmentList;
+
+export const zCreateEnvironmentData = z.object({
+    body: zCreateEnvironmentRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created environment.
+ */
+export const zCreateEnvironmentResponse = zEnvironment;
+
+export const zReorderEnvironmentsData = z.object({
+    body: zEnvironmentOrderRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's environments in their new display order.
+ */
+export const zReorderEnvironmentsResponse = zEnvironmentList;
+
+export const zDeleteEnvironmentData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteEnvironmentResponse = z.void();
+
+export const zGetEnvironmentData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment.
+ */
+export const zGetEnvironmentResponse = zEnvironment;
+
+export const zRenameEnvironmentData = z.object({
+    body: zRenameRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The renamed environment.
+ */
+export const zRenameEnvironmentResponse = zEnvironment;
+
+export const zListFoldersData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's folders, by path.
+ */
+export const zListFoldersResponse = zFolderList;
+
+export const zCreateFolderData = z.object({
+    body: zCreateFolderRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created folder.
+ */
+export const zCreateFolderResponse = zFolder;
+
+export const zDeleteFolderData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        folder: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteFolderResponse = z.void();
+
+export const zGetFolderData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        folder: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The folder.
+ */
+export const zGetFolderResponse = zFolder;
+
+export const zRenameFolderData = z.object({
+    body: zRenameFolderRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        folder: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The moved folder.
+ */
+export const zRenameFolderResponse = zFolder;
 
 export const zAuthMethodsData = z.object({
     body: z.optional(z.never()),
