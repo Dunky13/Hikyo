@@ -12,6 +12,11 @@
 -- wenv:table totp_challenges class=authn chain=-
 -- wenv:table recovery_codes class=authn chain=-
 -- wenv:table reauth_windows class=authn chain=-
+-- credential_authorities_new is the transient rebuild target for
+-- credential_authorities. Postgres could alter the CHECK in place, but the
+-- rebuild is done identically to the sqlite dialect so the analyzer's derived
+-- table registry is the same on both engines.
+-- wenv:table credential_authorities_new class=authn chain=-
 
 -- Browser sessions carry a synchronizer CSRF token; CLI sessions do not (a
 -- cookie's attributes protect nothing on a non-browser client). The token is a
@@ -111,21 +116,32 @@ CREATE TABLE reauth_windows (
     UNIQUE (session_id, environment_id)
 );
 
--- Admit recovery-code consumption as a fourth, differently-shaped issuer, and
--- record which credential kind an authority may establish. The recovery issuer
--- may only ever establish a password: a stolen recovery sheet must not be able
--- to enrol a possession factor and thereby manufacture multi-factor assurance.
--- Postgres can alter the CHECK in place, so no table rebuild is needed.
-ALTER TABLE credential_authorities
-    ADD COLUMN established_credential_kind TEXT NOT NULL DEFAULT 'password'
-    CHECK (established_credential_kind IN ('password'));
+-- Rebuild credential_authorities to admit recovery-code consumption as a
+-- fourth, differently-shaped issuer, and to record which credential kind an
+-- authority may establish. The recovery issuer may only ever establish a
+-- password: a stolen recovery sheet must not be able to enrol a possession
+-- factor and thereby manufacture multi-factor assurance. The rebuild mirrors
+-- the sqlite dialect exactly (nothing references this table, so drop + rename
+-- is safe) so both engines create and carry the same tables.
+CREATE TABLE credential_authorities_new (
+    id TEXT PRIMARY KEY,
+    verifier BYTEA NOT NULL UNIQUE,
+    account_id TEXT NOT NULL REFERENCES accounts (id),
+    purpose TEXT NOT NULL CHECK (purpose IN ('establish-credential')),
+    issued_by TEXT NOT NULL CHECK (issued_by IN ('bootstrap', 'credential-reset', 'break-glass', 'recovery')),
+    established_credential_kind TEXT NOT NULL DEFAULT 'password' CHECK (established_credential_kind IN ('password')),
+    credential_epoch BIGINT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    CHECK (issued_by <> 'recovery' OR established_credential_kind = 'password')
+);
 
-ALTER TABLE credential_authorities DROP CONSTRAINT credential_authorities_issued_by_check;
+INSERT INTO credential_authorities_new
+    (id, verifier, account_id, purpose, issued_by, credential_epoch, expires_at, consumed_at, created_at)
+SELECT id, verifier, account_id, purpose, issued_by, credential_epoch, expires_at, consumed_at, created_at
+FROM credential_authorities;
 
-ALTER TABLE credential_authorities
-    ADD CONSTRAINT credential_authorities_issued_by_check
-    CHECK (issued_by IN ('bootstrap', 'credential-reset', 'break-glass', 'recovery'));
+DROP TABLE credential_authorities;
 
-ALTER TABLE credential_authorities
-    ADD CONSTRAINT credential_authorities_recovery_password_only
-    CHECK (issued_by <> 'recovery' OR established_credential_kind = 'password');
+ALTER TABLE credential_authorities_new RENAME TO credential_authorities;
