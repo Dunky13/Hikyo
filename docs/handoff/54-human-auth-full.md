@@ -462,3 +462,53 @@ pre-auth admission invariant extended to enumerate every new pre-auth route.
    the grant-lock analyzer.
 6. Full dual-engine suite green → `/code-review` → blocking Codex cross-model
    pass (3-round cap) → land.
+
+---
+
+## FINAL STATUS (2026-08-08): #54 complete — all four verticals cross-model CLEAN
+
+| Vertical | Impl commit(s) | Cross-model | Result |
+|---|---|---|---|
+| Factors: TOTP, recovery, account-security, assurance flip | e97a461 (+e877a1a, 825730b) | 3-round | CLEAN |
+| OIDC multi-provider: transactions, linking, provider admin | 53b94b5 (+5a6d305, 0e1ad56, c3a44fe) | 3-round + R3 blocker | CLEAN |
+| WebAuthn / passkeys | 0ae37c5 (+eaec02c, 64d7b84) | 3-round | CLEAN |
+| Reauth windows / credential-reset / break-glass | 4a3e1af (+389005c, 2213b03) | 3-round | CLEAN |
+
+Migrations 00006–00008 (dual-engine). Uncached `go test ./...` green on sqlite;
+`go vet` + `gofmt` clean; dialects structurally identical (CI runs postgres).
+Each vertical: implemented by an Opus 5 subagent (synchronous), independently
+re-verified on the main thread, then a blocking Codex `gpt-5.6-sol` high-effort
+cross-model pass to a CLEAN verdict within the 3-round cap; all findings folded
+by delegated Opus 5 fix subagents. Review artifacts in `.xreview/54-*`.
+
+Cross-model caught and closed, among others: recovery-sheet→MFA (CRITICAL,
+factor design), unthrottled TOTP brute-force + Argon2 oracle, OIDC reauth
+possession/epoch/provider-rebind/downgrade + phase-C provider TOCTOU +
+provider-delete mint race, WebAuthn credential-delete IDOR + browser-token-in-body
++ ceremony-binding revalidation, and the reauth effective-window-seam
+consistency (slide/clamp).
+
+### Corrections to the per-vertical sections above (superseded by review fixes)
+- credential-reset instance-capability-target refusal is now the UNIFORM refusal
+  (no distinct 403 grant-shape oracle); the cause lives only in the audit trail.
+- The reauth-window slide and the WebAuthn open both go through the single
+  `effectiveReauthWindow(env)` seam and clamp to the hard cap (a tripwire test
+  pins the global window to one read site).
+
+### Deferred, each named to its ticket (scoped out, not gaps here)
+- Browser CSRF token delivery + per-purpose check → **#56** (SPA); `csrf_verifier`
+  minted, anti-fixation tx-binding ships, browser session tokens are cookie-only.
+- Per-env reauth-window values behind `effectiveReauthWindow` → **#55**
+  (project-settings); `LowerEffectiveWindow` is the library it calls; default 0.
+- `reveal`/`reveal-history` that CONSUME a window → **#50/#58** (consumption is a
+  tested library; no live reveal endpoint yet).
+- Member invitations → **#55**; restore/epoch-bump reconciliation → **#76**;
+  UI Playwright ceremonies → **#56**; common-password full list → #47 follow-up.
+- `issued_by='recovery'` ADR amendment on wayfinder-docs → owed (human's).
+- Passwordless passkey-proof mutations; the "drop password" B4 arm has no
+  endpoint (invariant enforced, SQL-reached in tests); `AccountByWebAuthnUserHandle`
+  now unused — remove in a codegen-capable pass.
+
+### Human-merge gate
+CI green + cross-model CLEAN across all four verticals. NOT merged — awaiting the
+human one-click merge decision (branch t3code/review-auth-assurance-flows).
