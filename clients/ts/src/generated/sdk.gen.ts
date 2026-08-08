@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -377,6 +377,36 @@ export const unlinkIdentity = <ThrowOnError extends boolean = false>(options: Op
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Issue a credential-establishment authority for another account.
+ *
+ * Administrator-issued credential reset (human-auth ADR § Recovery). A
+ * credential-reset holder mints a single-use, hashed, expiring
+ * credential-establishment authority for a target, returned once and
+ * transmitted out of band. The reset advances the target's session
+ * generation and revokes its sessions in the same transaction.
+ *
+ * Org-scoped credential-reset reaches only a target whose grants lie
+ * entirely within that org and who holds no instance capability; the
+ * org-bounded test is evaluated in one serializable transaction with the
+ * target's grant set (a concurrent grant landing conflicts with the
+ * in-flight reset). A target holding an instance capability has no network
+ * reset path at all — break-glass only. This route dispatches between the
+ * org-scoped and instance-scoped credential-reset operations by that
+ * classification. Every failure that could enumerate the
+ * target — an unknown or non-human principal, a caller lacking
+ * credential-reset, an org-P holder reaching an org-O target, and a target
+ * holding an instance capability (break-glass only) — answers a single
+ * uniform `401`; the true cause is durable in the audit trail, never on the
+ * wire.
+ *
+ */
+export const resetCredential = <ThrowOnError extends boolean = false>(options: Options<ResetCredentialData, ThrowOnError>) => (options.client ?? client).post<ResetCredentialResponses, ResetCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/accounts/{principal}/credential-reset',
+    ...options
 });
 
 /**

@@ -98,10 +98,13 @@ export type LoginResult = {
      * The bearer value, returned exactly once. A replayable credential:
      * cookie attributes constrain browsers, not an attacker holding the
      * value, which is why lifetimes are short and revocation is a
-     * delete.
+     * delete. OMITTED for a browser-artifact session: that token is
+     * delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+     * same-origin script cannot read it. A CLI-artifact session, which has
+     * no cookie channel, still carries it here.
      *
      */
-    session_token: string;
+    session_token?: string;
     session: Session;
     principal: Principal;
 };
@@ -169,6 +172,17 @@ export type RecoveryBeginResult = {
     /**
      * The single-use credential-establishment authority, returned once.
      * It creates no session: establish a password with it, then log in.
+     *
+     */
+    authority: string;
+    expires_at: Timestamp;
+};
+
+export type CredentialResetResult = {
+    /**
+     * The single-use credential-establishment authority for the target,
+     * returned once. It creates no session and may only ever establish a
+     * password; hand it to the target out of band.
      *
      */
     authority: string;
@@ -466,6 +480,11 @@ export type IdentityId = Id;
  * Enrolled passkey credential identifier.
  */
 export type WebauthnCredentialId = Id;
+
+/**
+ * The target principal whose credential is being reset.
+ */
+export type ResetTargetPrincipal = Id;
 
 export type GetMetaData = {
     body?: never;
@@ -1357,6 +1376,49 @@ export type UnlinkIdentityResponses = {
 };
 
 export type UnlinkIdentityResponse = UnlinkIdentityResponses[keyof UnlinkIdentityResponses];
+
+export type ResetCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * The target principal whose credential is being reset.
+         */
+        principal: Id;
+    };
+    query?: never;
+    url: '/api/v1/accounts/{principal}/credential-reset';
+};
+
+export type ResetCredentialErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ResetCredentialError = ResetCredentialErrors[keyof ResetCredentialErrors];
+
+export type ResetCredentialResponses = {
+    /**
+     * A session-less credential-establishment authority, returned once.
+     */
+    200: CredentialResetResult;
+};
+
+export type ResetCredentialResponse = ResetCredentialResponses[keyof ResetCredentialResponses];
 
 export type EnrolPasskeyStartData = {
     body: WebauthnEnrolStartRequest;

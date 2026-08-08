@@ -95,6 +95,11 @@ export const zRecoveryBeginResult = z.object({
     expires_at: zTimestamp
 });
 
+export const zCredentialResetResult = z.object({
+    authority: z.string(),
+    expires_at: zTimestamp
+});
+
 /**
  * OPEN enum: human sessions are per-client-class artifacts and new
  * classes are additive. A browser cookie's attributes protect nothing on
@@ -155,7 +160,7 @@ export const zPrincipal = z.object({
 });
 
 export const zLoginResult = z.object({
-    session_token: z.string(),
+    session_token: z.optional(z.string()),
     session: zSession,
     principal: zPrincipal
 });
@@ -366,6 +371,11 @@ export const zIdentityId = zId;
  * Enrolled passkey credential identifier.
  */
 export const zWebauthnCredentialId = zId;
+
+/**
+ * The target principal whose credential is being reset.
+ */
+export const zResetTargetPrincipal = zId;
 
 export const zGetMetaData = z.object({
     body: z.optional(z.never()),
@@ -599,6 +609,19 @@ export const zUnlinkIdentityData = z.object({
  * Unlinked. The reissued session token replaces the old one.
  */
 export const zUnlinkIdentityResponse = zLoginResult;
+
+export const zResetCredentialData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        principal: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * A session-less credential-establishment authority, returned once.
+ */
+export const zResetCredentialResponse = zCredentialResetResult;
 
 export const zEnrolPasskeyStartData = z.object({
     body: zWebauthnEnrolStartRequest,
