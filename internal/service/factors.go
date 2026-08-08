@@ -385,6 +385,15 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 		if live.Principal != account.PrincipalID {
 			return domain.ErrUnauthenticated
 		}
+		// Re-check the enrolment's expiry against the write-tx clock (finding
+		// R2 R1-4): the earlier check raced the write-lock wait, so a request
+		// delayed past the window could otherwise still promote. A pending row
+		// stamped in the future (clock moved backward) is refused rather than
+		// granted extended life.
+		age := now.Sub(pending.CreatedAt)
+		if age < 0 || age > AuthorityLifetime {
+			return domain.ErrUnauthenticated
+		}
 		// CAS on the row whose seed was VERIFIED, not a freshly read one: a
 		// concurrent start that cleared and re-inserted the pending row must not
 		// have its replacement promoted by a code proved against the old seed
@@ -742,6 +751,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 	}
 	sealed, err := sealer.SealField(recoveryBatchAAD(account.ID), batchJSON)
 	crypto.Zero(batchJSON)
+	zeroVerifiers(verifiers)
 	if err != nil {
 		return nil, LoginResult{}, err
 	}
@@ -926,7 +936,13 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 	default:
 		verifiers, oerr := s.openRecoveryBatch(ctx, account.ID, batch.Batch)
 		if oerr != nil {
-			s.burnRecoveryMatch(ctx, code)
+			// The real open already paid the envelope-decrypt cost (a GCM tag
+			// mismatch decrypts fully before failing), so only the scan is
+			// added here — a second dummy open would make this path observably
+			// heavier than the other misses (finding R2 R1-6).
+			dummy := dummyRecoveryVerifiers()
+			crypto.MatchRecoveryCode(code, dummy)
+			zeroVerifiers(dummy)
 			cause = "batch-unreadable"
 			break
 		}
@@ -1152,6 +1168,7 @@ func (s *Auth) burnRecoveryMatch(ctx context.Context, code string) {
 		}
 		sealed, serr := s.Keyring.ForInstance().SealField(recoveryBatchAAD(dummyRecoveryAccount), j)
 		crypto.Zero(j)
+		zeroVerifiers(verifiers)
 		if serr != nil {
 			s.logFault(ctx, "sealing the dummy recovery batch failed", serr, "")
 			return
@@ -1159,12 +1176,16 @@ func (s *Auth) burnRecoveryMatch(ctx context.Context, code string) {
 		s.dummyRecoverySealed = sealed
 	})
 	if s.dummyRecoverySealed == nil {
-		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		fallback := dummyRecoveryVerifiers()
+		crypto.MatchRecoveryCode(code, fallback)
+		zeroVerifiers(fallback)
 		return
 	}
 	plain, err := s.Keyring.ForInstance().OpenField(recoveryBatchAAD(dummyRecoveryAccount), s.dummyRecoverySealed)
 	if err != nil {
-		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		fallback := dummyRecoveryVerifiers()
+		crypto.MatchRecoveryCode(code, fallback)
+		zeroVerifiers(fallback)
 		return
 	}
 	var verifiers [][]byte

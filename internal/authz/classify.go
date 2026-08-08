@@ -145,18 +145,28 @@ var wireEvents = map[string][]audit.EventType{
 	// recovery/begin emits recovery_code_consumed (success and failure) and
 	// mints an establishment authority whose consumption is recorded by the
 	// establish path.
+	// Each factor ceremony validates a proof under the per-account backoff, so
+	// a crossed threshold is an event it can emit — declared here so the
+	// audit-completeness contract covers it.
+	"http:POST /api/v1/auth/totp/enrol/start": {audit.EventAuthThrottleCrossed},
 	"http:POST /api/v1/auth/totp/enrol/confirm": {
 		audit.EventAuthFactorEnrolled,
 		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
 	},
-	"http:POST /api/v1/auth/totp/step-up": {audit.EventAuthReauthenticated},
+	"http:POST /api/v1/auth/totp/step-up": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthThrottleCrossed,
+	},
 	"http:DELETE /api/v1/auth/totp": {
 		audit.EventAuthFactorRemoved,
 		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
 	},
 	"http:POST /api/v1/auth/recovery-codes/regenerate": {
 		audit.EventAuthRecoveryCodesGenerated,
 		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
 	},
 	"http:POST /api/v1/auth/recovery/begin": {
 		audit.EventAuthRecoveryCodeConsumed,
@@ -167,9 +177,6 @@ var wireEvents = map[string][]audit.EventType{
 		// own event, emitted directly by recordThrottleCrossing.
 		audit.EventAuthThrottleCrossed,
 	},
-	// enrol/start stages an inert, unconfirmed seed after verifying the proof;
-	// it enrols nothing and the completed mutation is recorded by enrol/confirm.
-	// Like whoami, it has no event of its own — pinned in the exemption fixture.
 	// whoami resolves a session and reports it. It writes nothing and its
 	// result duplicates what the login event already recorded, so it is the
 	// one auth path with no event of its own — pinned in the exemption
