@@ -111,9 +111,25 @@ Deferred, named: browser CSRF token delivery + per-purpose check ride #56 (the
 `csrf_verifier` is minted and the anti-fixation tx-binding ships); reauth-window
 CONSUMPTION at disclosure is vertical #7 (this vertical only OPENS/refuses).
 
-**Remaining verticals:** WebAuthn (migration + `internal/webauthnrp` +
-passkey-only + sign-count) and reauth windows + `LowerEffectiveWindow` +
-credential-reset + break-glass + the grant-lock analyzer.
+**WebAuthn vertical: DONE** (commit `0ae37c5` impl, `eaec02c` R1 fixes,
+`64d7b84` R2 fixes). Migration 00008, `internal/webauthnrp`,
+`internal/service/webauthn.go`, passkey login/enrol/step-up/reauth/remove,
+sign-count/clone (B9), passkey-only post-state invariant (B4/B13), fixtures on
+`descope/virtualwebauthn`. Cross-model 3-round cap: R1 (two passes) 2 HIGH
+(credential-delete IDOR, browser session token in JSON body) + 4 MED; R2 4 held
+/ 2 residual (login backoff keyed on attacker handle, ceremony binding
+revalidation); R3 CLEAN. Disposition items: passwordless accounts can't yet
+passkey-prove a mutation; the "drop password" B4 arm has no endpoint (invariant
+enforced, reached by SQL in tests); `AccountByWebAuthnUserHandle` now unused
+(remove in a codegen pass).
+
+**Remaining: the reauth/reset vertical** — reauth windows CONSUMPTION at
+disclosure + `LowerEffectiveWindow(tx, envID, newValue)` (finding B6) +
+`credential-reset` (org/instance scope, org-bounded serializable test, B14
+grant-lock analyzer) + break-glass (`wenv admin reset-credential`, host-local).
+Note the `reauth_windows` table already exists (00006) and OIDC/WebAuthn reauth
+already OPEN windows; this vertical adds the disclosure-time consumption + the
+credential-reset/break-glass recovery tier.
 
 **Delegation note (reliability):** in-process subagents and long background
 shell jobs get reaped at main-process boundaries between turns. Mitigation:
