@@ -64,19 +64,20 @@ foundation plus a rigorous blueprint.
   stays `false`** — the gate is wired but dormant until the factor endpoints
   land in the same PR.
 
-**Not yet landed — the next atomic step (must land together):** the service
-logic (TOTP enrol/confirm/remove + step-up, recovery generate/consume, the
-account-security-mutation helper, credential-establishment stays password-only),
-registering the factor audit events (which trips the tripwire and forces the
-`AssuranceEnforced` flip), the wire endpoints + openapi regen, the CLI factor
-verbs **with session-token rotation handling** (step-up and account-security
-mutations rotate the token; the CLI must persist the new one), the
-demo/bootstrap E2E update (enrol TOTP + step-up before `org create`, since
-`OpOrgCreate` needs the MFA-mandatory `instance-config`), and the A1 recovery +
-factor fixtures. This is one atomic vertical: any audited factor operation
-trips the flip, the flip gates `org create`, and the demo needs the CLI enrol
-path to satisfy it — so store+service+events+flip+wire+CLI+demo+fixtures land
-in a single green commit.
+**LANDED (the atomic factor vertical, commit `e97a461`):** TOTP
+enrol/confirm/remove + step-up, recovery generate/consume, the
+account-security-mutation reissue, `establish` stays password-only; the five
+factor audit events registered and **`AssuranceEnforced` flipped to true** (the
+chokepoint now refuses MFA-mandatory ops from inadequate session-backed
+callers); six wire endpoints + regen + classify; CLI factor verbs with rotated
+tokens persisted; demo E2E enrols + steps up before `org create`;
+`factors_e2e_test.go` carries the A1 fixtures. Full suite green on sqlite,
+built by an Opus 5 subagent, reviewed on the main thread. Blocking Codex
+cross-model pass in progress (round cap 3). Three main-thread findings to fold:
+(1) MEDIUM — step-up/confirm TOTP verification has no per-account backoff
+(authenticated online brute-force of the 6-digit code); (2) LOW — recovery
+mints an authority without an `auth.credential_authority_minted` event; (3)
+LOW — recovery success does extra write work vs failure (residual timing).
 
 **Then the later verticals:** OIDC (migration + `internal/oidcrp` + provider
 admin + mix-up fixtures), WebAuthn (migration + `internal/webauthnrp` +
