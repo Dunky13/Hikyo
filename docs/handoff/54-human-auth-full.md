@@ -94,10 +94,32 @@ unreadable-path timing, residual zeroing); all folded. R3 confirmed every item
 CLOSED with no new regression → CLEAN. Commits: `e97a461` (vertical), `e877a1a`
 (R1 fixes), `825730b` (R2 fixes). Review artifacts in `.xreview/54-factors-r*`.
 
-**Then the later verticals:** OIDC (migration + `internal/oidcrp` + provider
-admin + mix-up fixtures), WebAuthn (migration + `internal/webauthnrp` +
-passkey-only + sign-count), reauth windows + `LowerEffectiveWindow` +
+**OIDC vertical: DONE** (commits `53b94b5` impl, `5a6d305` R1 fixes, `0e1ad56`
+R2 fixes, `c3a44fe` R3 blocker). Migration 00007, `internal/oidcrp`,
+`internal/service/oidc*.go`, provider admin, dual-engine fixtures on
+`internal/oidctest`. Built by an Opus 5 subagent (synchronous), reviewed on the
+main thread. Blocking Codex cross-model pass ran the full 3-round cap:
+- R1 (two focused passes): 5 HIGH (reauth possession/epoch/provider-rebind/
+  downgrade + phase-C provider TOCTOU) + 2 MED + 3 LOW. Core transaction
+  invariants (mix-up, binding, single-use, link, SSRF) verified sound.
+- R2: reauth HIGHs held; 4 residuals folded (possession-`mfa` dropped,
+  provider-race made serializable via `GuardProviderForMint` row lock, start
+  timing uniform, callback default → 401).
+- R3: 3 closed, 1 HIGH surfaced (provider-DELETE mint race) — closed with a
+  `sessions.provider_id` ON DELETE CASCADE FK + lock-then-sweep ordering.
+Deferred, named: browser CSRF token delivery + per-purpose check ride #56 (the
+`csrf_verifier` is minted and the anti-fixation tx-binding ships); reauth-window
+CONSUMPTION at disclosure is vertical #7 (this vertical only OPENS/refuses).
+
+**Remaining verticals:** WebAuthn (migration + `internal/webauthnrp` +
+passkey-only + sign-count) and reauth windows + `LowerEffectiveWindow` +
 credential-reset + break-glass + the grant-lock analyzer.
+
+**Delegation note (reliability):** in-process subagents and long background
+shell jobs get reaped at main-process boundaries between turns. Mitigation:
+run implementer/fix subagents SYNCHRONOUSLY (one uninterrupted process
+lifetime), and run Codex reviews as small focused passes (foreground for tiny
+diffs, bounded background for larger) so each finishes inside the window.
 
 **Known follow-up:** the `internal/service/audit.go` query/export paths take a
 bare principal (not a session `Identity`), so they are wrapped as session-less
