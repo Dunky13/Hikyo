@@ -71,15 +71,16 @@ type AuthInstanceState struct {
 }
 
 type CredentialAuthority struct {
-	ID              string
-	Verifier        []byte
-	AccountID       string
-	Purpose         string
-	IssuedBy        string
-	CredentialEpoch int64
-	ExpiresAt       string
-	ConsumedAt      sql.NullString
-	CreatedAt       string
+	ID                        string
+	Verifier                  []byte
+	AccountID                 string
+	Purpose                   string
+	IssuedBy                  string
+	EstablishedCredentialKind string
+	CredentialEpoch           int64
+	ExpiresAt                 string
+	ConsumedAt                sql.NullString
+	CreatedAt                 string
 }
 
 type Environment struct {
@@ -148,6 +149,30 @@ type Project struct {
 	CreatedAt string
 }
 
+type ReauthWindow struct {
+	ID              string
+	SessionID       string
+	EnvironmentID   string
+	CeremonyID      string
+	FactorClass     string
+	SingleDecision  int64
+	AuthenticatedAt string
+	WindowExpiresAt string
+	HardExpiresAt   string
+	CredentialEpoch int64
+	ConsumedAt      sql.NullString
+	CreatedAt       string
+}
+
+type RecoveryCode struct {
+	AccountID       string
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	GeneratedAt     string
+}
+
 type Session struct {
 	ID                string
 	PrincipalID       string
@@ -165,6 +190,7 @@ type Session struct {
 	AbsoluteExpiresAt string
 	SourceIp          string
 	UserAgent         string
+	CsrfVerifier      []byte
 }
 
 type Tier3Key struct {
@@ -177,4 +203,30 @@ type Tier3Key struct {
 	State            string
 	Blob             []byte
 	CreatedAt        string
+}
+
+type TotpChallenge struct {
+	ID               string
+	AccountID        string
+	SessionID        sql.NullString
+	Purpose          string
+	OperationBinding sql.NullString
+	EnvironmentID    sql.NullString
+	CredentialEpoch  int64
+	ExpiresAt        string
+	ConsumedAt       sql.NullString
+	CreatedAt        string
+}
+
+type TotpCredential struct {
+	ID              string
+	AccountID       string
+	Seed            []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	RowVersion      int64
+	LastStep        int64
+	CreatedStep     int64
+	ConfirmedAt     sql.NullString
+	CreatedAt       string
 }

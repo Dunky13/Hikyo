@@ -7,9 +7,27 @@
   },
   {
     "engine": "postgres",
+    "name": "AdvanceTOTPStep",
+    "annotation": "authn-resolution",
+    "hash": "c5353f7cb1ff1eb6c1cef4049ec65630c5b8aa9022193730a552eb8e690dc7bd"
+  },
+  {
+    "engine": "postgres",
+    "name": "ConfirmTOTP",
+    "annotation": "authn-resolution",
+    "hash": "59095ca36fdf72afb548db9b485dfbf9c7ce601731f47058aace861616a2ab2b"
+  },
+  {
+    "engine": "postgres",
     "name": "ConsumeCredentialAuthority",
     "annotation": "authn-resolution",
     "hash": "b330ed55a007f19c32911b43853007489c586625c0a27daf9c38d6ad63e48b80"
+  },
+  {
+    "engine": "postgres",
+    "name": "ConsumeOutstandingAuthoritiesForAccount",
+    "annotation": "authn-resolution",
+    "hash": "5b7148c41eb4adca7ce1a134eb83c646fd65b8355615883c53db8030677c89f5"
   },
   {
     "engine": "postgres",
@@ -31,6 +49,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeletePendingTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "de3e3cf0a2de5c05ab5ec340129598cf840929bc37c322ce0a77360a779df451"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "11e96cfd8c2736f13ce55975ea910dd68640f6f14e38a4b3342d514804e3de27"
@@ -43,6 +67,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "7da6bc7da7bf6280eb8048db482389e3e3cdd61888602a936ff8926848efb068"
+  },
+  {
+    "engine": "postgres",
     "name": "GetAccountByID",
     "annotation": "authn-resolution",
     "hash": "f53bce6b6f22df5007369ba4429fb0a7256d27776cab7a7e798458b64e06c576"
@@ -52,6 +82,12 @@
     "name": "GetAccountByUsername",
     "annotation": "authn-resolution",
     "hash": "8c7e0be06817fe23b5ab786f43ed0972fc9b0638e0f1037437c7e953fe592edf"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetConfirmedTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "6eb2543b0a7e61b448bd13a4b6971c4d883785bb1c54802419f95a9c6a71c158"
   },
   {
     "engine": "postgres",
@@ -79,6 +115,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetPendingTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "3b4cde94f9b090861f71ec55cc1a8d4539f7118ade43720eeefe42cf4cfa35d3"
+  },
+  {
+    "engine": "postgres",
     "name": "GetPrincipalGeneration",
     "annotation": "authn-resolution",
     "hash": "557d84f0b1879f77618f5eac719f6f2c2acb2b767d45fad152832e5b11896596"
@@ -88,6 +130,12 @@
     "name": "GetPrincipalKind",
     "annotation": "authn-resolution",
     "hash": "7d34804525d3e9593db35c603cdd980dcb060dc83ff4600c08f3599d2b266de4"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "19816dbfd2333bb4af1cfce7697245dea43bfb2c9286c348ef358b6522d4df46"
   },
   {
     "engine": "postgres",
@@ -127,9 +175,21 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "eed39f37e353496e182619314423ce3b99bb755c88fc658df60db0176bc7f03f"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertSession",
     "annotation": "authn-resolution",
     "hash": "1e3eabbbadb55112c9c6aff84583fcdc2494042fb35f5ef8effed15c6063f32d"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertTOTP",
+    "annotation": "authn-resolution",
+    "hash": "42d50c932937c979d5c08bf8f1f21e41f17a4c2e0fb177a5513ee5dc5263cc1f"
   },
   {
     "engine": "postgres",
@@ -163,6 +223,12 @@
   },
   {
     "engine": "postgres",
+    "name": "RotateSessionFactors",
+    "annotation": "authn-resolution",
+    "hash": "923e9ee53ea03a85a0c33d5584f419c19a6d1596962d994f9274bf04516f8c15"
+  },
+  {
+    "engine": "postgres",
     "name": "TouchSession",
     "annotation": "authn-resolution",
     "hash": "f28d8e41a5d8bfdc200bf38c1459ac05c3585e125bf69831572ed61df85f349e"
@@ -174,6 +240,12 @@
     "hash": "63093b4013caae1b8dfd3e82983292e570eabfb35e8b8586b938aac52fa1f0f1"
   },
   {
+    "engine": "postgres",
+    "name": "UpdateRecoveryCodesCAS",
+    "annotation": "authn-resolution",
+    "hash": "4667385c505bd218fcedcb6ecb7feb637dd6526c55fa2733757431ff15121e66"
+  },
+  {
     "engine": "sqlite",
     "name": "AdvancePrincipalGeneration",
     "annotation": "authn-resolution",
@@ -181,9 +253,27 @@
   },
   {
     "engine": "sqlite",
+    "name": "AdvanceTOTPStep",
+    "annotation": "authn-resolution",
+    "hash": "0e079a429cfda392addb87c82b3a7f3089900cd5c3c64dc6225fb2041fe7bd91"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ConfirmTOTP",
+    "annotation": "authn-resolution",
+    "hash": "4351e66bec34613178ea3ad67da06835e385ce87df92e458d0b8a5a669fe959d"
+  },
+  {
+    "engine": "sqlite",
     "name": "ConsumeCredentialAuthority",
     "annotation": "authn-resolution",
     "hash": "b55a467fd6ffe3d3f4bdce5f99f1536bcdd0213151e4f170fab088a938a11ec8"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ConsumeOutstandingAuthoritiesForAccount",
+    "annotation": "authn-resolution",
+    "hash": "f1bbdcf248a4111592adc73223aec7342356e7c234ba27117f41d7358562edc9"
   },
   {
     "engine": "sqlite",
@@ -205,6 +295,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeletePendingTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "9cac0a620bc7fa2b5289015dddd8be9beb8d4c0c5166617f25c6bfffe0351904"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "4c0c29fb3d9f50d5c04e9d5db62e3f64d8df43b42d5991d7c85276873e24167b"
@@ -217,6 +313,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "454014ac949e9baa9b6e600d2ae8f3129520be9bf5acbf87464743bf8d48f049"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetAccountByID",
     "annotation": "authn-resolution",
     "hash": "3a8ac0bfba6d04e573b523a3bcba38919495c87cfac6b91ce40103cf38392d4e"
@@ -226,6 +328,12 @@
     "name": "GetAccountByUsername",
     "annotation": "authn-resolution",
     "hash": "3cdfa65ba79b4b0fd62e6d9c5d9142233f3c7c1b912a03807099bb97df4e6740"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetConfirmedTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "489f8111dc2d92e84b47b3c22e40617daac28f0b79ac07773a7a0367ca1759c6"
   },
   {
     "engine": "sqlite",
@@ -253,6 +361,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetPendingTOTPForAccount",
+    "annotation": "authn-resolution",
+    "hash": "717001fe5fe0f074ccd4fc8c8809ddb3cdaa48f393db4353205de1d6ab6cb8a4"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetPrincipalGeneration",
     "annotation": "authn-resolution",
     "hash": "edaa983ec7dab3409e5169df8ced76e89a1011ddfdaa7b76935eed99561a6193"
@@ -262,6 +376,12 @@
     "name": "GetPrincipalKind",
     "annotation": "authn-resolution",
     "hash": "9d2e7acdb6b1c52c840e24e6abdcf4102421a445eb0fdefa43ca81706a939516"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "cc0eb65452b1becf984e553ed3abdc8bebd6e6e56bbb8a2d6e031c61fc32a3ad"
   },
   {
     "engine": "sqlite",
@@ -301,9 +421,21 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertRecoveryCodes",
+    "annotation": "authn-resolution",
+    "hash": "704efac3a17b238e4539a94d1d5e494f362ce133c288a9f6236bb04067fb0585"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertSession",
     "annotation": "authn-resolution",
     "hash": "787cf4cf53d976da048f2144a1c6150cf24fe127be8329da6951ae486de60202"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertTOTP",
+    "annotation": "authn-resolution",
+    "hash": "de7ffa8837670bde5a88cc1a841420ce4a45ab3b51ed3d29062405d3ea81500e"
   },
   {
     "engine": "sqlite",
@@ -337,6 +469,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "RotateSessionFactors",
+    "annotation": "authn-resolution",
+    "hash": "309615e6b1914ebde4c26a3d2ace561f9fe2c1256a182caca3196a1247f82352"
+  },
+  {
+    "engine": "sqlite",
     "name": "TouchSession",
     "annotation": "authn-resolution",
     "hash": "dc82c58a0bdd5b936cbd194f398a94c000bf292f6cbba03c61df86c159a85769"
@@ -346,5 +484,11 @@
     "name": "UpdatePasswordCredentialCAS",
     "annotation": "authn-resolution",
     "hash": "ed995538ba0a184c346e4e7a667911efdb2f75b0d9b24bfca11882bf1c25b560"
+  },
+  {
+    "engine": "sqlite",
+    "name": "UpdateRecoveryCodesCAS",
+    "annotation": "authn-resolution",
+    "hash": "c8d3cd4c31fef6bb52b9c001422cc2f3814afbe415f5dc637f86d1ca63e72d39"
   }
 ]

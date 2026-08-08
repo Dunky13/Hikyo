@@ -151,6 +151,19 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"DeleteSession":              true,
 	"DeleteSessionsForPrincipal": true,
 	"AdvanceGeneration":          true,
+	// Factors (#54): TOTP enrolment/confirmation/removal, recovery-code batch
+	// writes, step-up session rotation, and the outstanding-authority sweep.
+	// None can hold a proof — they mutate the artifacts that decide how a
+	// caller authenticated, which is resolution, not authorization.
+	"CreateTOTP":                    true,
+	"ConfirmTOTP":                   true,
+	"AdvanceTOTPStep":               true,
+	"DeleteTOTPForAccount":          true,
+	"DeletePendingTOTPForAccount":   true,
+	"CreateRecoveryCodes":           true,
+	"UpdateRecoveryCodes":           true,
+	"RotateSessionFactors":          true,
+	"ConsumeOutstandingAuthorities": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

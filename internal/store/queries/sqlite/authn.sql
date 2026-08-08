@@ -154,3 +154,85 @@ DELETE FROM sessions WHERE principal_id = ?;
 -- wenv:authn-resolution
 -- name: AdvancePrincipalGeneration :exec
 UPDATE principals SET session_generation = session_generation + 1 WHERE id = ?;
+
+-- Factors (#54, human-auth ADR). TOTP, recovery codes and the session-rotation
+-- writers join the enumerated resolution surface for the same reason the login
+-- writers did: they mutate the artifacts that decide how strongly a caller
+-- authenticated, which is resolved rather than authorized.
+
+-- wenv:authn-resolution
+-- name: GetConfirmedTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NOT NULL;
+
+-- wenv:authn-resolution
+-- name: GetPendingTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: InsertTOTP :exec
+INSERT INTO totp_credentials
+    (id, account_id, seed, dek_version, credential_epoch, row_version,
+     last_step, created_step, confirmed_at, created_at)
+VALUES (?, ?, ?, ?, ?, 1, ?, ?, NULL, ?);
+
+-- Confirmation is the account-security mutation's write: it promotes the
+-- pending seed and consumes the confirming step in one CAS.
+-- wenv:authn-resolution
+-- name: ConfirmTOTP :execrows
+UPDATE totp_credentials
+SET confirmed_at = ?, last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND confirmed_at IS NULL AND last_step < ?;
+
+-- Single-use per (account, step): a code is consumed only if its step is
+-- strictly beyond the last one, which the CAS enforces atomically.
+-- wenv:authn-resolution
+-- name: AdvanceTOTPStep :execrows
+UPDATE totp_credentials SET last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND last_step < ?;
+
+-- wenv:authn-resolution
+-- name: DeleteTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ?;
+
+-- wenv:authn-resolution
+-- name: DeletePendingTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: GetRecoveryCodes :one
+SELECT account_id, batch, dek_version, credential_epoch, row_version, generated_at
+FROM recovery_codes WHERE account_id = ?;
+
+-- wenv:authn-resolution
+-- name: InsertRecoveryCodes :exec
+INSERT INTO recovery_codes
+    (account_id, batch, dek_version, credential_epoch, row_version, generated_at)
+VALUES (?, ?, ?, ?, 1, ?);
+
+-- Regeneration and consumption both rewrite the batch under a CAS, so a
+-- concurrent second presentation of the same code loses and fails closed.
+-- wenv:authn-resolution
+-- name: UpdateRecoveryCodesCAS :execrows
+UPDATE recovery_codes
+SET batch = ?, dek_version = ?, credential_epoch = ?,
+    row_version = row_version + 1, generated_at = ?
+WHERE account_id = ? AND row_version = ?;
+
+-- Step-up rotates the session token and rewrites its factor set; the original
+-- authenticated_at and ceremony_id are preserved so absolute-age attribution
+-- cannot be reset by repeated step-ups.
+-- wenv:authn-resolution
+-- name: RotateSessionFactors :exec
+UPDATE sessions SET verifier = ?, factors = ? WHERE id = ?;
+
+-- Minting an establishment authority for an account consumes every other
+-- outstanding one, so a second live reset token cannot linger past the point
+-- the operator believes the flow completed.
+-- wenv:authn-resolution
+-- name: ConsumeOutstandingAuthoritiesForAccount :exec
+UPDATE credential_authorities SET consumed_at = ?
+WHERE account_id = ? AND consumed_at IS NULL;

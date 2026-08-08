@@ -20,6 +20,65 @@ func (q *Queries) AdvancePrincipalGeneration(ctx context.Context, id string) err
 	return err
 }
 
+const advanceTOTPStep = `-- name: AdvanceTOTPStep :execrows
+UPDATE totp_credentials SET last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND last_step < ?
+`
+
+type AdvanceTOTPStepParams struct {
+	LastStep   int64
+	ID         string
+	RowVersion int64
+	LastStep_2 int64
+}
+
+// Single-use per (account, step): a code is consumed only if its step is
+// strictly beyond the last one, which the CAS enforces atomically.
+// wenv:authn-resolution
+func (q *Queries) AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advanceTOTPStep,
+		arg.LastStep,
+		arg.ID,
+		arg.RowVersion,
+		arg.LastStep_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const confirmTOTP = `-- name: ConfirmTOTP :execrows
+UPDATE totp_credentials
+SET confirmed_at = ?, last_step = ?, row_version = row_version + 1
+WHERE id = ? AND row_version = ? AND confirmed_at IS NULL AND last_step < ?
+`
+
+type ConfirmTOTPParams struct {
+	ConfirmedAt sql.NullString
+	LastStep    int64
+	ID          string
+	RowVersion  int64
+	LastStep_2  int64
+}
+
+// Confirmation is the account-security mutation's write: it promotes the
+// pending seed and consumes the confirming step in one CAS.
+// wenv:authn-resolution
+func (q *Queries) ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, confirmTOTP,
+		arg.ConfirmedAt,
+		arg.LastStep,
+		arg.ID,
+		arg.RowVersion,
+		arg.LastStep_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const consumeCredentialAuthority = `-- name: ConsumeCredentialAuthority :execrows
 UPDATE credential_authorities SET consumed_at = ?
 WHERE id = ? AND consumed_at IS NULL
@@ -41,6 +100,25 @@ func (q *Queries) ConsumeCredentialAuthority(ctx context.Context, arg ConsumeCre
 	return result.RowsAffected()
 }
 
+const consumeOutstandingAuthoritiesForAccount = `-- name: ConsumeOutstandingAuthoritiesForAccount :exec
+UPDATE credential_authorities SET consumed_at = ?
+WHERE account_id = ? AND consumed_at IS NULL
+`
+
+type ConsumeOutstandingAuthoritiesForAccountParams struct {
+	ConsumedAt sql.NullString
+	AccountID  string
+}
+
+// Minting an establishment authority for an account consumes every other
+// outstanding one, so a second live reset token cannot linger past the point
+// the operator believes the flow completed.
+// wenv:authn-resolution
+func (q *Queries) ConsumeOutstandingAuthoritiesForAccount(ctx context.Context, arg ConsumeOutstandingAuthoritiesForAccountParams) error {
+	_, err := q.db.ExecContext(ctx, consumeOutstandingAuthoritiesForAccount, arg.ConsumedAt, arg.AccountID)
+	return err
+}
+
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts
 `
@@ -51,6 +129,16 @@ func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deletePendingTOTPForAccount = `-- name: DeletePendingTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeletePendingTOTPForAccount(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingTOTPForAccount, accountID)
+	return err
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -72,6 +160,16 @@ DELETE FROM sessions WHERE principal_id = ?
 // wenv:authn-resolution
 func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID string) error {
 	_, err := q.db.ExecContext(ctx, deleteSessionsForPrincipal, principalID)
+	return err
+}
+
+const deleteTOTPForAccount = `-- name: DeleteTOTPForAccount :exec
+DELETE FROM totp_credentials WHERE account_id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeleteTOTPForAccount(ctx context.Context, accountID string) error {
+	_, err := q.db.ExecContext(ctx, deleteTOTPForAccount, accountID)
 	return err
 }
 
@@ -108,6 +206,36 @@ func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (Ac
 		&i.PrincipalID,
 		&i.Username,
 		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getConfirmedTOTPForAccount = `-- name: GetConfirmedTOTPForAccount :one
+
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NOT NULL
+`
+
+// Factors (#54, human-auth ADR). TOTP, recovery codes and the session-rotation
+// writers join the enumerated resolution surface for the same reason the login
+// writers did: they mutate the artifacts that decide how strongly a caller
+// authenticated, which is resolved rather than authorized.
+// wenv:authn-resolution
+func (q *Queries) GetConfirmedTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getConfirmedTOTPForAccount, accountID)
+	var i TotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Seed,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.LastStep,
+		&i.CreatedStep,
+		&i.ConfirmedAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -189,6 +317,31 @@ func (q *Queries) GetPasswordCredential(ctx context.Context, accountID string) (
 	return i, err
 }
 
+const getPendingTOTPForAccount = `-- name: GetPendingTOTPForAccount :one
+SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
+       last_step, created_step, confirmed_at, created_at
+FROM totp_credentials WHERE account_id = ? AND confirmed_at IS NULL
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetPendingTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
+	row := q.db.QueryRowContext(ctx, getPendingTOTPForAccount, accountID)
+	var i TotpCredential
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Seed,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.LastStep,
+		&i.CreatedStep,
+		&i.ConfirmedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getPrincipalGeneration = `-- name: GetPrincipalGeneration :one
 SELECT session_generation FROM principals WHERE id = ?
 `
@@ -215,6 +368,26 @@ func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, erro
 	var kind string
 	err := row.Scan(&kind)
 	return kind, err
+}
+
+const getRecoveryCodes = `-- name: GetRecoveryCodes :one
+SELECT account_id, batch, dek_version, credential_epoch, row_version, generated_at
+FROM recovery_codes WHERE account_id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetRecoveryCodes(ctx context.Context, accountID string) (RecoveryCode, error) {
+	row := q.db.QueryRowContext(ctx, getRecoveryCodes, accountID)
+	var i RecoveryCode
+	err := row.Scan(
+		&i.AccountID,
+		&i.Batch,
+		&i.DekVersion,
+		&i.CredentialEpoch,
+		&i.RowVersion,
+		&i.GeneratedAt,
+	)
+	return i, err
 }
 
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
@@ -400,6 +573,32 @@ func (q *Queries) InsertPrincipal(ctx context.Context, arg InsertPrincipalParams
 	return err
 }
 
+const insertRecoveryCodes = `-- name: InsertRecoveryCodes :exec
+INSERT INTO recovery_codes
+    (account_id, batch, dek_version, credential_epoch, row_version, generated_at)
+VALUES (?, ?, ?, ?, 1, ?)
+`
+
+type InsertRecoveryCodesParams struct {
+	AccountID       string
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	GeneratedAt     string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error {
+	_, err := q.db.ExecContext(ctx, insertRecoveryCodes,
+		arg.AccountID,
+		arg.Batch,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.GeneratedAt,
+	)
+	return err
+}
+
 const insertSession = `-- name: InsertSession :exec
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
@@ -446,6 +645,39 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.AbsoluteExpiresAt,
 		arg.SourceIp,
 		arg.UserAgent,
+	)
+	return err
+}
+
+const insertTOTP = `-- name: InsertTOTP :exec
+INSERT INTO totp_credentials
+    (id, account_id, seed, dek_version, credential_epoch, row_version,
+     last_step, created_step, confirmed_at, created_at)
+VALUES (?, ?, ?, ?, ?, 1, ?, ?, NULL, ?)
+`
+
+type InsertTOTPParams struct {
+	ID              string
+	AccountID       string
+	Seed            []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	LastStep        int64
+	CreatedStep     int64
+	CreatedAt       string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertTOTP(ctx context.Context, arg InsertTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, insertTOTP,
+		arg.ID,
+		arg.AccountID,
+		arg.Seed,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.LastStep,
+		arg.CreatedStep,
+		arg.CreatedAt,
 	)
 	return err
 }
@@ -560,6 +792,25 @@ func (q *Queries) ResolveProjectChain(ctx context.Context, arg ResolveProjectCha
 	return i, err
 }
 
+const rotateSessionFactors = `-- name: RotateSessionFactors :exec
+UPDATE sessions SET verifier = ?, factors = ? WHERE id = ?
+`
+
+type RotateSessionFactorsParams struct {
+	Verifier []byte
+	Factors  string
+	ID       string
+}
+
+// Step-up rotates the session token and rewrites its factor set; the original
+// authenticated_at and ceremony_id are preserved so absolute-age attribution
+// cannot be reset by repeated step-ups.
+// wenv:authn-resolution
+func (q *Queries) RotateSessionFactors(ctx context.Context, arg RotateSessionFactorsParams) error {
+	_, err := q.db.ExecContext(ctx, rotateSessionFactors, arg.Verifier, arg.Factors, arg.ID)
+	return err
+}
+
 const touchSession = `-- name: TouchSession :exec
 UPDATE sessions SET last_seen_at = ?, idle_expires_at = ? WHERE id = ?
 `
@@ -609,6 +860,40 @@ func (q *Queries) UpdatePasswordCredentialCAS(ctx context.Context, arg UpdatePas
 		arg.DekVersion,
 		arg.CredentialEpoch,
 		arg.UpdatedAt,
+		arg.AccountID,
+		arg.RowVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateRecoveryCodesCAS = `-- name: UpdateRecoveryCodesCAS :execrows
+UPDATE recovery_codes
+SET batch = ?, dek_version = ?, credential_epoch = ?,
+    row_version = row_version + 1, generated_at = ?
+WHERE account_id = ? AND row_version = ?
+`
+
+type UpdateRecoveryCodesCASParams struct {
+	Batch           []byte
+	DekVersion      int64
+	CredentialEpoch int64
+	GeneratedAt     string
+	AccountID       string
+	RowVersion      int64
+}
+
+// Regeneration and consumption both rewrite the batch under a CAS, so a
+// concurrent second presentation of the same code loses and fails closed.
+// wenv:authn-resolution
+func (q *Queries) UpdateRecoveryCodesCAS(ctx context.Context, arg UpdateRecoveryCodesCASParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateRecoveryCodesCAS,
+		arg.Batch,
+		arg.DekVersion,
+		arg.CredentialEpoch,
+		arg.GeneratedAt,
 		arg.AccountID,
 		arg.RowVersion,
 	)
