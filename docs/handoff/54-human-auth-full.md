@@ -53,23 +53,23 @@ enforcement flip, the CLI verbs, and the E2E fixture families.
 
 ## Disposition items for the human (surface before the freeze)
 
-1. **Default effective reauth window = 0 (fail-closed).** Until #55's
-   `project-settings` knob lands, an unset window defaults to 0, which requires
-   WebAuthn for a `reveal`-class disclosure and refuses TOTP there —
-   reproducing the "WebAuthn-only for reveal" state the ADR *explicitly
-   rejected*. Low-stakes today because no `reveal` operation is exercisable
-   until #50/#58 land, but it is a real ADR-tension. **Pick:** (a) keep 0
-   (fail-closed), or (b) an interim non-zero default — in which case the later
-   transition to 0 is owned by `LowerEffectiveWindow` (finding B6). This must
-   be dispositioned together with item 2.
+1. **Default effective reauth window = 0 (fail-closed).** **DECIDED (human,
+   2026-08-08): keep 0, fail-closed.** Until #55's `project-settings` knob
+   lands, an unset window defaults to 0, requiring WebAuthn for a
+   `reveal`-class disclosure and refusing TOTP there — reproducing the
+   "WebAuthn-only for reveal" state the ADR *explicitly rejected*, but
+   low-stakes because no `reveal` operation is exercisable until #50/#58 land.
+   The window-store library still ships `LowerEffectiveWindow` (finding B6)
+   for #55 to call when it introduces a settable window.
 2. **`issued_by='recovery'` is a fourth credential-authority issuer** beyond
-   the ADR's closed list (bootstrap, credential-reset, break-glass). The A1
-   fixture ("reveal attempted mid-reset") *requires* the intermediate
-   session-less artifact to exist, so a direct-consume recovery cannot satisfy
-   acceptance. The recovery issuer is constrained by CHECK to establish only a
-   password, so it inherits none of the authority's future factor-establishing
-   power. Same disposition shape as #47 deviation 1; amend the ADR's issuer
-   list when this lands.
+   the ADR's closed list (bootstrap, credential-reset, break-glass).
+   **DECIDED (human, 2026-08-08): accept, amend the ADR's issuer list when
+   the vertical lands** (do not introduce a separate `recovery_grants`
+   table). The A1 fixture ("reveal attempted mid-reset") *requires* the
+   intermediate session-less artifact to exist, so a direct-consume recovery
+   cannot satisfy acceptance. The recovery issuer is constrained by CHECK to
+   establish only a password, so it inherits none of the authority's future
+   factor-establishing power. Same disposition shape as #47 deviation 1.
 3. **`account establish-credential` spelling** (#47 deviation 2) is confirmed,
    not renamed, by this ticket.
 4. **`scs` not adopted** — session resolution must run inside the request
