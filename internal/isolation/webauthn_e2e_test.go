@@ -126,6 +126,12 @@ func runWebAuthnRoundtrip(t *testing.T, db *store.DB) {
 	if login.CSRFToken == "" {
 		t.Error("a browser session must carry a CSRF token")
 	}
+	// The minted session's ceremony_id is the RELOADED login ceremony row,
+	// consumed by its fresh id (A3): it resolves to a consumed login ceremony
+	// stamped with the credential that authored it.
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM sessions s JOIN webauthn_ceremonies c ON c.id = s.ceremony_id WHERE s.id = '"+login.SessionID+"' AND c.purpose = 'login' AND c.consumed_at IS NOT NULL AND c.credential_id IS NOT NULL"); got != 1 {
+		t.Errorf("minted session must trace to its consumed login ceremony (fresh id), got %d", got)
+	}
 
 	// The passkey session passes an MFA-mandatory operation (org create is
 	// instance-config); the password-only session is refused for inadequate
@@ -387,6 +393,45 @@ func runWebAuthnStepUpReauth(t *testing.T, db *store.DB) {
 	}
 }
 
+func TestWebAuthnReauthBindingMismatchSQLite(t *testing.T) {
+	runWebAuthnReauthBindingMismatch(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnReauthBindingMismatchPostgres(t *testing.T) {
+	runWebAuthnReauthBindingMismatch(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnReauthBindingMismatch is the reauth-binding regression (A3): a
+// reauth ceremony whose operation_binding no longer names its own environment (a
+// tampered or inconsistent row) is refused before any window opens — the finish
+// revalidates that the enumerated unit binds the ceremony's environment,
+// fail-closed, in the same validCeremony check the write tx re-runs against the
+// reloaded row.
+func runWebAuthnReauthBindingMismatch(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
+
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	if err != nil {
+		t.Fatalf("reauth start: %v", err)
+	}
+	// Tamper the pending ceremony so its operation_binding names a DIFFERENT
+	// environment than its environment_id column.
+	execRaw(t, db, `UPDATE webauthn_ceremonies SET operation_binding = '{"environment_id":"env_other","key_ids":["key_a"]}' WHERE purpose = 'reauth' AND consumed_at IS NULL`)
+	rresp, err := dev.Assert(ropts)
+	if err != nil {
+		t.Fatalf("device assert (reauth): %v", err)
+	}
+	if _, err := auth.ReauthPasskeyFinish(ctx, token, rresp); !errors.Is(err, service.ErrNoWebAuthnCeremony) {
+		t.Fatalf("a reauth ceremony whose binding does not name its environment must refuse, got %v", err)
+	}
+	// No window was opened.
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE factor_class = 'webauthn'"); got != 0 {
+		t.Errorf("a refused reauth must open no window, got %d", got)
+	}
+}
+
 func TestWebAuthnDeleteAccountScopedSQLite(t *testing.T) {
 	runWebAuthnDeleteAccountScoped(t, seededDB(t, openSQLite))
 }
@@ -434,39 +479,67 @@ func runWebAuthnDeleteAccountScoped(t *testing.T, db *store.DB) {
 	}
 }
 
-func TestWebAuthnLoginThrottleSQLite(t *testing.T) {
-	runWebAuthnLoginThrottle(t, seededDB(t, openSQLite))
+func TestWebAuthnLoginNoAccountThrottleSQLite(t *testing.T) {
+	runWebAuthnLoginNoAccountThrottle(t, seededDB(t, openSQLite))
 }
-func TestWebAuthnLoginThrottlePostgres(t *testing.T) {
-	runWebAuthnLoginThrottle(t, seededDB(t, openPostgres))
+func TestWebAuthnLoginNoAccountThrottlePostgres(t *testing.T) {
+	runWebAuthnLoginNoAccountThrottle(t, seededDB(t, openPostgres))
 }
 
-// runWebAuthnLoginThrottle is the assertion-admission regression (A2): repeated
-// bad assertions that resolve the account (UV not set) advance that account's
-// backoff, and the next attempt is refused by admission BEFORE verification —
-// even a well-formed one. FailuresBeforeBackoff is 5, so the sixth failure arms
-// the block and the seventh attempt throttles. The block is a real-time 1s
-// window (2^0 after the 6th failure); if this ever flakes under CI load the fix
-// is injecting the limiter clock, not adding more failures.
-func runWebAuthnLoginThrottle(t *testing.T, db *store.DB) {
+// runWebAuthnLoginNoAccountThrottle is the login-DoS regression (A2): a bad
+// discoverable-login assertion that RESOLVES a victim account (the assertion
+// carries the victim's real credential id and user handle) but fails
+// verification must NOT charge that account's per-account backoff — otherwise
+// anyone who can present a victim's handle/credential id holds the victim in
+// AccountDelay. The pre-auth login path is bounded by the per-IP + global
+// admission budget only; per-account backoff lives on the authenticated paths.
+// So after six bad assertions naming the victim, a genuine login still succeeds.
+func runWebAuthnLoginNoAccountThrottle(t *testing.T, db *store.DB) {
 	auth, _, token := bootstrapWebAuthnAdmin(t, db)
 	ctx := t.Context()
 	dev := webauthntest.New(waRPID, waOrigin)
 	enrolPasskey(t, auth, ctx, token, waPassword, dev)
 
-	// Six UV-not-set assertions: each resolves the account in the lookup (so the
-	// per-account failure is recorded) but fails server-side UV verification.
+	// Six UV-not-set assertions: each resolves the victim account in the lookup
+	// (real credential id + matching handle) but fails server-side UV.
 	dev.SetUserVerified(false)
 	for i := range 6 {
 		if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, domain.ErrUnauthenticated) {
 			t.Fatalf("bad assertion %d must refuse unauthenticated, got %v", i, err)
 		}
 	}
-	// The account is now backed off: even a valid assertion is refused by
-	// admission before any signature work.
+	// The victim is untouched: a genuine assertion still logs in (no per-account
+	// backoff was charged by the unauthenticated login path).
 	dev.SetUserVerified(true)
-	if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, admission.ErrOverloaded) {
-		t.Fatalf("after repeated bad assertions login must throttle, got %v", err)
+	if _, err := discoverableLogin(t, auth, ctx, dev); err != nil {
+		t.Fatalf("bad login assertions naming a victim must not throttle the victim, got %v", err)
+	}
+}
+
+func TestWebAuthnLoginHandleMismatchSQLite(t *testing.T) {
+	runWebAuthnLoginHandleMismatch(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnLoginHandleMismatchPostgres(t *testing.T) {
+	runWebAuthnLoginHandleMismatch(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnLoginHandleMismatch: the lookup resolves the account from the
+// assertion's credential id, and the assertion's user handle must match that
+// credential's account handle. A handle that does not match the resolved
+// credential's account is refused (the account is chosen by the credential,
+// never by the client-supplied handle).
+func runWebAuthnLoginHandleMismatch(t *testing.T, db *store.DB) {
+	auth, accountID, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	enrolPasskey(t, auth, ctx, token, waPassword, dev)
+
+	// Clear the stored handle so the assertion's (unchanged) handle no longer
+	// matches the credential's account handle; the login must refuse. NULL scans
+	// to a nil handle in both dialects, so bytes.Equal(nil, presented) is false.
+	execRaw(t, db, "UPDATE accounts SET webauthn_user_handle = NULL WHERE id = '"+accountID+"'")
+	if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("a user handle not matching the resolved credential's account must refuse, got %v", err)
 	}
 }
 

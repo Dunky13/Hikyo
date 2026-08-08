@@ -1,13 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"sort"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
@@ -248,7 +248,7 @@ func (s *Auth) EnrolPasskeyFinish(ctx context.Context, presented string, respons
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !validCeremony(ceremony, "enrol", account.ID, acting.SessionID, s.now()) {
+	if !validCeremony(ceremony, "enrol", account.ID, acting.SessionID, "", s.now()) {
 		return LoginResult{}, ErrNoWebAuthnCeremony
 	}
 
@@ -291,10 +291,10 @@ func (s *Auth) EnrolPasskeyFinish(ctx context.Context, presented string, respons
 		// Re-check the ceremony against the write-tx clock (R2 R1-4): a request
 		// delayed past the window must not still complete, and a ceremony from a
 		// superseded epoch is inert.
-		if !validCeremony(fresh, "enrol", account.ID, acting.SessionID, now) || fresh.CredentialEpoch != epoch {
+		if !validCeremony(fresh, "enrol", account.ID, acting.SessionID, "", now) || fresh.CredentialEpoch != epoch {
 			return ErrNoWebAuthnCeremony
 		}
-		consumed, err := az.ConsumeWebAuthnCeremony(ctx, ceremony.ID, credID, now)
+		consumed, err := az.ConsumeWebAuthnCeremony(ctx, fresh.ID, credID, now)
 		if err != nil {
 			return err
 		}
@@ -412,58 +412,54 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 		}
 		return LoginResult{}, err
 	}
-	if !validCeremony(ceremony, "login", "", "", s.now()) {
+	if !validCeremony(ceremony, "login", "", "", "", s.now()) {
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
 
-	// Resolve + verify the assertion. The lookup loads the account the user
-	// handle names and its non-disabled credentials so go-webauthn can verify
-	// the signature; a disabled (cloned) credential is not offered. A discoverable
-	// login learns the account only here, so the per-account admission backoff is
-	// applied inside the lookup — keyed on the resolved account, BEFORE the
-	// signature verification (A2). A backed-off account short-circuits via a
-	// side-channel flag rather than errors.Is through go-webauthn, which may wrap
-	// the lookup error in its own protocol error and eat the chain.
-	var (
-		resolved     authz.Account
-		haveResolved bool
-		delayRefused bool
-	)
+	// Resolve + verify the assertion. The lookup resolves the account from the
+	// assertion's CREDENTIAL id (rawID) — the cryptographically-meaningful
+	// identifier — and requires the assertion's user handle to match that
+	// credential's account handle, so a bare user-handle claim can neither select
+	// the account nor charge it (A2). The pre-auth login path touches NO
+	// per-account admission state: brute force is bounded by the per-IP + global
+	// Admission budget entered in PasskeyLoginFinish, and per-account backoff
+	// lives only on the authenticated step-up/reauth/factor paths — an
+	// unauthenticated, client-claimed account must not be holdable in backoff.
 	lookup := func(rawID, userHandle []byte) (webauthnrp.User, error) {
 		var u webauthnrp.User
 		lerr := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
-			acc, err := az.AccountByWebAuthnUserHandle(ctx, userHandle)
+			cred, err := az.WebAuthnCredentialByCredentialID(ctx, rawID)
 			if err != nil {
 				return err
 			}
-			resolved, haveResolved = acc, true
+			acc, err := az.AccountByID(ctx, cred.AccountID)
+			if err != nil {
+				return err
+			}
+			handle, err := az.WebAuthnUserHandle(ctx, acc.ID)
+			if err != nil {
+				return err
+			}
+			// The assertion's user handle must name the account the resolved
+			// credential belongs to; the account is chosen by the credential id,
+			// never by the client-supplied handle.
+			if len(userHandle) == 0 || !bytes.Equal(handle, userHandle) {
+				return domain.ErrUnauthenticated
+			}
 			creds, err := az.WebAuthnCredentialsForAccount(ctx, acc.ID)
 			if err != nil {
 				return err
 			}
-			u = rpUser(userHandle, acc, creds)
+			u = rpUser(handle, acc, creds)
 			return nil
 		})
 		if lerr != nil {
 			return webauthnrp.User{}, lerr
 		}
-		if s.Admission.AccountDelay(resolved.ID) > 0 {
-			delayRefused = true
-			return webauthnrp.User{}, admission.ErrOverloaded
-		}
 		return u, nil
 	}
 	assertion, err := s.WebAuthn.FinishDiscoverableLogin(ceremony.SessionData, responseJSON, lookup)
 	if err != nil {
-		if delayRefused {
-			return LoginResult{}, admission.ErrOverloaded
-		}
-		// A bad assertion against a resolved account advances that account's
-		// backoff (A2); an unresolved subject records nothing, mirroring login's
-		// unknown-subject path.
-		if haveResolved {
-			s.recordFactorFailure(ctx, resolved.PrincipalID, resolved.ID)
-		}
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
 
@@ -489,7 +485,7 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 		if err != nil {
 			return err
 		}
-		if !validCeremony(fresh, "login", "", "", now) || fresh.CredentialEpoch != epoch {
+		if !validCeremony(fresh, "login", "", "", "", now) || fresh.CredentialEpoch != epoch {
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
@@ -523,7 +519,6 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			if err := s.respondToClone(ctx, az, account, stored, now); err != nil {
 				return err
 			}
-			s.Admission.RecordFailure(account.ID)
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
@@ -538,11 +533,13 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
-		result, err = s.mintPasskeySession(ctx, az, account, ceremony.ID, now)
+		// Mint against the RELOADED ceremony row (A3): its id is what was consumed
+		// above, so the minted session's ceremony_id traces the credential that
+		// authored it even if the pre-tx row were ever superseded.
+		result, err = s.mintPasskeySession(ctx, az, account, fresh.ID, now)
 		if err != nil {
 			return err
 		}
-		s.Admission.RecordSuccess(account.ID)
 		return nil
 	})
 	if err != nil {
@@ -675,7 +672,7 @@ func (s *Auth) StepUpPasskeyStart(ctx context.Context, presented string) ([]byte
 // preserving the original authenticated_at/ceremony (A21). Not an
 // account-security mutation.
 func (s *Auth) StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (LoginResult, error) {
-	return s.finishAssertionElevation(ctx, presented, responseJSON, "step-up", "", nil)
+	return s.finishAssertionElevation(ctx, presented, responseJSON, "step-up", nil)
 }
 
 // ReauthPasskeyStart opens a reauth ceremony bound to the enumerated unit
@@ -698,7 +695,7 @@ func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented, environmentID 
 // is single-decision (B11); otherwise it slides by the configured window.
 func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (ReauthResult, error) {
 	var out ReauthResult
-	rotated, err := s.finishAssertionElevation(ctx, presented, responseJSON, "reauth", "", func(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, ceremony authz.WebAuthnCeremony, now time.Time) error {
+	rotated, err := s.finishAssertionElevation(ctx, presented, responseJSON, "reauth", func(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, ceremony authz.WebAuthnCeremony, now time.Time) error {
 		epoch, err := az.CredentialEpoch(ctx)
 		if err != nil {
 			return err
@@ -803,7 +800,7 @@ func (s *Auth) beginAccountCeremony(ctx context.Context, presented, purpose, ope
 // the assertion against the acting account, apply the sign-count rule, consume
 // the ceremony, then run the purpose-specific effect (append a factor / open a
 // window). The session token rotates either way.
-func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, responseJSON []byte, purpose, _ string, effect func(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, ceremony authz.WebAuthnCeremony, now time.Time) error) (LoginResult, error) {
+func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, responseJSON []byte, purpose string, effect func(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, ceremony authz.WebAuthnCeremony, now time.Time) error) (LoginResult, error) {
 	if err := s.requireRP(); err != nil {
 		return LoginResult{}, err
 	}
@@ -845,9 +842,14 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if !validCeremony(ceremony, purpose, account.ID, acting.SessionID, s.now()) {
+	// The expected reauth binding is the read-phase ceremony's own enumerated unit
+	// (the operation this reauth is for); step-up/enrol carry none. validCeremony
+	// enforces its presence + environment consistency here, and re-affirms the
+	// reloaded row still binds the same unit inside the write tx (A3).
+	if !validCeremony(ceremony, purpose, account.ID, acting.SessionID, ceremony.OperationBinding, s.now()) {
 		return LoginResult{}, ErrNoWebAuthnCeremony
 	}
+	expectedBinding := ceremony.OperationBinding
 
 	// Per-account admission (A2): the account is known up front for step-up and
 	// reauth, so check AccountDelay + Enter the expensive-work budget before the
@@ -898,7 +900,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		if err != nil {
 			return err
 		}
-		if !validCeremony(fresh, purpose, account.ID, acting.SessionID, now) || fresh.CredentialEpoch != epoch {
+		if !validCeremony(fresh, purpose, account.ID, acting.SessionID, expectedBinding, now) || fresh.CredentialEpoch != epoch {
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
@@ -1348,19 +1350,52 @@ func (s *Auth) credentialsForAccount(ctx context.Context, accountID string) ([]a
 }
 
 // validCeremony checks a ceremony is the expected purpose, unconsumed, unexpired
-// and — for account-bound purposes — bound to this account and session. A login
-// ceremony carries neither (account "" and session "").
-func validCeremony(c authz.WebAuthnCeremony, purpose, accountID, sessionID string, now time.Time) bool {
+// and carries the binding its purpose REQUIRES. A login ceremony carries none
+// (account, session and binding all expected ""). Every other purpose is
+// account+session bound (the schema CHECK pins account-security; enrol, step-up
+// and reauth are opened bound the same way), and reauth additionally binds the
+// enumerated operation unit to its environment. An empty EXPECTED value where the
+// purpose requires one is a MISMATCH (refuse), never a skip — a caller that omits
+// the account, session or reauth binding cannot slip past the equality check.
+func validCeremony(c authz.WebAuthnCeremony, purpose, accountID, sessionID, binding string, now time.Time) bool {
 	if c.Purpose != purpose || c.Consumed || !now.Before(c.ExpiresAt) {
 		return false
 	}
-	if accountID != "" && c.AccountID != accountID {
+	if purpose == "login" {
+		return true
+	}
+	if accountID == "" || c.AccountID != accountID {
 		return false
 	}
-	if sessionID != "" && c.SessionID != sessionID {
+	if sessionID == "" || c.SessionID != sessionID {
 		return false
+	}
+	if purpose == "reauth" {
+		// The reauth ceremony must carry its enumerated operation binding (schema:
+		// operation_binding NOT NULL for reauth), that binding must equal the
+		// expected unit, and it must name the ceremony's own environment — the
+		// internal consistency the schema cannot express. Threaded through the
+		// write tx, this re-affirms the reloaded row still binds the same unit.
+		if binding == "" || c.OperationBinding != binding || c.EnvironmentID == "" {
+			return false
+		}
+		if !bindingNamesEnvironment(c.OperationBinding, c.EnvironmentID) {
+			return false
+		}
 	}
 	return true
+}
+
+// bindingNamesEnvironment reports whether a reauth operation binding's canonical
+// JSON names environmentID. Unparseable binding => false (fail closed).
+func bindingNamesEnvironment(binding, environmentID string) bool {
+	var b struct {
+		EnvironmentID string `json:"environment_id"`
+	}
+	if json.Unmarshal([]byte(binding), &b) != nil {
+		return false
+	}
+	return b.EnvironmentID == environmentID
 }
 
 // credPropsDiscoverable reads residency from the credProps extension. Absent or
