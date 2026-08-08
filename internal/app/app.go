@@ -173,7 +173,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
-	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log}
+	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin}
 
 	proxies, err := parseCIDRs(cfg.TrustedProxyCIDRs)
 	if err != nil {
@@ -190,6 +190,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	api := &server.API{
 		Auth:           authSvc,
 		Orgs:           &service.Orgs{DB: db},
+		Providers:      &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
 		Admission:      limiter,
 		Version:        Version,
 		Log:            log,

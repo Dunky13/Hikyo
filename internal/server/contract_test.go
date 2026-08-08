@@ -94,6 +94,41 @@ func (s stubAuth) ConsumeRecoveryCode(context.Context, string, string) (service.
 	return service.RecoveryResult{}, domain.ErrUnauthenticated
 }
 
+func (s stubAuth) AuthMethods(context.Context) ([]service.AuthMethodProvider, bool, error) {
+	return nil, true, nil
+}
+
+func (s stubAuth) OIDCStart(context.Context, string, string, string, string, string) (service.OIDCStartResult, error) {
+	return service.OIDCStartResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) OIDCCallback(context.Context, string, string, string, string, string, string, string) (service.OIDCCallbackResult, error) {
+	return service.OIDCCallbackResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ListIdentities(context.Context, string) ([]service.ExternalIdentityView, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) UnlinkIdentity(context.Context, string, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+type stubProviders struct{}
+
+func (stubProviders) Put(context.Context, service.Actor, string, service.ProviderInput) (service.ProviderView, error) {
+	return service.ProviderView{}, domain.ErrUnauthorized
+}
+func (stubProviders) Get(context.Context, service.Actor, string) (service.ProviderView, error) {
+	return service.ProviderView{}, domain.ErrUnauthorized
+}
+func (stubProviders) List(context.Context, service.Actor) ([]service.ProviderView, error) {
+	return nil, domain.ErrUnauthorized
+}
+func (stubProviders) Delete(context.Context, service.Actor, string) error {
+	return domain.ErrUnauthorized
+}
+
 type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
 	get    func(ctx context.Context, a service.Actor, id string) (service.Org, error)
@@ -143,7 +178,7 @@ var liveIdentity = service.Identity{
 func newTestServer(t *testing.T, auth server.AuthService, orgs server.OrgService) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
-		Auth: auth, Orgs: orgs, Version: "test",
+		Auth: auth, Orgs: orgs, Providers: stubProviders{}, Version: "test",
 	}))
 	t.Cleanup(srv.Close)
 	return srv

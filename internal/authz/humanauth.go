@@ -231,6 +231,128 @@ func (a *TxAuthorizer) ConsumeOutstandingAuthorities(ctx context.Context, accoun
 	return a.r.ConsumeOutstandingAuthorities(ctx, accountID, at)
 }
 
+// OIDC seam (#54). Login, callback, link and reauth reach the resolution
+// surface through the same in-transaction authorizer as the login writers: they
+// mutate the artifacts that decide who a caller is, which is resolution rather
+// than authorization. Provider administration is proof-bound and does NOT come
+// through here.
+
+// OIDCProvider is a resolved provider row.
+type OIDCProvider = authn.OIDCProvider
+
+// OIDCTransaction is a resolved transaction row.
+type OIDCTransaction = authn.OIDCTransaction
+
+// NewOIDCTransaction is the transaction insert carrier.
+type NewOIDCTransaction = authn.NewOIDCTransaction
+
+// ExternalIdentity is a resolved linked identity.
+type ExternalIdentity = authn.ExternalIdentity
+
+// NewExternalIdentity is the link insert carrier.
+type NewExternalIdentity = authn.NewExternalIdentity
+
+// NewReauthWindow is the reauth-window insert carrier.
+type NewReauthWindow = authn.NewReauthWindow
+
+// EnabledProviderByIssuer resolves the currently enabled provider for an issuer.
+func (a *TxAuthorizer) EnabledProviderByIssuer(ctx context.Context, kind, issuer string) (OIDCProvider, error) {
+	return a.r.EnabledProviderByIssuer(ctx, kind, issuer)
+}
+
+// NewProvider is the provider create carrier.
+type NewProvider = authn.NewProvider
+
+// ProviderUpdate is the provider reconfigure carrier.
+type ProviderUpdate = authn.ProviderUpdate
+
+// EnabledProviderBySlug resolves an enabled provider by slug, for start.
+func (a *TxAuthorizer) EnabledProviderBySlug(ctx context.Context, slug string) (OIDCProvider, error) {
+	return a.r.EnabledProviderBySlug(ctx, slug)
+}
+
+// ProviderBySlug resolves a provider by slug for administration (any state).
+// The mutation that follows is authorized at the chokepoint first.
+func (a *TxAuthorizer) ProviderBySlug(ctx context.Context, slug string) (OIDCProvider, error) {
+	return a.r.ProviderBySlug(ctx, slug)
+}
+
+// ListProviders lists every configured provider.
+func (a *TxAuthorizer) ListProviders(ctx context.Context) ([]OIDCProvider, error) {
+	return a.r.ListProviders(ctx)
+}
+
+// CreateProvider inserts a provider row (authorized at the chokepoint first).
+func (a *TxAuthorizer) CreateProvider(ctx context.Context, n NewProvider) error {
+	return a.r.CreateProvider(ctx, n)
+}
+
+// UpdateProvider compare-and-swaps a provider; false means the row moved.
+func (a *TxAuthorizer) UpdateProvider(ctx context.Context, u ProviderUpdate) (bool, error) {
+	return a.r.UpdateProvider(ctx, u)
+}
+
+// DeleteProvider removes a provider.
+func (a *TxAuthorizer) DeleteProvider(ctx context.Context, id string) error {
+	return a.r.DeleteProvider(ctx, id)
+}
+
+// ProviderForCallback resolves the provider a transaction pinned, by id.
+func (a *TxAuthorizer) ProviderForCallback(ctx context.Context, id string) (OIDCProvider, error) {
+	return a.r.ProviderForCallback(ctx, id)
+}
+
+// CreateOIDCTransaction writes a single-use transaction row.
+func (a *TxAuthorizer) CreateOIDCTransaction(ctx context.Context, t NewOIDCTransaction) error {
+	return a.r.CreateOIDCTransaction(ctx, t)
+}
+
+// OIDCTransactionByState resolves a transaction by its state verifier.
+func (a *TxAuthorizer) OIDCTransactionByState(ctx context.Context, stateVerifier []byte) (OIDCTransaction, error) {
+	return a.r.OIDCTransactionByState(ctx, stateVerifier)
+}
+
+// ConsumeOIDCTransaction claims a transaction atomically; false means it moved.
+func (a *TxAuthorizer) ConsumeOIDCTransaction(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.ConsumeOIDCTransaction(ctx, id, at)
+}
+
+// ExternalIdentityByKey resolves a byte-exact (kind, issuer, subject).
+func (a *TxAuthorizer) ExternalIdentityByKey(ctx context.Context, kind, issuer, subject string) (ExternalIdentity, error) {
+	return a.r.ExternalIdentityByKey(ctx, kind, issuer, subject)
+}
+
+// ExternalIdentityByID resolves a link by id.
+func (a *TxAuthorizer) ExternalIdentityByID(ctx context.Context, id string) (ExternalIdentity, error) {
+	return a.r.ExternalIdentityByID(ctx, id)
+}
+
+// ExternalIdentitiesForAccount lists an account's linked identities.
+func (a *TxAuthorizer) ExternalIdentitiesForAccount(ctx context.Context, accountID string) ([]ExternalIdentity, error) {
+	return a.r.ExternalIdentitiesForAccount(ctx, accountID)
+}
+
+// CreateExternalIdentity writes a link.
+func (a *TxAuthorizer) CreateExternalIdentity(ctx context.Context, n NewExternalIdentity) error {
+	return a.r.CreateExternalIdentity(ctx, n)
+}
+
+// RemoveExternalIdentity removes a link (unlink).
+func (a *TxAuthorizer) RemoveExternalIdentity(ctx context.Context, id string) error {
+	return a.r.DeleteExternalIdentity(ctx, id)
+}
+
+// SweepSessionsForProvider deletes every session minted through a provider and
+// returns the count for audit (A4).
+func (a *TxAuthorizer) SweepSessionsForProvider(ctx context.Context, providerID string) (int64, error) {
+	return a.r.DeleteSessionsForProvider(ctx, providerID)
+}
+
+// OpenReauthWindow opens a reauthentication window over one environment.
+func (a *TxAuthorizer) OpenReauthWindow(ctx context.Context, w NewReauthWindow) error {
+	return a.r.CreateReauthWindow(ctx, w)
+}
+
 // RecordAuthEvent writes an authentication audit event through the resolution
 // surface's proof-free path. Authentication events cannot carry a proof: they
 // are what produces the principal a proof would be minted for, and credential

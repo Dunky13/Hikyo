@@ -62,6 +62,21 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/recovery-codes/regenerate": ClassUnauthenticated,
 	"http:POST /api/v1/auth/recovery/begin":            ClassUnauthenticated,
 
+	// OIDC (#54). Login/callback are pre-auth; link/reauth take a session but an
+	// unresolvable one is exactly the case they must not distinguish, so all are
+	// unauthenticated-class (enumeration uniformity). methods is public
+	// discovery. Provider administration is instance-config (below).
+	"http:GET /api/v1/auth/methods":                      ClassUnauthenticated,
+	"http:POST /api/v1/auth/oidc/{provider}/start":       ClassUnauthenticated,
+	"http:GET /api/v1/auth/oidc/{provider}/callback":     ClassUnauthenticated,
+	"http:GET /api/v1/auth/identities":                   ClassUnauthenticated,
+	"http:POST /api/v1/auth/identities/link":             ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/identities/{id}":           ClassUnauthenticated,
+	"http:GET /api/v1/instance/oidc-providers":           ClassInstance,
+	"http:GET /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
+	"http:PUT /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
+	"http:DELETE /api/v1/instance/oidc-providers/{slug}": ClassInstance,
+
 	// Org administration is instance-scoped: the probe contract is grant
 	// refusal, not tenancy, because no tenant object exists whose
 	// nonexistence could be mimicked.
@@ -182,6 +197,28 @@ var wireEvents = map[string][]audit.EventType{
 	// one auth path with no event of its own — pinned in the exemption
 	// fixture with that reason rather than silently absent.
 
+	// OIDC (#54). start emits only a throttle crossing directly; the callback
+	// is where a login/link/reauth lands, so it carries the family of outcomes
+	// (login success, refusal by cause, link, JIT, the reissued/rotated session,
+	// reauth). link start mirrors start; unlink emits the unlink plus the
+	// reissued session. Provider administration is operation-modeled (wireRoutes).
+	"http:POST /api/v1/auth/oidc/{provider}/start": {audit.EventAuthThrottleCrossed},
+	"http:GET /api/v1/auth/oidc/{provider}/callback": {
+		audit.EventOIDCLogin,
+		audit.EventOIDCRefused,
+		audit.EventIdentityLinked,
+		audit.EventJITProvisioned,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthReauthenticated,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/identities/link": {audit.EventAuthThrottleCrossed},
+	"http:DELETE /api/v1/auth/identities/{id}": {
+		audit.EventIdentityUnlinked,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+
 	// The bootstrap verb, running on the server's own host under local
 	// authority. Its mint is audited including the DELIVERY MODE, because a
 	// token that reached a log shipper is a different event from one written
@@ -197,6 +234,12 @@ var wireRoutes = map[string]Operation{
 	"http:POST /api/v1/orgs":      OpOrgCreate,
 	"http:GET /api/v1/orgs":       OpOrgList,
 	"http:GET /api/v1/orgs/{org}": OpOrgGet,
+
+	// OIDC provider administration (#54), instance-config.
+	"http:GET /api/v1/instance/oidc-providers":           OpProviderList,
+	"http:GET /api/v1/instance/oidc-providers/{slug}":    OpProviderGet,
+	"http:PUT /api/v1/instance/oidc-providers/{slug}":    OpProviderPut,
+	"http:DELETE /api/v1/instance/oidc-providers/{slug}": OpProviderDelete,
 }
 
 // WireRoutes returns the route→operation mapping for the invariant tests and

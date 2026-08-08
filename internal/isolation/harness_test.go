@@ -187,6 +187,7 @@ func openPostgres(t *testing.T) *store.DB {
 	for _, table := range []string{
 		// Factor tables (#54, migration 00006) reference accounts/sessions, so
 		// they drop first — a stale one fails the next re-migration's CREATE.
+		"oidc_transactions", "external_identities", "oidc_providers",
 		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
 		"credential_authorities", "password_credentials", "sessions", "accounts",
 		"auth_instance_state",

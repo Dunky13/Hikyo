@@ -92,6 +92,17 @@ type Environment struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type ExternalIdentity struct {
+	ID              string
+	AccountID       string
+	Kind            string
+	Issuer          string
+	Subject         string
+	ProviderID      string
+	CredentialEpoch int64
+	CreatedAt       pgtype.Timestamptz
+}
+
 type Grant struct {
 	ID          string
 	PrincipalID string
@@ -113,6 +124,46 @@ type MasterKey struct {
 	State        string
 	Blob         []byte
 	CreatedAt    pgtype.Timestamptz
+}
+
+type OidcProvider struct {
+	ID              string
+	Slug            string
+	DisplayName     string
+	Kind            string
+	Issuer          string
+	ClientID        string
+	ClientSecret    []byte
+	Scopes          string
+	RedirectUri     string
+	JitPolicy       pgtype.Text
+	AssurancePolicy pgtype.Text
+	Enabled         int64
+	DekVersion      int64
+	RowVersion      int64
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type OidcTransaction struct {
+	ID                     string
+	StateVerifier          []byte
+	Nonce                  []byte
+	PkceVerifier           string
+	ProviderID             string
+	Issuer                 string
+	RedirectUri            string
+	Purpose                string
+	BindingKind            string
+	InitiatingSessionID    pgtype.Text
+	BrowserBindingVerifier []byte
+	AccountID              pgtype.Text
+	EnvironmentID          pgtype.Text
+	CeremonyID             pgtype.Text
+	CredentialEpoch        int64
+	CreatedAt              pgtype.Timestamptz
+	ExpiresAt              pgtype.Timestamptz
+	ConsumedAt             pgtype.Timestamptz
 }
 
 type Org struct {
@@ -191,6 +242,7 @@ type Session struct {
 	SourceIp          string
 	UserAgent         string
 	CsrfVerifier      []byte
+	ProviderID        pgtype.Text
 }
 
 type Tier3Key struct {

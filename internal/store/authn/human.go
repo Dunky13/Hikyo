@@ -113,6 +113,13 @@ type NewSession struct {
 	AbsoluteExpiresAt time.Time
 	SourceIP          string
 	UserAgent         string
+	// ProviderID is the federated-session sweep key (A4): the OIDC provider a
+	// session authenticated through, empty for local sessions.
+	ProviderID string
+	// CSRFVerifier is the fast-hash verifier of a browser session's synchronizer
+	// token (A9), nil for CLI sessions (a cookie's attributes protect nothing on
+	// a non-browser client).
+	CSRFVerifier []byte
 }
 
 // CredentialAuthority is a resolved credential-establishment authority.
@@ -447,7 +454,8 @@ func (r *Resolver) CreateSession(ctx context.Context, s NewSession) error {
 			AuthenticatedAt: encodeTime(s.AuthenticatedAt), CeremonyID: nullString(s.CeremonyID),
 			CreatedAt: encodeTime(s.CreatedAt), LastSeenAt: encodeTime(s.CreatedAt),
 			IdleExpiresAt: encodeTime(s.IdleExpiresAt), AbsoluteExpiresAt: encodeTime(s.AbsoluteExpiresAt),
-			SourceIp: s.SourceIP, UserAgent: s.UserAgent,
+			SourceIp: s.SourceIP, UserAgent: s.UserAgent, ProviderID: nullString(s.ProviderID),
+			CsrfVerifier: s.CSRFVerifier,
 		})
 	}
 	return r.pg.InsertSession(ctx, pggen.InsertSessionParams{
@@ -457,7 +465,8 @@ func (r *Resolver) CreateSession(ctx context.Context, s NewSession) error {
 		AuthenticatedAt: pgTime(s.AuthenticatedAt), CeremonyID: pgText(s.CeremonyID),
 		CreatedAt: pgTime(s.CreatedAt), LastSeenAt: pgTime(s.CreatedAt),
 		IdleExpiresAt: pgTime(s.IdleExpiresAt), AbsoluteExpiresAt: pgTime(s.AbsoluteExpiresAt),
-		SourceIp: s.SourceIP, UserAgent: s.UserAgent,
+		SourceIp: s.SourceIP, UserAgent: s.UserAgent, ProviderID: pgText(s.ProviderID),
+		CsrfVerifier: s.CSRFVerifier,
 	})
 }
 

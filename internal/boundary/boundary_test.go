@@ -44,6 +44,15 @@ var authnImporters = map[string]bool{
 	module + "/internal/isolation":   true, // query-count instrumentation (tests only)
 }
 
+// oidcrpImporters is the allowlist for the OIDC relying-party wrapper (#54).
+// The protocol library (go-oidc, oauth2) is confined behind it, and only the
+// service layer consumes it - relying-party policy has exactly one home.
+var oidcrpImporters = map[string]bool{
+	module + "/internal/service": true,
+	module + "/internal/oidcrp":  true,
+	module + "/internal/app":     true, // construction wiring only
+}
+
 // forbidden direct edges: importer prefix -> banned import prefix.
 var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/server", module + "/internal/store", "handlers cannot reach the datastore directly"},
@@ -141,6 +150,19 @@ func TestCryptoChokepoint(t *testing.T) {
 			}
 			if (imp == "filippo.io/age" || strings.HasPrefix(imp, "filippo.io/age/")) && !ageImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: age is confined to internal/crypto/backup", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+// TestOIDCRPImportAllowlist confines the OIDC protocol library behind
+// internal/oidcrp: only the allowlisted packages may import it.
+func TestOIDCRPImportAllowlist(t *testing.T) {
+	oidcrp := module + "/internal/oidcrp"
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			if imp == oidcrp && !oidcrpImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: not on the oidcrp-importer allowlist", p.ImportPath, imp)
 			}
 		}
 	}

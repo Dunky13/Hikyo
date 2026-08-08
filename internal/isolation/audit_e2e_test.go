@@ -406,6 +406,11 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// generate/consume, TOTP enrol/confirm, step-up, remove.
 		runFactorLifecycle(t, auth, ctx, "e2e-admin", password)
 
+		// The full OIDC lifecycle, so every OIDC audit event is emitted by code
+		// before the emitter check: provider config + read, link, federated
+		// login, JIT provisioning, a refusal, and unlink.
+		runOIDCLifecycle(t, auth, ctx, boot.PrincipalID, "e2e-admin", password)
+
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
 			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")

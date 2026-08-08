@@ -100,6 +100,27 @@ func (q *Queries) ConsumeCredentialAuthority(ctx context.Context, arg ConsumeCre
 	return result.RowsAffected()
 }
 
+const consumeOIDCTransaction = `-- name: ConsumeOIDCTransaction :execrows
+UPDATE oidc_transactions SET consumed_at = ?
+WHERE id = ? AND consumed_at IS NULL
+`
+
+type ConsumeOIDCTransactionParams struct {
+	ConsumedAt sql.NullString
+	ID         string
+}
+
+// Single-use consumption: the NULL guard is the atomic claim, so a callback
+// cannot be replayed and two concurrent callbacks cannot both consume one tx.
+// wenv:authn-resolution
+func (q *Queries) ConsumeOIDCTransaction(ctx context.Context, arg ConsumeOIDCTransactionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, consumeOIDCTransaction, arg.ConsumedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const consumeOutstandingAuthoritiesForAccount = `-- name: ConsumeOutstandingAuthoritiesForAccount :exec
 UPDATE credential_authorities SET consumed_at = ?
 WHERE account_id = ? AND consumed_at IS NULL
@@ -129,6 +150,16 @@ func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteExternalIdentity = `-- name: DeleteExternalIdentity :exec
+DELETE FROM external_identities WHERE id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) DeleteExternalIdentity(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteExternalIdentity, id)
+	return err
 }
 
 const deletePendingTOTPForAccount = `-- name: DeletePendingTOTPForAccount :exec
@@ -161,6 +192,22 @@ DELETE FROM sessions WHERE principal_id = ?
 func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID string) error {
 	_, err := q.db.ExecContext(ctx, deleteSessionsForPrincipal, principalID)
 	return err
+}
+
+const deleteSessionsForProvider = `-- name: DeleteSessionsForProvider :execrows
+DELETE FROM sessions WHERE provider_id = ?
+`
+
+// The federated-session sweep (A4): every session minted through a provider
+// dies when the provider's issuer/client/assurance policy changes or the
+// provider is disabled or deleted. reauth_windows cascade from the session.
+// wenv:authn-resolution
+func (q *Queries) DeleteSessionsForProvider(ctx context.Context, providerID sql.NullString) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSessionsForProvider, providerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteTOTPForAccount = `-- name: DeleteTOTPForAccount :exec
@@ -312,6 +359,168 @@ func (q *Queries) GetCredentialEpoch(ctx context.Context) (int64, error) {
 	return credential_epoch, err
 }
 
+const getEnabledProviderByIssuer = `-- name: GetEnabledProviderByIssuer :one
+
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE kind = ? AND issuer = ? AND enabled = 1
+`
+
+type GetEnabledProviderByIssuerParams struct {
+	Kind   string
+	Issuer string
+}
+
+// OIDC login/link/reauth resolution (#54, human-auth ADR -- The OIDC
+// transaction). These read providers, transactions and external identities
+// with request-supplied identifiers, and write the transaction/identity/session
+// rows that decide who a caller is: the resolution surface, proof-free, for the
+// same reason the login writers are.
+// wenv:authn-resolution
+func (q *Queries) GetEnabledProviderByIssuer(ctx context.Context, arg GetEnabledProviderByIssuerParams) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEnabledProviderByIssuer, arg.Kind, arg.Issuer)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEnabledProviderBySlug = `-- name: GetEnabledProviderBySlug :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE slug = ? AND enabled = 1
+`
+
+// Start resolves the provider by slug for an enabled provider only: a login,
+// link or reauth may only begin against a provider that is currently serving.
+// wenv:authn-resolution
+func (q *Queries) GetEnabledProviderBySlug(ctx context.Context, slug string) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getEnabledProviderBySlug, slug)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getExternalIdentity = `-- name: GetExternalIdentity :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE kind = ? AND issuer = ? AND subject = ?
+`
+
+type GetExternalIdentityParams struct {
+	Kind    string
+	Issuer  string
+	Subject string
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetExternalIdentity(ctx context.Context, arg GetExternalIdentityParams) (ExternalIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getExternalIdentity, arg.Kind, arg.Issuer, arg.Subject)
+	var i ExternalIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Kind,
+		&i.Issuer,
+		&i.Subject,
+		&i.ProviderID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getExternalIdentityByID = `-- name: GetExternalIdentityByID :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE id = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetExternalIdentityByID(ctx context.Context, id string) (ExternalIdentity, error) {
+	row := q.db.QueryRowContext(ctx, getExternalIdentityByID, id)
+	var i ExternalIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Kind,
+		&i.Issuer,
+		&i.Subject,
+		&i.ProviderID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOIDCTransactionByState = `-- name: GetOIDCTransactionByState :one
+SELECT id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+       purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+       account_id, environment_id, ceremony_id, credential_epoch, created_at,
+       expires_at, consumed_at
+FROM oidc_transactions WHERE state_verifier = ?
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetOIDCTransactionByState(ctx context.Context, stateVerifier []byte) (OidcTransaction, error) {
+	row := q.db.QueryRowContext(ctx, getOIDCTransactionByState, stateVerifier)
+	var i OidcTransaction
+	err := row.Scan(
+		&i.ID,
+		&i.StateVerifier,
+		&i.Nonce,
+		&i.PkceVerifier,
+		&i.ProviderID,
+		&i.Issuer,
+		&i.RedirectUri,
+		&i.Purpose,
+		&i.BindingKind,
+		&i.InitiatingSessionID,
+		&i.BrowserBindingVerifier,
+		&i.AccountID,
+		&i.EnvironmentID,
+		&i.CeremonyID,
+		&i.CredentialEpoch,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const getPasswordCredential = `-- name: GetPasswordCredential :one
 SELECT account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
        dek_version, credential_epoch, row_version, updated_at
@@ -387,6 +596,40 @@ func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, erro
 	var kind string
 	err := row.Scan(&kind)
 	return kind, err
+}
+
+const getProviderForCallback = `-- name: GetProviderForCallback :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE id = ?
+`
+
+// The recorded provider a callback exchanges at (A11): loaded by the id the
+// transaction pinned, so the exchange happens only at that provider.
+// wenv:authn-resolution
+func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcProvider, error) {
+	row := q.db.QueryRowContext(ctx, getProviderForCallback, id)
+	var i OidcProvider
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Issuer,
+		&i.ClientID,
+		&i.ClientSecret,
+		&i.Scopes,
+		&i.RedirectUri,
+		&i.JitPolicy,
+		&i.AssurancePolicy,
+		&i.Enabled,
+		&i.DekVersion,
+		&i.RowVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getRecoveryCodes = `-- name: GetRecoveryCodes :one
@@ -511,6 +754,38 @@ func (q *Queries) InsertCredentialAuthority(ctx context.Context, arg InsertCrede
 	return err
 }
 
+const insertExternalIdentity = `-- name: InsertExternalIdentity :exec
+INSERT INTO external_identities
+    (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertExternalIdentityParams struct {
+	ID              string
+	AccountID       string
+	Kind            string
+	Issuer          string
+	Subject         string
+	ProviderID      string
+	CredentialEpoch int64
+	CreatedAt       string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertExternalIdentity(ctx context.Context, arg InsertExternalIdentityParams) error {
+	_, err := q.db.ExecContext(ctx, insertExternalIdentity,
+		arg.ID,
+		arg.AccountID,
+		arg.Kind,
+		arg.Issuer,
+		arg.Subject,
+		arg.ProviderID,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertGrant = `-- name: InsertGrant :exec
 INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -536,6 +811,59 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) error 
 		arg.ProjectID,
 		arg.EnvID,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertOIDCTransaction = `-- name: InsertOIDCTransaction :exec
+INSERT INTO oidc_transactions
+    (id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+     purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+     account_id, environment_id, ceremony_id, credential_epoch, created_at,
+     expires_at, consumed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+`
+
+type InsertOIDCTransactionParams struct {
+	ID                     string
+	StateVerifier          []byte
+	Nonce                  []byte
+	PkceVerifier           string
+	ProviderID             string
+	Issuer                 string
+	RedirectUri            string
+	Purpose                string
+	BindingKind            string
+	InitiatingSessionID    sql.NullString
+	BrowserBindingVerifier []byte
+	AccountID              sql.NullString
+	EnvironmentID          sql.NullString
+	CeremonyID             sql.NullString
+	CredentialEpoch        int64
+	CreatedAt              string
+	ExpiresAt              string
+}
+
+// wenv:authn-resolution
+func (q *Queries) InsertOIDCTransaction(ctx context.Context, arg InsertOIDCTransactionParams) error {
+	_, err := q.db.ExecContext(ctx, insertOIDCTransaction,
+		arg.ID,
+		arg.StateVerifier,
+		arg.Nonce,
+		arg.PkceVerifier,
+		arg.ProviderID,
+		arg.Issuer,
+		arg.RedirectUri,
+		arg.Purpose,
+		arg.BindingKind,
+		arg.InitiatingSessionID,
+		arg.BrowserBindingVerifier,
+		arg.AccountID,
+		arg.EnvironmentID,
+		arg.CeremonyID,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -592,6 +920,47 @@ func (q *Queries) InsertPrincipal(ctx context.Context, arg InsertPrincipalParams
 	return err
 }
 
+const insertReauthWindow = `-- name: InsertReauthWindow :exec
+INSERT INTO reauth_windows
+    (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+     authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+     consumed_at, created_at)
+VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
+`
+
+type InsertReauthWindowParams struct {
+	ID              string
+	SessionID       string
+	EnvironmentID   string
+	CeremonyID      string
+	FactorClass     string
+	AuthenticatedAt string
+	WindowExpiresAt string
+	HardExpiresAt   string
+	CredentialEpoch int64
+	CreatedAt       string
+}
+
+// A reauthentication window opened by an OIDC reauth ceremony (only where the
+// effective window is > 0; a 0-window gate needs WebAuthn). Keyed by session,
+// cascading with it.
+// wenv:authn-resolution
+func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindowParams) error {
+	_, err := q.db.ExecContext(ctx, insertReauthWindow,
+		arg.ID,
+		arg.SessionID,
+		arg.EnvironmentID,
+		arg.CeremonyID,
+		arg.FactorClass,
+		arg.AuthenticatedAt,
+		arg.WindowExpiresAt,
+		arg.HardExpiresAt,
+		arg.CredentialEpoch,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertRecoveryCodes = `-- name: InsertRecoveryCodes :exec
 INSERT INTO recovery_codes
     (account_id, batch, dek_version, credential_epoch, row_version, generated_at)
@@ -622,8 +991,9 @@ const insertSession = `-- name: InsertSession :exec
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
-     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
+     provider_id, csrf_verifier)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -643,6 +1013,8 @@ type InsertSessionParams struct {
 	AbsoluteExpiresAt string
 	SourceIp          string
 	UserAgent         string
+	ProviderID        sql.NullString
+	CsrfVerifier      []byte
 }
 
 // wenv:authn-resolution
@@ -664,6 +1036,8 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.AbsoluteExpiresAt,
 		arg.SourceIp,
 		arg.UserAgent,
+		arg.ProviderID,
+		arg.CsrfVerifier,
 	)
 	return err
 }
@@ -699,6 +1073,44 @@ func (q *Queries) InsertTOTP(ctx context.Context, arg InsertTOTPParams) error {
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const listExternalIdentitiesForAccount = `-- name: ListExternalIdentitiesForAccount :many
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE account_id = ? ORDER BY created_at
+`
+
+// wenv:authn-resolution
+func (q *Queries) ListExternalIdentitiesForAccount(ctx context.Context, accountID string) ([]ExternalIdentity, error) {
+	rows, err := q.db.QueryContext(ctx, listExternalIdentitiesForAccount, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExternalIdentity
+	for rows.Next() {
+		var i ExternalIdentity
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Kind,
+			&i.Issuer,
+			&i.Subject,
+			&i.ProviderID,
+			&i.CredentialEpoch,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listGrantsForPrincipal = `-- name: ListGrantsForPrincipal :many

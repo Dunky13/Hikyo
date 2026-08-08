@@ -85,6 +85,29 @@ const (
 	// possession factor and gained a factor class.
 	EventAuthReauthenticated EventType = "auth.reauthenticated"
 
+	// auth.* OIDC events (#54, human-auth ADR - Login methods, Identity
+	// linking, The OIDC transaction). auth.oidc_login records a federated login
+	// or reauth success with its method and the assurance the provider policy
+	// yielded; auth.oidc_refused records every transaction failure BY CAUSE
+	// (the ADR requires the failures, uniform response notwithstanding), with a
+	// closed cause enum covering mix-up, nonce, purpose, state, issuer,
+	// audience, signature, epoch and IdP-error refusals.
+	EventOIDCLogin   EventType = "auth.oidc_login"
+	EventOIDCRefused EventType = "auth.oidc_refused"
+	// auth.identity_linked / auth.identity_unlinked record an external identity
+	// bound to or removed from an account - account-security mutations both.
+	EventIdentityLinked   EventType = "auth.identity_linked"
+	EventIdentityUnlinked EventType = "auth.identity_unlinked"
+	// auth.jit_provisioned records a JIT account creation, naming the verified
+	// claim that admitted it - the evidence, never an email allowlist.
+	EventJITProvisioned EventType = "auth.jit_provisioned"
+	// auth.provider_changed records a provider configuration change and the
+	// count of federated sessions it swept (A3/A4). auth.provider_read records
+	// the instance-scoped provider reads (audit-model default-deny refuses
+	// audited:none to instance-class operations).
+	EventOIDCProviderChanged EventType = "auth.provider_changed"
+	EventOIDCProviderRead    EventType = "auth.provider_read"
+
 	// settings.* — scaffolding domain events for the demonstration
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
@@ -321,6 +344,91 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"session_id": {Kind: KindString, Required: true},
 			"factor":     {Kind: KindString, Required: true}, // totp
+		},
+	},
+	EventOIDCLogin: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"method":               {Kind: KindString, Required: true}, // oidc:<issuer>
+			"purpose":              {Kind: KindString, Required: true}, // login | reauth
+			"account_id":           {Kind: KindString, Required: true},
+			"assurance":            {Kind: KindString, Required: true}, // single-factor | multi-factor
+			"provider_id":          {Kind: KindString, Required: true},
+			"acr":                  {Kind: KindString},              // provider-asserted, raw (A12)
+			"amr":                  {Kind: KindString},              // provider-asserted, raw joined (A12)
+			"provider_row_version": {Kind: KindInt, Required: true}, // policy read in the mint tx (A12)
+		},
+	},
+	EventOIDCRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// Closed cause enum, by class never by detail: mixup | nonce |
+			// purpose | state | issuer | audience | signature | epoch |
+			// idp-error | expired | unknown-identity | no-assurance-policy |
+			// no-auth-time | binding | jit-refused | reconciliation.
+			"cause":       {Kind: KindString, Required: true},
+			"provider_id": {Kind: KindString},
+		},
+	},
+	EventIdentityLinked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"identity_id":            {Kind: KindString, Required: true},
+			"provider_id":            {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventIdentityUnlinked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"identity_id":            {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventJITProvisioned: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":  {Kind: KindString, Required: true},
+			"provider_id": {Kind: KindString, Required: true},
+			"claim":       {Kind: KindString, Required: true}, // the verified claim name
+		},
+	},
+	EventOIDCProviderChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id":    {Kind: KindString, Required: true},
+			"change":         {Kind: KindString, Required: true}, // created | updated | deleted
+			"sessions_swept": {Kind: KindInt, Required: true},    // federated sessions deleted (A3/A4)
+		},
+	},
+	EventOIDCProviderRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"query":     {Kind: KindString, Required: true}, // get | list
+			"row_count": {Kind: KindInt, Required: true},
 		},
 	},
 	EventOrgRead: {

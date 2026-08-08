@@ -97,8 +97,14 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 	// The grammar check is local and constant-cost, and a value that fails it
 	// cannot correspond to any row, so short-circuiting here reveals only
 	// that the caller sent something that is not a wenv artifact — a fact
-	// they already knew.
-	if presented == "" || crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil {
+	// they already knew. Both session artifact types are accepted here (A10):
+	// a CLI session ("cli") and a browser session ("br"). The transport decides
+	// which leg a value arrived on (header vs cookie) and enforces the CSRF
+	// requirement there; the verifier scheme is identical, so resolution does
+	// not branch on the type.
+	if presented == "" ||
+		(crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil &&
+			crypto.ParseArtifact(presented, crypto.ArtifactBrowserSession) != nil) {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 

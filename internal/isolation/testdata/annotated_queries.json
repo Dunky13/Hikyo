@@ -25,6 +25,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ConsumeOIDCTransaction",
+    "annotation": "authn-resolution",
+    "hash": "5092ad40148ea127795ed830bc02bef07e0cd51f0e4c2dde80d837712e9d6a45"
+  },
+  {
+    "engine": "postgres",
     "name": "ConsumeOutstandingAuthoritiesForAccount",
     "annotation": "authn-resolution",
     "hash": "5b7148c41eb4adca7ce1a134eb83c646fd65b8355615883c53db8030677c89f5"
@@ -43,9 +49,27 @@
   },
   {
     "engine": "postgres",
+    "name": "CreateOIDCProvider",
+    "annotation": "authn-resolution",
+    "hash": "f5c5253e3cbfe6d6dc9dfb7ed1e805c3706fef1a8b1e978ff2e08ef7b6498ab4"
+  },
+  {
+    "engine": "postgres",
     "name": "CreateOrg",
     "annotation": "instance-scoped",
     "hash": "cdff0423a21c54bfd9c34a8cd5d0a1ec1c7b4ca87527082d5b43591bec2403b3"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "ce3fc198e5d22eee48a2e571cd645cb564b86549cf38ce4a1a63650060063338"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteOIDCProvider",
+    "annotation": "authn-resolution",
+    "hash": "a8b2b6eb1ab32d1f11670662f3694a84b269f8dea9b3b78f466cb37facbfb68e"
   },
   {
     "engine": "postgres",
@@ -64,6 +88,12 @@
     "name": "DeleteSessionsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "d71eb4cf1d45147fbf7456e92835ccb858731dee0332838dde5f126896e21d08"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSessionsForProvider",
+    "annotation": "authn-resolution",
+    "hash": "35d7b8c347de725e6dd5bab401b88e4090c75f86f466552f917c58a8ab86f00c"
   },
   {
     "engine": "postgres",
@@ -109,6 +139,42 @@
   },
   {
     "engine": "postgres",
+    "name": "GetEnabledProviderByIssuer",
+    "annotation": "authn-resolution",
+    "hash": "8720cfbe40a6900eee4d57fc382865ab7c6b44ef8d7c43705bd7f99b99a378a0"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetEnabledProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "2b9325b93b2a8ece65f668f68f607696af2a3ac335322f385801e5cd6aafc27e"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "4883782ed210d543a6e2d5d20897e6bde34cba35987c87e1ef94a7049a888ba5"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetExternalIdentityByID",
+    "annotation": "authn-resolution",
+    "hash": "96e644de5512cae054a01359f35460afb717129c0a6b96f3bd3d5b2f45c5e346"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetOIDCProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "0fc87d39348bfd633354fc898a1cbd7f681c8395299ea8223aa78c1871dbf454"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetOIDCTransactionByState",
+    "annotation": "authn-resolution",
+    "hash": "fa83e3a76e9bd9995b15c3e01b9df79357f00d2860cbe36001b38afcd88845e3"
+  },
+  {
+    "engine": "postgres",
     "name": "GetOrg",
     "annotation": "instance-scoped",
     "hash": "4a4e28b0093acaf4c67487f0e19157cecbee480d5d2bd51e88e88074eb70e47d"
@@ -139,6 +205,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetProviderForCallback",
+    "annotation": "authn-resolution",
+    "hash": "e63c2d8817d8c47dcfb6ace0e4738ca1405c97c7c2694a3b785954c426cab679"
+  },
+  {
+    "engine": "postgres",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "19816dbfd2333bb4af1cfce7697245dea43bfb2c9286c348ef358b6522d4df46"
@@ -163,9 +235,21 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "f0f176d421d0a30b418ae594c62edcceece1ad9b6bd932c64bedc5c219b765c8"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertGrant",
     "annotation": "authn-resolution",
     "hash": "ebc8f27edf50d6400f6d92ed1af408ac9d3fdfa83e238498de684da12ff795f2"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertOIDCTransaction",
+    "annotation": "authn-resolution",
+    "hash": "80f2b0425effa0afd7d4f0cc4b38a0e1a9d6e8d0797e677af9af6f680b355069"
   },
   {
     "engine": "postgres",
@@ -181,6 +265,12 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "611ed7721c4607342783cb078366914f562be8cd41e50b583d1eb152f4e90111"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "eed39f37e353496e182619314423ce3b99bb755c88fc658df60db0176bc7f03f"
@@ -189,7 +279,7 @@
     "engine": "postgres",
     "name": "InsertSession",
     "annotation": "authn-resolution",
-    "hash": "1e3eabbbadb55112c9c6aff84583fcdc2494042fb35f5ef8effed15c6063f32d"
+    "hash": "667da5bdb247df0e5a80c4a80134f8fd6d2ebd2912786fbaf464d905d1eaa27f"
   },
   {
     "engine": "postgres",
@@ -199,9 +289,21 @@
   },
   {
     "engine": "postgres",
+    "name": "ListExternalIdentitiesForAccount",
+    "annotation": "authn-resolution",
+    "hash": "55f3961eec8cdb8fcbd7786e08ed6f33732f8b8bce3c1e77c54668afee852e9d"
+  },
+  {
+    "engine": "postgres",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListOIDCProviders",
+    "annotation": "authn-resolution",
+    "hash": "a40c245b92177b74179d4a24c340a6bfcfb9255d2e9b16917ed7ef6b558dd98b"
   },
   {
     "engine": "postgres",
@@ -241,6 +343,12 @@
   },
   {
     "engine": "postgres",
+    "name": "UpdateOIDCProviderCAS",
+    "annotation": "authn-resolution",
+    "hash": "ded2711fd1d54b158c424e2fb95f6543ef0660ab9bbb8c649440b41d68b17b30"
+  },
+  {
+    "engine": "postgres",
     "name": "UpdatePasswordCredentialCAS",
     "annotation": "authn-resolution",
     "hash": "63093b4013caae1b8dfd3e82983292e570eabfb35e8b8586b938aac52fa1f0f1"
@@ -277,6 +385,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ConsumeOIDCTransaction",
+    "annotation": "authn-resolution",
+    "hash": "02d3b8f9a9c68aa0657bc1b965e0691e549340d8a0d4017dc863095cd433118a"
+  },
+  {
+    "engine": "sqlite",
     "name": "ConsumeOutstandingAuthoritiesForAccount",
     "annotation": "authn-resolution",
     "hash": "f1bbdcf248a4111592adc73223aec7342356e7c234ba27117f41d7358562edc9"
@@ -295,9 +409,27 @@
   },
   {
     "engine": "sqlite",
+    "name": "CreateOIDCProvider",
+    "annotation": "authn-resolution",
+    "hash": "c42dd08dd3f40a1c8e97b602875c3dcdeec65754a90e9a5a5a02ca158fbacdb7"
+  },
+  {
+    "engine": "sqlite",
     "name": "CreateOrg",
     "annotation": "instance-scoped",
     "hash": "44fad26ccfb907a29f577de5526304360423c7fc7a3243e816e05e60842572ef"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "574453c51e84c4da03caec855e0349be62c896361ff20697f106e03907d4e8e2"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteOIDCProvider",
+    "annotation": "authn-resolution",
+    "hash": "a8581402ffe370d677fb4878795de71b58fbf59e0bf01696ce6a41334ff85b9d"
   },
   {
     "engine": "sqlite",
@@ -316,6 +448,12 @@
     "name": "DeleteSessionsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "4fb6f6f766cf8b9d331025566defdd05bcc63776e9f7bd7da052d1c11c77e0de"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSessionsForProvider",
+    "annotation": "authn-resolution",
+    "hash": "a788c304710e8d6ddaf13b14e16612ad276c0a6f235272243172d6e93319d9c6"
   },
   {
     "engine": "sqlite",
@@ -361,6 +499,42 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetEnabledProviderByIssuer",
+    "annotation": "authn-resolution",
+    "hash": "385335ff0dd06601ecdfd0333e3f3e8513c2bbb1b7bb80b4938803330df8c67c"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetEnabledProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "7dec4d917828f5562953739f4aaf32bd65d875969afc45c08d1912f74653c101"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "0568ba68597bc385113e4be179b9e85b9154317670c05a43ff8aedf5032caa99"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetExternalIdentityByID",
+    "annotation": "authn-resolution",
+    "hash": "bffd6a160ae77d6a5e03f6400f952240ea5f37844cbc0223f1dd3879ac368e1a"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetOIDCProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "8f0c1510ef41096cf92117b3287da005a1abc2cfece8c1ecdba485c18c2f0fcd"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetOIDCTransactionByState",
+    "annotation": "authn-resolution",
+    "hash": "867b1f518723fb3932135954b28f542a0fb053487a0943e2942536cd23a96ba8"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetOrg",
     "annotation": "instance-scoped",
     "hash": "1f5399c8a18f2b8b804f8fcfb4552f19506b2df88063b896f702223ce2423742"
@@ -391,6 +565,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetProviderForCallback",
+    "annotation": "authn-resolution",
+    "hash": "46c9fcacefdd07f115a81064b1fa73bb8fad94bd14994a58fb9369c41771ee4e"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "cc0eb65452b1becf984e553ed3abdc8bebd6e6e56bbb8a2d6e031c61fc32a3ad"
@@ -415,9 +595,21 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertExternalIdentity",
+    "annotation": "authn-resolution",
+    "hash": "ba0f265b7bf99647f9e82c0b072deb598a54c95e922732a09624b2f48e19503f"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertGrant",
     "annotation": "authn-resolution",
     "hash": "25705797d0c69e23afdd18e67f04a3bbdb8d4a7de4272109983dbf76a62afa01"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertOIDCTransaction",
+    "annotation": "authn-resolution",
+    "hash": "a79a932c6d5bd46c48572ea6ba1ddc493a79a751fd08366d144eebf986346dac"
   },
   {
     "engine": "sqlite",
@@ -433,6 +625,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "16e3e20e2eff6ba373bba549644e4e86437d9c4d44b117defabb90e84a2a2321"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "704efac3a17b238e4539a94d1d5e494f362ce133c288a9f6236bb04067fb0585"
@@ -441,7 +639,7 @@
     "engine": "sqlite",
     "name": "InsertSession",
     "annotation": "authn-resolution",
-    "hash": "787cf4cf53d976da048f2144a1c6150cf24fe127be8329da6951ae486de60202"
+    "hash": "782da14d7d18c3c19b5d7a2b4e0468dfffdf1a3429edde2b85b026e78c9fc195"
   },
   {
     "engine": "sqlite",
@@ -451,9 +649,21 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListExternalIdentitiesForAccount",
+    "annotation": "authn-resolution",
+    "hash": "ed6a2e20814e95e0d22fe6dff63cae1d9cc49cee3f7262d2769c455d21a148e0"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListOIDCProviders",
+    "annotation": "authn-resolution",
+    "hash": "a40c245b92177b74179d4a24c340a6bfcfb9255d2e9b16917ed7ef6b558dd98b"
   },
   {
     "engine": "sqlite",
@@ -490,6 +700,12 @@
     "name": "TouchSession",
     "annotation": "authn-resolution",
     "hash": "dc82c58a0bdd5b936cbd194f398a94c000bf292f6cbba03c61df86c159a85769"
+  },
+  {
+    "engine": "sqlite",
+    "name": "UpdateOIDCProviderCAS",
+    "annotation": "authn-resolution",
+    "hash": "d67be70bee78cb32202bbaffdf0fd50ee3bef2ff208836ab19132ac53ce1e266"
   },
   {
     "engine": "sqlite",

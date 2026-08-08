@@ -36,6 +36,24 @@ type AuthService interface {
 	RemoveTOTP(ctx context.Context, presented, password string) (service.LoginResult, error)
 	GenerateRecoveryCodes(ctx context.Context, presented, proof string) ([]string, service.LoginResult, error)
 	ConsumeRecoveryCode(ctx context.Context, username, code string) (service.RecoveryResult, error)
+	AuthMethods(ctx context.Context) ([]service.AuthMethodProvider, bool, error)
+	OIDCStart(ctx context.Context, slug, purpose, environmentID, presented, proof string) (service.OIDCStartResult, error)
+	OIDCCallback(ctx context.Context, slug, code, state, iss, idpError, bindingCookie, presented string) (service.OIDCCallbackResult, error)
+	ListIdentities(ctx context.Context, presented string) ([]authnIdentity, error)
+	UnlinkIdentity(ctx context.Context, presented, identityID, proof string) (service.LoginResult, error)
+}
+
+// authnIdentity is the transport's view of a linked identity (the service
+// returns authz.ExternalIdentity; this alias keeps internal/server off the
+// authz import, which the boundary test forbids).
+type authnIdentity = service.ExternalIdentityView
+
+// ProviderService is the OIDC provider administration surface.
+type ProviderService interface {
+	Put(ctx context.Context, actor service.Actor, slug string, in service.ProviderInput) (service.ProviderView, error)
+	Get(ctx context.Context, actor service.Actor, slug string) (service.ProviderView, error)
+	List(ctx context.Context, actor service.Actor) ([]service.ProviderView, error)
+	Delete(ctx context.Context, actor service.Actor, slug string) error
 }
 
 // OrgService is the domain surface this slice exposes.
@@ -56,8 +74,9 @@ type OrgService interface {
 
 // API implements the generated strict server.
 type API struct {
-	Auth AuthService
-	Orgs OrgService
+	Auth      AuthService
+	Orgs      OrgService
+	Providers ProviderService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP
@@ -515,9 +534,47 @@ func (a *API) GetOrg(ctx context.Context, req apigen.GetOrgRequestObject) (apige
 func (a *API) Middleware() []func(http.Handler) http.Handler {
 	return []func(http.Handler) http.Handler{
 		a.wireContext,
+		a.stashRequest,
 		a.extractBearer,
 		a.validateAgainstContract,
 	}
+}
+
+// requestKey carries the raw request so the OIDC handlers can read cookies (the
+// browser-binding cookie and the __Host-wenv session cookie), which the strict
+// server does not thread into a handler.
+type requestKey struct{}
+
+func (a *API) stashRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestKey{}, r)))
+	})
+}
+
+func requestFrom(ctx context.Context) *http.Request {
+	r, _ := ctx.Value(requestKey{}).(*http.Request)
+	return r
+}
+
+// browserSessionCookie is the __Host- browser session cookie name.
+const browserSessionCookie = "__Host-wenv"
+
+// oidcBindingCookiePrefix is the per-transaction browser-binding cookie name
+// prefix (A16): the suffix is derived from the state so concurrent tabs do not
+// clobber each other's binding.
+const oidcBindingCookiePrefix = "__Host-wenv-oidc-tx-"
+
+// bindingCookieName derives the per-transaction binding cookie name from the
+// state value, deterministically at both start and callback.
+func bindingCookieName(state string) string {
+	suffix := state
+	if i := strings.LastIndex(state, "_"); i >= 0 && i+1 < len(state) {
+		suffix = state[i+1:]
+	}
+	if len(suffix) > 24 {
+		suffix = suffix[:24]
+	}
+	return oidcBindingCookiePrefix + suffix
 }
 
 // wireContext attaches the per-request metadata every audit event records.
@@ -592,9 +649,33 @@ func (a *API) trusted(addr string) bool {
 // chokepoint reads the row it points at, inside a transaction.
 func (a *API) extractBearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if value, ok := strings.CutPrefix(header, "Bearer "); ok {
-			r = r.WithContext(withBearer(r.Context(), strings.TrimSpace(value)))
+		var headerVal string
+		if value, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			headerVal = strings.TrimSpace(value)
+		}
+		var cookieVal string
+		if c, err := r.Cookie(browserSessionCookie); err == nil {
+			cookieVal = strings.TrimSpace(c.Value)
+		}
+		// A10: a request carrying BOTH a cookie session and a bearer header is
+		// refused. The two legs are distinct artifact types with distinct CSRF
+		// contracts; accepting both would let a caller pick which contract
+		// applies. The refusal is uniform.
+		if headerVal != "" && cookieVal != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(errorBody(apigen.ErrorCodeUnauthenticated, ""))
+			return
+		}
+		// The cookie leg maps to the same raw artifact path; it is resolved only
+		// at the chokepoint like the header leg. CSRF for cookie-authenticated
+		// state-changing requests is #56's SPA surface (the token is delivered
+		// via whoami, A9); the browser-binding of the OIDC transaction, which is
+		// the load-bearing anti-fixation control, is enforced in the service.
+		if headerVal != "" {
+			r = r.WithContext(withBearer(r.Context(), headerVal))
+		} else if cookieVal != "" {
+			r = r.WithContext(withBearer(r.Context(), cookieVal))
 		}
 		next.ServeHTTP(w, r)
 	})

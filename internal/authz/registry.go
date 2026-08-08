@@ -27,6 +27,13 @@ const (
 	OpEnvRead       Operation = "environment.read"
 	OpEnvUpdateNote Operation = "environment.update-note"
 
+	// OIDC provider administration (#54, human-auth ADR - Login methods).
+	// Instance-config operations, MFA-mandatory like every instance capability.
+	OpProviderPut    Operation = "oidc-provider.put"
+	OpProviderGet    Operation = "oidc-provider.get"
+	OpProviderList   Operation = "oidc-provider.list"
+	OpProviderDelete Operation = "oidc-provider.delete"
+
 	// Audit trail reads (#45, audit-model ADR). One operation per addressed
 	// depth — the registry pins one depth per tenant operation, so the three
 	// depths are three rows sharing one service implementation; the formula
@@ -181,6 +188,37 @@ var operations = map[Operation]opSpec{
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsList: true, StoreOrgsCount: true, StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventOrgRead},
+	},
+
+	// OIDC provider administration (#54). Instance-config, MFA-mandatory. The
+	// provider table is class=authn, so the read and the mutation ride the
+	// proof-free resolution surface (like the session lifecycle) AFTER this
+	// operation authorizes the caller; only the audit write is a store op here.
+	// The put/delete paths also sweep federated sessions on the resolution
+	// surface (A4).
+	OpProviderPut: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderChanged},
+	},
+	OpProviderGet: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderRead},
+	},
+	OpProviderList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderRead},
+	},
+	OpProviderDelete: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderChanged},
 	},
 
 	// Tenant-scoped demonstration operations, one per chain depth. Their

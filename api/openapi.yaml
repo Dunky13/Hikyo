@@ -554,6 +554,334 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/methods:
+    get:
+      operationId: authMethods
+      tags: [auth]
+      summary: Enabled login methods for this instance.
+      description: |
+        Public discovery: the enabled OIDC provider slugs and display names, and
+        whether local login is enabled. Instance-level, never per-account, so it
+        discloses nothing about which accounts or factors exist. Under the
+        discovery admission bucket.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The enabled login methods.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMethods"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/{provider}/start:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    post:
+      operationId: oidcStart
+      tags: [auth]
+      summary: Begin an OIDC transaction (login, link or reauth).
+      description: |
+        Creates a single-use server-side transaction (PKCE S256 always) and
+        returns the IdP authorization URL. `login` is anonymous and bound by a
+        `__Host-` browser-binding cookie set on this response (A2/A16); `link`
+        and `reauth` require an authenticated session and are session-bound, and
+        `link` verifies the account-security proof up front (A6).
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OidcStartRequest"
+      responses:
+        "200":
+          description: The IdP authorization URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcStartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/{provider}/callback:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    get:
+      operationId: oidcCallback
+      tags: [auth]
+      summary: Complete an OIDC transaction from the IdP redirect.
+      description: |
+        Per-provider distinct callback path (mix-up defence leg 1): the path
+        provider must equal the transaction's provider, refused BEFORE any token
+        is fetched (A1). The transaction is consumed single-use, the code is
+        exchanged only at the recorded provider, the ID token validated
+        completely, and the purpose wall is structural. Returns the minted or
+        rotated session.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string, maxLength: 4096 }
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, maxLength: 512 }
+        - name: iss
+          in: query
+          required: false
+          schema: { type: string, maxLength: 2048 }
+        - name: error
+          in: query
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        "200":
+          description: The minted or rotated session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities:
+    get:
+      operationId: listIdentities
+      tags: [auth]
+      summary: List the caller's linked external identities.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The caller's linked identities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities/link:
+    post:
+      operationId: linkIdentity
+      tags: [auth]
+      summary: Begin linking an external identity (OIDC purpose=link).
+      description: |
+        An account-security mutation: verifies the pre-existing password up
+        front and starts an OIDC link transaction bound to the acting session.
+        Returns the IdP authorization URL; the link lands at the callback.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityLinkRequest"
+      responses:
+        "200":
+          description: The IdP authorization URL for the link.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcStartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/identities/{id}:
+    parameters:
+      - $ref: "#/components/parameters/IdentityID"
+    delete:
+      operationId: unlinkIdentity
+      tags: [auth]
+      summary: Unlink an external identity.
+      description: |
+        An account-security mutation proved by the pre-existing password. Refuses
+        removing the last remaining credential; deletes the identity's sessions;
+        reissues the acting session. The reissued token replaces the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentityUnlinkRequest"
+      responses:
+        "200":
+          description: Unlinked. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/oidc-providers:
+    get:
+      operationId: listOidcProviders
+      tags: [instance]
+      summary: List configured OIDC providers.
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.list
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The configured providers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/oidc-providers/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlugPath"
+    get:
+      operationId: getOidcProvider
+      tags: [instance]
+      summary: Read one OIDC provider.
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.get
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProvider"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: putOidcProvider
+      tags: [instance]
+      summary: Create or reconfigure an OIDC provider.
+      description: |
+        The issuer is immutable after create (A3): a changed issuer is refused.
+        Discovery is re-run and the document's issuer must byte-equal the
+        configured one. A reconfigure sweeps every session authenticated through
+        the provider (A4).
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.put
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OidcProviderInput"
+      responses:
+        "200":
+          description: The created or reconfigured provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OidcProvider"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteOidcProvider
+      tags: [instance]
+      summary: Delete an OIDC provider.
+      description: |
+        Sweeps every session authenticated through the provider (A4); its live
+        transactions cascade (A14).
+      x-wenv-class: instance
+      x-wenv-operation: oidc-provider.delete
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     wenvSession:
@@ -571,6 +899,33 @@ components:
       in: path
       required: true
       description: Organisation identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ProviderSlug:
+      name: provider
+      in: path
+      required: true
+      description: OIDC provider slug.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+    ProviderSlugPath:
+      name: slug
+      in: path
+      required: true
+      description: OIDC provider slug.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+    IdentityID:
+      name: id
+      in: path
+      required: true
+      description: External identity identifier.
       schema:
         $ref: "#/components/schemas/ID"
 
@@ -1008,6 +1363,168 @@ components:
           type: integer
           minimum: 0
           description: Total rows matching, which for an unpaged list equals `items` length.
+
+    AuthMethods:
+      type: object
+      additionalProperties: false
+      required: [providers, local_login_enabled]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthMethodProvider"
+        local_login_enabled:
+          type: boolean
+
+    AuthMethodProvider:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name]
+      properties:
+        slug:
+          type: string
+        display_name:
+          type: string
+
+    OidcStartRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          enum: [login, link, reauth]
+        environment_id:
+          type: string
+          maxLength: 64
+          description: Required for reauth; the window scope.
+        proof:
+          type: string
+          maxLength: 1024
+          description: Required for link; the pre-existing password.
+
+    OidcStartResult:
+      type: object
+      additionalProperties: false
+      required: [authorization_url]
+      properties:
+        authorization_url:
+          type: string
+          description: The IdP authorization URL to redirect the browser to.
+
+    IdentityLinkRequest:
+      type: object
+      additionalProperties: false
+      required: [provider, proof]
+      properties:
+        provider:
+          type: string
+          maxLength: 64
+        proof:
+          type: string
+          maxLength: 1024
+
+    IdentityUnlinkRequest:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof:
+          type: string
+          maxLength: 1024
+
+    ExternalIdentity:
+      type: object
+      additionalProperties: false
+      required: [id, issuer, subject, provider_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        issuer:
+          type: string
+        subject:
+          type: string
+        provider_id:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    IdentityList:
+      type: object
+      additionalProperties: false
+      required: [identities]
+      properties:
+        identities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalIdentity"
+
+    OidcProviderInput:
+      type: object
+      additionalProperties: false
+      required: [display_name, issuer, client_id, client_secret, scopes, enabled]
+      properties:
+        display_name:
+          type: string
+          maxLength: 256
+        issuer:
+          type: string
+          maxLength: 2048
+          description: Byte-exact, immutable after create (A3).
+        client_id:
+          type: string
+          maxLength: 1024
+        client_secret:
+          type: string
+          maxLength: 4096
+          description: Envelope-encrypted at rest; never returned.
+        scopes:
+          type: string
+          maxLength: 1024
+        jit_policy:
+          type: [string, "null"]
+          maxLength: 4096
+          description: JSON `{claim, values[]}`; absent means no JIT.
+        assurance_policy:
+          type: [string, "null"]
+          maxLength: 4096
+          description: JSON `{acr_values[], amr_sets[][]}`; absent means single-factor.
+        enabled:
+          type: boolean
+
+    OidcProvider:
+      type: object
+      additionalProperties: false
+      required: [slug, display_name, issuer, client_id, scopes, redirect_uri, enabled]
+      properties:
+        slug:
+          type: string
+        display_name:
+          type: string
+        issuer:
+          type: string
+        client_id:
+          type: string
+        scopes:
+          type: string
+        redirect_uri:
+          type: string
+        jit_policy:
+          type: [string, "null"]
+        assurance_policy:
+          type: [string, "null"]
+        enabled:
+          type: boolean
+
+    OidcProviderList:
+      type: object
+      additionalProperties: false
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/OidcProvider"
 
 security:
   - wenvSession: []

@@ -164,6 +164,23 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"UpdateRecoveryCodes":           true,
 	"RotateSessionFactors":          true,
 	"ConsumeOutstandingAuthorities": true,
+	// OIDC (#54): the transaction, external-identity, federated-session-sweep
+	// and reauth-window writers. None can hold a proof - they mutate the
+	// artifacts that decide who a caller is and how they authenticated, which is
+	// resolution, not authorization. Provider administration is proof-bound and
+	// lives on the repository surface, not here.
+	"CreateOIDCTransaction":     true,
+	"ConsumeOIDCTransaction":    true,
+	"CreateExternalIdentity":    true,
+	"DeleteExternalIdentity":    true,
+	"DeleteSessionsForProvider": true,
+	"CreateReauthWindow":        true,
+	// OIDC provider administration writes to a class=authn table, so the write
+	// rides the resolution surface even though the mutation is authorized at the
+	// chokepoint (OpProviderPut/Delete) before it runs.
+	"CreateProvider": true,
+	"UpdateProvider": true,
+	"DeleteProvider": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

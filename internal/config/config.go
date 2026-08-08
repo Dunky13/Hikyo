@@ -35,6 +35,11 @@ type Config struct {
 	AutoMigrate       bool
 	Store             Datastore
 
+	// ExternalOrigin is the instance's public origin (scheme + host), used to
+	// build per-provider OIDC redirect URIs (A1). Never derived from a request
+	// header. Defaults to http://<Listen> when unset.
+	ExternalOrigin string
+
 	// Root-key source descriptor — never the key material itself; the crypto
 	// package reads and validates it at boot. Only `wenv server` consults it.
 	RootKeyFile    string // --root-key-file (also covers systemd LoadCredential paths)
@@ -123,6 +128,12 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
+	}
+	if cfg.ExternalOrigin == "" {
+		cfg.ExternalOrigin = getenv("WENV_EXTERNAL_ORIGIN")
+	}
+	if cfg.ExternalOrigin == "" {
+		cfg.ExternalOrigin = "http://" + cfg.Listen
 	}
 	if subcommand == "server" || subcommand == "admin" {
 		var err error

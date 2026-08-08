@@ -14,6 +14,7 @@ import (
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/oidcrp"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/tx"
 )
@@ -83,6 +84,19 @@ type Auth struct {
 	Admission *admission.Limiter
 	// Now is injectable for tests; nil means time.Now.
 	Now func() time.Time
+	// ExternalOrigin is the instance's public origin; the OIDC callback validates
+	// the redirect it replays against the per-provider registered URI (A1).
+	ExternalOrigin string
+	// OIDCDiscover replaces go-oidc discovery in tests, so a fixture can point an
+	// httptest IdP's discovery at a byte-variant issuer. Nil means oidcrp.Discover.
+	OIDCDiscover func(ctx context.Context, issuer string) (*oidcrp.Provider, error)
+	// ReauthWindow is the effective reauthentication window (default 0). OIDC
+	// reauth opens a window only where it is > 0; a 0-window gate needs WebAuthn
+	// (finding B18). #55's project-settings knob sets it per environment.
+	ReauthWindow time.Duration
+	// ReauthHardCap bounds the absolute age of a reauth window, never extended by
+	// activity. Zero means the idle window value.
+	ReauthHardCap time.Duration
 	// Log records server-side faults that must not reach the caller — an
 	// unreadable verifier answers the uniform refusal, and the reason it was
 	// unreadable belongs in the process log and nowhere else.
@@ -158,6 +172,9 @@ type LoginResult struct {
 	AccountID    string
 	DisplayName  string
 	Assurance    Assurance
+	// CSRFToken is the synchronizer token for a browser session, returned once
+	// at mint (A9). Empty for CLI sessions.
+	CSRFToken string
 }
 
 // LocalLogin is the local floor: password verification against an

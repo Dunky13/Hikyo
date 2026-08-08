@@ -139,8 +139,9 @@ WHERE account_id = $8 AND row_version = $9;
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
-     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16);
+     last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
+     provider_id, csrf_verifier)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18);
 
 -- wenv:authn-resolution
 -- name: TouchSession :exec
@@ -241,3 +242,101 @@ UPDATE sessions SET verifier = $1, factors = $2 WHERE id = $3;
 -- name: ConsumeOutstandingAuthoritiesForAccount :exec
 UPDATE credential_authorities SET consumed_at = $1
 WHERE account_id = $2 AND consumed_at IS NULL;
+
+-- OIDC login/link/reauth resolution (#54, human-auth ADR -- The OIDC
+-- transaction). These read providers, transactions and external identities
+-- with request-supplied identifiers, and write the transaction/identity/session
+-- rows that decide who a caller is: the resolution surface, proof-free, for the
+-- same reason the login writers are.
+
+-- wenv:authn-resolution
+-- name: GetEnabledProviderByIssuer :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE kind = $1 AND issuer = $2 AND enabled = 1;
+
+-- The recorded provider a callback exchanges at (A11): loaded by the id the
+-- transaction pinned, so the exchange happens only at that provider.
+-- wenv:authn-resolution
+-- name: GetProviderForCallback :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE id = $1;
+
+-- wenv:authn-resolution
+-- name: InsertOIDCTransaction :exec
+INSERT INTO oidc_transactions
+    (id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+     purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+     account_id, environment_id, ceremony_id, credential_epoch, created_at,
+     expires_at, consumed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NULL);
+
+-- wenv:authn-resolution
+-- name: GetOIDCTransactionByState :one
+SELECT id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_uri,
+       purpose, binding_kind, initiating_session_id, browser_binding_verifier,
+       account_id, environment_id, ceremony_id, credential_epoch, created_at,
+       expires_at, consumed_at
+FROM oidc_transactions WHERE state_verifier = $1;
+
+-- Single-use consumption: the NULL guard is the atomic claim, so a callback
+-- cannot be replayed and two concurrent callbacks cannot both consume one tx.
+-- wenv:authn-resolution
+-- name: ConsumeOIDCTransaction :execrows
+UPDATE oidc_transactions SET consumed_at = $1
+WHERE id = $2 AND consumed_at IS NULL;
+
+-- wenv:authn-resolution
+-- name: GetExternalIdentity :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE kind = $1 AND issuer = $2 AND subject = $3;
+
+-- wenv:authn-resolution
+-- name: GetExternalIdentityByID :one
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE id = $1;
+
+-- wenv:authn-resolution
+-- name: ListExternalIdentitiesForAccount :many
+SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at
+FROM external_identities WHERE account_id = $1 ORDER BY created_at;
+
+-- wenv:authn-resolution
+-- name: InsertExternalIdentity :exec
+INSERT INTO external_identities
+    (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- wenv:authn-resolution
+-- name: DeleteExternalIdentity :exec
+DELETE FROM external_identities WHERE id = $1;
+
+-- The federated-session sweep (A4): every session minted through a provider
+-- dies when the provider's issuer/client/assurance policy changes or the
+-- provider is disabled or deleted. reauth_windows cascade from the session.
+-- wenv:authn-resolution
+-- name: DeleteSessionsForProvider :execrows
+DELETE FROM sessions WHERE provider_id = $1;
+
+-- A reauthentication window opened by an OIDC reauth ceremony (only where the
+-- effective window is > 0; a 0-window gate needs WebAuthn). Keyed by session,
+-- cascading with it.
+-- wenv:authn-resolution
+-- name: InsertReauthWindow :exec
+INSERT INTO reauth_windows
+    (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+     authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+     consumed_at, created_at)
+VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, NULL, $10);
+
+-- Start resolves the provider by slug for an enabled provider only: a login,
+-- link or reauth may only begin against a provider that is currently serving.
+-- wenv:authn-resolution
+-- name: GetEnabledProviderBySlug :one
+SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
+       redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
+       created_at, updated_at
+FROM oidc_providers WHERE slug = $1 AND enabled = 1;

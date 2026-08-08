@@ -8,6 +8,8 @@
     "cli:migrate": "process entry point: migration DDL runs below the store-method surface",
     "http:GET /api/v1/meta": "unauthenticated capability print: server version, API revision and which auth protocol flows this instance serves \u2014 no principal, no tenant data, no state change, and the ADR declares no event type for it (same class as cli:version, which it is the network form of)",
     "http:GET /api/v1/auth/whoami": "reports the session the caller already holds and writes nothing; the session's creation, method and assurance are already recorded by auth.session_created, so an event here would duplicate that record once per poll",
+    "http:GET /api/v1/auth/methods": "unauthenticated public discovery: the enabled provider slugs and whether local login is on, instance-level and never per-account; no principal, no tenant data, no state change, same class as GET /api/v1/meta",
+    "http:GET /api/v1/auth/identities": "reports the caller's own linked identities and writes nothing; a self read whose subjects are already recorded at link/unlink time (auth.identity_linked / auth.identity_unlinked), so an event here would duplicate that once per poll, exactly like whoami",
     "cli:login": "client transport for POST /api/v1/auth/local/login: the server audits the login it performs (auth.login, auth.session_created); the verb itself adds transport, not an auditable act",
     "cli:logout": "client transport for POST /api/v1/auth/logout, audited server-side as auth.logout",
     "cli:whoami": "client transport for GET /api/v1/auth/whoami, which is itself exempt (it reports the session the caller already holds and writes nothing)",
