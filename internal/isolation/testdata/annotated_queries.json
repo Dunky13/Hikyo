@@ -79,6 +79,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetAccountByPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "08cb9043fcb87e1c92987783e68f31b3125ee6a9417f473c8178cacb57389746"
+  },
+  {
+    "engine": "postgres",
     "name": "GetAccountByUsername",
     "annotation": "authn-resolution",
     "hash": "8c7e0be06817fe23b5ab786f43ed0972fc9b0638e0f1037437c7e953fe592edf"
@@ -322,6 +328,12 @@
     "name": "GetAccountByID",
     "annotation": "authn-resolution",
     "hash": "3a8ac0bfba6d04e573b523a3bcba38919495c87cfac6b91ce40103cf38392d4e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetAccountByPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "9ae94b4977ac78ba048f9b1593b8bca01993051f44bd5eeacf3b6c0196d75493"
   },
   {
     "engine": "sqlite",

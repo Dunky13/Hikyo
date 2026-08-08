@@ -232,6 +232,228 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/totp/enrol/start:
+    post:
+      operationId: enrolTotpStart
+      tags: [auth]
+      summary: Begin TOTP enrolment; returns the otpauth URI once.
+      description: |
+        An account-security proof up front (the pre-existing password, since no
+        possession factor stands yet — human-auth ADR § Account-security
+        mutations). Stages a sealed seed as a pending, inert enrolment and
+        returns the `otpauth://` URI exactly once. It confirms nothing and
+        mutates no session: `enrol/confirm` completes the enrolment. A confirmed
+        factor already standing is refused (`400`).
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpEnrolStartRequest"
+      responses:
+        "200":
+          description: The provisioning URI, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrolStartResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp/enrol/confirm:
+    post:
+      operationId: enrolTotpConfirm
+      tags: [auth]
+      summary: Confirm TOTP enrolment with a code; reissues the session.
+      description: |
+        Consumes a valid code against the pending seed (single-use) and
+        completes the enrolment as an account-security mutation: the generation
+        advances, every session is deleted, and the acting session is reissued
+        carrying ONLY the proof class — NOT `totp`. The user steps up separately
+        to present the factor they just enrolled. The reissued token is returned
+        and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: Enrolment confirmed. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp/step-up:
+    post:
+      operationId: stepUpTotp
+      tags: [auth]
+      summary: Elevate the acting session by presenting a TOTP code.
+      description: |
+        A valid code consumes its step (single-use) and appends `totp` to the
+        acting session's factor set, rotating its token — not an
+        account-security mutation, so no generation advance and no session
+        deletion, and the original authenticated_at is preserved (human-auth ADR
+        § Assurance). The rotated token is returned and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: Session elevated. The rotated token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/totp:
+    delete:
+      operationId: removeTotp
+      tags: [auth]
+      summary: Remove the confirmed TOTP factor.
+      description: |
+        An account-security mutation authorized by the password: the factor
+        being removed is excluded from the proof set, so a stolen phone alone
+        cannot drop the very factor it is (human-auth ADR § Account-security
+        mutations, finding B7). Reissues the acting session carrying only the
+        password class; the reissued token is returned.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpProofRequest"
+      responses:
+        "200":
+          description: Factor removed. The reissued session token replaces the old one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/recovery-codes/regenerate:
+    post:
+      operationId: regenerateRecoveryCodes
+      tags: [auth]
+      summary: Replace the recovery-code batch; returns the codes once.
+      description: |
+        An account-security mutation proved by the confirmed TOTP code where one
+        stands, else the password (recovery codes never authorize their own
+        regeneration). Replaces the batch atomically and returns the plaintext
+        codes exactly once. Reissues the acting session; the reissued token is
+        returned and MUST replace the old one.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoveryProofRequest"
+      responses:
+        "200":
+          description: New batch. The codes are displayed once and never again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/recovery/begin:
+    post:
+      operationId: beginRecovery
+      tags: [auth]
+      summary: Consume a recovery code for a credential-establishment authority.
+      description: |
+        The pre-auth break-in-glass path. Consumes a single-use recovery code
+        and mints a credential-establishment authority that may only ever
+        establish a password (human-auth ADR § Recovery). It creates **no
+        session, no assurance, no reauthentication window** — the holder
+        establishes a new password with the authority and then logs in.
+
+        Rides the instance-wide admission budget; an unknown username, an absent
+        batch, a stale epoch and a non-matching code all answer the same `401`.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoveryBeginRequest"
+      responses:
+        "200":
+          description: A session-less credential-establishment authority, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryBeginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs:
     get:
       operationId: listOrgs
@@ -556,6 +778,104 @@ components:
           $ref: "#/components/schemas/Session"
         principal:
           $ref: "#/components/schemas/Principal"
+
+    TotpEnrolStartRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: |
+            The account-security proof: the pre-existing password. Verified
+            before a pending seed is staged; never logged, never echoed.
+          minLength: 1
+          maxLength: 1024
+
+    TotpEnrolStartResult:
+      type: object
+      additionalProperties: false
+      required: [otpauth_uri]
+      properties:
+        otpauth_uri:
+          type: string
+          description: |
+            The `otpauth://totp/...` provisioning URI, returned exactly once.
+            The seed is never re-retrievable.
+
+    TotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: A TOTP code from the enrolled authenticator.
+          minLength: 6
+          maxLength: 10
+
+    TotpProofRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password:
+          type: string
+          description: The account-security proof for removing the factor.
+          minLength: 1
+          maxLength: 1024
+
+    RecoveryProofRequest:
+      type: object
+      additionalProperties: false
+      required: [proof]
+      properties:
+        proof:
+          type: string
+          description: |
+            The account-security proof: the confirmed TOTP code where one
+            stands, else the password.
+          minLength: 1
+          maxLength: 1024
+
+    RecoveryCodesResult:
+      type: object
+      required: [recovery_codes, login]
+      properties:
+        recovery_codes:
+          type: array
+          description: The plaintext single-use codes, displayed once and never again.
+          items:
+            type: string
+        login:
+          $ref: "#/components/schemas/LoginResult"
+
+    RecoveryBeginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, code]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+        code:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    RecoveryBeginResult:
+      type: object
+      additionalProperties: false
+      required: [authority, expires_at]
+      properties:
+        authority:
+          type: string
+          description: |
+            The single-use credential-establishment authority, returned once.
+            It creates no session: establish a password with it, then log in.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
 
     Session:
       type: object

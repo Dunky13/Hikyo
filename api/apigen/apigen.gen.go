@@ -209,6 +209,37 @@ type PrincipalKind string
 // unknown value rather than reject the response.
 type ProtocolCapability = string
 
+// RecoveryBeginRequest defines model for RecoveryBeginRequest.
+type RecoveryBeginRequest struct {
+	Code     string `json:"code"`
+	Username string `json:"username"`
+}
+
+// RecoveryBeginResult defines model for RecoveryBeginResult.
+type RecoveryBeginResult struct {
+	// Authority The single-use credential-establishment authority, returned once.
+	// It creates no session: establish a password with it, then log in.
+	Authority string `json:"authority"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+}
+
+// RecoveryCodesResult defines model for RecoveryCodesResult.
+type RecoveryCodesResult struct {
+	Login LoginResult `json:"login"`
+
+	// RecoveryCodes The plaintext single-use codes, displayed once and never again.
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+// RecoveryProofRequest defines model for RecoveryProofRequest.
+type RecoveryProofRequest struct {
+	// Proof The account-security proof: the confirmed TOTP code where one
+	// stands, else the password.
+	Proof string `json:"proof"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	// AbsoluteExpiresAt RFC 3339 UTC, microsecond precision.
@@ -245,6 +276,32 @@ type SessionArtifact = string
 // Timestamp RFC 3339 UTC, microsecond precision.
 type Timestamp = time.Time
 
+// TotpCodeRequest defines model for TotpCodeRequest.
+type TotpCodeRequest struct {
+	// Code A TOTP code from the enrolled authenticator.
+	Code string `json:"code"`
+}
+
+// TotpEnrolStartRequest defines model for TotpEnrolStartRequest.
+type TotpEnrolStartRequest struct {
+	// Password The account-security proof: the pre-existing password. Verified
+	// before a pending seed is staged; never logged, never echoed.
+	Password string `json:"password"`
+}
+
+// TotpEnrolStartResult defines model for TotpEnrolStartResult.
+type TotpEnrolStartResult struct {
+	// OtpauthUri The `otpauth://totp/...` provisioning URI, returned exactly once.
+	// The seed is never re-retrievable.
+	OtpauthUri string `json:"otpauth_uri"`
+}
+
+// TotpProofRequest defines model for TotpProofRequest.
+type TotpProofRequest struct {
+	// Password The account-security proof for removing the factor.
+	Password string `json:"password"`
+}
+
 // WhoAmI defines model for WhoAmI.
 type WhoAmI struct {
 	Principal Principal `json:"principal"`
@@ -278,6 +335,24 @@ type EstablishCredentialJSONRequestBody = EstablishCredentialRequest
 // LocalLoginJSONRequestBody defines body for LocalLogin for application/json ContentType.
 type LocalLoginJSONRequestBody = LocalLoginRequest
 
+// RegenerateRecoveryCodesJSONRequestBody defines body for RegenerateRecoveryCodes for application/json ContentType.
+type RegenerateRecoveryCodesJSONRequestBody = RecoveryProofRequest
+
+// BeginRecoveryJSONRequestBody defines body for BeginRecovery for application/json ContentType.
+type BeginRecoveryJSONRequestBody = RecoveryBeginRequest
+
+// RemoveTotpJSONRequestBody defines body for RemoveTotp for application/json ContentType.
+type RemoveTotpJSONRequestBody = TotpProofRequest
+
+// EnrolTotpConfirmJSONRequestBody defines body for EnrolTotpConfirm for application/json ContentType.
+type EnrolTotpConfirmJSONRequestBody = TotpCodeRequest
+
+// EnrolTotpStartJSONRequestBody defines body for EnrolTotpStart for application/json ContentType.
+type EnrolTotpStartJSONRequestBody = TotpEnrolStartRequest
+
+// StepUpTotpJSONRequestBody defines body for StepUpTotp for application/json ContentType.
+type StepUpTotpJSONRequestBody = TotpCodeRequest
+
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody = CreateOrgRequest
 
@@ -292,6 +367,24 @@ type ServerInterface interface {
 	// Logout Revoke the presented session.
 	// (POST /api/v1/auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// RegenerateRecoveryCodes Replace the recovery-code batch; returns the codes once.
+	// (POST /api/v1/auth/recovery-codes/regenerate)
+	RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request)
+	// BeginRecovery Consume a recovery code for a credential-establishment authority.
+	// (POST /api/v1/auth/recovery/begin)
+	BeginRecovery(w http.ResponseWriter, r *http.Request)
+	// RemoveTotp Remove the confirmed TOTP factor.
+	// (DELETE /api/v1/auth/totp)
+	RemoveTotp(w http.ResponseWriter, r *http.Request)
+	// EnrolTotpConfirm Confirm TOTP enrolment with a code; reissues the session.
+	// (POST /api/v1/auth/totp/enrol/confirm)
+	EnrolTotpConfirm(w http.ResponseWriter, r *http.Request)
+	// EnrolTotpStart Begin TOTP enrolment; returns the otpauth URI once.
+	// (POST /api/v1/auth/totp/enrol/start)
+	EnrolTotpStart(w http.ResponseWriter, r *http.Request)
+	// StepUpTotp Elevate the acting session by presenting a TOTP code.
+	// (POST /api/v1/auth/totp/step-up)
+	StepUpTotp(w http.ResponseWriter, r *http.Request)
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(w http.ResponseWriter, r *http.Request)
@@ -328,6 +421,42 @@ func (_ Unimplemented) LocalLogin(w http.ResponseWriter, r *http.Request) {
 // Logout Revoke the presented session.
 // (POST /api/v1/auth/logout)
 func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RegenerateRecoveryCodes Replace the recovery-code batch; returns the codes once.
+// (POST /api/v1/auth/recovery-codes/regenerate)
+func (_ Unimplemented) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// BeginRecovery Consume a recovery code for a credential-establishment authority.
+// (POST /api/v1/auth/recovery/begin)
+func (_ Unimplemented) BeginRecovery(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemoveTotp Remove the confirmed TOTP factor.
+// (DELETE /api/v1/auth/totp)
+func (_ Unimplemented) RemoveTotp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EnrolTotpConfirm Confirm TOTP enrolment with a code; reissues the session.
+// (POST /api/v1/auth/totp/enrol/confirm)
+func (_ Unimplemented) EnrolTotpConfirm(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EnrolTotpStart Begin TOTP enrolment; returns the otpauth URI once.
+// (POST /api/v1/auth/totp/enrol/start)
+func (_ Unimplemented) EnrolTotpStart(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StepUpTotp Elevate the acting session by presenting a TOTP code.
+// (POST /api/v1/auth/totp/step-up)
+func (_ Unimplemented) StepUpTotp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -403,6 +532,90 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegenerateRecoveryCodes operation middleware
+func (siw *ServerInterfaceWrapper) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegenerateRecoveryCodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BeginRecovery operation middleware
+func (siw *ServerInterfaceWrapper) BeginRecovery(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BeginRecovery(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveTotp operation middleware
+func (siw *ServerInterfaceWrapper) RemoveTotp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveTotp(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnrolTotpConfirm operation middleware
+func (siw *ServerInterfaceWrapper) EnrolTotpConfirm(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrolTotpConfirm(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnrolTotpStart operation middleware
+func (siw *ServerInterfaceWrapper) EnrolTotpStart(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrolTotpStart(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StepUpTotp operation middleware
+func (siw *ServerInterfaceWrapper) StepUpTotp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StepUpTotp(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -621,6 +834,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/whoami", wrapper.Whoami)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/totp/enrol/start", wrapper.EnrolTotpStart)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/totp/enrol/confirm", wrapper.EnrolTotpConfirm)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/totp/step-up", wrapper.StepUpTotp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/auth/totp", wrapper.RemoveTotp)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/recovery-codes/regenerate", wrapper.RegenerateRecoveryCodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/recovery/begin", wrapper.BeginRecovery)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs", wrapper.ListOrgs)
@@ -853,6 +1084,480 @@ func (response Logout429JSONResponse) VisitLogoutResponse(w http.ResponseWriter)
 type Logout500JSONResponse struct{ InternalJSONResponse }
 
 func (response Logout500JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateRecoveryCodesRequestObject struct {
+	Body *RegenerateRecoveryCodesJSONRequestBody
+}
+
+type RegenerateRecoveryCodesResponseObject interface {
+	VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error
+}
+
+type RegenerateRecoveryCodes200JSONResponse RecoveryCodesResult
+
+func (response RegenerateRecoveryCodes200JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateRecoveryCodes400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RegenerateRecoveryCodes400JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateRecoveryCodes401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RegenerateRecoveryCodes401JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateRecoveryCodes429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RegenerateRecoveryCodes429JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RegenerateRecoveryCodes500JSONResponse struct{ InternalJSONResponse }
+
+func (response RegenerateRecoveryCodes500JSONResponse) VisitRegenerateRecoveryCodesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginRecoveryRequestObject struct {
+	Body *BeginRecoveryJSONRequestBody
+}
+
+type BeginRecoveryResponseObject interface {
+	VisitBeginRecoveryResponse(w http.ResponseWriter) error
+}
+
+type BeginRecovery200JSONResponse RecoveryBeginResult
+
+func (response BeginRecovery200JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginRecovery400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response BeginRecovery400JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginRecovery401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response BeginRecovery401JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginRecovery429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response BeginRecovery429JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BeginRecovery500JSONResponse struct{ InternalJSONResponse }
+
+func (response BeginRecovery500JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTotpRequestObject struct {
+	Body *RemoveTotpJSONRequestBody
+}
+
+type RemoveTotpResponseObject interface {
+	VisitRemoveTotpResponse(w http.ResponseWriter) error
+}
+
+type RemoveTotp200JSONResponse LoginResult
+
+func (response RemoveTotp200JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTotp400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RemoveTotp400JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTotp401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveTotp401JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTotp429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RemoveTotp429JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveTotp500JSONResponse struct{ InternalJSONResponse }
+
+func (response RemoveTotp500JSONResponse) VisitRemoveTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpConfirmRequestObject struct {
+	Body *EnrolTotpConfirmJSONRequestBody
+}
+
+type EnrolTotpConfirmResponseObject interface {
+	VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error
+}
+
+type EnrolTotpConfirm200JSONResponse LoginResult
+
+func (response EnrolTotpConfirm200JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpConfirm400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response EnrolTotpConfirm400JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpConfirm401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response EnrolTotpConfirm401JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpConfirm429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response EnrolTotpConfirm429JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpConfirm500JSONResponse struct{ InternalJSONResponse }
+
+func (response EnrolTotpConfirm500JSONResponse) VisitEnrolTotpConfirmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpStartRequestObject struct {
+	Body *EnrolTotpStartJSONRequestBody
+}
+
+type EnrolTotpStartResponseObject interface {
+	VisitEnrolTotpStartResponse(w http.ResponseWriter) error
+}
+
+type EnrolTotpStart200JSONResponse TotpEnrolStartResult
+
+func (response EnrolTotpStart200JSONResponse) VisitEnrolTotpStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpStart400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response EnrolTotpStart400JSONResponse) VisitEnrolTotpStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpStart401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response EnrolTotpStart401JSONResponse) VisitEnrolTotpStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpStart429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response EnrolTotpStart429JSONResponse) VisitEnrolTotpStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnrolTotpStart500JSONResponse struct{ InternalJSONResponse }
+
+func (response EnrolTotpStart500JSONResponse) VisitEnrolTotpStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotpRequestObject struct {
+	Body *StepUpTotpJSONRequestBody
+}
+
+type StepUpTotpResponseObject interface {
+	VisitStepUpTotpResponse(w http.ResponseWriter) error
+}
+
+type StepUpTotp200JSONResponse LoginResult
+
+func (response StepUpTotp200JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotp400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StepUpTotp400JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotp401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StepUpTotp401JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotp429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response StepUpTotp429JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StepUpTotp500JSONResponse struct{ InternalJSONResponse }
+
+func (response StepUpTotp500JSONResponse) VisitStepUpTotpResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -1253,6 +1958,24 @@ type StrictServerInterface interface {
 	// Logout Revoke the presented session.
 	// (POST /api/v1/auth/logout)
 	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// RegenerateRecoveryCodes Replace the recovery-code batch; returns the codes once.
+	// (POST /api/v1/auth/recovery-codes/regenerate)
+	RegenerateRecoveryCodes(ctx context.Context, request RegenerateRecoveryCodesRequestObject) (RegenerateRecoveryCodesResponseObject, error)
+	// BeginRecovery Consume a recovery code for a credential-establishment authority.
+	// (POST /api/v1/auth/recovery/begin)
+	BeginRecovery(ctx context.Context, request BeginRecoveryRequestObject) (BeginRecoveryResponseObject, error)
+	// RemoveTotp Remove the confirmed TOTP factor.
+	// (DELETE /api/v1/auth/totp)
+	RemoveTotp(ctx context.Context, request RemoveTotpRequestObject) (RemoveTotpResponseObject, error)
+	// EnrolTotpConfirm Confirm TOTP enrolment with a code; reissues the session.
+	// (POST /api/v1/auth/totp/enrol/confirm)
+	EnrolTotpConfirm(ctx context.Context, request EnrolTotpConfirmRequestObject) (EnrolTotpConfirmResponseObject, error)
+	// EnrolTotpStart Begin TOTP enrolment; returns the otpauth URI once.
+	// (POST /api/v1/auth/totp/enrol/start)
+	EnrolTotpStart(ctx context.Context, request EnrolTotpStartRequestObject) (EnrolTotpStartResponseObject, error)
+	// StepUpTotp Elevate the acting session by presenting a TOTP code.
+	// (POST /api/v1/auth/totp/step-up)
+	StepUpTotp(ctx context.Context, request StepUpTotpRequestObject) (StepUpTotpResponseObject, error)
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(ctx context.Context, request WhoamiRequestObject) (WhoamiResponseObject, error)
@@ -1388,6 +2111,192 @@ func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(LogoutResponseObject); ok {
 		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RegenerateRecoveryCodes operation middleware
+func (sh *strictHandler) RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	var request RegenerateRecoveryCodesRequestObject
+
+	var body RegenerateRecoveryCodesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RegenerateRecoveryCodes(ctx, request.(RegenerateRecoveryCodesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RegenerateRecoveryCodes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RegenerateRecoveryCodesResponseObject); ok {
+		if err := validResponse.VisitRegenerateRecoveryCodesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BeginRecovery operation middleware
+func (sh *strictHandler) BeginRecovery(w http.ResponseWriter, r *http.Request) {
+	var request BeginRecoveryRequestObject
+
+	var body BeginRecoveryJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BeginRecovery(ctx, request.(BeginRecoveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BeginRecovery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BeginRecoveryResponseObject); ok {
+		if err := validResponse.VisitBeginRecoveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveTotp operation middleware
+func (sh *strictHandler) RemoveTotp(w http.ResponseWriter, r *http.Request) {
+	var request RemoveTotpRequestObject
+
+	var body RemoveTotpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveTotp(ctx, request.(RemoveTotpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveTotp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveTotpResponseObject); ok {
+		if err := validResponse.VisitRemoveTotpResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnrolTotpConfirm operation middleware
+func (sh *strictHandler) EnrolTotpConfirm(w http.ResponseWriter, r *http.Request) {
+	var request EnrolTotpConfirmRequestObject
+
+	var body EnrolTotpConfirmJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnrolTotpConfirm(ctx, request.(EnrolTotpConfirmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnrolTotpConfirm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnrolTotpConfirmResponseObject); ok {
+		if err := validResponse.VisitEnrolTotpConfirmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnrolTotpStart operation middleware
+func (sh *strictHandler) EnrolTotpStart(w http.ResponseWriter, r *http.Request) {
+	var request EnrolTotpStartRequestObject
+
+	var body EnrolTotpStartJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnrolTotpStart(ctx, request.(EnrolTotpStartRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnrolTotpStart")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnrolTotpStartResponseObject); ok {
+		if err := validResponse.VisitEnrolTotpStartResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StepUpTotp operation middleware
+func (sh *strictHandler) StepUpTotp(w http.ResponseWriter, r *http.Request) {
+	var request StepUpTotpRequestObject
+
+	var body StepUpTotpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StepUpTotp(ctx, request.(StepUpTotpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StepUpTotp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StepUpTotpResponseObject); ok {
+		if err := validResponse.VisitStepUpTotpResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

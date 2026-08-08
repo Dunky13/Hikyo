@@ -84,6 +84,11 @@ authentication:
 
 accounts:
   wenv account establish-credential --instance <url|ref> [--as USER]
+  wenv account factor enrol-totp [--output-file PATH | --dangerously-print]
+  wenv account factor confirm-totp
+  wenv account factor step-up
+  wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
+  wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
 
 contexts:
   wenv context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
@@ -400,14 +405,30 @@ func runWhoami(ctx context.Context, ios IO, args []string) error {
 // existing grammar - no new verb family, no new output class - and #54
 // confirms or renames it before the freeze.
 func runAccount(ctx context.Context, ios IO, args []string) error {
-	if len(args) == 0 || args[0] != "establish-credential" {
-		return failf(ExitUsage, "usage: wenv account establish-credential --instance <url|ref> [--as USER]")
+	if len(args) == 0 {
+		return failf(ExitUsage, "usage: wenv account establish-credential|factor|recovery-codes|recovery ...")
 	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "establish-credential":
+		return runEstablishCredential(ctx, ios, rest)
+	case "factor":
+		return runFactor(ctx, ios, rest)
+	case "recovery-codes":
+		return runRecoveryCodes(ctx, ios, rest)
+	case "recovery":
+		return runRecovery(ctx, ios, rest)
+	default:
+		return failf(ExitUsage, "unknown account verb %q: use establish-credential, factor, recovery-codes or recovery", sub)
+	}
+}
+
+func runEstablishCredential(ctx context.Context, ios IO, args []string) error {
 	var (
 		as        string
 		trustFile string
 	)
-	st, flags, err := parseCommon("account establish-credential", ios, args[1:], func(fs *flag.FlagSet) {
+	st, flags, err := parseCommon("account establish-credential", ios, args, func(fs *flag.FlagSet) {
 		fs.StringVar(&as, "as", "", "the username the authority was minted for (display only)")
 		fs.StringVar(&trustFile, "trust-file", "", "provisioned trust bundle")
 	})
@@ -468,6 +489,235 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 		"credential established at %s. It creates no session: log in with\n    wenv login %s --local --as %s\n",
 		entry.Origin, entry.Origin, firstNonEmpty(as, "<username>"))
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// account factor / recovery-codes / recovery (#54)
+// ---------------------------------------------------------------------------
+//
+// The account-security mutations (confirm, step-up, regenerate) reissue or
+// rotate the acting session, so each returns a NEW token the CLI must persist
+// in place of the old one — the previous token is dead the instant the server
+// answers. Display-once material (the otpauth seed, the recovery codes, the
+// recovery authority) goes through the print triad, never ordinary stdout.
+
+func runFactor(ctx context.Context, ios IO, args []string) error {
+	if len(args) == 0 {
+		return failf(ExitUsage, "usage: wenv account factor enrol-totp|confirm-totp|step-up")
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "enrol-totp":
+		return runFactorEnrolTOTP(ctx, ios, rest)
+	case "confirm-totp":
+		return runFactorConfirmTOTP(ctx, ios, rest)
+	case "step-up":
+		return runFactorStepUp(ctx, ios, rest)
+	default:
+		return failf(ExitUsage, "unknown factor verb %q: use enrol-totp, confirm-totp or step-up", sub)
+	}
+}
+
+// runFactorEnrolTOTP stages a pending enrolment and discloses the otpauth URI
+// once through the print triad. It does not reissue the session — confirm-totp
+// does — so it persists no token.
+func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) error {
+	var outputFile string
+	var dangerous bool
+	st, flags, err := parseCommon("account factor enrol-totp", ios, args, func(fs *flag.FlagSet) {
+		fs.StringVar(&outputFile, "output-file", "", "write the otpauth URI to a file this command creates (0600)")
+		fs.BoolVar(&dangerous, "dangerously-print", false, "print the otpauth URI to stdout (publishes the seed to whatever captures it)")
+	})
+	if err != nil {
+		return err
+	}
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	if err := disclose.Preflight(deliver); err != nil {
+		return failf(ExitRefused, "the otpauth URI has nowhere to go: %v", err)
+	}
+	client, _, err := authenticatedClient(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	password, err := ios.readPassword("Password (to authorize enrolment): ")
+	if err != nil {
+		return err
+	}
+	var start apigen.TotpEnrolStartResult
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/totp/enrol/start",
+		apigen.TotpEnrolStartRequest{Password: password}, &start); err != nil {
+		return err
+	}
+	if _, err := disclose.Emit("otpauth provisioning URI", start.OtpauthUri, deliver); err != nil {
+		return failf(ExitRefused, "disclosing the otpauth URI: %v", err)
+	}
+	fmt.Fprintf(ios.Stderr, "TOTP enrolment staged. Scan the URI, then confirm with\n    wenv account factor confirm-totp\n")
+	return nil
+}
+
+// runFactorConfirmTOTP completes enrolment and persists the reissued session.
+func runFactorConfirmTOTP(ctx context.Context, ios IO, args []string) error {
+	st, flags, err := parseCommon("account factor confirm-totp", ios, args, nil)
+	if err != nil {
+		return err
+	}
+	client, artifact, err := authenticatedClient(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	code, err := ios.readPassword("Enter the code from your authenticator to confirm: ")
+	if err != nil {
+		return err
+	}
+	var result apigen.LoginResult
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/totp/enrol/confirm",
+		apigen.TotpCodeRequest{Code: code}, &result); err != nil {
+		return err
+	}
+	if err := persistRotatedSession(st, artifact, result); err != nil {
+		return err
+	}
+	fmt.Fprintf(ios.Stderr, "TOTP enrolled. Step up to present it with\n    wenv account factor step-up\n")
+	return nil
+}
+
+// runFactorStepUp elevates the acting session and persists the rotated token.
+func runFactorStepUp(ctx context.Context, ios IO, args []string) error {
+	st, flags, err := parseCommon("account factor step-up", ios, args, nil)
+	if err != nil {
+		return err
+	}
+	client, artifact, err := authenticatedClient(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	code, err := ios.readPassword("Enter the code from your authenticator: ")
+	if err != nil {
+		return err
+	}
+	var result apigen.LoginResult
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/totp/step-up",
+		apigen.TotpCodeRequest{Code: code}, &result); err != nil {
+		return err
+	}
+	if err := persistRotatedSession(st, artifact, result); err != nil {
+		return err
+	}
+	fmt.Fprintf(ios.Stderr, "session elevated: factors now %s\n",
+		strings.Join(result.Session.Assurance.Factors, ", "))
+	return nil
+}
+
+func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
+	if len(args) == 0 || args[0] != "regenerate" {
+		return failf(ExitUsage, "usage: wenv account recovery-codes regenerate")
+	}
+	var outputFile string
+	var dangerous bool
+	st, flags, err := parseCommon("account recovery-codes regenerate", ios, args[1:], func(fs *flag.FlagSet) {
+		fs.StringVar(&outputFile, "output-file", "", "write the codes to a file this command creates (0600)")
+		fs.BoolVar(&dangerous, "dangerously-print", false, "print the codes to stdout")
+	})
+	if err != nil {
+		return err
+	}
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	if err := disclose.Preflight(deliver); err != nil {
+		return failf(ExitRefused, "the recovery codes have nowhere to go: %v", err)
+	}
+	client, artifact, err := authenticatedClient(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	proof, err := ios.readPassword("Account-security proof (your TOTP code, or password if no factor): ")
+	if err != nil {
+		return err
+	}
+	var result apigen.RecoveryCodesResult
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/recovery-codes/regenerate",
+		apigen.RecoveryProofRequest{Proof: proof}, &result); err != nil {
+		return err
+	}
+	if _, err := disclose.Emit("recovery codes (single-use)", strings.Join(result.RecoveryCodes, "\n"), deliver); err != nil {
+		return failf(ExitRefused, "disclosing the recovery codes: %v", err)
+	}
+	if err := persistRotatedSession(st, artifact, result.Login); err != nil {
+		return err
+	}
+	fmt.Fprintf(ios.Stderr, "recovery codes regenerated; the previous batch is now void\n")
+	return nil
+}
+
+// runRecovery is the pre-auth break-in-glass path: consume a code for a
+// credential-establishment authority, then establish a new password with it.
+func runRecovery(ctx context.Context, ios IO, args []string) error {
+	if len(args) == 0 || args[0] != "begin" {
+		return failf(ExitUsage, "usage: wenv account recovery begin --instance <url|ref> --as <username>")
+	}
+	var (
+		as         string
+		trustFile  string
+		outputFile string
+		dangerous  bool
+	)
+	st, flags, err := parseCommon("account recovery begin", ios, args[1:], func(fs *flag.FlagSet) {
+		fs.StringVar(&as, "as", "", "the username to recover")
+		fs.StringVar(&trustFile, "trust-file", "", "provisioned trust bundle")
+		fs.StringVar(&outputFile, "output-file", "", "write the authority to a file this command creates (0600)")
+		fs.BoolVar(&dangerous, "dangerously-print", false, "print the authority to stdout")
+	})
+	if err != nil {
+		return err
+	}
+	if as == "" {
+		return failf(ExitUsage, "--as <username> is required")
+	}
+	target := flags.Instance
+	if target == "" {
+		target = ios.Env.Getenv("WENV_INSTANCE")
+	}
+	if target == "" {
+		return failf(ExitUsage, "--instance <url|ref> is required")
+	}
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	if err := disclose.Preflight(deliver); err != nil {
+		return failf(ExitRefused, "the authority has nowhere to go: %v", err)
+	}
+	entry, err := establish(ios, st, target, "", trustFile)
+	if err != nil {
+		return err
+	}
+	client, err := NewClient(entry, "")
+	if err != nil {
+		return err
+	}
+	code, err := ios.readPassword(fmt.Sprintf("Recovery code for %s at %s: ", as, entry.Origin))
+	if err != nil {
+		return err
+	}
+	var result apigen.RecoveryBeginResult
+	if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/auth/recovery/begin",
+		apigen.RecoveryBeginRequest{Username: as, Code: code}, &result); err != nil {
+		return err
+	}
+	if _, err := disclose.Emit("credential-establishment authority", result.Authority, deliver); err != nil {
+		return failf(ExitRefused, "disclosing the authority: %v", err)
+	}
+	fmt.Fprintf(ios.Stderr,
+		"recovery authority issued. It creates no session: establish a new password with\n    wenv account establish-credential --instance %s --as %s\n",
+		entry.Origin, as)
+	return nil
+}
+
+// persistRotatedSession replaces the stored artifact's token after an
+// account-security mutation or step-up rotates it. The old token is already
+// dead server-side, so a failure to persist here strands the caller — hence it
+// is surfaced, not swallowed.
+func persistRotatedSession(st *State, artifact SessionArtifact, r apigen.LoginResult) error {
+	artifact.Token = r.SessionToken
+	artifact.SessionID = r.Session.Id
+	artifact.ExpiresAt = r.Session.AbsoluteExpiresAt.Format("2006-01-02T15:04:05Z")
+	return st.PutSession(artifact)
 }
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,21 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/logout":               ClassUnauthenticated,
 	"http:GET /api/v1/auth/whoami":                ClassUnauthenticated,
 
+	// Factor endpoints (#54). Unauthenticated-class like logout/whoami: they
+	// take a session but an unresolvable one is exactly the case they must not
+	// distinguish, so their probe contract is enumeration uniformity, not
+	// tenancy. `recovery/begin` is fully pre-auth. None reaches an authz
+	// operation — the account-security mutations resolve and rotate the acting
+	// session, which is resolution rather than authorization, so their audit
+	// obligation is discharged directly through wireEvents like every other
+	// authentication-surface endpoint.
+	"http:POST /api/v1/auth/totp/enrol/start":          ClassUnauthenticated,
+	"http:POST /api/v1/auth/totp/enrol/confirm":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/totp/step-up":              ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/totp":                    ClassUnauthenticated,
+	"http:POST /api/v1/auth/recovery-codes/regenerate": ClassUnauthenticated,
+	"http:POST /api/v1/auth/recovery/begin":            ClassUnauthenticated,
+
 	// Org administration is instance-scoped: the probe contract is grant
 	// refusal, not tenancy, because no tenant object exists whose
 	// nonexistence could be mimicked.
@@ -123,6 +138,35 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthCredentialEstablished,
 		audit.EventAuthAuthorityRefused,
 	},
+
+	// Factor endpoints (#54). The account-security mutations emit their
+	// mutation event plus auth.session_created for the reissued session; step-up
+	// emits auth.reauthenticated (it rotates, mints no new session row);
+	// recovery/begin emits recovery_code_consumed (success and failure) and
+	// mints an establishment authority whose consumption is recorded by the
+	// establish path.
+	"http:POST /api/v1/auth/totp/enrol/confirm": {
+		audit.EventAuthFactorEnrolled,
+		audit.EventAuthSessionCreated,
+	},
+	"http:POST /api/v1/auth/totp/step-up": {audit.EventAuthReauthenticated},
+	"http:DELETE /api/v1/auth/totp": {
+		audit.EventAuthFactorRemoved,
+		audit.EventAuthSessionCreated,
+	},
+	"http:POST /api/v1/auth/recovery-codes/regenerate": {
+		audit.EventAuthRecoveryCodesGenerated,
+		audit.EventAuthSessionCreated,
+	},
+	"http:POST /api/v1/auth/recovery/begin": {
+		audit.EventAuthRecoveryCodeConsumed,
+		// Pre-auth like login: a crossed per-account backoff threshold is its
+		// own event, emitted directly by recordThrottleCrossing.
+		audit.EventAuthThrottleCrossed,
+	},
+	// enrol/start stages an inert, unconfirmed seed after verifying the proof;
+	// it enrols nothing and the completed mutation is recorded by enrol/confirm.
+	// Like whoami, it has no event of its own — pinned in the exemption fixture.
 	// whoami resolves a session and reports it. It writes nothing and its
 	// result duplicates what the login event already recorded, so it is the
 	// one auth path with no event of its own — pinned in the exemption

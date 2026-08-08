@@ -67,6 +67,33 @@ func (s stubAuth) Logout(ctx context.Context, presented string) error {
 
 func (s stubAuth) SlideIdleClock(context.Context, string) error { return nil }
 
+// Factor endpoints (#54): the transport contract for these is exercised in the
+// isolation suite end to end; the stubs here keep the interface satisfied and
+// default to the uniform refusal.
+func (s stubAuth) EnrolTOTPStart(context.Context, string, string) (string, error) {
+	return "", domain.ErrUnauthenticated
+}
+
+func (s stubAuth) EnrolTOTPConfirm(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) StepUpTOTP(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) RemoveTOTP(context.Context, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) GenerateRecoveryCodes(context.Context, string, string) ([]string, service.LoginResult, error) {
+	return nil, service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ConsumeRecoveryCode(context.Context, string, string) (service.RecoveryResult, error) {
+	return service.RecoveryResult{}, domain.ErrUnauthenticated
+}
+
 type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
 	get    func(ctx context.Context, a service.Actor, id string) (service.Org, error)

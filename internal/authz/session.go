@@ -55,19 +55,19 @@ var MFAMandatory = map[domain.Capability]bool{
 // AssuranceEnforced reports whether the chokepoint refuses an MFA-mandatory
 // operation from a single-factor session.
 //
-// The GATE is plumbed (Authorize threads the caller's Identity and consults
-// assuranceInadequate after the grant check, so only a capability-holder ever
-// learns a step-up is required; session-less local host authority is exempt).
-// The constant stays FALSE until the factor endpoints land in the same PR: the
-// moment a factor beyond a password becomes mintable — signalled by any factor
-// audit event registering — this flips to true and the demo/bootstrap flows
-// enrol a factor. Flipping it before an enrolment path exists would strand a
-// freshly bootstrapped administrator with no way to satisfy the rule.
+// ENFORCED (#54): the factor endpoints have landed, so a session that presented
+// only a password is refused an MFA-mandatory operation and must step up. The
+// gate is consulted in assuranceInadequate AFTER the grant check, so only a
+// capability-holder ever learns a step-up is required; session-less local host
+// authority (bootstrap, break-glass, `wenv admin`) presents no session and is
+// exempt. Enrolment and step-up endpoints are themselves never MFA-gated (they
+// are the path out), so a freshly bootstrapped administrator can always reach
+// them.
 //
-// isolation.TestAssuranceEnforcementCannotBeForgotten fails the build if a
-// factor event registers while this is still false, so the flip cannot be
-// forgotten. See docs/handoff/54-human-auth-full.md.
-const AssuranceEnforced = false
+// isolation.TestAssuranceEnforcementCannotBeForgotten held the flip to the
+// registration of the first factor audit event, which has now happened. See
+// docs/handoff/54-human-auth-full.md.
+const AssuranceEnforced = true
 
 // AdequateAssurance reports whether a session's assurance record satisfies the
 // MFA-mandatory rule: two distinct factor classes, or a WebAuthn assertion

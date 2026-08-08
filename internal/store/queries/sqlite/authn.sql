@@ -55,6 +55,11 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE id = ?;
 
 -- wenv:authn-resolution
+-- name: GetAccountByPrincipal :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE principal_id = ?;
+
+-- wenv:authn-resolution
 -- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts;
 

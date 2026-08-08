@@ -63,6 +63,28 @@ const (
 	// crossed, so a distributed attempt is visible rather than merely slowed.
 	EventAuthThrottleCrossed EventType = "auth.throttle_crossed"
 
+	// auth.* factor events (#54, human-auth ADR § Factors, § Account-security
+	// mutations). Registering ANY of these is the tripwire that forces
+	// authz.AssuranceEnforced to flip: a factor beyond a password now exists,
+	// so the chokepoint must enforce the MFA-mandatory rule (see
+	// isolation.TestAssuranceEnforcementCannotBeForgotten).
+	//
+	// auth.factor_enrolled / auth.factor_removed record a TOTP factor coming
+	// into or out of existence, naming the credential class that authorized the
+	// account-security mutation.
+	EventAuthFactorEnrolled EventType = "auth.factor_enrolled"
+	EventAuthFactorRemoved  EventType = "auth.factor_removed"
+	// auth.recovery_codes_generated records a display-once batch replacing the
+	// previous one.
+	EventAuthRecoveryCodesGenerated EventType = "auth.recovery_codes_generated"
+	// auth.recovery_code_consumed records the pre-auth break-in-glass path,
+	// including its failures (the ADR requires the failures, uniform response
+	// notwithstanding).
+	EventAuthRecoveryCodeConsumed EventType = "auth.recovery_code_consumed"
+	// auth.reauthenticated records a step-up: the acting session presented a
+	// possession factor and gained a factor class.
+	EventAuthReauthenticated EventType = "auth.reauthenticated"
+
 	// settings.* — scaffolding domain events for the demonstration
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
@@ -244,6 +266,61 @@ var registry = map[EventType]TypeSpec{
 			"scope":            {Kind: KindString, Required: true}, // account | source-ip | instance
 			"subject_resolved": {Kind: KindBool, Required: true},
 			"account_id":       {Kind: KindString},
+		},
+	},
+	EventAuthFactorEnrolled: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"factor":                 {Kind: KindString, Required: true}, // totp
+			"account_id":             {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true}, // the proof class
+		},
+	},
+	EventAuthFactorRemoved: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"factor":                 {Kind: KindString, Required: true},
+			"account_id":             {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthRecoveryCodesGenerated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"count":                  {Kind: KindInt, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthRecoveryCodeConsumed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"subject_resolved": {Kind: KindBool, Required: true},
+			"account_id":       {Kind: KindString},
+			"authority_id":     {Kind: KindString}, // success only
+			"cause":            {Kind: KindString}, // failures only, by class
+		},
+	},
+	EventAuthReauthenticated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"factor":     {Kind: KindString, Required: true}, // totp
 		},
 	},
 	EventOrgRead: {

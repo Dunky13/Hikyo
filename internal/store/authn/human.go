@@ -184,6 +184,25 @@ func (r *Resolver) AccountByID(ctx context.Context, id string) (Account, error) 
 	return pgAccount(row), nil
 }
 
+// AccountByPrincipal resolves the account a session's principal owns — the
+// bridge every factor path needs, since a session is keyed by principal but a
+// factor row (password, TOTP, recovery) is keyed by account. A human principal
+// owns exactly one account.
+func (r *Resolver) AccountByPrincipal(ctx context.Context, p domain.PrincipalID) (Account, error) {
+	if r.sq != nil {
+		row, err := r.sq.GetAccountByPrincipal(ctx, string(p))
+		if err != nil {
+			return Account{}, notFoundOr(err)
+		}
+		return sqliteAccount(row)
+	}
+	row, err := r.pg.GetAccountByPrincipal(ctx, string(p))
+	if err != nil {
+		return Account{}, notFoundOr(err)
+	}
+	return pgAccount(row), nil
+}
+
 // AccountCount answers the bootstrap path's one question: is this a fresh
 // instance? It is deliberately not exposed over the network.
 func (r *Resolver) AccountCount(ctx context.Context) (int64, error) {

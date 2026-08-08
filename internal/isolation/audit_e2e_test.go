@@ -401,6 +401,11 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			t.Fatalf("a revoked session still resolves: %v", err)
 		}
 
+		// The full factor lifecycle, so every factor audit event is emitted by
+		// code before the emitter check below reads the trail: recovery
+		// generate/consume, TOTP enrol/confirm, step-up, remove.
+		runFactorLifecycle(t, auth, ctx, "e2e-admin", password)
+
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
 			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")

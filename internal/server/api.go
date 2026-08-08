@@ -30,6 +30,12 @@ type AuthService interface {
 	Identity(ctx context.Context, presented string) (service.Identity, error)
 	Logout(ctx context.Context, presented string) error
 	SlideIdleClock(ctx context.Context, presented string) error
+	EnrolTOTPStart(ctx context.Context, presented, password string) (string, error)
+	EnrolTOTPConfirm(ctx context.Context, presented, code string) (service.LoginResult, error)
+	StepUpTOTP(ctx context.Context, presented, code string) (service.LoginResult, error)
+	RemoveTOTP(ctx context.Context, presented, password string) (service.LoginResult, error)
+	GenerateRecoveryCodes(ctx context.Context, presented, proof string) ([]string, service.LoginResult, error)
+	ConsumeRecoveryCode(ctx context.Context, username, code string) (service.RecoveryResult, error)
 }
 
 // OrgService is the domain surface this slice exposes.
@@ -217,6 +223,197 @@ func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.
 		return apigen.Logout500JSONResponse{
 			InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
 		}, nil
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Factor endpoints (#54)
+// ---------------------------------------------------------------------------
+//
+// These carry the raw bearer via the Actor pattern and resolve it only at the
+// chokepoint, like every other authenticated surface. The account-security
+// mutations reissue the acting session and step-up rotates it, so each returns
+// a fresh token the client must persist in place of the old one.
+
+// factorPrecondition reports a loud structural refusal — a caller acting on
+// their OWN authenticated account, so the state (already enrolled, nothing to
+// confirm, no factor) is theirs to know and 400 names it. A bad code or
+// password stays the uniform 401.
+func factorPrecondition(err error) bool {
+	return errors.Is(err, service.ErrTOTPAlreadyEnrolled) ||
+		errors.Is(err, service.ErrNoPendingTOTP) ||
+		errors.Is(err, service.ErrNoTOTPFactor) ||
+		errors.Is(err, service.ErrNoProofCredential)
+}
+
+func (a *API) EnrolTotpStart(ctx context.Context, req apigen.EnrolTotpStartRequestObject) (apigen.EnrolTotpStartResponseObject, error) {
+	uri, err := a.Auth.EnrolTOTPStart(ctx, bearer(ctx), req.Body.Password)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.EnrolTotpStart400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.EnrolTotpStart401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.EnrolTotpStart429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp enrol start", err)
+			return apigen.EnrolTotpStart500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.EnrolTotpStart200JSONResponse{OtpauthUri: uri}, nil
+}
+
+func (a *API) EnrolTotpConfirm(ctx context.Context, req apigen.EnrolTotpConfirmRequestObject) (apigen.EnrolTotpConfirmResponseObject, error) {
+	result, err := a.Auth.EnrolTOTPConfirm(ctx, bearer(ctx), req.Body.Code)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.EnrolTotpConfirm400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.EnrolTotpConfirm401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.EnrolTotpConfirm429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp enrol confirm", err)
+			return apigen.EnrolTotpConfirm500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.EnrolTotpConfirm200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject) (apigen.StepUpTotpResponseObject, error) {
+	result, err := a.Auth.StepUpTOTP(ctx, bearer(ctx), req.Body.Code)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.StepUpTotp400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.StepUpTotp401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.StepUpTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp step-up", err)
+			return apigen.StepUpTotp500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.StepUpTotp200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject) (apigen.RemoveTotpResponseObject, error) {
+	result, err := a.Auth.RemoveTOTP(ctx, bearer(ctx), req.Body.Password)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.RemoveTotp400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.RemoveTotp401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.RemoveTotp429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "totp remove", err)
+			return apigen.RemoveTotp500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.RemoveTotp200JSONResponse(loginResultOf(result)), nil
+}
+
+func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.RegenerateRecoveryCodesRequestObject) (apigen.RegenerateRecoveryCodesResponseObject, error) {
+	codes, result, err := a.Auth.GenerateRecoveryCodes(ctx, bearer(ctx), req.Body.Proof)
+	if err != nil {
+		if factorPrecondition(err) {
+			return apigen.RegenerateRecoveryCodes400JSONResponse{
+				BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, "")),
+			}, nil
+		}
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.RegenerateRecoveryCodes401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.RegenerateRecoveryCodes429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "recovery codes regenerate", err)
+			return apigen.RegenerateRecoveryCodes500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.RegenerateRecoveryCodes200JSONResponse{
+		RecoveryCodes: codes,
+		Login:         loginResultOf(result),
+	}, nil
+}
+
+func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequestObject) (apigen.BeginRecoveryResponseObject, error) {
+	result, err := a.Auth.ConsumeRecoveryCode(ctx, req.Body.Username, req.Body.Code)
+	if err != nil {
+		switch classify(err) {
+		case apigen.ErrorCodeUnauthenticated:
+			return apigen.BeginRecovery401JSONResponse{
+				UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, "")),
+			}, nil
+		case apigen.ErrorCodeTooManyRequests:
+			return apigen.BeginRecovery429JSONResponse{TooManyRequestsJSONResponse: tooMany()}, nil
+		default:
+			a.fault(ctx, "recovery begin", err)
+			return apigen.BeginRecovery500JSONResponse{
+				InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, "")),
+			}, nil
+		}
+	}
+	return apigen.BeginRecovery200JSONResponse{
+		Authority: result.Authority,
+		ExpiresAt: result.ExpiresAt,
+	}, nil
+}
+
+// loginResultOf renders a freshly minted or rotated session for the wire.
+func loginResultOf(r service.LoginResult) apigen.LoginResult {
+	return apigen.LoginResult{
+		SessionToken: r.SessionToken,
+		Session: apigen.Session{
+			Id:                r.SessionID,
+			Artifact:          r.Artifact,
+			CreatedAt:         r.CreatedAt,
+			IdleExpiresAt:     r.IdleExpires,
+			AbsoluteExpiresAt: r.AbsExpires,
+			Assurance:         assuranceOf(r.Assurance),
+		},
+		Principal: apigen.Principal{
+			Id:          string(r.Principal),
+			Kind:        apigen.Human,
+			DisplayName: optional(r.DisplayName),
+		},
 	}
 }
 

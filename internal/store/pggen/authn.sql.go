@@ -193,6 +193,25 @@ func (q *Queries) GetAccountByID(ctx context.Context, id string) (Account, error
 	return i, err
 }
 
+const getAccountByPrincipal = `-- name: GetAccountByPrincipal :one
+SELECT id, principal_id, username, display_name, created_at FROM accounts
+WHERE principal_id = $1
+`
+
+// wenv:authn-resolution
+func (q *Queries) GetAccountByPrincipal(ctx context.Context, principalID string) (Account, error) {
+	row := q.db.QueryRow(ctx, getAccountByPrincipal, principalID)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Username,
+		&i.DisplayName,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAccountByUsername = `-- name: GetAccountByUsername :one
 SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE username = $1

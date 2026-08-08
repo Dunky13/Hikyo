@@ -185,6 +185,9 @@ func openPostgres(t *testing.T) *store.DB {
 	// human-authentication tables with #47 (sessions and accounts reference
 	// principals, so they drop first).
 	for _, table := range []string{
+		// Factor tables (#54, migration 00006) reference accounts/sessions, so
+		// they drop first — a stale one fails the next re-migration's CREATE.
+		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
 		"credential_authorities", "password_credentials", "sessions", "accounts",
 		"auth_instance_state",
 		"grants", "environments", "projects", "principals",

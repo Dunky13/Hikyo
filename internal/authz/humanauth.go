@@ -50,6 +50,13 @@ func (a *TxAuthorizer) AccountByID(ctx context.Context, id string) (Account, err
 	return a.r.AccountByID(ctx, id)
 }
 
+// AccountByPrincipal resolves the account a session's principal owns — the
+// bridge the factor paths need to reach an account's password/TOTP/recovery
+// rows from the principal a session carries.
+func (a *TxAuthorizer) AccountByPrincipal(ctx context.Context, p domain.PrincipalID) (Account, error) {
+	return a.r.AccountByPrincipal(ctx, p)
+}
+
 // AccountCount answers the bootstrap path's one question. It has no network
 // route: `wenv admin create` runs on the server's own host.
 func (a *TxAuthorizer) AccountCount(ctx context.Context) (int64, error) {
