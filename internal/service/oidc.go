@@ -72,11 +72,13 @@ const (
 
 // possessionAMR is the closed set of RFC 8176 amr values wenv accepts as
 // evidence of a possession factor for a reauth: a hardware key, a software key,
-// a one-time password, or a self-asserted multi-factor. "pwd"/"pin" (knowledge)
-// and biometric-only values are deliberately excluded, so a password-only token
-// can never open a reveal reauth window even when it satisfies a policy that
-// keyed on acr alone.
-var possessionAMR = map[string]bool{"hwk": true, "swk": true, "otp": true, "mfa": true}
+// or a one-time password. "pwd"/"pin" (knowledge) and biometric-only values are
+// deliberately excluded, so a password-only token can never open a reveal reauth
+// window even when it satisfies a policy that keyed on acr alone. "mfa" is
+// excluded too: RFC 8176 "mfa" only asserts that multiple factors were used, it
+// does NOT prove any of them was a possession factor, so a token asserting only
+// amr=["mfa"] carries no possession evidence and is refused (cause=no-possession).
+var possessionAMR = map[string]bool{"hwk": true, "swk": true, "otp": true}
 
 // hasPossessionAMR reports whether the token asserted a recognized possession
 // factor, INDEPENDENTLY of policy satisfaction. Policy satisfaction (an acr
@@ -88,14 +90,6 @@ func hasPossessionAMR(amr []string) bool {
 		}
 	}
 	return false
-}
-
-// ptrEq reports whether two optional JSON-policy pointers carry the same value.
-func ptrEq(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 // Loud, structural OIDC refusals for callers acting on their own instance

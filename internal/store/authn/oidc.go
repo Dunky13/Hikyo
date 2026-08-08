@@ -259,6 +259,22 @@ func (r *Resolver) EnabledProviderBySlug(ctx context.Context, slug string) (OIDC
 	return pgProvider(row), nil
 }
 
+// GuardProviderForMint takes the pinned provider's row lock inside a Phase-C
+// write tx and reports whether it still matches the Phase-A snapshot (same
+// row_version, still enabled, same issuer). A no-op CAS that never bumps
+// row_version: 0 rows means the provider moved (disabled/deleted/re-issued or
+// any reconfigure, which always bumps row_version) since Phase A, so the mint
+// must refuse — the A4 sweep deterministically wins the TOCTOU because a
+// concurrent provider-change UPDATE serializes behind this row lock.
+func (r *Resolver) GuardProviderForMint(ctx context.Context, id string, rowVersion int64, issuer string) (bool, error) {
+	if r.sq != nil {
+		n, err := r.sq.GuardOIDCProviderForMint(ctx, sqlitegen.GuardOIDCProviderForMintParams{ID: id, RowVersion: rowVersion, Issuer: issuer})
+		return n == 1, err
+	}
+	n, err := r.pg.GuardOIDCProviderForMint(ctx, pggen.GuardOIDCProviderForMintParams{ID: id, RowVersion: rowVersion, Issuer: issuer})
+	return n == 1, err
+}
+
 // ProviderForCallback resolves the provider a transaction pinned, by id, so a
 // callback exchanges only at the recorded provider (A11).
 func (r *Resolver) ProviderForCallback(ctx context.Context, id string) (OIDCProvider, error) {

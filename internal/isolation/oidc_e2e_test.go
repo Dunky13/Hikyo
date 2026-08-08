@@ -525,6 +525,30 @@ func runOIDCReauthPossession(t *testing.T, db *store.DB) {
 	if oidcRefusedCount(t, db, "no-possession") != before+1 {
 		t.Fatalf("acr-satisfied refusal was not audited cause=no-possession")
 	}
+
+	// (c) amr_sets [["mfa"]] satisfied by amr=["mfa"] (rA-1). RFC 8176 "mfa"
+	// asserts multiple factors were used but proves no possession factor, so
+	// the policy is satisfied yet the reveal window is refused. A ["hwk"] or
+	// ["otp"] token on the same policy passes (the downgrade fixture's positive
+	// control exercises the ["hwk"] pass).
+	_, mfaIdP := configureProvider(t, auth, ctx, admin, "mfa-only", service.ProviderInput{
+		DisplayName: "mfa-only", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
+	})
+	linkOn(t, auth, ctx, "mfa-only", "mfa-user", password)
+	mfaIdP.AuthTime = time.Now()
+	mfaIdP.AMR = []string{"mfa"}
+	relogin3, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before = oidcRefusedCount(t, db, "no-possession")
+	if err := reauthOn(t, auth, ctx, "mfa-only", "mfa-user", relogin3.SessionToken); !isUnauth(err) {
+		t.Fatalf("mfa-only amr reauth should refuse (mfa is not possession): %v", err)
+	}
+	if oidcRefusedCount(t, db, "no-possession") != before+1 {
+		t.Fatalf("mfa-only refusal was not audited cause=no-possession")
+	}
 }
 
 func TestOIDCReauthPossessionSQLite(t *testing.T) {
@@ -635,11 +659,13 @@ func runOIDCReauthDowngrade(t *testing.T, db *store.DB) {
 	auth.ReauthWindow = time.Minute
 	_, idp := configureProvider(t, auth, ctx, admin, "strict", service.ProviderInput{
 		DisplayName: "strict", ClientID: "c", ClientSecret: "s", Scopes: "openid",
-		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
+		AssurancePolicy: strptr(`{"amr_sets":[["hwk"]]}`), Enabled: true,
 	})
 	linkOn(t, auth, ctx, "strict", "down-user", password)
 	idp.AuthTime = time.Now()
-	idp.AMR = []string{"mfa"}
+	// hwk is a true possession factor (mfa is not); the token both satisfies the
+	// policy and carries possession, so it reaches the downgrade/positive legs.
+	idp.AMR = []string{"hwk"}
 
 	// A rank-2 (WebAuthn) session: OIDC evidence is rank 1, so this is a
 	// downgrade. Forge the factor set directly — the rank comparison is under
@@ -723,6 +749,64 @@ func TestOIDCReauthProviderRaceSQLite(t *testing.T) {
 }
 func TestOIDCReauthProviderRacePostgres(t *testing.T) {
 	runOIDCReauthProviderRace(t, seededDB(t, openPostgres))
+}
+
+// runOIDCLoginProviderRace: a provider reconfigure that lands during a login's
+// code exchange (Phase B) must make the Phase-C mint refuse (rA-5/TOCTOU). The
+// guard row lock makes the A4 sweep deterministically win, so a live federated
+// session swept mid-exchange is NOT resurrected by a fresh mint and no new
+// session is created in its place.
+func runOIDCLoginProviderRace(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, _ := oidcAdmin(t, db)
+	providers, idp := configureProvider(t, auth, ctx, admin, "race-login", service.ProviderInput{
+		DisplayName: "race-login", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		JITPolicy: strptr(`{"claim":"sub","values":["race-login-user"]}`), Enabled: true,
+	})
+	// A live federated session that the mid-exchange sweep must delete.
+	victim := oidcLogin(t, auth, ctx, "race-login", "race-login-user")
+	if _, err := auth.Identity(ctx, victim.SessionToken); err != nil {
+		t.Fatalf("federated session should be live before the race: %v", err)
+	}
+	// A second login for the same subject; during its exchange, reconfigure the
+	// provider (bumps row_version, sweeps every federated session for it).
+	fired := false
+	idp.OnToken = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := providers.Put(ctx, service.LocalPrincipal(admin), "race-login", service.ProviderInput{
+			DisplayName: "race-login", Issuer: idp.Issuer(), ClientID: "c2", ClientSecret: "s", Scopes: "openid",
+			JITPolicy: strptr(`{"claim":"sub","values":["race-login-user"]}`), Enabled: true,
+		}); err != nil {
+			t.Errorf("mid-exchange provider Put: %v", err)
+		}
+	}
+	before := oidcRefusedCount(t, db, "reconciliation")
+	start, err := auth.OIDCStart(ctx, "race-login", "login", "", "", "")
+	if err != nil {
+		t.Fatalf("login start: %v", err)
+	}
+	code, state := driveIdP(t, start.AuthURL+"&sub=race-login-user")
+	if _, err := auth.OIDCCallback(ctx, "race-login", code, state, "", "", start.BindingCookie, ""); !isUnauth(err) {
+		t.Fatalf("login racing a provider change should refuse the mint: %v", err)
+	}
+	if oidcRefusedCount(t, db, "reconciliation") != before+1 {
+		t.Fatalf("login-race refusal was not audited cause=reconciliation")
+	}
+	// The swept session stays swept: the refused mint neither resurrected it nor
+	// minted a replacement.
+	if _, err := auth.Identity(ctx, victim.SessionToken); !isUnauth(err) {
+		t.Fatalf("swept federated session was resurrected by the racing login: %v", err)
+	}
+}
+
+func TestOIDCLoginProviderRaceSQLite(t *testing.T) {
+	runOIDCLoginProviderRace(t, seededDB(t, openSQLite))
+}
+func TestOIDCLoginProviderRacePostgres(t *testing.T) {
+	runOIDCLoginProviderRace(t, seededDB(t, openPostgres))
 }
 
 // runOIDCIATRejected: an ID token whose iat is in the future beyond the skew is

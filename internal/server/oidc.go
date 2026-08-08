@@ -50,7 +50,9 @@ func (r oidcStartResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
 
 func (a *API) OidcStart(ctx context.Context, req apigen.OidcStartRequestObject) (apigen.OidcStartResponseObject, error) {
 	if req.Body == nil {
-		return apigen.OidcStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		// A missing body folds into the uniform 401 like every other start
+		// refusal: this endpoint never distinguishes its refusals on the wire.
+		return apigen.OidcStart401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 	}
 	env, proof := "", ""
 	if req.Body.EnvironmentId != nil {
@@ -125,11 +127,12 @@ func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestOb
 	result, err := a.Auth.OIDCCallback(ctx, string(req.Provider), code, state, iss, idpErr, bindingCookie, bearer(ctx))
 	if err != nil {
 		// Every expected callback refusal is one uniform 401 body: a closed
-		// reauth window, an unknown/expired/wrong-purpose state, and every
+		// reauth window, a wrong-purpose transaction (the dispatch default
+		// returns ErrBadPurpose), an unknown/expired state, and every
 		// oidc_refused cause are indistinguishable on the wire, so a stolen or
 		// observed state cannot be probed for the transaction's purpose or
 		// lifecycle. Only a true fault is 500.
-		if errors.Is(err, service.ErrReauthWindowClosed) {
+		if errors.Is(err, service.ErrReauthWindowClosed) || errors.Is(err, service.ErrBadPurpose) {
 			return apigen.OidcCallback401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
 		}
 		switch classify(err) {

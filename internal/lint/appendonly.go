@@ -175,6 +175,11 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"DeleteExternalIdentity":    true,
 	"DeleteSessionsForProvider": true,
 	"CreateReauthWindow":        true,
+	// The Phase-C mint guard: a no-op CAS write that locks the pinned provider
+	// row so a concurrent reconfigure serializes behind it (A4 TOCTOU). It is a
+	// proof-free write on the resolution surface for the same reason the other
+	// OIDC writers are.
+	"GuardProviderForMint": true,
 	// OIDC provider administration writes to a class=authn table, so the write
 	// rides the resolution surface even though the mutation is authorized at the
 	// chokepoint (OpProviderPut/Delete) before it runs.

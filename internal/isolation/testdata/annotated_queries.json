@@ -223,6 +223,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GuardOIDCProviderForMint",
+    "annotation": "authn-resolution",
+    "hash": "ff01b9bb77e6a1537c04912e54d56b4eefdd8b62ce5cc6e5b1b5f109e1e18f46"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertAccount",
     "annotation": "authn-resolution",
     "hash": "e49a478aa77279183d2d478de60367f0c515bc5bfe4cb5d8646e105088bd215a"
@@ -580,6 +586,12 @@
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
     "hash": "1741b6bd0bb2fbccb016346d83588d5aec8782b1ec6c433a3687105e508060ed"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GuardOIDCProviderForMint",
+    "annotation": "authn-resolution",
+    "hash": "437d333086a9a1dc36a8bf4a7cf9855f64a5796be6c3c5c1ef23d11431c13891"
   },
   {
     "engine": "sqlite",

@@ -108,6 +108,34 @@ func (q *Queries) GetOIDCProviderBySlug(ctx context.Context, slug string) (OidcP
 	return i, err
 }
 
+const guardOIDCProviderForMint = `-- name: GuardOIDCProviderForMint :execrows
+UPDATE oidc_providers SET row_version = row_version
+WHERE id = $1 AND row_version = $2 AND issuer = $3 AND enabled = 1
+`
+
+type GuardOIDCProviderForMintParams struct {
+	ID         string
+	RowVersion int64
+	Issuer     string
+}
+
+// A phase-C mint (login/link/reauth) guards the pinned provider row against a
+// concurrent reconfigure: a no-op CAS that takes the row lock. 0 rows affected
+// means the provider was disabled, deleted, re-issued or row_version-bumped
+// since Phase A, so the mint must refuse (the A4 sweep always wins the TOCTOU).
+// A matching row takes the lock, so a concurrent provider-change UPDATE
+// serializes behind it (and vice-versa: whichever commits first, the other's
+// guard sees the bumped row_version and fails). The no-op never bumps
+// row_version, so it never spuriously fails an administrator's reconfigure CAS.
+// wenv:authn-resolution
+func (q *Queries) GuardOIDCProviderForMint(ctx context.Context, arg GuardOIDCProviderForMintParams) (int64, error) {
+	result, err := q.db.Exec(ctx, guardOIDCProviderForMint, arg.ID, arg.RowVersion, arg.Issuer)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listOIDCProviders = `-- name: ListOIDCProviders :many
 SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
        redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,

@@ -609,12 +609,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OidcStartResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
+        # Every expected start refusal (unknown or disabled slug, bad purpose,
+        # policy-less or environment-less reauth, unauthenticated link/reauth,
+        # and a missing body) collapses to one uniform 401 so a pre-auth prober
+        # cannot enumerate provider config. 429/500 are the cross-cutting
+        # admission and fault responses.
         "401":
           $ref: "#/components/responses/Unauthenticated"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":

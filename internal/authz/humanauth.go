@@ -302,6 +302,13 @@ func (a *TxAuthorizer) ProviderForCallback(ctx context.Context, id string) (OIDC
 	return a.r.ProviderForCallback(ctx, id)
 }
 
+// GuardProviderForMint locks the pinned provider row inside a Phase-C mint tx
+// and reports whether it still matches the Phase-A snapshot; false means the
+// provider moved and the mint must refuse (A4 TOCTOU, sweep wins).
+func (a *TxAuthorizer) GuardProviderForMint(ctx context.Context, id string, rowVersion int64, issuer string) (bool, error) {
+	return a.r.GuardProviderForMint(ctx, id, rowVersion, issuer)
+}
+
 // CreateOIDCTransaction writes a single-use transaction row.
 func (a *TxAuthorizer) CreateOIDCTransaction(ctx context.Context, t NewOIDCTransaction) error {
 	return a.r.CreateOIDCTransaction(ctx, t)

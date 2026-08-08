@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
@@ -47,6 +48,19 @@ type OIDCStartResult struct {
 // the account-security proof (the pre-existing password) up front, binding it to
 // the transaction ceremony (A6). PKCE S256 is always used.
 func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, presented, proof string) (OIDCStartResult, error) {
+	// Admission is entered FIRST, uniformly for every purpose and BEFORE the
+	// provider is resolved or the purpose/environment validated. An unknown
+	// slug, a bad purpose, a missing environment and a fully resolved provider
+	// then take one path with one per-IP admission cost, so a pre-auth prober
+	// cannot enumerate provider config by the status, body or timing of the
+	// refusal. link/reauth additionally ride the per-account backoff below; the
+	// per-IP slot taken here already throttles their Argon2 proof.
+	release, err := s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
+	if err != nil {
+		return OIDCStartResult{}, err
+	}
+	defer release()
+
 	switch purpose {
 	case purposeLogin, purposeLink, purposeReauth:
 	default:
@@ -58,41 +72,19 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 		return OIDCStartResult{}, ErrReauthNoEnvironment
 	}
 
-	// Login is the only anonymous purpose, so its admission runs BEFORE provider
-	// resolution: an unknown slug pays the same per-IP admission cost as a
-	// configured one, so the refusal timing does not enumerate provider config.
-	// link and reauth are authenticated and ride the per-account factor budget
-	// (below), which needs the resolved account.
-	var release func()
-	if purpose == purposeLogin {
-		var rerr error
-		release, rerr = s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
-		if rerr != nil {
-			return OIDCStartResult{}, rerr
-		}
-		defer release()
-	}
-
 	// Phase 1 - resolve the provider and, for a session-bound purpose, the
-	// acting session and account.
+	// acting session and account. Both run INSIDE the admission budget, and
+	// link/reauth authenticate BEFORE the provider is resolved so an
+	// unauthenticated caller refuses identically (uniform 401) whether the slug
+	// is known or not: provider existence is never what a prober learns first.
 	var (
 		provider  authz.OIDCProvider
 		epoch     int64
 		account   authz.Account
 		sessionID string
 	)
-	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		var e error
-		provider, e = az.EnabledProviderBySlug(ctx, slug)
-		if errors.Is(e, domain.ErrNotFound) {
-			return ErrProviderNotFound
-		}
-		if e != nil {
-			return e
-		}
-		if epoch, e = az.CredentialEpoch(ctx); e != nil {
-			return e
-		}
 		if purpose != purposeLogin {
 			id, e := az.Authenticate(ctx, presented, s.now())
 			if e != nil {
@@ -104,6 +96,16 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 			}
 			sessionID = id.SessionID
 		}
+		provider, e = az.EnabledProviderBySlug(ctx, slug)
+		if errors.Is(e, domain.ErrNotFound) {
+			return ErrProviderNotFound
+		}
+		if e != nil {
+			return e
+		}
+		if epoch, e = az.CredentialEpoch(ctx); e != nil {
+			return e
+		}
 		return nil
 	})
 	if err != nil {
@@ -113,14 +115,13 @@ func (s *Auth) OIDCStart(ctx context.Context, slug, purpose, environmentID, pres
 		return OIDCStartResult{}, ErrReauthNoPolicy // A5, fail fast (also enforced at callback)
 	}
 
-	// link/reauth ride the per-account factor budget so a stolen session cannot
-	// be an unthrottled Argon2 oracle (login's per-IP admission was taken above).
+	// link/reauth ride the per-account backoff so a stolen session cannot be an
+	// unthrottled Argon2 oracle; the per-IP admission slot is already held, so
+	// this adds only the account-scoped delay, never a second slot.
 	if purpose != purposeLogin {
-		release, err = s.enterFactorBudget(ctx, account.ID)
-		if err != nil {
-			return OIDCStartResult{}, err
+		if s.Admission.AccountDelay(account.ID) > 0 {
+			return OIDCStartResult{}, admission.ErrOverloaded
 		}
-		defer release()
 	}
 
 	// Link: verify the account-security proof (the pre-existing password, since
@@ -401,23 +402,31 @@ func (s *Auth) exchangeAndVerify(ctx context.Context, prov authz.OIDCProvider, t
 	return claims, ""
 }
 
-// revalidateProvider re-reads the pinned provider inside a Phase-C write tx and
-// returns a refusal cause if it moved since the Phase-A snapshot (deleted,
-// disabled, issuer changed, JIT/assurance policy tightened, or any row_version
-// bump). The snapshot was taken before the network exchange, so a concurrent
-// reconfigure could have swept sessions and narrowed policy while the exchange
-// was in flight; re-reading here makes the sweep always win the race (A4) — a
-// stale evaluation cannot mint an account, identity, session or window.
+// revalidateProvider locks the pinned provider row inside a Phase-C write tx
+// and returns a refusal cause if it moved since the Phase-A snapshot. The
+// snapshot was taken before the network exchange, so a concurrent reconfigure
+// could have swept sessions and narrowed policy while the exchange was in
+// flight. A plain re-read is not enough under postgres READ COMMITTED: the
+// callback could read a stale snapshot and mint after the sweep committed. The
+// guard is a no-op CAS UPDATE on the provider row (row_version + enabled +
+// issuer against the snapshot), so it deterministically CONFLICTS with a
+// concurrent provider-change UPDATE on the same row — whichever commits first,
+// the other refuses. 0 rows means the provider was disabled, deleted, re-issued
+// or reconfigured (every reconfigure bumps row_version), so the sweep always
+// wins (A4): a stale evaluation cannot mint an account, identity, session or
+// window. On sqlite the single writer already serializes; the guard keeps one
+// code path across engines.
+//
+// ponytail: every phase-C mint now takes the provider row lock, so concurrent
+// logins through one provider serialize at phase C. Acceptable — the locked
+// window is a small local write tx (no network, which was phase B), and login
+// is not a hot enough path here to want per-provider lock striping.
 func (s *Auth) revalidateProvider(ctx context.Context, az *authz.TxAuthorizer, snapshot authz.OIDCProvider) (string, error) {
-	cur, err := az.ProviderForCallback(ctx, snapshot.ID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return causeReconciliation, nil
-	}
+	ok, err := az.GuardProviderForMint(ctx, snapshot.ID, snapshot.RowVersion, snapshot.Issuer)
 	if err != nil {
 		return "", err
 	}
-	if !cur.Enabled || cur.Issuer != snapshot.Issuer || cur.RowVersion != snapshot.RowVersion ||
-		!ptrEq(cur.AssurancePolicy, snapshot.AssurancePolicy) || !ptrEq(cur.JITPolicy, snapshot.JITPolicy) {
+	if !ok {
 		return causeReconciliation, nil
 	}
 	return "", nil

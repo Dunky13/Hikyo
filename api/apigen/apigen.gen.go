@@ -2019,20 +2019,6 @@ func (response OidcStart200JSONResponse) VisitOidcStartResponse(w http.ResponseW
 	return err
 }
 
-type OidcStart400JSONResponse struct{ BadRequestJSONResponse }
-
-func (response OidcStart400JSONResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type OidcStart401JSONResponse struct{ UnauthenticatedJSONResponse }
 
 func (response OidcStart401JSONResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
@@ -2043,20 +2029,6 @@ func (response OidcStart401JSONResponse) VisitOidcStartResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type OidcStart404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response OidcStart404JSONResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }

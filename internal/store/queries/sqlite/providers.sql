@@ -41,3 +41,16 @@ WHERE id = ? AND row_version = ?;
 -- wenv:authn-resolution
 -- name: DeleteOIDCProvider :exec
 DELETE FROM oidc_providers WHERE id = ?;
+
+-- A phase-C mint (login/link/reauth) guards the pinned provider row against a
+-- concurrent reconfigure: a no-op CAS that takes the row lock. 0 rows affected
+-- means the provider was disabled, deleted, re-issued or row_version-bumped
+-- since Phase A, so the mint must refuse (the A4 sweep always wins the TOCTOU).
+-- A matching row takes the lock, so a concurrent provider-change UPDATE
+-- serializes behind it (and vice-versa: whichever commits first, the other's
+-- guard sees the bumped row_version and fails). The no-op never bumps
+-- row_version, so it never spuriously fails an administrator's reconfigure CAS.
+-- wenv:authn-resolution
+-- name: GuardOIDCProviderForMint :execrows
+UPDATE oidc_providers SET row_version = row_version
+WHERE id = ? AND row_version = ? AND issuer = ? AND enabled = 1;
