@@ -1,0 +1,141 @@
+-- +goose Up
+-- Factors and the account-security surface (#54, human-auth ADR — TOTP,
+-- recovery codes, reauthentication windows, browser sessions). Roll-forward
+-- only: no Down section by policy.
+--
+-- Every table here is `class=authn`, for the same reason 00005's are: the
+-- artifacts that decide who a caller is and how strongly they authenticated
+-- are resolved on the proof-free surface, because the proof is what that
+-- answer produces.
+--
+-- wenv:table totp_credentials class=authn chain=-
+-- wenv:table totp_challenges class=authn chain=-
+-- wenv:table recovery_codes class=authn chain=-
+-- wenv:table reauth_windows class=authn chain=-
+
+-- Browser sessions carry a synchronizer CSRF token; CLI sessions do not (a
+-- cookie's attributes protect nothing on a non-browser client). The token is a
+-- fast-hash verifier of a high-entropy artifact, like the session value
+-- itself, returned once at mint and regenerated on rotation. The requirement
+-- to present it is a property of "the value arrived in the cookie", decided in
+-- the transport, never inferred from this row.
+ALTER TABLE sessions ADD COLUMN csrf_verifier BLOB;
+
+-- TOTP seed, envelope-encrypted under the instance DEK (#14 placed MFA seeds
+-- there). `confirmed_at` NULL means an enrolment that has proved nothing: an
+-- unconfirmed seed satisfies no code check. The partial unique index below
+-- keeps a pending enrolment from displacing a confirmed factor — a factor
+-- removal disguised as a start.
+--
+-- `last_step` is the single-use guard per (account, time step): a code is
+-- accepted only for a step strictly greater than the last consumed one within
+-- the skew window, and the step is written in the same transaction. It is
+-- floored at the row's creation step so re-enrolment with a kept seed cannot
+-- rewind it and re-admit a spent code.
+CREATE TABLE totp_credentials (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts (id),
+    seed BLOB NOT NULL,
+    dek_version INTEGER NOT NULL,
+    credential_epoch INTEGER NOT NULL,
+    row_version INTEGER NOT NULL,
+    last_step INTEGER NOT NULL,
+    created_step INTEGER NOT NULL,
+    confirmed_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- At most one confirmed TOTP factor per account; unconfirmed enrolments do not
+-- collide, so a start never destroys the standing factor.
+CREATE UNIQUE INDEX totp_confirmed_unique
+    ON totp_credentials (account_id)
+    WHERE confirmed_at IS NOT NULL;
+
+-- A purpose-bound single-use challenge for a TOTP code presentation. A code is
+-- six digits with no server-issued challenge of its own, so the binding the
+-- account-security and reauth rules require — "this code authorizes THIS
+-- operation and nothing else" — lives here: the server commits to the purpose
+-- (and, for reauth, the enumerated unit) before the user is asked for a code.
+CREATE TABLE totp_challenges (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL REFERENCES accounts (id),
+    session_id TEXT,
+    purpose TEXT NOT NULL CHECK (purpose IN ('step-up', 'reauth', 'account-security')),
+    operation_binding TEXT,
+    environment_id TEXT,
+    credential_epoch INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    -- reauth binds the enumerated unit; account-security binds the acting
+    -- session so a proof cannot be produced without one.
+    CHECK (purpose <> 'reauth' OR operation_binding IS NOT NULL),
+    CHECK (purpose <> 'account-security' OR session_id IS NOT NULL)
+);
+
+-- Recovery codes: single-use, >=128-bit each, hashed, the batch as a whole
+-- envelope-encrypted. Regeneration replaces the batch atomically (CAS on
+-- row_version), invalidating the previous one. A batch at a superseded epoch
+-- is inert like any other restored artifact.
+CREATE TABLE recovery_codes (
+    account_id TEXT PRIMARY KEY REFERENCES accounts (id),
+    batch BLOB NOT NULL,
+    dek_version INTEGER NOT NULL,
+    credential_epoch INTEGER NOT NULL,
+    row_version INTEGER NOT NULL,
+    generated_at TEXT NOT NULL
+);
+
+-- A reauthentication window over one environment, opened by a possession-factor
+-- ceremony and consulted at the disclosure chokepoint. Two clocks: the sliding
+-- window (refreshed per disclosure) and the hard cap (measured from the
+-- ceremony, never extended). `single_decision` marks a window that a 0-window
+-- WebAuthn ceremony opened for exactly one enumerated unit — `consumed_at`
+-- claims it, so it cannot authorize a second decision.
+--
+-- Keyed by session, never by principal: a dead session's window must never
+-- answer for a fresh one, which is what "never inherits prior windows" means.
+CREATE TABLE reauth_windows (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+    environment_id TEXT NOT NULL,
+    ceremony_id TEXT NOT NULL,
+    factor_class TEXT NOT NULL CHECK (factor_class IN ('webauthn', 'totp', 'oidc')),
+    single_decision INTEGER NOT NULL,
+    authenticated_at TEXT NOT NULL,
+    window_expires_at TEXT NOT NULL,
+    hard_expires_at TEXT NOT NULL,
+    credential_epoch INTEGER NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (session_id, environment_id)
+);
+
+-- Rebuild credential_authorities to (a) admit recovery-code consumption as a
+-- fourth, differently-shaped issuer, and (b) record which credential kind an
+-- authority may establish. The recovery issuer may only ever establish a
+-- password: a stolen recovery sheet must not be able to enrol a possession
+-- factor and thereby manufacture multi-factor assurance. sqlite cannot alter a
+-- CHECK, so the table is recreated and its rows carried across.
+CREATE TABLE credential_authorities_new (
+    id TEXT PRIMARY KEY,
+    verifier BLOB NOT NULL UNIQUE,
+    account_id TEXT NOT NULL REFERENCES accounts (id),
+    purpose TEXT NOT NULL CHECK (purpose IN ('establish-credential')),
+    issued_by TEXT NOT NULL CHECK (issued_by IN ('bootstrap', 'credential-reset', 'break-glass', 'recovery')),
+    established_credential_kind TEXT NOT NULL DEFAULT 'password' CHECK (established_credential_kind IN ('password')),
+    credential_epoch INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    CHECK (issued_by <> 'recovery' OR established_credential_kind = 'password')
+);
+
+INSERT INTO credential_authorities_new
+    (id, verifier, account_id, purpose, issued_by, credential_epoch, expires_at, consumed_at, created_at)
+SELECT id, verifier, account_id, purpose, issued_by, credential_epoch, expires_at, consumed_at, created_at
+FROM credential_authorities;
+
+DROP TABLE credential_authorities;
+
+ALTER TABLE credential_authorities_new RENAME TO credential_authorities;

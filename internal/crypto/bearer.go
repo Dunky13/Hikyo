@@ -36,6 +36,26 @@ const (
 	ArtifactCLISession ArtifactType = "cli"
 	// ArtifactBootstrap is a credential-establishment authority.
 	ArtifactBootstrap ArtifactType = "bs"
+	// ArtifactBrowserSession is a human browser session, carried in the
+	// `__Host-wenv` cookie — a distinct artifact type with its own lifetime
+	// and revocation surface, listed separately from CLI sessions.
+	ArtifactBrowserSession ArtifactType = "br"
+	// ArtifactRecoveryCode is a single-use recovery code. The grammar buys
+	// the audit redaction filter and offline checksum validation; the batch
+	// is stored as hashes sealed under the instance DEK.
+	ArtifactRecoveryCode ArtifactType = "rc"
+	// ArtifactOIDCState is the `state` value of an OIDC transaction; the row
+	// it resolves to holds the transaction record, and the value crosses the
+	// IdP redirect, so it carries full artifact entropy and redacts like any
+	// other bearer value.
+	ArtifactOIDCState ArtifactType = "st"
+	// ArtifactOIDCBinding is the browser-binding cookie value minted at an
+	// anonymous OIDC start — the callback must present it before the
+	// transaction is consumed, closing forced-login/fixation.
+	ArtifactOIDCBinding ArtifactType = "ob"
+	// ArtifactCSRF is the synchronizer token bound to a browser session,
+	// required on state-changing cookie-authenticated requests.
+	ArtifactCSRF ArtifactType = "cs"
 )
 
 // artifactFormatVersion is the grammar's `version` field. It exists so a

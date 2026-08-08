@@ -7,8 +7,12 @@
 # request cannot reach a handler as `any` and a response cannot be written
 # without passing through the generated type. That is the parse-don't-cast
 # rule expressed in the transport layer.
+# Output is repo-root-relative: the documented regeneration command runs from
+# the repo root (`go tool oapi-codegen --config api/oapi-codegen.yaml
+# api/openapi.yaml`), and a bare `apigen/` path silently wrote a stray
+# duplicate at the root instead of the live package.
 package: apigen
-output: apigen/apigen.gen.go
+output: api/apigen/apigen.gen.go
 generate:
   models: true
   chi-server: true
