@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Dunky13/wenv/internal/admission"
@@ -86,6 +87,13 @@ type Auth struct {
 	// unreadable verifier answers the uniform refusal, and the reason it was
 	// unreadable belongs in the process log and nowhere else.
 	Log *slog.Logger
+
+	// dummyRecoverySealed is a batch sealed once and opened on every
+	// non-matching recovery path, so a miss costs the same envelope decrypt +
+	// JSON decode + set scan as a hit — the recovery analogue of the login
+	// dummy verifier, closing the account/batch existence timing oracle.
+	dummyRecoveryOnce   sync.Once
+	dummyRecoverySealed []byte
 }
 
 func (s *Auth) now() time.Time {

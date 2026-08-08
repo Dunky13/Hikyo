@@ -160,6 +160,9 @@ var wireEvents = map[string][]audit.EventType{
 	},
 	"http:POST /api/v1/auth/recovery/begin": {
 		audit.EventAuthRecoveryCodeConsumed,
+		// A successful consume mints a recovery-issued credential-establishment
+		// authority; the authority coming into existence is its own record.
+		audit.EventAuthAuthorityMinted,
 		// Pre-auth like login: a crossed per-account backoff threshold is its
 		// own event, emitted directly by recordThrottleCrossing.
 		audit.EventAuthThrottleCrossed,

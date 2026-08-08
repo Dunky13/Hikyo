@@ -230,8 +230,8 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"authority_id": {Kind: KindString, Required: true},
 			"account_id":   {Kind: KindString, Required: true},
-			"issued_by":    {Kind: KindString, Required: true}, // bootstrap | credential-reset | break-glass
-			"delivery":     {Kind: KindString, Required: true}, // file | terminal
+			"issued_by":    {Kind: KindString, Required: true}, // bootstrap | credential-reset | break-glass | recovery
+			"delivery":     {Kind: KindString, Required: true}, // file | terminal | response
 		},
 	},
 	EventAuthCredentialEstablished: {

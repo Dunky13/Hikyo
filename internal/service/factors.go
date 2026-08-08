@@ -89,6 +89,53 @@ func (s *Auth) verifyPassword(ctx context.Context, accountID string, cred authz.
 	return ok
 }
 
+// enterFactorBudget applies LocalLogin's admission discipline to a
+// proof/validation ceremony on an already-authenticated account. The
+// per-account backoff is checked BEFORE the expensive-work semaphore, so a
+// backed-off account never occupies a slot while it sleeps; the key is the
+// canonical account id, never the session, because an attacker holding a stolen
+// session can open many and keying on the session would be bypassable. Both a
+// wrong password (Argon2, 64 MiB) and a wrong TOTP code go through here — the
+// first to bound resource exhaustion, the second to bound online brute force of
+// a six-digit code whose skew window admits roughly three valid values.
+func (s *Auth) enterFactorBudget(ctx context.Context, accountID string) (func(), error) {
+	if delay := s.Admission.AccountDelay(accountID); delay > 0 {
+		return nil, admission.ErrOverloaded
+	}
+	return s.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
+}
+
+// recordFactorFailure feeds a failed proof into the per-account backoff and, on
+// a threshold crossing, emits the throttle event. Per-attempt failures are NOT
+// individually audited: a durable write per attempt is the audit amplification
+// the threat model forbids under a flood, so — exactly as LocalLogin does — the
+// aggregated threshold crossing is the visibility, and the backoff is the
+// defence.
+func (s *Auth) recordFactorFailure(ctx context.Context, principal domain.PrincipalID, accountID string) {
+	if crossed := s.Admission.RecordFailure(accountID); crossed {
+		s.recordFactorThrottleCrossing(ctx, principal, accountID)
+	}
+}
+
+// recordFactorThrottleCrossing emits the throttle event for an authenticated
+// account whose backoff threshold was crossed. Best-effort for the caller — the
+// request is already refused — but never silent: a swallowed error would hide a
+// crossing nobody sees.
+func (s *Auth) recordFactorThrottleCrossing(ctx context.Context, principal domain.PrincipalID, accountID string) {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		e, err := newAuditEvent(ctx, audit.EventAuthThrottleCrossed, principal,
+			audit.Object{Type: "account", ID: accountID}, audit.OutcomeFailure, "",
+			audit.Payload{"scope": "account", "subject_resolved": true, "account_id": accountID})
+		if err != nil {
+			return err
+		}
+		return az.RecordAuthEvent(ctx, e)
+	})
+	if err != nil {
+		s.logFault(ctx, "recording a factor throttle threshold crossing failed", err, accountID)
+	}
+}
+
 // reissueSession is the write-phase half of every account-security mutation:
 // advance the generation, delete every session, and mint a fresh acting session
 // built SOLELY from the proof ceremony (finding B3) — one factor class, a fresh
@@ -194,10 +241,20 @@ func (s *Auth) EnrolTOTPStart(ctx context.Context, presented, password string) (
 		return "", err
 	}
 
+	// Admission: a stolen session must not be an unthrottled Argon2 oracle or a
+	// lever to exhaust the expensive-work budget.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	// Phase 2 — verify the password proof, outside any transaction.
 	if !s.verifyPassword(ctx, account.ID, cred, password) {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 		return "", domain.ErrUnauthenticated
 	}
+	s.Admission.RecordSuccess(account.ID)
 
 	// Seal the seed under the row it will own, so the id is minted first.
 	rawSeed, err := crypto.NewTOTPSeed()
@@ -285,6 +342,21 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 		return LoginResult{}, err
 	}
 
+	// A pending enrolment is bound to its start ceremony by a short expiry: an
+	// old seed cannot be completed indefinitely by a later session (finding
+	// HIGH-4). A password change between start and confirm additionally kills
+	// the session, which the write-phase re-authentication below catches.
+	if s.now().Sub(pending.CreatedAt) > AuthorityLifetime {
+		return LoginResult{}, ErrNoPendingTOTP
+	}
+
+	// Admission: bound online brute force of the confirming code.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer release()
+
 	// Phase 2 — verify the code against the sealed seed.
 	seed, err := s.Keyring.ForInstance().OpenField(totpSeedAAD(pending.ID), pending.Seed)
 	if err != nil {
@@ -294,21 +366,30 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 	step, ok := crypto.ValidateTOTP(seed, code, s.now(), crypto.TOTPSkewSteps)
 	crypto.Zero(seed)
 	if !ok {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
+	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — write: promote (single-use CAS), then reissue.
 	var result LoginResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		now := s.now()
-		live, err := az.PendingTOTP(ctx, account.ID)
-		if errors.Is(err, domain.ErrNotFound) {
-			return ErrNoPendingTOTP
-		}
+		// Re-authenticate inside the write tx: a session revoked between the
+		// phases (a concurrent recovery or password change) must not be able to
+		// complete the enrolment and reissue itself (finding HIGH-3).
+		live, err := az.Authenticate(ctx, presented, now)
 		if err != nil {
 			return err
 		}
-		promoted, err := az.ConfirmTOTP(ctx, live.ID, live.RowVersion, step, now)
+		if live.Principal != account.PrincipalID {
+			return domain.ErrUnauthenticated
+		}
+		// CAS on the row whose seed was VERIFIED, not a freshly read one: a
+		// concurrent start that cleared and re-inserted the pending row must not
+		// have its replacement promoted by a code proved against the old seed
+		// (finding HIGH-5). A mismatch fails the CAS and refuses.
+		promoted, err := az.ConfirmTOTP(ctx, pending.ID, pending.RowVersion, step, now)
 		if err != nil {
 			return err
 		}
@@ -369,15 +450,33 @@ func (s *Auth) RemoveTOTP(ctx context.Context, presented, password string) (Logi
 		return LoginResult{}, err
 	}
 
+	// Admission: a stolen session must not be an unthrottled Argon2 oracle.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer release()
+
 	// Phase 2 — verify the password proof, outside any transaction.
 	if !s.verifyPassword(ctx, account.ID, cred, password) {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
+	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — write.
 	var result LoginResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		now := s.now()
+		// Re-authenticate inside the write tx: a session revoked between the
+		// phases must not remove a factor and reissue itself (finding HIGH-3).
+		live, err := az.Authenticate(ctx, presented, now)
+		if err != nil {
+			return err
+		}
+		if live.Principal != account.PrincipalID {
+			return domain.ErrUnauthenticated
+		}
 		current, err := az.PasswordCredentialFor(ctx, account.ID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
@@ -446,6 +545,14 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 		return LoginResult{}, err
 	}
 
+	// Admission: bound online brute force of the six-digit code by an attacker
+	// holding a stolen session.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer release()
+
 	// Phase 2 — verify the code.
 	seed, err := s.Keyring.ForInstance().OpenField(totpSeedAAD(confirmed.ID), confirmed.Seed)
 	if err != nil {
@@ -455,8 +562,10 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 	step, ok := crypto.ValidateTOTP(seed, code, s.now(), crypto.TOTPSkewSteps)
 	crypto.Zero(seed)
 	if !ok {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
+	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — consume the step and rotate the acting session.
 	value, verifier, err := crypto.NewArtifact(crypto.ArtifactCLISession)
@@ -475,14 +584,16 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 		if err != nil {
 			return err
 		}
-		fresh, err := az.ConfirmedTOTP(ctx, account.ID)
-		if errors.Is(err, domain.ErrNotFound) {
+		if _, err := az.ConfirmedTOTP(ctx, account.ID); errors.Is(err, domain.ErrNotFound) {
 			return ErrNoTOTPFactor
-		}
-		if err != nil {
+		} else if err != nil {
 			return err
 		}
-		consumed, err := az.AdvanceTOTPStep(ctx, fresh.ID, fresh.RowVersion, step)
+		// CAS on the row whose seed was VERIFIED in phase 1, not a freshly read
+		// one, so a code proved against a since-removed-and-replaced factor
+		// cannot be applied to its successor (finding HIGH-5). A replacement row
+		// has a different id and fails the CAS.
+		consumed, err := az.AdvanceTOTPStep(ctx, confirmed.ID, confirmed.RowVersion, step)
 		if err != nil {
 			return err
 		}
@@ -584,6 +695,15 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 		return nil, LoginResult{}, err
 	}
 
+	// Admission: whether the proof is a password (Argon2) or a TOTP code, a
+	// stolen session must not make regeneration an unthrottled oracle — a bad
+	// proof here yields a fresh recovery batch, so it is a takeover primitive.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return nil, LoginResult{}, err
+	}
+	defer release()
+
 	// Phase 2 — verify the proof (Argon2 outside any tx for a password).
 	var proofClass string
 	var totpStep int64
@@ -598,14 +718,17 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 		totpStep, ok = crypto.ValidateTOTP(seed, proof, s.now(), crypto.TOTPSkewSteps)
 		crypto.Zero(seed)
 		if !ok {
+			s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 			return nil, LoginResult{}, domain.ErrUnauthenticated
 		}
 	} else {
 		proofClass = "password"
 		if !s.verifyPassword(ctx, account.ID, cred, proof) {
+			s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 			return nil, LoginResult{}, domain.ErrUnauthenticated
 		}
 	}
+	s.Admission.RecordSuccess(account.ID)
 
 	// Mint the batch and seal its verifiers.
 	codes, verifiers, err := crypto.GenerateRecoveryBatch(RecoveryBatchSize)
@@ -618,6 +741,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 		return nil, LoginResult{}, err
 	}
 	sealed, err := sealer.SealField(recoveryBatchAAD(account.ID), batchJSON)
+	crypto.Zero(batchJSON)
 	if err != nil {
 		return nil, LoginResult{}, err
 	}
@@ -626,19 +750,30 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 	var result LoginResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		now := s.now()
+		// Re-authenticate inside the write tx: a session revoked between the
+		// phases must not replace the owner's recovery batch and reissue itself
+		// (finding HIGH-3).
+		liveID, err := az.Authenticate(ctx, presented, now)
+		if err != nil {
+			return err
+		}
+		if liveID.Principal != account.PrincipalID {
+			return domain.ErrUnauthenticated
+		}
 		epoch, err := az.CredentialEpoch(ctx)
 		if err != nil {
 			return err
 		}
 		if hasTOTP {
-			fresh, err := az.ConfirmedTOTP(ctx, account.ID)
-			if err != nil {
+			if _, err := az.ConfirmedTOTP(ctx, account.ID); err != nil {
 				if errors.Is(err, domain.ErrNotFound) {
 					return domain.ErrUnauthenticated
 				}
 				return err
 			}
-			consumed, err := az.AdvanceTOTPStep(ctx, fresh.ID, fresh.RowVersion, totpStep)
+			// CAS on the row VERIFIED in phase 1 (finding HIGH-5): a code proved
+			// against a since-replaced factor must not consume its successor.
+			consumed, err := az.AdvanceTOTPStep(ctx, confirmed.ID, confirmed.RowVersion, totpStep)
 			if err != nil {
 				return err
 			}
@@ -751,6 +886,10 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		account, err = az.AccountByUsername(ctx, username)
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
+			// Equalise the read shape: an unknown subject still issues the batch
+			// lookup (against a fixed dummy id that resolves to nothing) so the
+			// query count does not distinguish it from a known one.
+			_, _ = az.RecoveryCodesFor(ctx, dummyRecoveryAccount)
 			return nil
 		case err != nil:
 			return err
@@ -776,22 +915,24 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 	matchIdx := -1
 	switch {
 	case !resolved:
-		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		s.burnRecoveryMatch(ctx, code)
 		cause = "unknown-subject"
 	case !haveBtch:
-		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		s.burnRecoveryMatch(ctx, code)
 		cause = "no-batch"
 	case batch.CredentialEpoch != epoch:
-		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		s.burnRecoveryMatch(ctx, code)
 		cause = "epoch-superseded"
 	default:
 		verifiers, oerr := s.openRecoveryBatch(ctx, account.ID, batch.Batch)
 		if oerr != nil {
-			crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+			s.burnRecoveryMatch(ctx, code)
 			cause = "batch-unreadable"
 			break
 		}
-		if matchIdx = crypto.MatchRecoveryCode(code, verifiers); matchIdx < 0 {
+		matchIdx = crypto.MatchRecoveryCode(code, verifiers)
+		zeroVerifiers(verifiers)
+		if matchIdx < 0 {
 			cause = "no-match"
 		}
 	}
@@ -849,6 +990,7 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		}
 		idx := crypto.MatchRecoveryCode(code, verifiers)
 		if idx < 0 {
+			zeroVerifiers(verifiers)
 			if ferr := s.failRecovery(ctx, az, now, account.ID, true, "no-match"); ferr != nil {
 				return ferr
 			}
@@ -857,6 +999,7 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		}
 		// Remove the consumed verifier and re-seal the remainder. The CAS is
 		// the single-use claim: a losing swap discards this authority (B22).
+		crypto.Zero(verifiers[idx])
 		remaining := append(verifiers[:idx:idx], verifiers[idx+1:]...)
 		batchJSON, err := json.Marshal(remaining)
 		if err != nil {
@@ -864,6 +1007,8 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		}
 		sealer := s.Keyring.ForInstance()
 		sealed, err := sealer.SealField(recoveryBatchAAD(account.ID), batchJSON)
+		crypto.Zero(batchJSON)
+		zeroVerifiers(remaining)
 		if err != nil {
 			return err
 		}
@@ -899,6 +1044,19 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		if err := az.RevokeAllSessionsFor(ctx, account.PrincipalID); err != nil {
 			return err
 		}
+		// The authority coming into existence is its own audit record, in the
+		// same transaction as the mint (finding MEDIUM-7): audit consumers that
+		// watch authority issuance must see the recovery-issued password-reset
+		// capability, delivered in the API response.
+		minted, err := newAuditEvent(ctx, audit.EventAuthAuthorityMinted, account.PrincipalID,
+			audit.Object{Type: "authority", ID: authorityID}, audit.OutcomeSuccess, "",
+			audit.Payload{"authority_id": authorityID, "account_id": account.ID, "issued_by": "recovery", "delivery": "response"})
+		if err != nil {
+			return err
+		}
+		if err := az.RecordAuthEvent(ctx, minted); err != nil {
+			return err
+		}
 		e, err := newAuditEvent(ctx, audit.EventAuthRecoveryCodeConsumed, account.PrincipalID,
 			audit.Object{Type: "account", ID: account.ID}, audit.OutcomeSuccess, "",
 			audit.Payload{"subject_resolved": true, "account_id": account.ID, "authority_id": authorityID})
@@ -928,7 +1086,9 @@ func (s *Auth) openRecoveryBatch(ctx context.Context, accountID string, sealed [
 		return nil, err
 	}
 	var verifiers [][]byte
-	if err := json.Unmarshal(plain, &verifiers); err != nil {
+	err = json.Unmarshal(plain, &verifiers)
+	crypto.Zero(plain)
+	if err != nil {
 		s.logFault(ctx, "recovery batch is unparseable", err, accountID)
 		return nil, err
 	}
@@ -953,14 +1113,65 @@ func (s *Auth) failRecovery(ctx context.Context, az *authz.TxAuthorizer, now tim
 	return az.RecordAuthEvent(ctx, e)
 }
 
-// dummyRecoveryVerifiers is a set the size of a real batch, scanned on every
-// non-matching path so the miss costs a match's set scan.
-// ponytail: best-effort timing parity — the envelope open on the hit path has
-// no dummy analogue, so this equalises the scan, not the whole operation.
+// dummyRecoveryAccount is the owner id the dummy batch is sealed under. Its
+// AAD must be stable so the cached blob opens on every call.
+const dummyRecoveryAccount = "dummy-recovery-account"
+
+// dummyRecoveryVerifiers is a set the size of a real batch, the fallback scan
+// when the cached dummy envelope is unavailable.
 func dummyRecoveryVerifiers() [][]byte {
 	out := make([][]byte, RecoveryBatchSize)
 	for i := range out {
 		out[i] = make([]byte, 32)
 	}
 	return out
+}
+
+// zeroVerifiers wipes a verifier set's backing bytes.
+func zeroVerifiers(vs [][]byte) {
+	for _, v := range vs {
+		crypto.Zero(v)
+	}
+}
+
+// burnRecoveryMatch performs the SAME envelope decrypt + JSON decode + set scan
+// a matching path performs, on a cached dummy batch, so a non-matching path
+// (unknown subject, absent batch, stale epoch, unreadable batch, wrong code) is
+// not distinguishable from a match by the dominant crypto cost (finding
+// MEDIUM-6). The batch is sealed once; if that ever fails the scan still runs
+// against an in-memory dummy so the path never becomes observably cheaper.
+func (s *Auth) burnRecoveryMatch(ctx context.Context, code string) {
+	s.dummyRecoveryOnce.Do(func() {
+		_, verifiers, err := crypto.GenerateRecoveryBatch(RecoveryBatchSize)
+		if err != nil {
+			return
+		}
+		j, err := json.Marshal(verifiers)
+		if err != nil {
+			return
+		}
+		sealed, serr := s.Keyring.ForInstance().SealField(recoveryBatchAAD(dummyRecoveryAccount), j)
+		crypto.Zero(j)
+		if serr != nil {
+			s.logFault(ctx, "sealing the dummy recovery batch failed", serr, "")
+			return
+		}
+		s.dummyRecoverySealed = sealed
+	})
+	if s.dummyRecoverySealed == nil {
+		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		return
+	}
+	plain, err := s.Keyring.ForInstance().OpenField(recoveryBatchAAD(dummyRecoveryAccount), s.dummyRecoverySealed)
+	if err != nil {
+		crypto.MatchRecoveryCode(code, dummyRecoveryVerifiers())
+		return
+	}
+	var verifiers [][]byte
+	if json.Unmarshal(plain, &verifiers) != nil {
+		verifiers = dummyRecoveryVerifiers()
+	}
+	crypto.Zero(plain)
+	crypto.MatchRecoveryCode(code, verifiers)
+	zeroVerifiers(verifiers)
 }
