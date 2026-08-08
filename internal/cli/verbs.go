@@ -91,6 +91,7 @@ accounts:
   wenv account passkey enrol|list|remove          browser-only; refused on the terminal
   wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
   wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
+  wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]
 
 contexts:
   wenv context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
@@ -412,7 +413,7 @@ func runWhoami(ctx context.Context, ios IO, args []string) error {
 // confirms or renames it before the freeze.
 func runAccount(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 {
-		return failf(ExitUsage, "usage: wenv account establish-credential|factor|recovery-codes|recovery ...")
+		return failf(ExitUsage, "usage: wenv account establish-credential|factor|passkey|recovery-codes|recovery|reset-credential ...")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -436,8 +437,8 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 // runResetCredential is the network administrator-issued reset: a credential-reset
 // holder mints a credential-establishment authority for a target, returned once
 // and transmitted out of band. An instance-capability target has no network path
-// and is refused (403) - break-glass only, via `wenv admin reset-credential` on
-// the host.
+// and is refused uniformly (like a nonexistent target, B2) - break-glass only,
+// via `wenv admin reset-credential` on the host.
 func runResetCredential(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return failf(ExitUsage, "usage: wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]")

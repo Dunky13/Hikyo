@@ -167,14 +167,15 @@ var wireRegistry = map[string]Class{
 // the completeness invariant reads this table beside the operation registry
 // rather than letting an unaudited pre-auth path hide behind "no operation".
 //
-// A wire entry that appears here and also reaches a registered operation is a
-// modelling mistake, and the completeness invariant says so — with one named
-// exception (#54): the credential-reset route below authorizes through a
-// registered operation, but WHICH operation is chosen at runtime from the
-// target's grant classification (org-bounded -> the org-scoped op at the target's
-// org; multi-org -> the instance op), so no single x-wenv-operation/wireRoutes
-// row can name it. Its writes and audit ride the resolution surface like the
-// account-security mutations, so it declares its event here.
+// Most wire entries are either operation-backed (wireRoutes) or declare their
+// events directly here (the authentication surface). The credential-reset route
+// (#54) is deliberately BOTH: it is listed in wireRoutes against the two
+// operations it dispatches between at runtime — so the operation linkage records
+// that it reaches CapCredentialReset (MFA-mandatory) — AND declares its events
+// here, because its writes and audit ride the resolution surface (like the
+// account-security mutations) rather than a single operation row. It names no
+// single x-wenv-operation in the contract, since two ops of different classes
+// cannot be carried by one row; the completeness invariant unions both sources.
 var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -302,25 +303,40 @@ var wireEvents = map[string][]audit.EventType{
 	"cli:admin": {audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued},
 }
 
-// wireRoutes maps an HTTP entry point to the registered operation it reaches.
+// wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
 // The audit-completeness invariant follows it so a domain route inherits its
 // operation's audit mapping instead of needing a second declaration that
-// could drift from the first.
-var wireRoutes = map[string]Operation{
-	"http:POST /api/v1/orgs":      OpOrgCreate,
-	"http:GET /api/v1/orgs":       OpOrgList,
-	"http:GET /api/v1/orgs/{org}": OpOrgGet,
+// could drift from the first. Most routes reach exactly one operation; a route
+// that dispatches at runtime between operations (credential reset) lists them
+// all, so the linkage records every operation the route can reach.
+var wireRoutes = map[string][]Operation{
+	"http:POST /api/v1/orgs":      {OpOrgCreate},
+	"http:GET /api/v1/orgs":       {OpOrgList},
+	"http:GET /api/v1/orgs/{org}": {OpOrgGet},
 
 	// OIDC provider administration (#54), instance-config.
-	"http:GET /api/v1/instance/oidc-providers":           OpProviderList,
-	"http:GET /api/v1/instance/oidc-providers/{slug}":    OpProviderGet,
-	"http:PUT /api/v1/instance/oidc-providers/{slug}":    OpProviderPut,
-	"http:DELETE /api/v1/instance/oidc-providers/{slug}": OpProviderDelete,
+	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},
+	"http:GET /api/v1/instance/oidc-providers/{slug}":    {OpProviderGet},
+	"http:PUT /api/v1/instance/oidc-providers/{slug}":    {OpProviderPut},
+	"http:DELETE /api/v1/instance/oidc-providers/{slug}": {OpProviderDelete},
+
+	// Credential reset (#54). ONE route dispatches at runtime between the
+	// org-scoped and instance-scoped credential-reset operations by the target's
+	// grant classification, resolved under the target-row lock inside the
+	// handler's tx. Both are mapped here so the operation linkage records that
+	// this route reaches CapCredentialReset (MFA-mandatory): the chokepoint —
+	// authorize(), which the service calls on the chosen op inside that tx —
+	// enforces capability + MFA + assurance. The route keeps its unauthenticated
+	// probe class (enumeration uniformity is its dominant contract, reinforced by
+	// B2's uniform refusal) and carries no single x-wenv-operation, since two ops
+	// of different classes cannot be named by one contract row; its audit events
+	// also ride wireEvents below.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": {OpCredentialReset, OpCredentialResetInstance},
 }
 
-// WireRoutes returns the route→operation mapping for the invariant tests and
+// WireRoutes returns the route→operation(s) mapping for the invariant tests and
 // the contract cross-check.
-func (RegistryFacts) WireRoutes() map[string]Operation {
+func (RegistryFacts) WireRoutes() map[string][]Operation {
 	return maps.Clone(wireRoutes)
 }
 

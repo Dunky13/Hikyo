@@ -94,10 +94,11 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 		}
 		_, exemptEntry := ex.Wire[entry]
 		events := wireEvents[entry]
-		if op, ok := facts.WireRoutes()[entry]; ok {
+		for _, op := range facts.WireRoutes()[entry] {
 			// A route that reaches a registered operation inherits that
 			// operation's audit mapping; declaring it twice is how the two
-			// declarations drift apart.
+			// declarations drift apart. A route that dispatches between several
+			// operations inherits from every one it can reach.
 			m, known := mappings[op]
 			if !known {
 				t.Errorf("wire entry %s names unregistered operation %q", entry, op)

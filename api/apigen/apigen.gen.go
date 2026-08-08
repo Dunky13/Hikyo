@@ -1879,20 +1879,6 @@ func (response ResetCredential401JSONResponse) VisitResetCredentialResponse(w ht
 	return err
 }
 
-type ResetCredential403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response ResetCredential403JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type ResetCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response ResetCredential429JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {

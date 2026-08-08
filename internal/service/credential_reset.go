@@ -26,17 +26,14 @@ import (
 // and revoke its sessions in one transaction — the recovery flow's shape, minus
 // self-service.
 
-var (
-	// ErrCredentialResetInstanceTarget refuses a NETWORK reset of a target holding
-	// an instance capability: there is no network reset path for such a target at
-	// all (ADR - Recovery), break-glass only. Named to a caller who has already
-	// been authorized to reset, so a non-holder learns nothing.
-	ErrCredentialResetInstanceTarget = errors.New(
-		"service: this account holds an instance capability and can be reset only by break-glass on the host")
-	// ErrNoResetTarget refuses a reset of a principal that is not a resettable
-	// human account (unknown, or a machine principal with no account).
-	ErrNoResetTarget = errors.New("service: no such account to reset")
-)
+// ErrNoResetTarget is the ONE uniform refusal for every network reset that must
+// not enumerate the target's grant shape: an unknown principal, a machine
+// principal with no account, and — collapsed here so it is indistinguishable on
+// the wire (B2) — a target holding an instance capability, which has no network
+// reset path at all (ADR - Recovery), break-glass only. The operator learns to
+// use break-glass from the docs, not from a differential response; the durable
+// audit still records the true cause (see stageResetRefusal).
+var ErrNoResetTarget = errors.New("service: no such account to reset")
 
 // ResetLifetime is the out-of-band credential-establishment window for an
 // administrator-issued or break-glass reset. Longer than the self-service
@@ -113,18 +110,21 @@ func (s *Auth) ResetCredential(ctx context.Context, actor Actor, targetPrincipal
 		}
 		org, instanceCap, orgCount := classifyResetTarget(grants)
 		if instanceCap {
-			// Instance-capability targets have no network path. Authorize the
-			// instance operation FIRST — a caller without credential-reset gets the
-			// uniform refusal (denial-captured) and learns nothing about the target
-			// — then audit and refuse by name to the holder the ADR's "refused by
-			// name" serves.
+			// Instance-capability targets have no network path — break-glass only,
+			// UNCONDITIONALLY, prior to and independent of the org-count branch (A3).
+			// Authorize the instance operation FIRST so a caller without
+			// credential-reset gets the uniform refusal (denial-captured) and learns
+			// nothing; a holder is then audited by cause and refused — but with the
+			// SAME uniform sentinel a nonexistent target returns (B2), so the wire
+			// response is a grant-shape oracle no longer. The true cause is durable
+			// in the trail.
 			if _, err := az.Authorize(ctx, caller, authz.OpCredentialResetInstance, domain.Scope{}); err != nil {
 				return err
 			}
 			if aerr := s.stageResetRefusal(ctx, az, caller.Principal, targetPrincipal, account.ID, causeInstanceTarget, now); aerr != nil {
 				return aerr
 			}
-			refused = ErrCredentialResetInstanceTarget
+			refused = ErrNoResetTarget
 			return nil
 		}
 		// Org-bounded (one org) → the org operation, satisfied by an org-scoped OR

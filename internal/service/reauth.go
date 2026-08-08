@@ -91,15 +91,22 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		}
 		return nil
 	}
-	// Sliding window: refresh the idle clock, capped at the hard cap. The liveness
-	// check above already authorized this decision; a losing CAS (row moved) means
-	// no refresh, never a refused disclosure.
+	// Sliding window: refresh the idle clock, capped at the hard cap. A losing
+	// CAS — the slide matches 0 rows because a concurrent LowerEffectiveWindow
+	// invalidation or a single-decision claim deleted/consumed the window between
+	// the liveness read above and this update — means the window this disclosure
+	// read is no longer live, so the disclosure fails closed rather than proceeding
+	// against an invalidated window (A1).
 	windowExpires := now.Add(s.ReauthWindow)
 	if windowExpires.After(w.HardExpiresAt) {
 		windowExpires = w.HardExpiresAt
 	}
-	if _, err := az.SlideReauthWindow(ctx, w.ID, windowExpires); err != nil {
+	slid, err := az.SlideReauthWindow(ctx, w.ID, windowExpires)
+	if err != nil {
 		return err
+	}
+	if !slid {
+		return ErrReauthWindowExpired
 	}
 	return nil
 }
@@ -121,6 +128,11 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 //
 // Stranded principals are computed only when newValue <= 0: at a smaller
 // non-zero window TOTP still opens a window, so no reveal holder is locked out.
+//
+// newValue is the SAME per-environment quantity effectiveReauthWindow resolves
+// for the window openers — this is the writer, that is the reader, one value —
+// so once #55 persists per-environment overrides, a lowering here is what
+// ReauthTOTP/OIDC read there; they cannot diverge onto the global window (A2).
 func (s *Auth) LowerEffectiveWindow(ctx context.Context, az *authz.TxAuthorizer, envID string, newValue time.Duration, now time.Time) ([]domain.PrincipalID, int, error) {
 	invalidated, err := az.InvalidateReauthWindowsForEnvironment(ctx, envID)
 	if err != nil {
@@ -162,6 +174,24 @@ func (s *Auth) LowerEffectiveWindow(ctx context.Context, az *authz.TxAuthorizer,
 	return stranded, int(invalidated), nil
 }
 
+// effectiveReauthWindow is the SINGLE source of an environment's effective
+// reauthentication window. Every window opener — ReauthTOTP, OIDC reauth and
+// ReauthPasskeyFinish (WebAuthn) — resolves it through here rather than reading
+// the global s.ReauthWindow directly, so an environment lowered by
+// LowerEffectiveWindow cannot be bypassed by a reader that consulted a different
+// window (A2). LowerEffectiveWindow's newValue is this same per-environment
+// quantity: one function, so the writer and the readers cannot diverge.
+//
+// No per-environment override storage exists yet — it is #55's project-settings
+// knob — so today this returns the instance default s.ReauthWindow, which itself
+// defaults to 0 (fail-closed: a 0 window has no TOTP/OIDC path, only WebAuthn).
+// #55 replaces this body with a locked per-environment read inside the passed
+// transaction; the ctx/az/environmentID are already threaded so that read is
+// consistent with the window the caller is about to open under the same lock.
+func (s *Auth) effectiveReauthWindow(_ context.Context, _ *authz.TxAuthorizer, _ string) (time.Duration, error) {
+	return s.ReauthWindow, nil
+}
+
 // ReauthTOTP opens a reauthentication window over one environment by presenting
 // a TOTP code, the possession-factor analog of OIDC reauth. Like OIDC, TOTP
 // cannot bind the challenge to the enumerated unit, so it opens a window only
@@ -180,6 +210,7 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		acting    authz.Identity
 		account   authz.Account
 		confirmed authz.TOTPCredential
+		effWin    time.Duration
 	)
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, err := az.Authenticate(ctx, presented, s.now())
@@ -195,6 +226,10 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		if errors.Is(err, domain.ErrNotFound) {
 			return ErrNoTOTPFactor
 		}
+		if err != nil {
+			return err
+		}
+		effWin, err = s.effectiveReauthWindow(ctx, az, environmentID)
 		return err
 	})
 	if err != nil {
@@ -203,7 +238,9 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 
 	// Refuse at a 0 effective window BEFORE consuming any code: TOTP cannot supply
 	// a per-operation gate, so a 0 window has no TOTP path (ADR - Reauthentication).
-	if s.ReauthWindow <= 0 {
+	// The environment's effective window is resolved through the one seam, never
+	// the global (A2), so a lowered environment is honoured here.
+	if effWin <= 0 {
 		return ReauthResult{}, ErrReauthWindowClosed
 	}
 
@@ -238,11 +275,6 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		return ReauthResult{}, err
 	}
 	now := s.now()
-	hardCap := s.ReauthHardCap
-	if hardCap <= 0 {
-		hardCap = s.ReauthWindow
-	}
-	windowExpires := now.Add(s.ReauthWindow)
 	var out ReauthResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		// Re-authenticate inside the write tx: a revoked session may not open a
@@ -259,6 +291,26 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		epoch, err := az.CredentialEpoch(ctx)
 		if err != nil {
 			return err
+		}
+		// Resolve the environment's effective window authoritatively inside the
+		// window-opening tx, through the one seam #55 will make a locked per-env
+		// read, and fail closed at <= 0 (A2). The idle window is derived from that
+		// value and clamped by the hard cap.
+		effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
+		if err != nil {
+			return err
+		}
+		if effWin <= 0 {
+			return ErrReauthWindowClosed
+		}
+		hardCap := s.ReauthHardCap
+		if hardCap <= 0 {
+			hardCap = effWin
+		}
+		hardExpires := now.Add(hardCap)
+		windowExpires := now.Add(effWin)
+		if windowExpires.After(hardExpires) {
+			windowExpires = hardExpires
 		}
 		// CAS on the row whose seed was verified in phase 1, so a code proved
 		// against a since-replaced factor cannot apply to its successor.
@@ -283,7 +335,7 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 			// ConsumeReauthWindow never resolves it as a ceremony for unit matching.
 			ID: windowID, SessionID: live.SessionID, EnvironmentID: environmentID,
 			CeremonyID: confirmed.ID, FactorClass: "totp", SingleDecision: false,
-			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: now.Add(hardCap),
+			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
 			CredentialEpoch: epoch, CreatedAt: now,
 		}); err != nil {
 			return err

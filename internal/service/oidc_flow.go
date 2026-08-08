@@ -745,7 +745,14 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		if authz.AssuranceRank(id.Assurance) > authz.AssuranceRank(evidence) {
 			return reject(causeDowngrade)
 		}
-		if s.ReauthWindow <= 0 {
+		// The environment's effective window is resolved through the one seam,
+		// never the global s.ReauthWindow directly (A2), so a lowered environment
+		// is honoured on the OIDC path exactly as on the TOTP path.
+		effWin, e := s.effectiveReauthWindow(ctx, az, txn.EnvironmentID)
+		if e != nil {
+			return e
+		}
+		if effWin <= 0 {
 			// A 0-window gate requires WebAuthn: OIDC cannot bind the enumerated
 			// unit, so it opens nothing here (B18). Refuse naming the remedy.
 			refused = ErrReauthWindowClosed
@@ -774,12 +781,17 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		}
 		hardCap := s.ReauthHardCap
 		if hardCap <= 0 {
-			hardCap = s.ReauthWindow
+			hardCap = effWin
+		}
+		hardExpires := now.Add(hardCap)
+		windowExpires := now.Add(effWin)
+		if windowExpires.After(hardExpires) {
+			windowExpires = hardExpires
 		}
 		if e := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
 			ID: windowID, SessionID: id.SessionID, EnvironmentID: txn.EnvironmentID, CeremonyID: txn.ID,
-			FactorClass: "oidc", AuthenticatedAt: now, WindowExpiresAt: now.Add(s.ReauthWindow),
-			HardExpiresAt: now.Add(hardCap), CredentialEpoch: epoch, CreatedAt: now,
+			FactorClass: "oidc", AuthenticatedAt: now, WindowExpiresAt: windowExpires,
+			HardExpiresAt: hardExpires, CredentialEpoch: epoch, CreatedAt: now,
 		}); e != nil {
 			return e
 		}

@@ -29,3 +29,21 @@ func LocklessWriter(ctx context.Context, q *sqlitegen.Queries, p sqlitegen.Inser
 func GrantReadIsFine(ctx context.Context, q *sqlitegen.Queries, id string) ([]sqlitegen.ListGrantsForPrincipalRow, error) {
 	return q.ListGrantsForPrincipal(ctx, id)
 }
+
+// fakeLocker carries a method spelled exactly like the real principal-row lock
+// but belonging to an unrelated type, so it resolves outside the lock-definer
+// packages.
+type fakeLocker struct{}
+
+func (fakeLocker) LockPrincipalRow(ctx context.Context, id string) error { return nil }
+
+// DecoyLockWriter takes a lock spelled `LockPrincipalRow` that is NOT the real
+// lock (a same-named method on an unrelated type). A bare-name match would
+// wrongly clear it; the type-resolved check must still flag it, proving the
+// A5 hardening closes the "any selector merely named LockPrincipalRow" bypass.
+func DecoyLockWriter(ctx context.Context, q *sqlitegen.Queries, l fakeLocker, p sqlitegen.InsertGrantParams) error {
+	if err := l.LockPrincipalRow(ctx, "x"); err != nil {
+		return err
+	}
+	return q.InsertGrant(ctx, p)
+}

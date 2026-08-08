@@ -784,10 +784,14 @@ paths:
         org-bounded test is evaluated in one serializable transaction with the
         target's grant set (a concurrent grant landing conflicts with the
         in-flight reset). A target holding an instance capability has no network
-        reset path and is refused by name — break-glass only. This route
-        dispatches between the org-scoped and instance-scoped credential-reset
-        operations by that classification, so it names no single x-wenv-operation;
-        every failure that could enumerate the target answers a uniform `401`.
+        reset path at all — break-glass only. This route dispatches between the
+        org-scoped and instance-scoped credential-reset operations by that
+        classification. Every failure that could enumerate the
+        target — an unknown or non-human principal, a caller lacking
+        credential-reset, an org-P holder reaching an org-O target, and a target
+        holding an instance capability (break-glass only) — answers a single
+        uniform `401`; the true cause is durable in the audit trail, never on the
+        wire.
       x-wenv-class: unauthenticated
       x-wenv-artifacts: [human-session]
       x-wenv-min-revision: 1
@@ -800,8 +804,6 @@ paths:
                 $ref: "#/components/schemas/CredentialResetResult"
         "401":
           $ref: "#/components/responses/Unauthenticated"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":

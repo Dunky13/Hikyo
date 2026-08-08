@@ -188,6 +188,56 @@ func runReauthConsumeSlidingHardCap(t *testing.T, db *store.DB) {
 	}
 }
 
+func TestReauthConsumeInvalidationFailsClosedSQLite(t *testing.T) {
+	runReauthConsumeInvalidationFailsClosed(t, seededDB(t, openSQLite))
+}
+func TestReauthConsumeInvalidationFailsClosedPostgres(t *testing.T) {
+	runReauthConsumeInvalidationFailsClosed(t, seededDB(t, openPostgres))
+}
+
+// runReauthConsumeInvalidationFailsClosed (A1): a disclosure that reads a live
+// sliding window but whose slide matches 0 rows — because a concurrent
+// LowerEffectiveWindow invalidation / single-decision claim landed between the
+// liveness read and the slide — must fail CLOSED, never proceeding against a
+// window the CAS could not refresh. Simulated deterministically on both engines
+// by marking the window consumed after it is opened: ReauthWindowFor has no
+// consumed_at filter, so the read succeeds and the liveness check passes, but the
+// slide's `consumed_at IS NULL` guard matches 0 rows — which the fix now refuses
+// (before the fix, the dropped rows-affected result let the disclosure proceed).
+func runReauthConsumeInvalidationFailsClosed(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	base := time.Now().UTC().Truncate(time.Second)
+	clk := base
+	auth.Now = func() time.Time { return clk }
+	auth.ReauthWindow = 5 * time.Minute
+	auth.ReauthHardCap = 10 * time.Minute
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
+	token = stepUpPasskey(t, auth, ctx, token, dev)
+
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	if err != nil {
+		t.Fatalf("reauth start: %v", err)
+	}
+	rresp, err := dev.Assert(ropts)
+	if err != nil {
+		t.Fatalf("device assert: %v", err)
+	}
+	if _, err := auth.ReauthPasskeyFinish(ctx, token, rresp); err != nil {
+		t.Fatalf("reauth finish: %v", err)
+	}
+	sessionID := queryString(t, db, "SELECT session_id FROM reauth_windows WHERE environment_id = 'env_prod'")
+
+	// A concurrent invalidation claims the window (consumed_at set) between the
+	// liveness read and the slide; the disclosure at +1m must refuse rather than
+	// succeed against a window the slide could not refresh.
+	execRaw(t, db, "UPDATE reauth_windows SET consumed_at = "+ts+" WHERE environment_id = 'env_prod'")
+	if err := consumeWindow(t, auth, db, sessionID, "env_prod", nil, base.Add(1*time.Minute)); !errors.Is(err, service.ErrReauthWindowExpired) {
+		t.Fatalf("disclosure whose slide lost the CAS: %v, want ErrReauthWindowExpired (fail closed)", err)
+	}
+}
+
 func TestReauthTOTPZeroWindowSQLite(t *testing.T) {
 	runReauthTOTPZeroWindow(t, seededDB(t, openSQLite))
 }
@@ -304,8 +354,8 @@ func TestCredentialResetNetworkPostgres(t *testing.T) {
 // runCredentialResetNetwork (ADR - Recovery): a stepped-up credential-reset
 // holder resets an org-bounded target over the network, minting a session-less
 // authority that establishes only a password; the target then logs in with it. An
-// instance-capability target has no network path and is refused by name, but
-// break-glass on the host reaches it. The org-bounded test runs under the target
+// instance-capability target has no network path and is refused uniformly (B2),
+// but break-glass on the host reaches it. The org-bounded test runs under the target
 // principal-row lock every grant writer also takes (B14, analyzer-enforced), so a
 // concurrent grant landing serializes against the reset.
 func runCredentialResetNetwork(t *testing.T, db *store.DB) {
@@ -357,12 +407,15 @@ func runCredentialResetNetwork(t *testing.T, db *store.DB) {
 		t.Error("the network reset was not audited as auth.credential_reset_issued")
 	}
 
-	// An instance-capability target has no network path: refused by name.
+	// An instance-capability target has no network path: refused UNIFORMLY (B2) —
+	// the same sentinel a nonexistent target returns, so a reset holder cannot
+	// probe which principals hold instance capabilities off a differential
+	// response. The true cause is durable in the trail (asserted below).
 	execRaw(t, db, "INSERT INTO principals (id, kind, created_at) VALUES ('usr_op', 'human', "+ts+")")
 	execRaw(t, db, "INSERT INTO accounts (id, principal_id, username, display_name, created_at) VALUES ('acc_op', 'usr_op', 'op', 'Operator', "+tsMicro+")")
 	execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_op_ic', 'usr_op', 'instance-config', NULL, NULL, NULL, "+ts+")")
-	if _, err := auth.ResetCredential(ctx, service.Bearer(adminToken), "usr_op", "response"); !errors.Is(err, service.ErrCredentialResetInstanceTarget) {
-		t.Fatalf("network reset of an instance-capability target: %v, want ErrCredentialResetInstanceTarget", err)
+	if _, err := auth.ResetCredential(ctx, service.Bearer(adminToken), "usr_op", "response"); !errors.Is(err, service.ErrNoResetTarget) {
+		t.Fatalf("network reset of an instance-capability target: %v, want the uniform ErrNoResetTarget", err)
 	}
 	// The refusal is audited (ADR - Recovery: failures are audited), by cause,
 	// while the wire stays uniform — the commit-then-refuse plumbing.
@@ -381,6 +434,49 @@ func runCredentialResetNetwork(t *testing.T, db *store.DB) {
 	}
 	if _, err := auth.LocalLogin(ctx, "op", opPassword); err != nil {
 		t.Fatalf("the operator cannot log in after break-glass: %v", err)
+	}
+}
+
+func TestCredentialResetMFAMandatorySQLite(t *testing.T) {
+	runCredentialResetMFAMandatory(t, seededDB(t, openSQLite))
+}
+func TestCredentialResetMFAMandatoryPostgres(t *testing.T) {
+	runCredentialResetMFAMandatory(t, seededDB(t, openPostgres))
+}
+
+// runCredentialResetMFAMandatory (B1/B3): the network reset route authorizes
+// through the credential-reset operations, so the chokepoint authorize() enforces
+// CapCredentialReset AND its MFA-mandatory rule — not merely the handler's manual
+// dispatch. A holder on a single-factor (password-only) session is refused, no
+// authority is minted, and the refusal is cause-audited as a grant denial naming
+// the credential-reset operation: uniform on the wire (mapped to 401), detailed
+// in the trail.
+func runCredentialResetMFAMandatory(t *testing.T, db *store.DB) {
+	auth, _, password := bootstrapFactorAdmin(t, db)
+	ctx := t.Context()
+
+	// An org-bounded target within org_a.
+	execRaw(t, db, "INSERT INTO principals (id, kind, created_at) VALUES ('usr_t2', 'human', "+ts+")")
+	execRaw(t, db, "INSERT INTO accounts (id, principal_id, username, display_name, created_at) VALUES ('acc_t2', 'usr_t2', 'target2', 'Target Two', "+tsMicro+")")
+	execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_t2_rev', 'usr_t2', 'reveal', 'org_a', NULL, NULL, "+ts+")")
+
+	// The admin holds credential-reset (admin template) but logs in with the
+	// password alone — a single-factor session that the MFA-mandatory rule refuses.
+	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.ResetCredential(ctx, service.Bearer(login.SessionToken), "usr_t2", "response"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("single-factor credential reset: %v, want domain.ErrUnauthorized (MFA-mandatory at the chokepoint)", err)
+	}
+	// Cause-audited as a grant denial naming the credential-reset operation (B3);
+	// a resolvable org-scoped denial lands in the tenant trail.
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'grant.denied' AND payload LIKE '%credential-reset%'"); n != 1 {
+		t.Errorf("insufficient-MFA reset was not cause-audited as a grant denial (got %d)", n)
+	}
+	// No authority was minted for the refused reset.
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'auth.authority_minted'"); n != 0 {
+		t.Errorf("a refused reset minted an authority (got %d)", n)
 	}
 }
 

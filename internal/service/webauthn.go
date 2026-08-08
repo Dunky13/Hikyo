@@ -704,12 +704,20 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 		if err != nil {
 			return err
 		}
-		single := s.ReauthWindow <= 0
+		// The environment's effective window is resolved through the one seam, not
+		// the global s.ReauthWindow (A2): once #55 persists per-environment
+		// overrides, an env lowered to 0 opens the mandated single-decision gate
+		// here — never a sliding window — exactly as the TOTP/OIDC openers honour it.
+		effWin, err := s.effectiveReauthWindow(ctx, az, ceremony.EnvironmentID)
+		if err != nil {
+			return err
+		}
+		single := effWin <= 0
 		hardCap := s.ReauthHardCap
 		if hardCap <= 0 {
-			hardCap = s.ReauthWindow
+			hardCap = effWin
 		}
-		windowExpires := now.Add(s.ReauthWindow)
+		windowExpires := now.Add(effWin)
 		if single {
 			// A single-decision 0-window still needs a bounded life; the flag,
 			// not the clock, is what limits it to one decision (#7 consumes it).

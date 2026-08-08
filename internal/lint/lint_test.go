@@ -393,6 +393,9 @@ func TestGrantLockCatchesLocklessWriter(t *testing.T) {
 	findings := CheckGrantLockIn(pkgs, surface, writers, lockName)
 	assertFindings(t, findings, []string{
 		"LocklessWriter writes a grant table but does not take the LockPrincipalRow principal-row lock",
+		// The decoy proves the lock match is type-resolved, not name-only: a
+		// same-named LockPrincipalRow on an unrelated type does not satisfy it.
+		"DecoyLockWriter writes a grant table but does not take the LockPrincipalRow principal-row lock",
 	})
 	for _, f := range findings {
 		if strings.Contains(f, "LockedWriter") || strings.Contains(f, "GrantReadIsFine") {
