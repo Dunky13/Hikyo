@@ -38,6 +38,14 @@ SET display_name = ?, client_id = ?, client_secret = ?, scopes = ?,
     dek_version = ?, row_version = row_version + 1, updated_at = ?
 WHERE id = ? AND row_version = ?;
 
+-- Structural twin of the postgres lock: BEGIN IMMEDIATE already holds the
+-- database write lock for the whole delete tx, so a concurrent mint guard
+-- cannot interleave; this read confirms the row still exists (no-rows =>
+-- ErrProviderNotFound) and keeps the delete path identical across engines.
+-- wenv:authn-resolution
+-- name: LockOIDCProviderForDelete :one
+SELECT id FROM oidc_providers WHERE id = ?;
+
 -- wenv:authn-resolution
 -- name: DeleteOIDCProvider :exec
 DELETE FROM oidc_providers WHERE id = ?;

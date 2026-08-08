@@ -38,6 +38,15 @@ SET display_name = $1, client_id = $2, client_secret = $3, scopes = $4,
     dek_version = $9, row_version = row_version + 1, updated_at = $10
 WHERE id = $11 AND row_version = $12;
 
+-- Locks the provider row inside the delete tx so a concurrent Phase-C mint
+-- guard serializes behind it. Taken BEFORE the session sweep so the sweep runs
+-- with the row held: a mint that already committed is caught by the sweep, and
+-- a mint blocked on this lock finds the row gone once the delete commits. FOR
+-- UPDATE, so it is a lock, not just a read.
+-- wenv:authn-resolution
+-- name: LockOIDCProviderForDelete :one
+SELECT id FROM oidc_providers WHERE id = $1 FOR UPDATE;
+
 -- wenv:authn-resolution
 -- name: DeleteOIDCProvider :exec
 DELETE FROM oidc_providers WHERE id = $1;

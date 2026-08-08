@@ -123,4 +123,11 @@ CREATE TABLE oidc_transactions (
 -- issuer/client/assurance-policy change deletes sessions by this key, so a
 -- stale-assurance session cannot survive a policy narrowing. reauth_windows
 -- cascade from their session (00006), so the sweep reaches their windows too.
-ALTER TABLE sessions ADD COLUMN provider_id TEXT;
+-- ON DELETE CASCADE (A14) closes the provider-delete mint race: a session a
+-- concurrent Phase-C mint commits against a still-live provider is removed
+-- atomically when the provider row is deleted, even one the explicit sweep's
+-- snapshot could not see. Nullable: local/CLI sessions carry provider_id NULL,
+-- which the FK permits. The delete path also locks the provider row before
+-- sweeping so the ordering alone is race-safe under the serializable write tx.
+ALTER TABLE sessions ADD COLUMN provider_id TEXT
+    REFERENCES oidc_providers (id) ON DELETE CASCADE;

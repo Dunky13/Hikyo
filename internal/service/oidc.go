@@ -446,8 +446,10 @@ func (s *Providers) List(ctx context.Context, actor Actor) ([]ProviderView, erro
 	return out, err
 }
 
-// Delete removes a provider and sweeps its federated sessions (A4). The
-// transaction rows cascade (A14).
+// Delete removes a provider and sweeps its federated sessions (A4). Its
+// transaction rows and federated sessions cascade on the FK (A14); the sweep
+// runs after the provider row is locked so the count is accurate and no mint
+// can race the delete.
 func (s *Providers) Delete(ctx context.Context, actor Actor, slug string) error {
 	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, s.now())
@@ -463,6 +465,17 @@ func (s *Providers) Delete(ctx context.Context, actor Actor, slug string) error 
 			return ErrProviderNotFound
 		}
 		if err != nil {
+			return err
+		}
+		// Lock the provider row BEFORE sweeping, so the sweep runs with the row
+		// held: a concurrent Phase-C mint guard either already committed (the
+		// sweep then catches its session) or blocks on this lock and finds the
+		// row gone once we commit (mint refused). The FK cascade (A14) is the
+		// atomic backstop; this ordering keeps the sweep count accurate and is
+		// race-safe even if FK enforcement were off.
+		if err := az.LockProviderForDelete(ctx, prov.ID); errors.Is(err, domain.ErrNotFound) {
+			return ErrProviderNotFound
+		} else if err != nil {
 			return err
 		}
 		swept, err := az.SweepSessionsForProvider(ctx, prov.ID)

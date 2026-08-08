@@ -181,6 +181,23 @@ func (q *Queries) ListOIDCProviders(ctx context.Context) ([]OidcProvider, error)
 	return items, nil
 }
 
+const lockOIDCProviderForDelete = `-- name: LockOIDCProviderForDelete :one
+SELECT id FROM oidc_providers WHERE id = $1 FOR UPDATE
+`
+
+// Locks the provider row inside the delete tx so a concurrent Phase-C mint
+// guard serializes behind it. Taken BEFORE the session sweep so the sweep runs
+// with the row held: a mint that already committed is caught by the sweep, and
+// a mint blocked on this lock finds the row gone once the delete commits. FOR
+// UPDATE, so it is a lock, not just a read.
+// wenv:authn-resolution
+func (q *Queries) LockOIDCProviderForDelete(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, lockOIDCProviderForDelete, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const updateOIDCProviderCAS = `-- name: UpdateOIDCProviderCAS :execrows
 UPDATE oidc_providers
 SET display_name = $1, client_id = $2, client_secret = $3, scopes = $4,

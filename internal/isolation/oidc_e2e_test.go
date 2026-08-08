@@ -809,6 +809,104 @@ func TestOIDCLoginProviderRacePostgres(t *testing.T) {
 	runOIDCLoginProviderRace(t, seededDB(t, openPostgres))
 }
 
+// runOIDCLoginProviderDeleteRace: deleting a provider during a login's code
+// exchange (Phase B) must refuse the Phase-C mint AND leave no session
+// referencing the deleted provider. The delete locks the provider row before
+// sweeping, and the FK cascade (A14) is the atomic backstop, so a live
+// federated session and any raced mint are both gone once the provider is
+// deleted — a compromised provider cannot be deleted yet keep live sessions.
+func runOIDCLoginProviderDeleteRace(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, _ := oidcAdmin(t, db)
+	providers, idp := configureProvider(t, auth, ctx, admin, "race-del", service.ProviderInput{
+		DisplayName: "race-del", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		JITPolicy: strptr(`{"claim":"sub","values":["race-del-user"]}`), Enabled: true,
+	})
+	// A live federated session the mid-exchange delete's cascade must remove.
+	victim := oidcLogin(t, auth, ctx, "race-del", "race-del-user")
+	if _, err := auth.Identity(ctx, victim.SessionToken); err != nil {
+		t.Fatalf("federated session should be live before the race: %v", err)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM sessions WHERE provider_id IS NOT NULL"); n != 1 {
+		t.Fatalf("expected 1 federated session before the race, got %d", n)
+	}
+	// A second login for the same subject; during its exchange, delete the
+	// provider. The mint's guard then finds the row gone and refuses.
+	fired := false
+	idp.OnToken = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if err := providers.Delete(ctx, service.LocalPrincipal(admin), "race-del"); err != nil {
+			t.Errorf("mid-exchange provider Delete: %v", err)
+		}
+	}
+	before := oidcRefusedCount(t, db, "reconciliation")
+	start, err := auth.OIDCStart(ctx, "race-del", "login", "", "", "")
+	if err != nil {
+		t.Fatalf("login start: %v", err)
+	}
+	code, state := driveIdP(t, start.AuthURL+"&sub=race-del-user")
+	if _, err := auth.OIDCCallback(ctx, "race-del", code, state, "", "", start.BindingCookie, ""); !isUnauth(err) {
+		t.Fatalf("login racing a provider delete should refuse the mint: %v", err)
+	}
+	if oidcRefusedCount(t, db, "reconciliation") != before+1 {
+		t.Fatalf("login-delete-race refusal was not audited cause=reconciliation")
+	}
+	// The victim is gone and no session survives referencing the deleted provider.
+	if _, err := auth.Identity(ctx, victim.SessionToken); !isUnauth(err) {
+		t.Fatalf("federated session survived its provider's deletion: %v", err)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM sessions WHERE provider_id IS NOT NULL"); n != 0 {
+		t.Fatalf("expected 0 sessions after provider delete, got %d", n)
+	}
+}
+
+func TestOIDCLoginProviderDeleteRaceSQLite(t *testing.T) {
+	runOIDCLoginProviderDeleteRace(t, seededDB(t, openSQLite))
+}
+func TestOIDCLoginProviderDeleteRacePostgres(t *testing.T) {
+	runOIDCLoginProviderDeleteRace(t, seededDB(t, openPostgres))
+}
+
+// runOIDCProviderDeleteCascade proves the FK cascade (A14) is the atomic
+// backstop, not the service sweep: deleting the provider ROW directly (raw
+// SQL, bypassing SweepSessionsForProvider entirely) must still remove every
+// session referencing it. On sqlite this establishes that PRAGMA
+// foreign_keys=ON plus the ADD COLUMN ... REFERENCES ... ON DELETE CASCADE in
+// 00007 actually enforces the cascade. Without the FK edit this test fails.
+func runOIDCProviderDeleteCascade(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, admin, _ := oidcAdmin(t, db)
+	configureProvider(t, auth, ctx, admin, "cascade", service.ProviderInput{
+		DisplayName: "cascade", ClientID: "c", ClientSecret: "s", Scopes: "openid",
+		JITPolicy: strptr(`{"claim":"sub","values":["cascade-user"]}`), Enabled: true,
+	})
+	sess := oidcLogin(t, auth, ctx, "cascade", "cascade-user")
+	if _, err := auth.Identity(ctx, sess.SessionToken); err != nil {
+		t.Fatalf("federated session should be live: %v", err)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM sessions WHERE provider_id IS NOT NULL"); n != 1 {
+		t.Fatalf("expected 1 federated session, got %d", n)
+	}
+	// Delete the provider row directly, NOT via the service (no sweep runs).
+	execRaw(t, db, "DELETE FROM oidc_providers WHERE slug = 'cascade'")
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM sessions WHERE provider_id IS NOT NULL"); n != 0 {
+		t.Fatalf("FK cascade did not remove sessions on provider row delete, got %d", n)
+	}
+	if _, err := auth.Identity(ctx, sess.SessionToken); !isUnauth(err) {
+		t.Fatalf("session survived its provider's row deletion: %v", err)
+	}
+}
+
+func TestOIDCProviderDeleteCascadeSQLite(t *testing.T) {
+	runOIDCProviderDeleteCascade(t, seededDB(t, openSQLite))
+}
+func TestOIDCProviderDeleteCascadePostgres(t *testing.T) {
+	runOIDCProviderDeleteCascade(t, seededDB(t, openPostgres))
+}
+
 // runOIDCIATRejected: an ID token whose iat is in the future beyond the skew is
 // refused (A validation completeness), audited cause=signature.
 func runOIDCIATRejected(t *testing.T, db *store.DB) {

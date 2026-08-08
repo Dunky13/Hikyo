@@ -319,6 +319,12 @@
   },
   {
     "engine": "postgres",
+    "name": "LockOIDCProviderForDelete",
+    "annotation": "authn-resolution",
+    "hash": "4148d6fd0fa7a3ddb6a9b9676ae8c90c20de366ca4cbb14449d9e722edacbff8"
+  },
+  {
+    "engine": "postgres",
     "name": "ResolveEnvChain",
     "annotation": "authn-resolution",
     "hash": "5943f4da693ec42590ca76214112c8f8088d47f1175824e9c2a03d5a933ed199"
@@ -682,6 +688,12 @@
     "name": "ListOrgs",
     "annotation": "instance-scoped",
     "hash": "9337bcf28e615461de0c89def036bc4fa7ed06569eea5b7ea6720c117a2c979d"
+  },
+  {
+    "engine": "sqlite",
+    "name": "LockOIDCProviderForDelete",
+    "annotation": "authn-resolution",
+    "hash": "2385fd95516a831c8df536be0663443d9d1e9c8a454143c0858008f64275e2ce"
   },
   {
     "engine": "sqlite",

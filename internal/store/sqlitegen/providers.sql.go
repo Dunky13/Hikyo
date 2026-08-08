@@ -183,6 +183,22 @@ func (q *Queries) ListOIDCProviders(ctx context.Context) ([]OidcProvider, error)
 	return items, nil
 }
 
+const lockOIDCProviderForDelete = `-- name: LockOIDCProviderForDelete :one
+SELECT id FROM oidc_providers WHERE id = ?
+`
+
+// Structural twin of the postgres lock: BEGIN IMMEDIATE already holds the
+// database write lock for the whole delete tx, so a concurrent mint guard
+// cannot interleave; this read confirms the row still exists (no-rows =>
+// ErrProviderNotFound) and keeps the delete path identical across engines.
+// wenv:authn-resolution
+func (q *Queries) LockOIDCProviderForDelete(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockOIDCProviderForDelete, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const updateOIDCProviderCAS = `-- name: UpdateOIDCProviderCAS :execrows
 UPDATE oidc_providers
 SET display_name = ?, client_id = ?, client_secret = ?, scopes = ?,

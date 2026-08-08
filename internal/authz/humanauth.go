@@ -292,6 +292,13 @@ func (a *TxAuthorizer) UpdateProvider(ctx context.Context, u ProviderUpdate) (bo
 	return a.r.UpdateProvider(ctx, u)
 }
 
+// LockProviderForDelete locks the provider row inside the delete tx so the
+// session sweep runs with the row held and a concurrent mint guard serializes
+// behind it (A14). ErrNotFound means a concurrent delete already removed it.
+func (a *TxAuthorizer) LockProviderForDelete(ctx context.Context, id string) error {
+	return a.r.LockProviderForDelete(ctx, id)
+}
+
 // DeleteProvider removes a provider.
 func (a *TxAuthorizer) DeleteProvider(ctx context.Context, id string) error {
 	return a.r.DeleteProvider(ctx, id)

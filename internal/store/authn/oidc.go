@@ -221,7 +221,21 @@ func (r *Resolver) UpdateProvider(ctx context.Context, u ProviderUpdate) (bool, 
 	return n == 1, err
 }
 
-// DeleteProvider removes a provider. Its transactions cascade (A14).
+// LockProviderForDelete takes the provider row lock inside the delete tx so a
+// concurrent Phase-C mint guard serializes behind it. Called before the session
+// sweep so the sweep runs with the row held (A14). ErrNotFound means the row is
+// already gone (a concurrent delete won).
+func (r *Resolver) LockProviderForDelete(ctx context.Context, id string) error {
+	if r.sq != nil {
+		_, err := r.sq.LockOIDCProviderForDelete(ctx, id)
+		return notFoundOr(err)
+	}
+	_, err := r.pg.LockOIDCProviderForDelete(ctx, id)
+	return notFoundOr(err)
+}
+
+// DeleteProvider removes a provider. Its transactions and federated sessions
+// cascade (A14).
 func (r *Resolver) DeleteProvider(ctx context.Context, id string) error {
 	if r.sq != nil {
 		return r.sq.DeleteOIDCProvider(ctx, id)
