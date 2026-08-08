@@ -9,11 +9,12 @@ import (
 )
 
 type Account struct {
-	ID          string
-	PrincipalID string
-	Username    string
-	DisplayName string
-	CreatedAt   pgtype.Timestamptz
+	ID                 string
+	PrincipalID        string
+	Username           string
+	DisplayName        string
+	CreatedAt          pgtype.Timestamptz
+	WebauthnUserHandle []byte
 }
 
 type AuditInstanceEvent struct {
@@ -281,4 +282,39 @@ type TotpCredential struct {
 	CreatedStep     int64
 	ConfirmedAt     pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
+}
+
+type WebauthnCeremony struct {
+	ID                string
+	ChallengeVerifier []byte
+	SessionData       []byte
+	AccountID         pgtype.Text
+	SessionID         pgtype.Text
+	Purpose           string
+	OperationBinding  pgtype.Text
+	EnvironmentID     pgtype.Text
+	CredentialID      pgtype.Text
+	CredentialEpoch   int64
+	ExpiresAt         pgtype.Timestamptz
+	ConsumedAt        pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+}
+
+type WebauthnCredential struct {
+	ID              string
+	AccountID       string
+	CredentialID    []byte
+	PublicKey       []byte
+	Aaguid          []byte
+	SignCount       int64
+	Transports      string
+	Discoverable    int64
+	BackupEligible  int64
+	BackupState     int64
+	Label           string
+	CredentialEpoch int64
+	RowVersion      int64
+	DisabledAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
 }

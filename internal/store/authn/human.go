@@ -166,13 +166,13 @@ func (r *Resolver) AccountByUsername(ctx context.Context, username string) (Acco
 		if err != nil {
 			return Account{}, notFoundOr(err)
 		}
-		return sqliteAccount(row)
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
 	}
 	row, err := r.pg.GetAccountByUsername(ctx, username)
 	if err != nil {
 		return Account{}, notFoundOr(err)
 	}
-	return pgAccount(row), nil
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
 }
 
 // AccountByID resolves an account for the whoami and reset paths.
@@ -182,13 +182,13 @@ func (r *Resolver) AccountByID(ctx context.Context, id string) (Account, error) 
 		if err != nil {
 			return Account{}, notFoundOr(err)
 		}
-		return sqliteAccount(row)
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
 	}
 	row, err := r.pg.GetAccountByID(ctx, id)
 	if err != nil {
 		return Account{}, notFoundOr(err)
 	}
-	return pgAccount(row), nil
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
 }
 
 // AccountByPrincipal resolves the account a session's principal owns — the
@@ -201,13 +201,13 @@ func (r *Resolver) AccountByPrincipal(ctx context.Context, p domain.PrincipalID)
 		if err != nil {
 			return Account{}, notFoundOr(err)
 		}
-		return sqliteAccount(row)
+		return sqliteAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt)
 	}
 	row, err := r.pg.GetAccountByPrincipal(ctx, string(p))
 	if err != nil {
 		return Account{}, notFoundOr(err)
 	}
-	return pgAccount(row), nil
+	return pgAccount(row.ID, row.PrincipalID, row.Username, row.DisplayName, row.CreatedAt.Time), nil
 }
 
 // AccountCount answers the bootstrap path's one question: is this a fresh
@@ -521,21 +521,26 @@ func pgText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}
 }
 
-func sqliteAccount(row sqlitegen.Account) (Account, error) {
-	created, err := decodeTime(row.CreatedAt)
+// sqliteAccount and pgAccount build an Account from the five columns every
+// account read selects. They take scalars rather than a row type because the
+// accounts table gained webauthn_user_handle (#54): sqlc now emits a distinct
+// Row type per query instead of the shared model, and a scalar signature reads
+// them all.
+func sqliteAccount(id, principalID, username, displayName, createdAt string) (Account, error) {
+	created, err := decodeTime(createdAt)
 	if err != nil {
 		return Account{}, err
 	}
 	return Account{
-		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID),
-		Username: row.Username, DisplayName: row.DisplayName, CreatedAt: created,
+		ID: id, PrincipalID: domain.PrincipalID(principalID),
+		Username: username, DisplayName: displayName, CreatedAt: created,
 	}, nil
 }
 
-func pgAccount(row pggen.Account) Account {
+func pgAccount(id, principalID, username, displayName string, createdAt time.Time) Account {
 	return Account{
-		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID),
-		Username: row.Username, DisplayName: row.DisplayName, CreatedAt: row.CreatedAt.Time,
+		ID: id, PrincipalID: domain.PrincipalID(principalID),
+		Username: username, DisplayName: displayName, CreatedAt: createdAt,
 	}
 }
 

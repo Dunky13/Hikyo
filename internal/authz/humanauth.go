@@ -367,6 +367,98 @@ func (a *TxAuthorizer) OpenReauthWindow(ctx context.Context, w NewReauthWindow) 
 	return a.r.CreateReauthWindow(ctx, w)
 }
 
+// WebAuthn seam (#54). Passkey enrolment, discoverable login, step-up, reauth
+// and removal reach the resolution surface through the same in-transaction
+// authorizer as the OIDC and factor writers: they mutate the artifacts that
+// decide who a caller is and how strongly they authenticated.
+
+// WebAuthnCredential is a resolved registered passkey.
+type WebAuthnCredential = authn.WebAuthnCredential
+
+// NewWebAuthnCredential is the passkey insert carrier.
+type NewWebAuthnCredential = authn.NewWebAuthnCredential
+
+// WebAuthnCeremony is a resolved ceremony row.
+type WebAuthnCeremony = authn.WebAuthnCeremony
+
+// NewWebAuthnCeremony is the ceremony insert carrier.
+type NewWebAuthnCeremony = authn.NewWebAuthnCeremony
+
+// WebAuthnCredentialByID resolves a credential by its surrogate id.
+func (a *TxAuthorizer) WebAuthnCredentialByID(ctx context.Context, id string) (WebAuthnCredential, error) {
+	return a.r.WebAuthnCredentialByID(ctx, id)
+}
+
+// WebAuthnCredentialByCredentialID resolves the row a passkey assertion names.
+func (a *TxAuthorizer) WebAuthnCredentialByCredentialID(ctx context.Context, credentialID []byte) (WebAuthnCredential, error) {
+	return a.r.WebAuthnCredentialByCredentialID(ctx, credentialID)
+}
+
+// WebAuthnCredentialsForAccount lists an account's passkeys.
+func (a *TxAuthorizer) WebAuthnCredentialsForAccount(ctx context.Context, accountID string) ([]WebAuthnCredential, error) {
+	return a.r.WebAuthnCredentialsForAccount(ctx, accountID)
+}
+
+// CreateWebAuthnCredential inserts a freshly enrolled passkey.
+func (a *TxAuthorizer) CreateWebAuthnCredential(ctx context.Context, c NewWebAuthnCredential) error {
+	return a.r.CreateWebAuthnCredential(ctx, c)
+}
+
+// AdvanceWebAuthnSignCount writes the presented counter under a row_version CAS;
+// false means the row moved or was disabled.
+func (a *TxAuthorizer) AdvanceWebAuthnSignCount(ctx context.Context, id string, rowVersion, count int64, at time.Time) (bool, error) {
+	return a.r.AdvanceWebAuthnSignCount(ctx, id, rowVersion, count, at)
+}
+
+// DisableWebAuthnCredential sets disabled_at under a CAS (the clone response);
+// false means the row moved or was already disabled.
+func (a *TxAuthorizer) DisableWebAuthnCredential(ctx context.Context, id string, rowVersion int64, at time.Time) (bool, error) {
+	return a.r.DisableWebAuthnCredential(ctx, id, rowVersion, at)
+}
+
+// DeleteWebAuthnCredential removes a credential (de-enrolment).
+func (a *TxAuthorizer) DeleteWebAuthnCredential(ctx context.Context, id string) error {
+	return a.r.DeleteWebAuthnCredential(ctx, id)
+}
+
+// SweepSessionsForWebAuthnCredential deletes every session a passkey login
+// minted through a credential and returns the count for audit (B9 clone sweep).
+func (a *TxAuthorizer) SweepSessionsForWebAuthnCredential(ctx context.Context, credentialID string) (int64, error) {
+	return a.r.DeleteSessionsForWebAuthnCredential(ctx, credentialID)
+}
+
+// CreateWebAuthnCeremony writes a single-use, expiring challenge row.
+func (a *TxAuthorizer) CreateWebAuthnCeremony(ctx context.Context, c NewWebAuthnCeremony) error {
+	return a.r.CreateWebAuthnCeremony(ctx, c)
+}
+
+// WebAuthnCeremonyByChallenge resolves a ceremony by its challenge verifier.
+func (a *TxAuthorizer) WebAuthnCeremonyByChallenge(ctx context.Context, challengeVerifier []byte) (WebAuthnCeremony, error) {
+	return a.r.WebAuthnCeremonyByChallenge(ctx, challengeVerifier)
+}
+
+// ConsumeWebAuthnCeremony claims a ceremony atomically and stamps the credential
+// that answered it; false means it was already consumed.
+func (a *TxAuthorizer) ConsumeWebAuthnCeremony(ctx context.Context, id, credentialID string, at time.Time) (bool, error) {
+	return a.r.ConsumeWebAuthnCeremony(ctx, id, credentialID, at)
+}
+
+// WebAuthnUserHandle reads an account's opaque handle, or nil when unset.
+func (a *TxAuthorizer) WebAuthnUserHandle(ctx context.Context, accountID string) ([]byte, error) {
+	return a.r.WebAuthnUserHandle(ctx, accountID)
+}
+
+// SetWebAuthnUserHandle sets the opaque handle once; false means one already
+// exists (the caller reads it back rather than rotating).
+func (a *TxAuthorizer) SetWebAuthnUserHandle(ctx context.Context, accountID string, handle []byte) (bool, error) {
+	return a.r.SetWebAuthnUserHandle(ctx, accountID, handle)
+}
+
+// AccountByWebAuthnUserHandle resolves the account a discoverable assertion names.
+func (a *TxAuthorizer) AccountByWebAuthnUserHandle(ctx context.Context, handle []byte) (Account, error) {
+	return a.r.AccountByWebAuthnUserHandle(ctx, handle)
+}
+
 // RecordAuthEvent writes an authentication audit event through the resolution
 // surface's proof-free path. Authentication events cannot carry a proof: they
 // are what produces the principal a proof would be minted for, and credential

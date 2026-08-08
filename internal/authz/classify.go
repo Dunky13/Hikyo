@@ -66,12 +66,29 @@ var wireRegistry = map[string]Class{
 	// unresolvable one is exactly the case they must not distinguish, so all are
 	// unauthenticated-class (enumeration uniformity). methods is public
 	// discovery. Provider administration is instance-config (below).
-	"http:GET /api/v1/auth/methods":                      ClassUnauthenticated,
-	"http:POST /api/v1/auth/oidc/{provider}/start":       ClassUnauthenticated,
-	"http:GET /api/v1/auth/oidc/{provider}/callback":     ClassUnauthenticated,
-	"http:GET /api/v1/auth/identities":                   ClassUnauthenticated,
-	"http:POST /api/v1/auth/identities/link":             ClassUnauthenticated,
-	"http:DELETE /api/v1/auth/identities/{id}":           ClassUnauthenticated,
+	"http:GET /api/v1/auth/methods":                  ClassUnauthenticated,
+	"http:POST /api/v1/auth/oidc/{provider}/start":   ClassUnauthenticated,
+	"http:GET /api/v1/auth/oidc/{provider}/callback": ClassUnauthenticated,
+	"http:GET /api/v1/auth/identities":               ClassUnauthenticated,
+	"http:POST /api/v1/auth/identities/link":         ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/identities/{id}":       ClassUnauthenticated,
+	// WebAuthn / passkeys (#54). Enrolment, login, step-up, reauth, removal and
+	// the credential inventory. Login is fully pre-auth; the rest take a session
+	// but an unresolvable one is exactly the case they must not distinguish, so
+	// all are unauthenticated-class (enumeration uniformity). None reaches an
+	// authz operation — the mutations resolve and rotate the acting session,
+	// which is resolution rather than authorization, so their audit obligation
+	// is discharged directly through wireEvents.
+	"http:POST /api/v1/auth/webauthn/enrol/start":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/enrol/finish":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/start":        ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/finish":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/start":      ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/finish":     ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/start":       ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/finish":      ClassUnauthenticated,
+	"http:GET /api/v1/auth/webauthn/credentials":         ClassUnauthenticated,
+	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": ClassUnauthenticated,
 	"http:GET /api/v1/instance/oidc-providers":           ClassInstance,
 	"http:GET /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
 	"http:PUT /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
@@ -215,6 +232,39 @@ var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/auth/identities/link": {audit.EventAuthThrottleCrossed},
 	"http:DELETE /api/v1/auth/identities/{id}": {
 		audit.EventIdentityUnlinked,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
+
+	// WebAuthn / passkeys (#54). The three start ceremonies and the credential
+	// read emit nothing directly and are exemption-pinned; the finish endpoints
+	// carry the outcomes. enrol validates a proof under the per-account backoff
+	// (a crossed threshold is its own event) and adds a credential + reissues
+	// the session; login mints a session and, on a signature-count regression,
+	// disables the cloned credential; step-up and reauth append the factor
+	// (reauthenticated) and can likewise detect a clone; removal removes the
+	// credential and reissues the session.
+	"http:POST /api/v1/auth/webauthn/enrol/start": {audit.EventAuthThrottleCrossed},
+	"http:POST /api/v1/auth/webauthn/enrol/finish": {
+		audit.EventAuthPasskeyAdded,
+		audit.EventAuthSessionCreated,
+	},
+	"http:POST /api/v1/auth/webauthn/login/finish": {
+		audit.EventAuthLogin,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthPasskeyCloned,
+		audit.EventAuthThrottleCrossed,
+	},
+	"http:POST /api/v1/auth/webauthn/step-up/finish": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthPasskeyCloned,
+	},
+	"http:POST /api/v1/auth/webauthn/reauth/finish": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthPasskeyCloned,
+	},
+	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": {
+		audit.EventAuthPasskeyRemoved,
 		audit.EventAuthSessionCreated,
 		audit.EventAuthThrottleCrossed,
 	},

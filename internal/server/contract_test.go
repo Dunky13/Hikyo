@@ -31,10 +31,11 @@ import (
 // internal/isolation; what these prove is the TRANSPORT's contract, which is
 // a different claim and needs a different fixture.
 type stubAuth struct {
-	login    func(ctx context.Context, u, p string) (service.LoginResult, error)
-	identity func(ctx context.Context, presented string) (service.Identity, error)
-	logout   func(ctx context.Context, presented string) error
-	estab    func(ctx context.Context, authority, password string) error
+	login        func(ctx context.Context, u, p string) (service.LoginResult, error)
+	identity     func(ctx context.Context, presented string) (service.Identity, error)
+	logout       func(ctx context.Context, presented string) error
+	estab        func(ctx context.Context, authority, password string) error
+	passkeyStart func(ctx context.Context) ([]byte, error)
 }
 
 func (s stubAuth) LocalLogin(ctx context.Context, u, p string) (service.LoginResult, error) {
@@ -112,6 +113,52 @@ func (s stubAuth) ListIdentities(context.Context, string) ([]service.ExternalIde
 
 func (s stubAuth) UnlinkIdentity(context.Context, string, string, string) (service.LoginResult, error) {
 	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+// WebAuthn (#54): the transport contract for the opaque-JSON bridging is
+// smoke-tested through PasskeyLoginStart; the rest keep the interface satisfied
+// and default to the uniform refusal.
+func (s stubAuth) EnrolPasskeyStart(context.Context, string, string, string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) EnrolPasskeyFinish(context.Context, string, []byte) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) PasskeyLoginStart(ctx context.Context) ([]byte, error) {
+	if s.passkeyStart == nil {
+		return nil, domain.ErrUnauthenticated
+	}
+	return s.passkeyStart(ctx)
+}
+
+func (s stubAuth) PasskeyLoginFinish(context.Context, []byte) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) StepUpPasskeyStart(context.Context, string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) StepUpPasskeyFinish(context.Context, string, []byte) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ReauthPasskeyStart(context.Context, string, string, []string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.ReauthResult, error) {
+	return service.ReauthResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) RemovePasskey(context.Context, string, string, string, string) (service.LoginResult, error) {
+	return service.LoginResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ListPasskeys(context.Context, string) ([]service.PasskeyView, error) {
+	return nil, domain.ErrUnauthenticated
 }
 
 type stubProviders struct{}
@@ -462,3 +509,29 @@ func TestHealthProbesSitOutsideTheAPIStack(t *testing.T) {
 }
 
 func liveIdentityFn(context.Context, string) (service.Identity, error) { return liveIdentity, nil }
+
+func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
+	// The one end-to-end check of the opaque-JSON wire bridging: the service
+	// returns raw options bytes, the handler round-trips them through the
+	// free-form object, and the response satisfies the contract (validated by
+	// call()). The base64url fields the authenticator signs over must survive.
+	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"wenv.example","timeout":60000}}`)
+	srv := newTestServer(t, stubAuth{
+		passkeyStart: func(context.Context) ([]byte, error) { return opts, nil },
+	}, stubOrgs{})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/webauthn/login/start", "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, payload)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("response is not a JSON object: %v (%s)", err, payload)
+	}
+	pk, ok := got["publicKey"].(map[string]any)
+	if !ok {
+		t.Fatalf("options lost their publicKey member: %s", payload)
+	}
+	if pk["challenge"] != "Y2hhbGxlbmdl" {
+		t.Fatalf("the signed-over challenge did not round-trip: %v", pk["challenge"])
+	}
+}

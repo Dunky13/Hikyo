@@ -12,3 +12,4 @@ wenv context list -o yaml -> 2 usage
 wenv org -> 2 usage
 wenv org list --instance unknown-ref -> 4 refused
 wenv account -> 2 usage
+wenv account passkey enrol -> 4 refused

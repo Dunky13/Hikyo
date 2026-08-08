@@ -10,6 +10,7 @@ accounts:
   wenv account factor enrol-totp [--output-file PATH | --dangerously-print]
   wenv account factor confirm-totp
   wenv account factor step-up
+  wenv account passkey enrol|list|remove          browser-only; refused on the terminal
   wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
   wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
 

@@ -84,6 +84,14 @@ const (
 	// auth.reauthenticated records a step-up: the acting session presented a
 	// possession factor and gained a factor class.
 	EventAuthReauthenticated EventType = "auth.reauthenticated"
+	// auth.passkey_added / auth.passkey_removed record a WebAuthn credential
+	// coming into or out of existence, naming the credential class that
+	// authorized the account-security mutation (#54). auth.passkey_cloned is the
+	// clone-detection security event: a real sign-count regression on a
+	// non-backup credential disabled it and swept its sessions (B9).
+	EventAuthPasskeyAdded   EventType = "auth.passkey_added"
+	EventAuthPasskeyRemoved EventType = "auth.passkey_removed"
+	EventAuthPasskeyCloned  EventType = "auth.passkey_cloned"
 
 	// auth.* OIDC events (#54, human-auth ADR - Login methods, Identity
 	// linking, The OIDC transaction). auth.oidc_login records a federated login
@@ -344,6 +352,40 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"session_id": {Kind: KindString, Required: true},
 			"factor":     {Kind: KindString, Required: true}, // totp
+		},
+	},
+	EventAuthPasskeyAdded: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"credential_id":          {Kind: KindString, Required: true}, // the surrogate row id
+			"authorizing_credential": {Kind: KindString, Required: true}, // the proof class
+			"discoverable":           {Kind: KindBool, Required: true},   // login-capable (B13)
+		},
+	},
+	EventAuthPasskeyRemoved: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":             {Kind: KindString, Required: true},
+			"credential_id":          {Kind: KindString, Required: true},
+			"authorizing_credential": {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthPasskeyCloned: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"account_id":     {Kind: KindString, Required: true},
+			"credential_id":  {Kind: KindString, Required: true},
+			"sessions_swept": {Kind: KindInt, Required: true},
 		},
 	},
 	EventOIDCLogin: {

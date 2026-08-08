@@ -411,6 +411,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// login, JIT provisioning, a refusal, and unlink.
 		runOIDCLifecycle(t, auth, ctx, boot.PrincipalID, "e2e-admin", password)
 
+		// The full WebAuthn lifecycle, so passkey_added, passkey_cloned and
+		// passkey_removed are emitted before the emitter check.
+		runWebAuthnLifecycle(t, auth, ctx, "e2e-admin", password)
+
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
 			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")

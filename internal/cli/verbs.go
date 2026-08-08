@@ -87,6 +87,7 @@ accounts:
   wenv account factor enrol-totp [--output-file PATH | --dangerously-print]
   wenv account factor confirm-totp
   wenv account factor step-up
+  wenv account passkey enrol|list|remove          browser-only; refused on the terminal
   wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
   wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
 
@@ -414,12 +415,35 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 		return runEstablishCredential(ctx, ios, rest)
 	case "factor":
 		return runFactor(ctx, ios, rest)
+	case "passkey":
+		return runPasskey(rest)
 	case "recovery-codes":
 		return runRecoveryCodes(ctx, ios, rest)
 	case "recovery":
 		return runRecovery(ctx, ios, rest)
 	default:
-		return failf(ExitUsage, "unknown account verb %q: use establish-credential, factor, recovery-codes or recovery", sub)
+		return failf(ExitUsage, "unknown account verb %q: use establish-credential, factor, passkey, recovery-codes or recovery", sub)
+	}
+}
+
+// runPasskey refuses by name. A passkey ceremony needs an authenticator
+// transport (CTAP/WebAuthn) that a terminal does not have, so the CLI serves
+// the refusal rather than pretending: the verbs exist so the surface is
+// discoverable and the message points at the only place they work — the
+// browser. It reaches no server and touches no state, exactly like the
+// `login --device` refusal.
+func runPasskey(args []string) error {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "enrol", "list", "remove":
+		return failf(ExitRefused,
+			"`account passkey %s` is not served on the terminal: a passkey ceremony needs an authenticator transport a terminal does not have. "+
+				"Manage passkeys from the browser session surface; use `account factor` for TOTP, which the terminal can carry", sub)
+	default:
+		return failf(ExitUsage, "unknown passkey verb %q: use enrol, list or remove (all browser-only)", sub)
 	}
 }
 

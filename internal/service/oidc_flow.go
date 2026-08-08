@@ -638,7 +638,7 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 		}); e != nil {
 			return e
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", now)
+		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
 		if e != nil {
 			return e
 		}
@@ -1083,7 +1083,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 		if e := az.RemoveExternalIdentity(ctx, identityID); e != nil {
 			return e
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", now)
+		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
 		if e != nil {
 			return e
 		}

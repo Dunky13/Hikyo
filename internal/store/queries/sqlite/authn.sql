@@ -321,8 +321,10 @@ DELETE FROM external_identities WHERE id = ?;
 -- name: DeleteSessionsForProvider :execrows
 DELETE FROM sessions WHERE provider_id = ?;
 
--- A reauthentication window opened by an OIDC reauth ceremony (only where the
--- effective window is > 0; a 0-window gate needs WebAuthn). Keyed by session,
+-- A reauthentication window opened by a possession-factor ceremony. OIDC reauth
+-- opens one only where the effective window is > 0; a WebAuthn ceremony can bind
+-- the enumerated unit, so at a 0 effective window it opens a single_decision
+-- window (B11) consumed by exactly one enumerated decision. Keyed by session,
 -- cascading with it.
 -- wenv:authn-resolution
 -- name: InsertReauthWindow :exec
@@ -330,7 +332,7 @@ INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
      consumed_at, created_at)
-VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?);
 
 -- Start resolves the provider by slug for an enabled provider only: a login,
 -- link or reauth may only begin against a provider that is currently serving.

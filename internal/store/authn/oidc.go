@@ -580,6 +580,7 @@ type NewReauthWindow struct {
 	EnvironmentID   string
 	CeremonyID      string
 	FactorClass     string
+	SingleDecision  bool
 	AuthenticatedAt time.Time
 	WindowExpiresAt time.Time
 	HardExpiresAt   time.Time
@@ -592,14 +593,16 @@ func (r *Resolver) CreateReauthWindow(ctx context.Context, w NewReauthWindow) er
 	if r.sq != nil {
 		return r.sq.InsertReauthWindow(ctx, sqlitegen.InsertReauthWindowParams{
 			ID: w.ID, SessionID: w.SessionID, EnvironmentID: w.EnvironmentID, CeremonyID: w.CeremonyID,
-			FactorClass: w.FactorClass, AuthenticatedAt: encodeTime(w.AuthenticatedAt),
+			FactorClass: w.FactorClass, SingleDecision: boolInt(w.SingleDecision),
+			AuthenticatedAt: encodeTime(w.AuthenticatedAt),
 			WindowExpiresAt: encodeTime(w.WindowExpiresAt), HardExpiresAt: encodeTime(w.HardExpiresAt),
 			CredentialEpoch: w.CredentialEpoch, CreatedAt: encodeTime(w.CreatedAt),
 		})
 	}
 	return r.pg.InsertReauthWindow(ctx, pggen.InsertReauthWindowParams{
 		ID: w.ID, SessionID: w.SessionID, EnvironmentID: w.EnvironmentID, CeremonyID: w.CeremonyID,
-		FactorClass: w.FactorClass, AuthenticatedAt: pgTime(w.AuthenticatedAt),
+		FactorClass: w.FactorClass, SingleDecision: boolInt(w.SingleDecision),
+		AuthenticatedAt: pgTime(w.AuthenticatedAt),
 		WindowExpiresAt: pgTime(w.WindowExpiresAt), HardExpiresAt: pgTime(w.HardExpiresAt),
 		CredentialEpoch: w.CredentialEpoch, CreatedAt: pgTime(w.CreatedAt),
 	})

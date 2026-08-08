@@ -226,10 +226,18 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE id = $1
 `
 
+type GetAccountByIDRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
 // wenv:authn-resolution
-func (q *Queries) GetAccountByID(ctx context.Context, id string) (Account, error) {
+func (q *Queries) GetAccountByID(ctx context.Context, id string) (GetAccountByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByID, id)
-	var i Account
+	var i GetAccountByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
@@ -245,10 +253,18 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE principal_id = $1
 `
 
+type GetAccountByPrincipalRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
 // wenv:authn-resolution
-func (q *Queries) GetAccountByPrincipal(ctx context.Context, principalID string) (Account, error) {
+func (q *Queries) GetAccountByPrincipal(ctx context.Context, principalID string) (GetAccountByPrincipalRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByPrincipal, principalID)
-	var i Account
+	var i GetAccountByPrincipalRow
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
@@ -264,10 +280,18 @@ SELECT id, principal_id, username, display_name, created_at FROM accounts
 WHERE username = $1
 `
 
+type GetAccountByUsernameRow struct {
+	ID          string
+	PrincipalID string
+	Username    string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
 // wenv:authn-resolution
-func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (Account, error) {
+func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (GetAccountByUsernameRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByUsername, username)
-	var i Account
+	var i GetAccountByUsernameRow
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
@@ -926,7 +950,7 @@ INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
      consumed_at, created_at)
-VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, NULL, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11)
 `
 
 type InsertReauthWindowParams struct {
@@ -935,6 +959,7 @@ type InsertReauthWindowParams struct {
 	EnvironmentID   string
 	CeremonyID      string
 	FactorClass     string
+	SingleDecision  int64
 	AuthenticatedAt pgtype.Timestamptz
 	WindowExpiresAt pgtype.Timestamptz
 	HardExpiresAt   pgtype.Timestamptz
@@ -942,8 +967,10 @@ type InsertReauthWindowParams struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// A reauthentication window opened by an OIDC reauth ceremony (only where the
-// effective window is > 0; a 0-window gate needs WebAuthn). Keyed by session,
+// A reauthentication window opened by a possession-factor ceremony. OIDC reauth
+// opens one only where the effective window is > 0; a WebAuthn ceremony can bind
+// the enumerated unit, so at a 0 effective window it opens a single_decision
+// window (B11) consumed by exactly one enumerated decision. Keyed by session,
 // cascading with it.
 // wenv:authn-resolution
 func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindowParams) error {
@@ -953,6 +980,7 @@ func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindow
 		arg.EnvironmentID,
 		arg.CeremonyID,
 		arg.FactorClass,
+		arg.SingleDecision,
 		arg.AuthenticatedAt,
 		arg.WindowExpiresAt,
 		arg.HardExpiresAt,

@@ -53,6 +53,17 @@ var oidcrpImporters = map[string]bool{
 	module + "/internal/app":     true, // construction wiring only
 }
 
+// webauthnrpImporters is the allowlist for the WebAuthn relying-party wrapper
+// (#54). The protocol library (go-webauthn) is confined behind it, and only the
+// service layer and the test harness consume it - relying-party policy has
+// exactly one home.
+var webauthnrpImporters = map[string]bool{
+	module + "/internal/service":      true,
+	module + "/internal/webauthnrp":   true,
+	module + "/internal/webauthntest": true, // software-authenticator harness (tests only)
+	module + "/internal/app":          true, // construction wiring only
+}
+
 // forbidden direct edges: importer prefix -> banned import prefix.
 var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/server", module + "/internal/store", "handlers cannot reach the datastore directly"},
@@ -163,6 +174,19 @@ func TestOIDCRPImportAllowlist(t *testing.T) {
 		for _, imp := range allImports(p) {
 			if imp == oidcrp && !oidcrpImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: not on the oidcrp-importer allowlist", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+// TestWebAuthnRPImportAllowlist confines the WebAuthn protocol library behind
+// internal/webauthnrp: only the allowlisted packages may import it.
+func TestWebAuthnRPImportAllowlist(t *testing.T) {
+	webauthnrp := module + "/internal/webauthnrp"
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			if imp == webauthnrp && !webauthnrpImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: not on the webauthnrp-importer allowlist", p.ImportPath, imp)
 			}
 		}
 	}

@@ -143,10 +143,11 @@ func (s *Auth) recordFactorThrottleCrossing(ctx context.Context, principal domai
 // AFTER the advance so the new session is born live rather than one generation
 // behind and dead on arrival.
 //
-// ponytail: reissues a CLI artifact; the only session type this slice mints.
-// When the browser login page lands (#56) this must preserve the acting
-// session's artifact type instead of assuming cli.
-func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, factorClass string, now time.Time) (LoginResult, error) {
+// The TOTP/recovery mutations reissue a CLI/local-password session; the WebAuthn
+// mutations run on a browser session, so the acting artifact and the proof's
+// method/class are threaded in rather than assumed (a browser reissue also mints
+// a fresh CSRF verifier). The assurance is built solely from the proof (B3).
+func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, factorClass, method, artifact string, now time.Time) (LoginResult, error) {
 	if err := az.AdvanceGeneration(ctx, account.PrincipalID); err != nil {
 		return LoginResult{}, err
 	}
@@ -161,9 +162,23 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	if err != nil {
 		return LoginResult{}, err
 	}
-	value, verifier, err := crypto.NewArtifact(crypto.ArtifactCLISession)
+	artifactKind := crypto.ArtifactCLISession
+	idleFor, absFor := CLISessionIdle, CLISessionAbsolute
+	if artifact == ArtifactBrowser {
+		artifactKind = crypto.ArtifactBrowserSession
+		idleFor, absFor = BrowserSessionIdle, BrowserSessionAbsolute
+	}
+	value, verifier, err := crypto.NewArtifact(artifactKind)
 	if err != nil {
 		return LoginResult{}, err
+	}
+	var csrfValue string
+	var csrfVerifier []byte
+	if artifact == ArtifactBrowser {
+		csrfValue, csrfVerifier, err = crypto.NewArtifact(crypto.ArtifactCSRF)
+		if err != nil {
+			return LoginResult{}, err
+		}
 	}
 	id, err := newID("ses")
 	if err != nil {
@@ -176,20 +191,25 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	wire := audit.FromContext(ctx)
 	sess := authz.NewSession{
 		ID: id, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactCLI, SessionGeneration: generation, CredentialEpoch: epoch,
-		AuthMethod: MethodLocalPassword, Factors: string(factors),
+		Artifact: artifact, SessionGeneration: generation, CredentialEpoch: epoch,
+		AuthMethod: method, Factors: string(factors),
 		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(CLISessionIdle), AbsoluteExpiresAt: now.Add(CLISessionAbsolute),
+		IdleExpiresAt: now.Add(idleFor), AbsoluteExpiresAt: now.Add(absFor),
 		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
+		CSRFVerifier: csrfVerifier,
 	}
 	if err := az.MintSession(ctx, sess); err != nil {
 		return LoginResult{}, err
 	}
+	assuranceLabel := "single-factor"
+	if factorClass == "webauthn" {
+		assuranceLabel = "multi-factor"
+	}
 	e, err := newAuditEvent(ctx, audit.EventAuthSessionCreated, account.PrincipalID,
 		audit.Object{Type: "session", ID: id}, audit.OutcomeSuccess, "",
 		audit.Payload{
-			"session_id": id, "artifact": ArtifactCLI,
-			"method": MethodLocalPassword, "assurance": "single-factor",
+			"session_id": id, "artifact": artifact,
+			"method": method, "assurance": assuranceLabel,
 		})
 	if err != nil {
 		return LoginResult{}, err
@@ -198,10 +218,11 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 		return LoginResult{}, err
 	}
 	return LoginResult{
-		SessionToken: value, SessionID: id, Artifact: ArtifactCLI,
+		SessionToken: value, SessionID: id, Artifact: artifact,
 		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
 		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
-		Assurance: Assurance{Method: MethodLocalPassword, Factors: []string{factorClass}, AuthenticatedAt: now},
+		Assurance: Assurance{Method: method, Factors: []string{factorClass}, AuthenticatedAt: now},
+		CSRFToken: csrfValue,
 	}, nil
 }
 
@@ -406,7 +427,7 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 			// The row moved or the step was already consumed: single-use holds.
 			return domain.ErrUnauthenticated
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", now)
+		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
 		if err != nil {
 			return err
 		}
@@ -503,7 +524,7 @@ func (s *Auth) RemoveTOTP(ctx context.Context, presented, password string) (Logi
 		if err := az.RemoveTOTPForAccount(ctx, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", now)
+		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
 		if err != nil {
 			return err
 		}
@@ -820,7 +841,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 				return err
 			}
 		}
-		result, err = s.reissueSession(ctx, az, account, proofClass, now)
+		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, ArtifactCLI, now)
 		if err != nil {
 			return err
 		}

@@ -41,6 +41,16 @@ type AuthService interface {
 	OIDCCallback(ctx context.Context, slug, code, state, iss, idpError, bindingCookie, presented string) (service.OIDCCallbackResult, error)
 	ListIdentities(ctx context.Context, presented string) ([]authnIdentity, error)
 	UnlinkIdentity(ctx context.Context, presented, identityID, proof string) (service.LoginResult, error)
+	EnrolPasskeyStart(ctx context.Context, presented, password, code string) ([]byte, error)
+	EnrolPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
+	PasskeyLoginStart(ctx context.Context) ([]byte, error)
+	PasskeyLoginFinish(ctx context.Context, responseJSON []byte) (service.LoginResult, error)
+	StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error)
+	StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
+	ReauthPasskeyStart(ctx context.Context, presented, environmentID string, keyIDs []string) ([]byte, error)
+	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
+	RemovePasskey(ctx context.Context, presented, credentialID, password, code string) (service.LoginResult, error)
+	ListPasskeys(ctx context.Context, presented string) ([]service.PasskeyView, error)
 }
 
 // authnIdentity is the transport's view of a linked identity (the service

@@ -17,6 +17,7 @@ import (
 	"github.com/Dunky13/wenv/internal/oidcrp"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/wenv/internal/webauthnrp"
 )
 
 // Human authentication: the local floor and credential establishment (#47,
@@ -60,7 +61,12 @@ const (
 )
 
 // Authentication methods, matching the wire enum.
-const MethodLocalPassword = "local-password"
+const (
+	MethodLocalPassword = "local-password"
+	// MethodLocalPasskey is a discoverable WebAuthn login: user-verifying and
+	// inherently multi-factor.
+	MethodLocalPasskey = "local-passkey"
+)
 
 // ErrWeakPassword is a loud, specific refusal — password policy is evaluated
 // at set time, where naming the rule helps the human and reveals nothing.
@@ -90,6 +96,10 @@ type Auth struct {
 	// OIDCDiscover replaces go-oidc discovery in tests, so a fixture can point an
 	// httptest IdP's discovery at a byte-variant issuer. Nil means oidcrp.Discover.
 	OIDCDiscover func(ctx context.Context, issuer string) (*oidcrp.Provider, error)
+	// WebAuthn is the relying party: RP ID + expected origins are immutable
+	// instance config derived from ExternalOrigin, never a request header (§5).
+	// Nil means WebAuthn routes refuse (the RP could not be configured at boot).
+	WebAuthn *webauthnrp.RP
 	// ReauthWindow is the effective reauthentication window (default 0). OIDC
 	// reauth opens a window only where it is > 0; a 0-window gate needs WebAuthn
 	// (finding B18). #55's project-settings knob sets it per environment.

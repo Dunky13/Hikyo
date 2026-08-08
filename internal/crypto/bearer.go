@@ -91,6 +91,17 @@ func NewArtifact(t ArtifactType) (value string, verifier []byte, err error) {
 	return value, ArtifactVerifier(value), nil
 }
 
+// RandomBytes returns n cryptographically random bytes. It is the source for
+// opaque identifiers that are not bearer artifacts — the WebAuthn user handle
+// (#54), an opaque per-account value that must never be a username, email or id.
+func RandomBytes(n int) ([]byte, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return nil, fmt.Errorf("crypto: random bytes: %w", err)
+	}
+	return b, nil
+}
+
 // ArtifactVerifier is the stored form: an unsalted SHA-256 of the whole
 // presented value. Fast hashing is correct here, not a shortcut — the
 // artifact carries >=256 bits of entropy, so brute force is infeasible and

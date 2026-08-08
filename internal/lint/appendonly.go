@@ -186,6 +186,18 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"CreateProvider": true,
 	"UpdateProvider": true,
 	"DeleteProvider": true,
+	// WebAuthn (#54): credential, ceremony and user-handle writers, plus the
+	// clone session sweep. None can hold a proof — they mutate the artifacts that
+	// decide who a caller is and how strongly they authenticated, which is
+	// resolution, not authorization.
+	"CreateWebAuthnCredential":            true,
+	"AdvanceWebAuthnSignCount":            true,
+	"DisableWebAuthnCredential":           true,
+	"DeleteWebAuthnCredential":            true,
+	"DeleteSessionsForWebAuthnCredential": true,
+	"CreateWebAuthnCeremony":              true,
+	"ConsumeWebAuthnCeremony":             true,
+	"SetWebAuthnUserHandle":               true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

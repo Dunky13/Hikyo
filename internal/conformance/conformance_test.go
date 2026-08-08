@@ -150,8 +150,9 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 	// Children before parents: tier3_keys references master_keys, and the
 	// tenant chain is grants -> environments -> projects -> orgs.
 	for _, table := range []string{
-		// Factor tables (#54, migration 00006) reference accounts/sessions, so
-		// they drop first — a stale one fails the next re-migration's CREATE.
+		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
+		// so they drop first — a stale one fails the next re-migration's CREATE.
+		"webauthn_ceremonies", "webauthn_credentials",
 		"oidc_transactions", "external_identities", "oidc_providers",
 		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
 		"credential_authorities", "password_credentials", "sessions", "accounts",
