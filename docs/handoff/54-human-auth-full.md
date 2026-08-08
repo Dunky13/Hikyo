@@ -45,11 +45,51 @@ foundation plus a rigorous blueprint.
   documented regen command) is removed, and `api/oapi-codegen.yaml`'s `output`
   is now repo-root-relative so regeneration targets the live package.
 
-**Not yet landed (the remaining slices, specified below):** the store writers +
-sqlc queries for the new tables, the service logic (OIDC transaction, WebAuthn
-RP, TOTP, recovery, reauth windows, account-security mutation helper,
-credential-reset, break-glass), the wire surface + regen, the assurance
-enforcement flip, the CLI verbs, and the E2E fixture families.
+**Also landed since (commits on this branch):**
+
+- **Store + crypto for TOTP and recovery codes.** `internal/crypto/totp.go`
+  (pquerna/otp wrapper: 160-bit seed, constant-time code comparison returning
+  the matched step for single-use tracking) and `recovery.go` (bearer-artifact
+  codes, constant-time set match). sqlc queries + enumerated resolution-surface
+  writers for `totp_credentials`, `totp_challenges`, `recovery_codes`, plus
+  step-up session rotation and the outstanding-authority sweep (B12). Nine new
+  writers in `lint.ResolutionSurfaceWriters`; `annotated_queries.json`
+  regenerated. Dual-engine.
+- **Assurance gate plumbed (dormant).** `authz.Authorize` now takes the
+  caller's `Identity` instead of a bare principal and consults
+  `assuranceInadequate` AFTER the grant check (so only a capability-holder
+  learns a step-up is required); session-less local host authority is exempt.
+  `authz.AdequateAssurance` is the rule (two distinct factor classes, or
+  WebAuthn). `Actor.resolve` returns the full `Identity`. **`AssuranceEnforced`
+  stays `false`** — the gate is wired but dormant until the factor endpoints
+  land in the same PR.
+
+**Not yet landed — the next atomic step (must land together):** the service
+logic (TOTP enrol/confirm/remove + step-up, recovery generate/consume, the
+account-security-mutation helper, credential-establishment stays password-only),
+registering the factor audit events (which trips the tripwire and forces the
+`AssuranceEnforced` flip), the wire endpoints + openapi regen, the CLI factor
+verbs **with session-token rotation handling** (step-up and account-security
+mutations rotate the token; the CLI must persist the new one), the
+demo/bootstrap E2E update (enrol TOTP + step-up before `org create`, since
+`OpOrgCreate` needs the MFA-mandatory `instance-config`), and the A1 recovery +
+factor fixtures. This is one atomic vertical: any audited factor operation
+trips the flip, the flip gates `org create`, and the demo needs the CLI enrol
+path to satisfy it — so store+service+events+flip+wire+CLI+demo+fixtures land
+in a single green commit.
+
+**Then the later verticals:** OIDC (migration + `internal/oidcrp` + provider
+admin + mix-up fixtures), WebAuthn (migration + `internal/webauthnrp` +
+passkey-only + sign-count), reauth windows + `LowerEffectiveWindow` +
+credential-reset + break-glass + the grant-lock analyzer.
+
+**Known follow-up:** the `internal/service/audit.go` query/export paths take a
+bare principal (not a session `Identity`), so they are wrapped as session-less
+(MFA-exempt) at their `Authorize` call. This is safe today — audit ops use
+`CapAuditRead`, which is NOT MFA-mandatory, and they are not yet wired to HTTP —
+but when audit read is exposed over the network it must thread the session
+`Identity` like the demonstration services do, or a `reveal-history`-class read
+would bypass the assurance gate. Noted so it is closed by name, not omission.
 
 ## Disposition items for the human (surface before the freeze)
 
