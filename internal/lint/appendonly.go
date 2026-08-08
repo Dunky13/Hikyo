@@ -198,6 +198,14 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"CreateWebAuthnCeremony":              true,
 	"ConsumeWebAuthnCeremony":             true,
 	"SetWebAuthnUserHandle":               true,
+	// Reauth-window consumption at disclosure and the effective-window transition
+	// (#54): slide the sliding clock, claim a single-decision window once, and
+	// invalidate every window on an environment when its effective window is
+	// lowered. Proof-free like every other window writer — they mutate the
+	// artifact that decides whether a disclosure may proceed.
+	"SlideReauthWindow":                 true,
+	"ConsumeSingleDecisionWindow":       true,
+	"DeleteReauthWindowsForEnvironment": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

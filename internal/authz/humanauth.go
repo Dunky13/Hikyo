@@ -367,6 +367,65 @@ func (a *TxAuthorizer) OpenReauthWindow(ctx context.Context, w NewReauthWindow) 
 	return a.r.CreateReauthWindow(ctx, w)
 }
 
+// ReauthWindow is a resolved reauthentication-window row.
+type ReauthWindow = authn.ReauthWindow
+
+// ReauthWindowFor resolves the window over one environment for one session.
+func (a *TxAuthorizer) ReauthWindowFor(ctx context.Context, sessionID, environmentID string) (ReauthWindow, error) {
+	return a.r.ReauthWindowFor(ctx, sessionID, environmentID)
+}
+
+// SlideReauthWindow advances a sliding window's idle clock; false means the row
+// moved and the caller must not extend it.
+func (a *TxAuthorizer) SlideReauthWindow(ctx context.Context, id string, windowExpires time.Time) (bool, error) {
+	return a.r.SlideReauthWindow(ctx, id, windowExpires)
+}
+
+// ConsumeSingleDecisionWindow claims a single-decision window exactly once;
+// false means it was already spent (B11 double-spend).
+func (a *TxAuthorizer) ConsumeSingleDecisionWindow(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.ConsumeSingleDecisionWindow(ctx, id, at)
+}
+
+// InvalidateReauthWindowsForEnvironment deletes every open window on one
+// environment (the effective-window transition, B6) and returns the count.
+func (a *TxAuthorizer) InvalidateReauthWindowsForEnvironment(ctx context.Context, environmentID string) (int64, error) {
+	return a.r.DeleteReauthWindowsForEnvironment(ctx, environmentID)
+}
+
+// StrandedRevealPrincipals enumerates the reveal-holding principals a 0
+// effective window would strand on the given environment chain (B6).
+func (a *TxAuthorizer) StrandedRevealPrincipals(ctx context.Context, org, project, env string) ([]domain.PrincipalID, error) {
+	return a.r.StrandedRevealPrincipals(ctx, org, project, env)
+}
+
+// GrantsForResetTarget reads the credential-reset target's full grant set for
+// the org-bounded test, under the row lock the reset holds.
+func (a *TxAuthorizer) GrantsForResetTarget(ctx context.Context, p domain.PrincipalID) ([]domain.Grant, error) {
+	return a.r.GrantsForResetTarget(ctx, p)
+}
+
+// LockTargetPrincipal takes the target principal's row lock so the org-bounded
+// test and every grant mutation serialize on the same row (B14).
+func (a *TxAuthorizer) LockTargetPrincipal(ctx context.Context, p domain.PrincipalID) error {
+	return a.r.LockPrincipalRow(ctx, p)
+}
+
+// WebAuthnCeremonyByID resolves a ceremony by id, for single-decision window
+// unit matching at disclosure.
+func (a *TxAuthorizer) WebAuthnCeremonyByID(ctx context.Context, id string) (WebAuthnCeremony, error) {
+	return a.r.WebAuthnCeremonyByID(ctx, id)
+}
+
+// EnvironmentChain is a resolved (org, project, env) chain.
+type EnvironmentChain = authn.EnvironmentChain
+
+// EnvironmentChainByID resolves an environment's chain from its id, so
+// LowerEffectiveWindow can build the grant-coverage predicate from an env id.
+func (a *TxAuthorizer) EnvironmentChainByID(ctx context.Context, envID string) (EnvironmentChain, error) {
+	return a.r.EnvironmentChainByID(ctx, envID)
+}
+
 // WebAuthn seam (#54). Passkey enrolment, discoverable login, step-up, reauth
 // and removal reach the resolution surface through the same in-transaction
 // authorizer as the OIDC and factor writers: they mutate the artifacts that

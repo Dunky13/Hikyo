@@ -101,6 +101,16 @@ SELECT id, challenge_verifier, session_data, account_id, session_id, purpose,
        expires_at, consumed_at, created_at
 FROM webauthn_ceremonies WHERE challenge_verifier = $1;
 
+-- Resolve a ceremony by id for single-decision reauth-window consumption (#54):
+-- the window row carries only ceremony_id, so the enumerated-unit binding the
+-- ceremony pinned is read here and matched byte-exact against the disclosure unit.
+-- wenv:authn-resolution
+-- name: GetWebAuthnCeremonyByID :one
+SELECT id, challenge_verifier, session_data, account_id, session_id, purpose,
+       operation_binding, environment_id, credential_id, credential_epoch,
+       expires_at, consumed_at, created_at
+FROM webauthn_ceremonies WHERE id = $1;
+
 -- Single-use consumption: the NULL guard is the atomic claim. credential_id is
 -- stamped here (the passkey that answered), so the ceremony row keeps resolving
 -- a minted session to the credential that authored it after consume.

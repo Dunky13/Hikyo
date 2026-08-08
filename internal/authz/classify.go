@@ -94,6 +94,16 @@ var wireRegistry = map[string]Class{
 	"http:PUT /api/v1/instance/oidc-providers/{slug}":    ClassInstance,
 	"http:DELETE /api/v1/instance/oidc-providers/{slug}": ClassInstance,
 
+	// Credential reset (#54). Unauthenticated-class for its probe contract:
+	// the target-principal path parameter makes enumeration uniformity the
+	// dominant concern, so every failure that could reveal the target's grant
+	// shape answers a uniform 401 (the instance-capability refusal is the one
+	// named 403, reached only after the caller is authorized at instance scope).
+	// The route dispatches at runtime between two credential-reset operations, so
+	// it names no single operation in wireRoutes; its audit obligation is
+	// discharged through wireEvents like the account-security surface.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": ClassUnauthenticated,
+
 	// Org administration is instance-scoped: the probe contract is grant
 	// refusal, not tenancy, because no tenant object exists whose
 	// nonexistence could be mimicked.
@@ -158,7 +168,13 @@ var wireRegistry = map[string]Class{
 // rather than letting an unaudited pre-auth path hide behind "no operation".
 //
 // A wire entry that appears here and also reaches a registered operation is a
-// modelling mistake, and the completeness invariant says so.
+// modelling mistake, and the completeness invariant says so — with one named
+// exception (#54): the credential-reset route below authorizes through a
+// registered operation, but WHICH operation is chosen at runtime from the
+// target's grant classification (org-bounded -> the org-scoped op at the target's
+// org; multi-org -> the instance op), so no single x-wenv-operation/wireRoutes
+// row can name it. Its writes and audit ride the resolution surface like the
+// account-security mutations, so it declares its event here.
 var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -236,6 +252,15 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthThrottleCrossed,
 	},
 
+	// Credential reset (#54). A successful reset mints a credential-establishment
+	// authority (its own record, factors MEDIUM-7) and records the reset issuance
+	// naming the tier. See the exception note above for why this route audits here
+	// rather than through an operation row.
+	"http:POST /api/v1/accounts/{principal}/credential-reset": {
+		audit.EventAuthCredentialResetIssued,
+		audit.EventAuthAuthorityMinted,
+	},
+
 	// WebAuthn / passkeys (#54). The three start ceremonies and the credential
 	// read emit nothing directly and are exemption-pinned; the finish endpoints
 	// carry the outcomes. enrol validates a proof under the per-account backoff
@@ -272,8 +297,9 @@ var wireEvents = map[string][]audit.EventType{
 	// The bootstrap verb, running on the server's own host under local
 	// authority. Its mint is audited including the DELIVERY MODE, because a
 	// token that reached a log shipper is a different event from one written
-	// to a root-owned file.
-	"cli:admin": {audit.EventAuthAuthorityMinted},
+	// to a root-owned file. `wenv admin reset-credential` (#54 break-glass) is the
+	// same local-authority verb group and emits the reset issuance beside the mint.
+	"cli:admin": {audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation it reaches.

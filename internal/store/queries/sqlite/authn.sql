@@ -342,3 +342,78 @@ SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
        redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
        created_at, updated_at
 FROM oidc_providers WHERE slug = ? AND enabled = 1;
+
+-- Reauth-window consumption at disclosure (#54, human-auth ADR - Reauthentication).
+-- A disclosure on environment E requires a live window for (session, E). These
+-- read the window, slide its sliding clock (never past the hard cap the service
+-- enforces), and claim a single_decision window exactly once via the consumed_at
+-- NULL guard. There is no reveal operation to call these yet (#50/#58); they ship
+-- as the library those verticals consume, exercised directly by fixtures.
+-- wenv:authn-resolution
+-- name: GetReauthWindow :one
+SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+       authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+       consumed_at, created_at
+FROM reauth_windows WHERE session_id = ? AND environment_id = ?;
+
+-- Slide the idle window clock on a sliding (non single-decision) window. The hard
+-- cap is enforced by the service, which passes min(now+window, hard_expires_at);
+-- the NULL guard keeps a concurrently-claimed window from sliding.
+-- wenv:authn-resolution
+-- name: SlideReauthWindow :execrows
+UPDATE reauth_windows SET window_expires_at = ?
+WHERE id = ? AND single_decision = 0 AND consumed_at IS NULL;
+
+-- Claim a single_decision window exactly once: the NULL guard is the atomic
+-- claim, so a second disclosure loses and is refused (B11 double-spend).
+-- wenv:authn-resolution
+-- name: ConsumeSingleDecisionWindow :execrows
+UPDATE reauth_windows SET consumed_at = ?
+WHERE id = ? AND single_decision = 1 AND consumed_at IS NULL;
+
+-- Invalidate every open window on one environment: the first of LowerEffective
+-- Window's five ADR items on the effective-window transition (#54 B6).
+-- wenv:authn-resolution
+-- name: DeleteReauthWindowsForEnvironment :execrows
+DELETE FROM reauth_windows WHERE environment_id = ?;
+
+-- Stranded-principal enumeration for LowerEffectiveWindow (#54 B6): principals
+-- holding reveal/reveal-history covering environment E (a grant at E, its project,
+-- its org, or the instance) who have no enabled WebAuthn authenticator, so a 0
+-- effective window fails their disclosure closed until they enrol one.
+-- wenv:authn-resolution
+-- name: StrandedRevealPrincipalsForEnvironment :many
+SELECT DISTINCT g.principal_id
+FROM grants g
+WHERE g.capability IN ('reveal', 'reveal-history')
+  AND (g.org_id IS NULL
+       OR (g.org_id = sqlc.arg(org) AND g.project_id IS NULL)
+       OR (g.org_id = sqlc.arg(org) AND g.project_id = sqlc.arg(project) AND g.env_id IS NULL)
+       OR (g.org_id = sqlc.arg(org) AND g.project_id = sqlc.arg(project) AND g.env_id = sqlc.arg(env)))
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_credentials w
+      JOIN accounts a ON a.id = w.account_id
+      WHERE a.principal_id = g.principal_id AND w.disabled_at IS NULL);
+
+-- The target principal's grant set, for the credential-reset org-bounded test
+-- (#54 credential-reset, ADR - Recovery): reset reaches only a target whose grants
+-- lie entirely within one org and who holds no instance capability.
+-- wenv:authn-resolution
+-- name: ListGrantsForResetTarget :many
+SELECT capability, org_id, project_id, env_id FROM grants
+WHERE principal_id = ?;
+
+-- Principal row lock (#54 B14): every grant writer takes it so the credential-
+-- reset org-bounded test serializes against a concurrent grant landing. sqlite's
+-- single writer serializes trivially; postgres takes FOR UPDATE. The grant-lock
+-- analyzer pins that this sits inside every grant writer.
+-- wenv:authn-resolution
+-- name: LockPrincipalRow :one
+SELECT id FROM principals WHERE id = ?;
+
+-- Resolve an environment's chain from its id alone, for LowerEffectiveWindow's
+-- stranded-principal query (#54 B6): the denormalized chain columns make the row
+-- self-describing, so the grant-coverage predicate can be built from an env id.
+-- wenv:authn-resolution
+-- name: EnvironmentChainByID :one
+SELECT org_id, project_id, id FROM environments WHERE id = ?;

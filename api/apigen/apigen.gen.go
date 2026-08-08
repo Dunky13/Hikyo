@@ -130,6 +130,17 @@ type CreateOrgRequest struct {
 	Name     string                  `json:"name"`
 }
 
+// CredentialResetResult defines model for CredentialResetResult.
+type CredentialResetResult struct {
+	// Authority The single-use credential-establishment authority for the target,
+	// returned once. It creates no session and may only ever establish a
+	// password; hand it to the target out of band.
+	Authority string `json:"authority"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
@@ -514,6 +525,9 @@ type ProviderSlug = string
 // ProviderSlugPath defines model for ProviderSlugPath.
 type ProviderSlugPath = string
 
+// ResetTargetPrincipal A prefixed UUIDv7, e.g. `org_0198…`.
+type ResetTargetPrincipal = ID
+
 // WebauthnCredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type WebauthnCredentialID = ID
 
@@ -605,6 +619,9 @@ type CreateOrgJSONRequestBody = CreateOrgRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ResetCredential Issue a credential-establishment authority for another account.
+	// (POST /api/v1/accounts/{principal}/credential-reset)
+	ResetCredential(w http.ResponseWriter, r *http.Request, principal ResetTargetPrincipal)
 	// EstablishCredential Consume a credential-establishment authority and set an initial credential.
 	// (POST /api/v1/auth/credential/establish)
 	EstablishCredential(w http.ResponseWriter, r *http.Request)
@@ -712,6 +729,12 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// ResetCredential Issue a credential-establishment authority for another account.
+// (POST /api/v1/accounts/{principal}/credential-reset)
+func (_ Unimplemented) ResetCredential(w http.ResponseWriter, r *http.Request, principal ResetTargetPrincipal) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // EstablishCredential Consume a credential-establishment authority and set an initial credential.
 // (POST /api/v1/auth/credential/establish)
@@ -925,6 +948,32 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ResetCredential operation middleware
+func (siw *ServerInterfaceWrapper) ResetCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "principal" -------------
+	var principal ResetTargetPrincipal
+
+	err = runtime.BindStyledParameterWithOptions("simple", "principal", chi.URLParam(r, "principal"), &principal, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "principal", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetCredential(w, r, principal)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // EstablishCredential operation middleware
 func (siw *ServerInterfaceWrapper) EstablishCredential(w http.ResponseWriter, r *http.Request) {
@@ -1727,6 +1776,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/api/v1/auth/identities/{id}", wrapper.UnlinkIdentity)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/accounts/{principal}/credential-reset", wrapper.ResetCredential)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/auth/webauthn/enrol/start", wrapper.EnrolPasskeyStart)
 	})
 	r.Group(func(r chi.Router) {
@@ -1790,6 +1842,85 @@ type TooManyRequestsJSONResponse struct {
 }
 
 type UnauthenticatedJSONResponse Error
+
+type ResetCredentialRequestObject struct {
+	Principal ResetTargetPrincipal `json:"principal"`
+}
+
+type ResetCredentialResponseObject interface {
+	VisitResetCredentialResponse(w http.ResponseWriter) error
+}
+
+type ResetCredential200JSONResponse CredentialResetResult
+
+func (response ResetCredential200JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ResetCredential401JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetCredential403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ResetCredential403JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ResetCredential429JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response ResetCredential500JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type EstablishCredentialRequestObject struct {
 	Body *EstablishCredentialJSONRequestBody
@@ -4414,6 +4545,9 @@ func (response GetOrg500JSONResponse) VisitGetOrgResponse(w http.ResponseWriter)
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ResetCredential Issue a credential-establishment authority for another account.
+	// (POST /api/v1/accounts/{principal}/credential-reset)
+	ResetCredential(ctx context.Context, request ResetCredentialRequestObject) (ResetCredentialResponseObject, error)
 	// EstablishCredential Consume a credential-establishment authority and set an initial credential.
 	// (POST /api/v1/auth/credential/establish)
 	EstablishCredential(ctx context.Context, request EstablishCredentialRequestObject) (EstablishCredentialResponseObject, error)
@@ -4555,6 +4689,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ResetCredential operation middleware
+func (sh *strictHandler) ResetCredential(w http.ResponseWriter, r *http.Request, principal ResetTargetPrincipal) {
+	var request ResetCredentialRequestObject
+
+	request.Principal = principal
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResetCredential(ctx, request.(ResetCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResetCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResetCredentialResponseObject); ok {
+		if err := validResponse.VisitResetCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // EstablishCredential operation middleware

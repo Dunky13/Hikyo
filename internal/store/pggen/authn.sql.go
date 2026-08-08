@@ -141,6 +141,27 @@ func (q *Queries) ConsumeOutstandingAuthoritiesForAccount(ctx context.Context, a
 	return err
 }
 
+const consumeSingleDecisionWindow = `-- name: ConsumeSingleDecisionWindow :execrows
+UPDATE reauth_windows SET consumed_at = $1
+WHERE id = $2 AND single_decision = 1 AND consumed_at IS NULL
+`
+
+type ConsumeSingleDecisionWindowParams struct {
+	ConsumedAt pgtype.Timestamptz
+	ID         string
+}
+
+// Claim a single_decision window exactly once: the NULL guard is the atomic
+// claim, so a second disclosure loses and is refused (B11 double-spend).
+// wenv:authn-resolution
+func (q *Queries) ConsumeSingleDecisionWindow(ctx context.Context, arg ConsumeSingleDecisionWindowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeSingleDecisionWindow, arg.ConsumedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts
 `
@@ -171,6 +192,21 @@ DELETE FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL
 func (q *Queries) DeletePendingTOTPForAccount(ctx context.Context, accountID string) error {
 	_, err := q.db.Exec(ctx, deletePendingTOTPForAccount, accountID)
 	return err
+}
+
+const deleteReauthWindowsForEnvironment = `-- name: DeleteReauthWindowsForEnvironment :execrows
+DELETE FROM reauth_windows WHERE environment_id = $1
+`
+
+// Invalidate every open window on one environment: the first of LowerEffective
+// Window's five ADR items on the effective-window transition (#54 B6).
+// wenv:authn-resolution
+func (q *Queries) DeleteReauthWindowsForEnvironment(ctx context.Context, environmentID string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteReauthWindowsForEnvironment, environmentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -219,6 +255,27 @@ DELETE FROM totp_credentials WHERE account_id = $1
 func (q *Queries) DeleteTOTPForAccount(ctx context.Context, accountID string) error {
 	_, err := q.db.Exec(ctx, deleteTOTPForAccount, accountID)
 	return err
+}
+
+const environmentChainByID = `-- name: EnvironmentChainByID :one
+SELECT org_id, project_id, id FROM environments WHERE id = $1
+`
+
+type EnvironmentChainByIDRow struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+}
+
+// Resolve an environment's chain from its id alone, for LowerEffectiveWindow's
+// stranded-principal query (#54 B6): the denormalized chain columns make the row
+// self-describing, so the grant-coverage predicate can be built from an env id.
+// wenv:authn-resolution
+func (q *Queries) EnvironmentChainByID(ctx context.Context, id string) (EnvironmentChainByIDRow, error) {
+	row := q.db.QueryRow(ctx, environmentChainByID, id)
+	var i EnvironmentChainByIDRow
+	err := row.Scan(&i.OrgID, &i.ProjectID, &i.ID)
+	return i, err
 }
 
 const getAccountByID = `-- name: GetAccountByID :one
@@ -653,6 +710,45 @@ func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcPr
 		&i.RowVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getReauthWindow = `-- name: GetReauthWindow :one
+SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
+       authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
+       consumed_at, created_at
+FROM reauth_windows WHERE session_id = $1 AND environment_id = $2
+`
+
+type GetReauthWindowParams struct {
+	SessionID     string
+	EnvironmentID string
+}
+
+// Reauth-window consumption at disclosure (#54, human-auth ADR - Reauthentication).
+// A disclosure on environment E requires a live window for (session, E). These
+// read the window, slide its sliding clock (never past the hard cap the service
+// enforces), and claim a single_decision window exactly once via the consumed_at
+// NULL guard. There is no reveal operation to call these yet (#50/#58); they ship
+// as the library those verticals consume, exercised directly by fixtures.
+// wenv:authn-resolution
+func (q *Queries) GetReauthWindow(ctx context.Context, arg GetReauthWindowParams) (ReauthWindow, error) {
+	row := q.db.QueryRow(ctx, getReauthWindow, arg.SessionID, arg.EnvironmentID)
+	var i ReauthWindow
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.EnvironmentID,
+		&i.CeremonyID,
+		&i.FactorClass,
+		&i.SingleDecision,
+		&i.AuthenticatedAt,
+		&i.WindowExpiresAt,
+		&i.HardExpiresAt,
+		&i.CredentialEpoch,
+		&i.ConsumedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1177,6 +1273,63 @@ func (q *Queries) ListGrantsForPrincipal(ctx context.Context, principalID string
 	return items, nil
 }
 
+const listGrantsForResetTarget = `-- name: ListGrantsForResetTarget :many
+SELECT capability, org_id, project_id, env_id FROM grants
+WHERE principal_id = $1
+`
+
+type ListGrantsForResetTargetRow struct {
+	Capability string
+	OrgID      pgtype.Text
+	ProjectID  pgtype.Text
+	EnvID      pgtype.Text
+}
+
+// The target principal's grant set, for the credential-reset org-bounded test
+// (#54 credential-reset, ADR - Recovery): reset reaches only a target whose grants
+// lie entirely within one org and who holds no instance capability.
+// wenv:authn-resolution
+func (q *Queries) ListGrantsForResetTarget(ctx context.Context, principalID string) ([]ListGrantsForResetTargetRow, error) {
+	rows, err := q.db.Query(ctx, listGrantsForResetTarget, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListGrantsForResetTargetRow
+	for rows.Next() {
+		var i ListGrantsForResetTargetRow
+		if err := rows.Scan(
+			&i.Capability,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPrincipalRow = `-- name: LockPrincipalRow :one
+SELECT id FROM principals WHERE id = $1 FOR UPDATE
+`
+
+// Principal row lock (#54 B14): every grant writer takes it so the credential-
+// reset org-bounded test serializes against a concurrent grant landing. sqlite's
+// single writer serializes trivially; postgres takes FOR UPDATE. The grant-lock
+// analyzer pins that this sits inside every grant writer.
+// wenv:authn-resolution
+func (q *Queries) LockPrincipalRow(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, lockPrincipalRow, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const resolveEnvChain = `-- name: ResolveEnvChain :one
 SELECT org_id, project_id, id FROM environments
 WHERE org_id = $1 AND project_id = $2 AND id = $3
@@ -1263,6 +1416,73 @@ type RotateSessionFactorsParams struct {
 func (q *Queries) RotateSessionFactors(ctx context.Context, arg RotateSessionFactorsParams) error {
 	_, err := q.db.Exec(ctx, rotateSessionFactors, arg.Verifier, arg.Factors, arg.ID)
 	return err
+}
+
+const slideReauthWindow = `-- name: SlideReauthWindow :execrows
+UPDATE reauth_windows SET window_expires_at = $1
+WHERE id = $2 AND single_decision = 0 AND consumed_at IS NULL
+`
+
+type SlideReauthWindowParams struct {
+	WindowExpiresAt pgtype.Timestamptz
+	ID              string
+}
+
+// Slide the idle window clock on a sliding (non single-decision) window. The hard
+// cap is enforced by the service, which passes min(now+window, hard_expires_at);
+// the NULL guard keeps a concurrently-claimed window from sliding.
+// wenv:authn-resolution
+func (q *Queries) SlideReauthWindow(ctx context.Context, arg SlideReauthWindowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, slideReauthWindow, arg.WindowExpiresAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const strandedRevealPrincipalsForEnvironment = `-- name: StrandedRevealPrincipalsForEnvironment :many
+SELECT DISTINCT g.principal_id
+FROM grants g
+WHERE g.capability IN ('reveal', 'reveal-history')
+  AND (g.org_id IS NULL
+       OR (g.org_id = $1 AND g.project_id IS NULL)
+       OR (g.org_id = $1 AND g.project_id = $2 AND g.env_id IS NULL)
+       OR (g.org_id = $1 AND g.project_id = $2 AND g.env_id = $3))
+  AND NOT EXISTS (
+      SELECT 1 FROM webauthn_credentials w
+      JOIN accounts a ON a.id = w.account_id
+      WHERE a.principal_id = g.principal_id AND w.disabled_at IS NULL)
+`
+
+type StrandedRevealPrincipalsForEnvironmentParams struct {
+	Org     pgtype.Text
+	Project pgtype.Text
+	Env     pgtype.Text
+}
+
+// Stranded-principal enumeration for LowerEffectiveWindow (#54 B6): principals
+// holding reveal/reveal-history covering environment E (a grant at E, its project,
+// its org, or the instance) who have no enabled WebAuthn authenticator, so a 0
+// effective window fails their disclosure closed until they enrol one.
+// wenv:authn-resolution
+func (q *Queries) StrandedRevealPrincipalsForEnvironment(ctx context.Context, arg StrandedRevealPrincipalsForEnvironmentParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, strandedRevealPrincipalsForEnvironment, arg.Org, arg.Project, arg.Env)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var principal_id string
+		if err := rows.Scan(&principal_id); err != nil {
+			return nil, err
+		}
+		items = append(items, principal_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchSession = `-- name: TouchSession :exec

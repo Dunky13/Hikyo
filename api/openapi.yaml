@@ -765,6 +765,48 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/accounts/{principal}/credential-reset:
+    parameters:
+      - $ref: "#/components/parameters/ResetTargetPrincipal"
+    post:
+      operationId: resetCredential
+      tags: [accounts]
+      summary: Issue a credential-establishment authority for another account.
+      description: |
+        Administrator-issued credential reset (human-auth ADR § Recovery). A
+        credential-reset holder mints a single-use, hashed, expiring
+        credential-establishment authority for a target, returned once and
+        transmitted out of band. The reset advances the target's session
+        generation and revokes its sessions in the same transaction.
+
+        Org-scoped credential-reset reaches only a target whose grants lie
+        entirely within that org and who holds no instance capability; the
+        org-bounded test is evaluated in one serializable transaction with the
+        target's grant set (a concurrent grant landing conflicts with the
+        in-flight reset). A target holding an instance capability has no network
+        reset path and is refused by name — break-glass only. This route
+        dispatches between the org-scoped and instance-scoped credential-reset
+        operations by that classification, so it names no single x-wenv-operation;
+        every failure that could enumerate the target answers a uniform `401`.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: A session-less credential-establishment authority, returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialResetResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/webauthn/enrol/start:
     post:
       operationId: enrolPasskeyStart
@@ -1260,6 +1302,13 @@ components:
       description: Enrolled passkey credential identifier.
       schema:
         $ref: "#/components/schemas/ID"
+    ResetTargetPrincipal:
+      name: principal
+      in: path
+      required: true
+      description: The target principal whose credential is being reset.
+      schema:
+        $ref: "#/components/schemas/ID"
 
   responses:
     BadRequest:
@@ -1564,6 +1613,20 @@ components:
           description: |
             The single-use credential-establishment authority, returned once.
             It creates no session: establish a password with it, then log in.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    CredentialResetResult:
+      type: object
+      additionalProperties: false
+      required: [authority, expires_at]
+      properties:
+        authority:
+          type: string
+          description: |
+            The single-use credential-establishment authority for the target,
+            returned once. It creates no session and may only ever establish a
+            password; hand it to the target out of band.
         expires_at:
           $ref: "#/components/schemas/Timestamp"
 

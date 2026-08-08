@@ -190,6 +190,38 @@ func (q *Queries) GetWebAuthnCeremonyByChallenge(ctx context.Context, challengeV
 	return i, err
 }
 
+const getWebAuthnCeremonyByID = `-- name: GetWebAuthnCeremonyByID :one
+SELECT id, challenge_verifier, session_data, account_id, session_id, purpose,
+       operation_binding, environment_id, credential_id, credential_epoch,
+       expires_at, consumed_at, created_at
+FROM webauthn_ceremonies WHERE id = ?
+`
+
+// Resolve a ceremony by id for single-decision reauth-window consumption (#54):
+// the window row carries only ceremony_id, so the enumerated-unit binding the
+// ceremony pinned is read here and matched byte-exact against the disclosure unit.
+// wenv:authn-resolution
+func (q *Queries) GetWebAuthnCeremonyByID(ctx context.Context, id string) (WebauthnCeremony, error) {
+	row := q.db.QueryRowContext(ctx, getWebAuthnCeremonyByID, id)
+	var i WebauthnCeremony
+	err := row.Scan(
+		&i.ID,
+		&i.ChallengeVerifier,
+		&i.SessionData,
+		&i.AccountID,
+		&i.SessionID,
+		&i.Purpose,
+		&i.OperationBinding,
+		&i.EnvironmentID,
+		&i.CredentialID,
+		&i.CredentialEpoch,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWebAuthnCredentialByCredentialID = `-- name: GetWebAuthnCredentialByCredentialID :one
 SELECT id, account_id, credential_id, public_key, aaguid, sign_count, transports,
        discoverable, backup_eligible, backup_state, label, credential_epoch,

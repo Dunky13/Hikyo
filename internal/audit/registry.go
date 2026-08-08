@@ -116,6 +116,17 @@ const (
 	EventOIDCProviderChanged EventType = "auth.provider_changed"
 	EventOIDCProviderRead    EventType = "auth.provider_read"
 
+	// auth.credential_reset_issued records an administrator-issued or break-glass
+	// credential-establishment authority minted for a target (#54, human-auth ADR
+	// - Recovery), naming the issuer tier and whether it ran under network
+	// (credential-reset) or local host (break-glass) authority.
+	EventAuthCredentialResetIssued EventType = "auth.credential_reset_issued"
+	// auth.effective_window_lowered records an environment's effective
+	// reauthentication window being lowered, the count of windows it invalidated,
+	// and the principals the transition strands (reveal holders there without a
+	// WebAuthn authenticator), so the trail carries the surfaced list (#54 B6).
+	EventAuthEffectiveWindowLowered EventType = "auth.effective_window_lowered"
+
 	// settings.* — scaffolding domain events for the demonstration
 	// operations (#42/#44). Instance-scoped org administration and the
 	// tenant-chain demonstration writes audit under these until the real
@@ -471,6 +482,42 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"query":     {Kind: KindString, Required: true}, // get | list
 			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventAuthCredentialResetIssued: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		// Failures are audited too (ADR - Recovery: "including failures"): a
+		// network reset of an instance-capability target, or of an unknown
+		// principal, records the attempt with its cause while the wire stays
+		// uniform. The mint-specific fields are success-only.
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:   map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"target_principal": {Kind: KindString, Required: true},
+			"issued_by":        {Kind: KindString, Required: true}, // credential-reset | break-glass
+			"authority":        {Kind: KindString, Required: true}, // network | local-host
+			"target_account":   {Kind: KindString},                 // absent for an unknown-target failure
+			"authority_id":     {Kind: KindString},                 // success only
+			"delivery":         {Kind: KindString},                 // success only
+			"sessions_revoked": {Kind: KindBool},                   // success only
+			"cause":            {Kind: KindString},                 // failures only, by class
+		},
+	},
+	EventAuthEffectiveWindowLowered: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"environment_id":      {Kind: KindString, Required: true},
+			"new_window_seconds":  {Kind: KindInt, Required: true},
+			"windows_invalidated": {Kind: KindInt, Required: true},
+			"stranded_count":      {Kind: KindInt, Required: true},
+			// The stranded-principal list the ADR requires the event to carry.
+			// Principal ids are trusted vocabulary (prefixed UUIDs), joined with a
+			// comma; empty when nothing is stranded.
+			"stranded_principals": {Kind: KindString},
 		},
 	},
 	EventOrgRead: {

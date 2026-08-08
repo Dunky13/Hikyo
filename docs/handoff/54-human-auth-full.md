@@ -123,13 +123,75 @@ passkey-prove a mutation; the "drop password" B4 arm has no endpoint (invariant
 enforced, reached by SQL in tests); `AccountByWebAuthnUserHandle` now unused
 (remove in a codegen pass).
 
-**Remaining: the reauth/reset vertical** — reauth windows CONSUMPTION at
-disclosure + `LowerEffectiveWindow(tx, envID, newValue)` (finding B6) +
-`credential-reset` (org/instance scope, org-bounded serializable test, B14
-grant-lock analyzer) + break-glass (`wenv admin reset-credential`, host-local).
-Note the `reauth_windows` table already exists (00006) and OIDC/WebAuthn reauth
-already OPEN windows; this vertical adds the disclosure-time consumption + the
-credential-reset/break-glass recovery tier.
+**Reauth/reset vertical: DONE** (uncommitted, main-thread review pending). No
+new migration — reauth_windows, consumed_at/single_decision, and the
+credential-reset/break-glass issuers all pre-exist in 00006. What landed:
+
+- **Reauth-window CONSUMPTION** (`service.ConsumeReauthWindow(az, session, env,
+  keyIDs, now)`): a disclosure on env E requires a live window for (session, E) —
+  `now < hard_expires_at AND now < window_expires_at` at the current epoch; the
+  sliding clock slides per disclosure capped at the hard cap; a `single_decision`
+  window (0-window WebAuthn, unit-bound) is consumed exactly once via the
+  consumed_at NULL guard and matched byte-exact to the ceremony's
+  operation_binding. Ships as the library #50/#58's reveal path calls; no reveal
+  op exists yet, so fixtures exercise it directly.
+- **`service.ReauthTOTP`** (library, no HTTP endpoint): the TOTP analog of OIDC
+  reauth — refuses at a 0 effective window naming the WebAuthn remedy, opens a
+  sliding window above 0. Direct code presentation like the landed `StepUpTOTP`;
+  `totp_challenges` is dormant codebase-wide (no writer), so B8's purpose wall is
+  unexercised and the single-use step CAS is the operative control (stated
+  deviation).
+- **`LowerEffectiveWindow(az, envID, newValue, now) -> (stranded, invalidated)`**
+  (B6): the five ADR items in one tx — invalidate the env's open windows, RETAIN
+  grants, enumerate the stranded reveal/reveal-history holders (no WebAuthn
+  authenticator), disclosure fails closed for them, factor enrolment stays
+  reachable — plus the `auth.effective_window_lowered` event carrying the
+  stranded list. Stranded computed only at `newValue <= 0`. #55's project-settings
+  knob is the arriving caller.
+- **`credential-reset`** (network): `POST /accounts/{principal}/credential-reset`,
+  two registered ops (`credential-reset.org` tenant@org, `credential-reset.instance`)
+  the service dispatches between by the target's grant classification —
+  org-bounded (one org, no instance cap) → org op (an org-scoped OR inherited
+  instance-scoped grant covers it); multi-org/zero-grant → instance op;
+  instance-capability target → refused by name (break-glass only). The
+  classification + mint run under a `principals` row lock every grant writer also
+  takes (B14), making the org-bounded test serializable. Failures audited by
+  cause (`instance-capability-target`, `unknown-target`), wire uniform (401/403).
+- **Break-glass** (`wenv admin reset-credential --principal ID`): host-local, root
+  key required, reaches any target incl instance-cap holders, no network route
+  (contract test asserts exactly one credential-reset HTTP path, the network one).
+  Mirrors `wenv admin create`'s local-authority mechanism; no SystemProof (rides
+  the resolution surface like `BootstrapAdmin`).
+- **Grant-lock analyzer** (`lint.CheckGrantLock`, B14): pins that every grant-table
+  writer takes `LockPrincipalRow`; the lock is folded into `Resolver.CreateGrant`;
+  negative fixture `testdata/badgrant`. #55's general grant surface inherits the
+  obligation.
+- CLI: `wenv account reset-credential <principal>` (network) + `wenv admin
+  reset-credential` (host-local). Audit events `auth.credential_reset_issued`,
+  `auth.effective_window_lowered` registered.
+
+**Disposition items surfaced by this vertical (for the human):**
+
+1. **A single-decision (0-window) reauth window has ZERO life unless
+   `ReauthHardCap > 0`** — with both `ReauthWindow` and `ReauthHardCap` at 0 the
+   window's `hard_expires_at == authenticated_at`, so consumption fails closed
+   immediately. #55 / the ops-spec MUST set a non-zero hard cap before any
+   `reveal` ships, or 0-window WebAuthn reauth is unusable. Low-stakes today (no
+   reveal exercisable). The consumption library enforces the cap correctly.
+2. **ADR issuer-list amendment still owed.** `issued_by='credential-reset'` and
+   `'break-glass'` are in the ADR's list already; no amendment needed for those.
+   Disposition 2 above (the `'recovery'` issuer) remains the outstanding
+   wayfinder-docs edit — the implementer cannot commit to that repo, so the main
+   thread owns landing the ADR amendment.
+3. **Serializability is lock+analyzer-argued, not race-fixtured** (the task's
+   stated option, mirroring the OIDC provider-race argument): sqlite serializes on
+   its single writer; postgres holds `FOR UPDATE`; the analyzer proves every grant
+   writer takes the same row lock the reset takes.
+4. **credential-reset audits via `RecordAuthEvent`** (resolution surface,
+   TrailInstance) though it authorizes through a chokepoint operation — a hybrid
+   (recovery audits proof-free; provider-admin audits proof-bound). The event
+   commits in the same tx as the reset, so durability holds; the minted proof is
+   the authorization gate only (the writes are all resolution-surface).
 
 **Delegation note (reliability):** in-process subagents and long background
 shell jobs get reaped at main-process boundaries between turns. Mitigation:

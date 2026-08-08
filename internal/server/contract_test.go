@@ -165,6 +165,10 @@ func (s stubAuth) ListPasskeys(context.Context, string) ([]service.PasskeyView, 
 	return nil, domain.ErrUnauthenticated
 }
 
+func (s stubAuth) ResetCredential(context.Context, service.Actor, string, string) (service.ResetResult, error) {
+	return service.ResetResult{}, domain.ErrUnauthenticated
+}
+
 type stubProviders struct{}
 
 func (stubProviders) Put(context.Context, service.Actor, string, service.ProviderInput) (service.ProviderView, error) {

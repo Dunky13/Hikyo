@@ -34,6 +34,19 @@ const (
 	OpProviderList   Operation = "oidc-provider.list"
 	OpProviderDelete Operation = "oidc-provider.delete"
 
+	// Administrator-issued credential reset (#54, human-auth ADR - Recovery).
+	// The capability is credential-reset, valid at org and instance scope only.
+	// One route dispatches between these two by the target's grant
+	// classification: an org-bounded target (grants within one org, no instance
+	// capability) is reached through the org-scoped operation — an org-scope OR
+	// instance-scope credential-reset grant covers it by downward inheritance; a
+	// multi-org (no instance capability) target has no single org to address and
+	// is reached only at instance scope. Instance-capability targets have no
+	// network path at all (break-glass only). Both are MFA-mandatory (the atom
+	// is in MFAMandatory) and audit through the resolution surface.
+	OpCredentialReset         Operation = "credential-reset.org"
+	OpCredentialResetInstance Operation = "credential-reset.instance"
+
 	// Audit trail reads (#45, audit-model ADR). One operation per addressed
 	// depth — the registry pins one depth per tenant operation, so the three
 	// depths are three rows sharing one service implementation; the formula
@@ -219,6 +232,25 @@ var operations = map[Operation]opSpec{
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventOIDCProviderChanged},
+	},
+
+	// Credential reset (#54). The formula IS the ADR's org-bounded rule: at the
+	// target's org, an org-scoped credential-reset grant covers it and an
+	// instance-scoped one covers it by inheritance, while an org-P grant (P != the
+	// target's org) does not. The instance variant is for multi-org targets, which
+	// only an instance-scope holder can reach. Writes (generation advance, session
+	// revocation, authority mint) and the audit event ride the resolution surface,
+	// so there is no store op here; the event is declared for completeness.
+	OpCredentialReset: {
+		class:   ClassTenant,
+		level:   domain.LevelOrg,
+		formula: Formula{{Cap: domain.CapCredentialReset, At: domain.LevelOrg}},
+		events:  []audit.EventType{audit.EventAuthCredentialResetIssued},
+	},
+	OpCredentialResetInstance: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapCredentialReset, At: domain.LevelNone}},
+		events:  []audit.EventType{audit.EventAuthCredentialResetIssued},
 	},
 
 	// Tenant-scoped demonstration operations, one per chain depth. Their

@@ -43,6 +43,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ConsumeSingleDecisionWindow",
+    "annotation": "authn-resolution",
+    "hash": "c20537fa5b826cd158c944cbb2968837107939d26d4131f3cf9c63b65bea48ba"
+  },
+  {
+    "engine": "postgres",
     "name": "ConsumeWebAuthnCeremony",
     "annotation": "authn-resolution",
     "hash": "d4b7d7892aa73f3540f231953f541bedb9a23a0279cf15b15d29dd5ec078ff8f"
@@ -91,6 +97,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteReauthWindowsForEnvironment",
+    "annotation": "authn-resolution",
+    "hash": "b9467726d5d8eaed94a629f6c4eb9cf55e7124e385876c361ec38981cf4c8edc"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "11e96cfd8c2736f13ce55975ea910dd68640f6f14e38a4b3342d514804e3de27"
@@ -130,6 +142,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "848f0fe3ce8a4f1ca5d8f819696cb66997d72de72efbac64e3090050460a8df0"
+  },
+  {
+    "engine": "postgres",
+    "name": "EnvironmentChainByID",
+    "annotation": "authn-resolution",
+    "hash": "5c31ff638d985b5d9cbd5d55b38ac851ef1f7321b1efa72cb54943996340059f"
   },
   {
     "engine": "postgres",
@@ -247,6 +265,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "bb640a11bf45ebade884e246f3012d30ada74c41402a94c1c1a48228e4923799"
+  },
+  {
+    "engine": "postgres",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "19816dbfd2333bb4af1cfce7697245dea43bfb2c9286c348ef358b6522d4df46"
@@ -262,6 +286,12 @@
     "name": "GetWebAuthnCeremonyByChallenge",
     "annotation": "authn-resolution",
     "hash": "cd06a77e564385a275d40d99125a76c312579d0c8d0a8b4ed3c3e1ba446d34b0"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetWebAuthnCeremonyByID",
+    "annotation": "authn-resolution",
+    "hash": "86377b1d970f8870457e981bc1e02111ba99c0055b2c629e8b7ce7175a6265c3"
   },
   {
     "engine": "postgres",
@@ -379,6 +409,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListGrantsForResetTarget",
+    "annotation": "authn-resolution",
+    "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
+  },
+  {
+    "engine": "postgres",
     "name": "ListOIDCProviders",
     "annotation": "authn-resolution",
     "hash": "a40c245b92177b74179d4a24c340a6bfcfb9255d2e9b16917ed7ef6b558dd98b"
@@ -400,6 +436,12 @@
     "name": "LockOIDCProviderForDelete",
     "annotation": "authn-resolution",
     "hash": "4148d6fd0fa7a3ddb6a9b9676ae8c90c20de366ca4cbb14449d9e722edacbff8"
+  },
+  {
+    "engine": "postgres",
+    "name": "LockPrincipalRow",
+    "annotation": "authn-resolution",
+    "hash": "dc379a18027f0fc520065a13023ee7b1ccd38935199770bc8143d1ca39859a6a"
   },
   {
     "engine": "postgres",
@@ -430,6 +472,18 @@
     "name": "SetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "f6e17867c0d902e40805f567c0967893ff46ac2be926b014218a48d895efc36f"
+  },
+  {
+    "engine": "postgres",
+    "name": "SlideReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "aa2745f91ae89aa8e60914ec5b0286a7c98d4010bc4cb82a6f8d61e3be671100"
+  },
+  {
+    "engine": "postgres",
+    "name": "StrandedRevealPrincipalsForEnvironment",
+    "annotation": "authn-resolution",
+    "hash": "95cd1f8c392587ce7700fa672088cb243f4b5581ec98a9537ec54e909eb1cdee"
   },
   {
     "engine": "postgres",
@@ -499,6 +553,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ConsumeSingleDecisionWindow",
+    "annotation": "authn-resolution",
+    "hash": "966d7b58a186869dfcfb5145558d16f1c4d806184f051786c992276a4e325a26"
+  },
+  {
+    "engine": "sqlite",
     "name": "ConsumeWebAuthnCeremony",
     "annotation": "authn-resolution",
     "hash": "c4d56d06a98b346035e4cdac30b1e0833dc7a287514f93c7853abf28fd8d3e72"
@@ -547,6 +607,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteReauthWindowsForEnvironment",
+    "annotation": "authn-resolution",
+    "hash": "372ea6e9510bc1fdf82032650c82f4240acb6c502a068f091ed3673bf7f61ef6"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "4c0c29fb3d9f50d5c04e9d5db62e3f64d8df43b42d5991d7c85276873e24167b"
@@ -586,6 +652,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "8b28aa8f530e6ef3ef812866a0daa85c83c7f6092d35ed2357dd959ab3603435"
+  },
+  {
+    "engine": "sqlite",
+    "name": "EnvironmentChainByID",
+    "annotation": "authn-resolution",
+    "hash": "170bedbeb14b3270711ccc705b4b2ad4ceadef181b4f97025d8a6bea844654e2"
   },
   {
     "engine": "sqlite",
@@ -703,6 +775,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "0cc2e9e8342a8daf186e98879d806b6567a23cdb855196e3c7a2b58368b2eac2"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "cc0eb65452b1becf984e553ed3abdc8bebd6e6e56bbb8a2d6e031c61fc32a3ad"
@@ -718,6 +796,12 @@
     "name": "GetWebAuthnCeremonyByChallenge",
     "annotation": "authn-resolution",
     "hash": "ff408cb3ef31a35f6c120d3651dacc9b245786b89362c4cbdc37b45949d561c5"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetWebAuthnCeremonyByID",
+    "annotation": "authn-resolution",
+    "hash": "8f7e62af07d6c008cb30404da6ee057b07eeb87bae63734100a2ec0df29a5e89"
   },
   {
     "engine": "sqlite",
@@ -835,6 +919,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListGrantsForResetTarget",
+    "annotation": "authn-resolution",
+    "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListOIDCProviders",
     "annotation": "authn-resolution",
     "hash": "a40c245b92177b74179d4a24c340a6bfcfb9255d2e9b16917ed7ef6b558dd98b"
@@ -856,6 +946,12 @@
     "name": "LockOIDCProviderForDelete",
     "annotation": "authn-resolution",
     "hash": "2385fd95516a831c8df536be0663443d9d1e9c8a454143c0858008f64275e2ce"
+  },
+  {
+    "engine": "sqlite",
+    "name": "LockPrincipalRow",
+    "annotation": "authn-resolution",
+    "hash": "3da3cb65ce3abc134c0d6e2914b5f9566a9e3a445da14b4e5bebf32088eb2a28"
   },
   {
     "engine": "sqlite",
@@ -886,6 +982,18 @@
     "name": "SetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "e9cb27a19d04f2aa166d07dd84c3db52e274c8507ab774d6728de4f267b945c3"
+  },
+  {
+    "engine": "sqlite",
+    "name": "SlideReauthWindow",
+    "annotation": "authn-resolution",
+    "hash": "641331db49a99c5d8b519f7c26f882c9c73232dad15b46fbbcde3f8f02c889db"
+  },
+  {
+    "engine": "sqlite",
+    "name": "StrandedRevealPrincipalsForEnvironment",
+    "annotation": "authn-resolution",
+    "hash": "95cd1f8c392587ce7700fa672088cb243f4b5581ec98a9537ec54e909eb1cdee"
   },
   {
     "engine": "sqlite",

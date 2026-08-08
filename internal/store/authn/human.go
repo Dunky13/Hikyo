@@ -356,6 +356,14 @@ func (r *Resolver) CreateGrant(ctx context.Context, id string, p domain.Principa
 	if _, err := g.Scope.Level(); err != nil {
 		return err
 	}
+	// Grant-lock obligation (#54 B14): take the target principal's row lock
+	// before the insert so the credential-reset org-bounded test — which locks
+	// the same row — serializes against a concurrent grant landing. A future
+	// grant writer (#55) inherits this obligation, pinned by the grant-lock
+	// analyzer. sqlite serializes on its single writer; postgres holds FOR UPDATE.
+	if err := r.LockPrincipalRow(ctx, p); err != nil {
+		return err
+	}
 	if r.sq != nil {
 		return r.sq.InsertGrant(ctx, sqlitegen.InsertGrantParams{
 			ID: id, PrincipalID: string(p), Capability: string(g.Capability),

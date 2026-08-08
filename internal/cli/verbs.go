@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -425,9 +426,53 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 		return runRecoveryCodes(ctx, ios, rest)
 	case "recovery":
 		return runRecovery(ctx, ios, rest)
+	case "reset-credential":
+		return runResetCredential(ctx, ios, rest)
 	default:
-		return failf(ExitUsage, "unknown account verb %q: use establish-credential, factor, passkey, recovery-codes or recovery", sub)
+		return failf(ExitUsage, "unknown account verb %q: use establish-credential, factor, passkey, recovery-codes, recovery or reset-credential", sub)
 	}
+}
+
+// runResetCredential is the network administrator-issued reset: a credential-reset
+// holder mints a credential-establishment authority for a target, returned once
+// and transmitted out of band. An instance-capability target has no network path
+// and is refused (403) - break-glass only, via `wenv admin reset-credential` on
+// the host.
+func runResetCredential(ctx context.Context, ios IO, args []string) error {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return failf(ExitUsage, "usage: wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]")
+	}
+	principal := args[0]
+	var outputFile string
+	var dangerous bool
+	st, flags, err := parseCommon("account reset-credential", ios, args[1:], func(fs *flag.FlagSet) {
+		fs.StringVar(&outputFile, "output-file", "", "write the authority to a file this command creates (0600)")
+		fs.BoolVar(&dangerous, "dangerously-print", false, "print the authority to stdout")
+	})
+	if err != nil {
+		return err
+	}
+	deliver := disclose.Options{OutputFile: outputFile, DangerouslyPrint: dangerous, Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal}
+	if err := disclose.Preflight(deliver); err != nil {
+		return failf(ExitRefused, "the reset authority has nowhere to go: %v", err)
+	}
+	client, _, err := authenticatedClient(st, ios, flags)
+	if err != nil {
+		return err
+	}
+	var result apigen.CredentialResetResult
+	if err := client.Do(ctx, http.MethodPost,
+		api.PathPrefix+"/accounts/"+url.PathEscape(principal)+"/credential-reset", nil, &result); err != nil {
+		return err
+	}
+	if _, err := disclose.Emit(
+		fmt.Sprintf("credential-establishment authority for %s (single-use)", principal),
+		result.Authority, deliver); err != nil {
+		return failf(ExitRefused, "disclosing the reset authority: %v", err)
+	}
+	fmt.Fprintf(ios.Stderr,
+		"credential reset for %s; its sessions are revoked. Hand the authority above to the account holder out of band.\n", principal)
+	return nil
 }
 
 // runPasskey refuses by name. A passkey ceremony needs an authenticator
