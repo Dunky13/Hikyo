@@ -31,11 +31,12 @@ import (
 // internal/isolation; what these prove is the TRANSPORT's contract, which is
 // a different claim and needs a different fixture.
 type stubAuth struct {
-	login        func(ctx context.Context, u, p string) (service.LoginResult, error)
-	identity     func(ctx context.Context, presented string) (service.Identity, error)
-	logout       func(ctx context.Context, presented string) error
-	estab        func(ctx context.Context, authority, password string) error
-	passkeyStart func(ctx context.Context) ([]byte, error)
+	login         func(ctx context.Context, u, p string) (service.LoginResult, error)
+	identity      func(ctx context.Context, presented string) (service.Identity, error)
+	logout        func(ctx context.Context, presented string) error
+	estab         func(ctx context.Context, authority, password string) error
+	passkeyStart  func(ctx context.Context) ([]byte, error)
+	passkeyFinish func(ctx context.Context, response []byte) (service.LoginResult, error)
 }
 
 func (s stubAuth) LocalLogin(ctx context.Context, u, p string) (service.LoginResult, error) {
@@ -133,8 +134,11 @@ func (s stubAuth) PasskeyLoginStart(ctx context.Context) ([]byte, error) {
 	return s.passkeyStart(ctx)
 }
 
-func (s stubAuth) PasskeyLoginFinish(context.Context, []byte) (service.LoginResult, error) {
-	return service.LoginResult{}, domain.ErrUnauthenticated
+func (s stubAuth) PasskeyLoginFinish(ctx context.Context, response []byte) (service.LoginResult, error) {
+	if s.passkeyFinish == nil {
+		return service.LoginResult{}, domain.ErrUnauthenticated
+	}
+	return s.passkeyFinish(ctx, response)
 }
 
 func (s stubAuth) StepUpPasskeyStart(context.Context, string) ([]byte, error) {
@@ -428,7 +432,7 @@ func TestSuccessfulLoginMatchesTheContract(t *testing.T) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.SessionToken == "" {
+	if result.SessionToken == nil || *result.SessionToken == "" {
 		t.Error("the response carries no session token")
 	}
 }
@@ -533,5 +537,59 @@ func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
 	}
 	if pk["challenge"] != "Y2hhbGxlbmdl" {
 		t.Fatalf("the signed-over challenge did not round-trip: %v", pk["challenge"])
+	}
+}
+
+// TestBrowserPasskeyLoginTokenOnlyOnCookie is the B2 regression: a passkey login
+// mints a BROWSER session, whose token must reach the caller ONLY on the
+// __Host-wenv HttpOnly cookie — never echoed into the script-readable JSON body
+// where injected same-origin script could exfiltrate the bearer.
+func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
+	const token = "ew_1_browser_stub"
+	srv := newTestServer(t, stubAuth{
+		passkeyFinish: func(context.Context, []byte) (service.LoginResult, error) {
+			return service.LoginResult{
+				SessionToken: token, SessionID: liveIdentity.SessionID,
+				Artifact: "browser", CreatedAt: liveIdentity.CreatedAt,
+				IdleExpires: liveIdentity.IdleExpiresAt, AbsExpires: liveIdentity.AbsoluteExpiresAt,
+				Principal: liveIdentity.Principal, DisplayName: "Admin",
+				Assurance: liveIdentity.Assurance,
+			}, nil
+		},
+	}, stubOrgs{})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/webauthn/login/finish", "",
+		map[string]any{"id": "cred", "response": map[string]any{}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, payload)
+	}
+
+	// The body carries the session and principal but NOT the token.
+	var result apigen.LoginResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.SessionToken != nil {
+		t.Errorf("a browser-artifact login body must omit session_token, got %q", *result.SessionToken)
+	}
+	// The raw bytes must not contain the token anywhere either.
+	if bytes.Contains(payload, []byte(token)) {
+		t.Errorf("the session token leaked into the response body: %s", payload)
+	}
+
+	// The token is delivered on the __Host-wenv cookie, HttpOnly + Secure.
+	var got *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == "__Host-wenv" {
+			got = c
+		}
+	}
+	if got == nil {
+		t.Fatal("no __Host-wenv session cookie was set")
+	}
+	if got.Value != token {
+		t.Errorf("cookie token = %q, want %q", got.Value, token)
+	}
+	if !got.HttpOnly || !got.Secure {
+		t.Errorf("session cookie must be HttpOnly+Secure, got HttpOnly=%v Secure=%v", got.HttpOnly, got.Secure)
 	}
 }

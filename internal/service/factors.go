@@ -1038,6 +1038,31 @@ func (s *Auth) attemptRecovery(ctx context.Context, username, code string) (Reco
 		// the single-use claim: a losing swap discards this authority (B22).
 		crypto.Zero(verifiers[idx])
 		remaining := append(verifiers[:idx:idx], verifiers[idx+1:]...)
+		// Fail-closed passkey-only floor (A1): consuming the FINAL recovery code on
+		// a passwordless (passkey-only) account would strand it below the floor —
+		// no password and no current recovery batch. Refuse. The rollback is
+		// non-destructive: the code is NOT burned, no authority minted, no sessions
+		// revoked, so the reserve code stays usable. A passwordless account that has
+		// also lost its passkeys recovers through the break-glass vertical (#7), not
+		// by spending its last code into a bricked floor.
+		if len(remaining) == 0 {
+			if _, perr := az.PasswordCredentialFor(ctx, account.ID); errors.Is(perr, domain.ErrNotFound) {
+				zeroVerifiers(remaining)
+				// Refuse with an audit event, never an eventless refusal (the
+				// failRecovery contract): nothing destructive has run yet — no batch
+				// swap, no authority, no generation advance, no session revocation —
+				// so committing ONLY the event keeps the reserve code usable while
+				// the refusal stays visible to audit.
+				if ferr := s.failRecovery(ctx, az, now, account.ID, true, "passkey-only-floor"); ferr != nil {
+					return ferr
+				}
+				refused = ErrPasskeyOnlyViolation
+				return nil
+			} else if perr != nil {
+				zeroVerifiers(remaining)
+				return perr
+			}
+		}
 		batchJSON, err := json.Marshal(remaining)
 		if err != nil {
 			return err

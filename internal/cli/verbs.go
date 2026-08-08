@@ -196,10 +196,14 @@ func runLogin(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
+	token, err := cliSessionToken(result.SessionToken)
+	if err != nil {
+		return err
+	}
 	if err := st.PutSession(SessionArtifact{
 		Instance:  entry.Name,
 		Origin:    entry.Origin,
-		Token:     result.SessionToken,
+		Token:     token,
 		SessionID: result.Session.Id,
 		Principal: result.Principal.Id,
 		ExpiresAt: result.Session.AbsoluteExpiresAt.Format("2006-01-02T15:04:05Z"),
@@ -738,10 +742,25 @@ func runRecovery(ctx context.Context, ios IO, args []string) error {
 // dead server-side, so a failure to persist here strands the caller — hence it
 // is surfaced, not swallowed.
 func persistRotatedSession(st *State, artifact SessionArtifact, r apigen.LoginResult) error {
-	artifact.Token = r.SessionToken
+	token, err := cliSessionToken(r.SessionToken)
+	if err != nil {
+		return err
+	}
+	artifact.Token = token
 	artifact.SessionID = r.Session.Id
 	artifact.ExpiresAt = r.Session.AbsoluteExpiresAt.Format("2006-01-02T15:04:05Z")
 	return st.PutSession(artifact)
+}
+
+// cliSessionToken derefs the token the server returns to a CLI caller. A CLI
+// artifact always carries its token in the body — it has no cookie channel — so
+// a nil or empty token is a contract break worth surfacing, not a silent empty
+// store that would strand the next request unauthenticated.
+func cliSessionToken(t *string) (string, error) {
+	if t == nil || *t == "" {
+		return "", fmt.Errorf("server returned no session token for a CLI session")
+	}
+	return *t, nil
 }
 
 // ---------------------------------------------------------------------------

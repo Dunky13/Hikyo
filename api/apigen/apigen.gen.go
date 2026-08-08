@@ -210,8 +210,11 @@ type LoginResult struct {
 	// SessionToken The bearer value, returned exactly once. A replayable credential:
 	// cookie attributes constrain browsers, not an attacker holding the
 	// value, which is why lifetimes are short and revocation is a
-	// delete.
-	SessionToken string `json:"session_token"`
+	// delete. OMITTED for a browser-artifact session: that token is
+	// delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+	// same-origin script cannot read it. A CLI-artifact session, which has
+	// no cookie channel, still carries it here.
+	SessionToken *string `json:"session_token,omitempty"`
 }
 
 // Meta An exact closed allowlist. `additionalProperties: false` is the

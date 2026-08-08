@@ -416,9 +416,10 @@ func (a *TxAuthorizer) DisableWebAuthnCredential(ctx context.Context, id string,
 	return a.r.DisableWebAuthnCredential(ctx, id, rowVersion, at)
 }
 
-// DeleteWebAuthnCredential removes a credential (de-enrolment).
-func (a *TxAuthorizer) DeleteWebAuthnCredential(ctx context.Context, id string) error {
-	return a.r.DeleteWebAuthnCredential(ctx, id)
+// DeleteWebAuthnCredential removes a credential (de-enrolment) under an
+// account_id predicate. False means zero rows matched — refused fail-closed.
+func (a *TxAuthorizer) DeleteWebAuthnCredential(ctx context.Context, id, accountID string) (bool, error) {
+	return a.r.DeleteWebAuthnCredential(ctx, id, accountID)
 }
 
 // SweepSessionsForWebAuthnCredential deletes every session a passkey login

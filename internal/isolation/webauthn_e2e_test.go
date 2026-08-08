@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/Dunky13/wenv/internal/admission"
+	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/domain"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/wenv/internal/store/tx"
 	"github.com/Dunky13/wenv/internal/webauthntest"
 )
 
@@ -380,6 +384,212 @@ func runWebAuthnStepUpReauth(t *testing.T, db *store.DB) {
 	binding := queryString(t, db, "SELECT c.operation_binding FROM webauthn_ceremonies c JOIN reauth_windows w ON w.ceremony_id = c.id WHERE w.environment_id = 'env_prod'")
 	if binding != `{"environment_id":"env_prod","key_ids":["key_a","key_b"]}` {
 		t.Errorf("reauth operation_binding = %q, want canonical sorted JSON", binding)
+	}
+}
+
+func TestWebAuthnDeleteAccountScopedSQLite(t *testing.T) {
+	runWebAuthnDeleteAccountScoped(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnDeleteAccountScopedPostgres(t *testing.T) {
+	runWebAuthnDeleteAccountScoped(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnDeleteAccountScoped is the IDOR regression (B1): the credential
+// DELETE carries an account_id predicate, so a delete naming a DIFFERENT owner
+// matches zero rows and leaves the credential intact — even with the correct
+// surrogate id — so an IDOR cannot appear even if a service-layer ownership
+// check regresses. The true owner still deletes its own credential.
+func runWebAuthnDeleteAccountScoped(t *testing.T, db *store.DB) {
+	auth, accountID, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	enrolPasskey(t, auth, ctx, token, waPassword, webauthntest.New(waRPID, waOrigin))
+	credID := queryString(t, db, "SELECT id FROM webauthn_credentials WHERE account_id = '"+accountID+"' LIMIT 1")
+
+	del := func(owner string) bool {
+		t.Helper()
+		var deleted bool
+		if err := tx.Write(ctx, db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+			var e error
+			deleted, e = az.DeleteWebAuthnCredential(ctx, credID, owner)
+			return e
+		}); err != nil {
+			t.Fatalf("delete tx: %v", err)
+		}
+		return deleted
+	}
+
+	// A non-owning account id removes nothing and the row survives.
+	if del("acc_not-the-owner") {
+		t.Error("a cross-account DELETE reported a row removed")
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM webauthn_credentials WHERE id = '"+credID+"'"); got != 1 {
+		t.Fatalf("the credential was deleted by a non-owning account id (count=%d)", got)
+	}
+	// The true owner deletes it.
+	if !del(accountID) {
+		t.Error("the owning account could not delete its own credential")
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM webauthn_credentials WHERE id = '"+credID+"'"); got != 0 {
+		t.Errorf("the owner's DELETE left the row (count=%d)", got)
+	}
+}
+
+func TestWebAuthnLoginThrottleSQLite(t *testing.T) {
+	runWebAuthnLoginThrottle(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnLoginThrottlePostgres(t *testing.T) {
+	runWebAuthnLoginThrottle(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnLoginThrottle is the assertion-admission regression (A2): repeated
+// bad assertions that resolve the account (UV not set) advance that account's
+// backoff, and the next attempt is refused by admission BEFORE verification —
+// even a well-formed one. FailuresBeforeBackoff is 5, so the sixth failure arms
+// the block and the seventh attempt throttles. The block is a real-time 1s
+// window (2^0 after the 6th failure); if this ever flakes under CI load the fix
+// is injecting the limiter clock, not adding more failures.
+func runWebAuthnLoginThrottle(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	enrolPasskey(t, auth, ctx, token, waPassword, dev)
+
+	// Six UV-not-set assertions: each resolves the account in the lookup (so the
+	// per-account failure is recorded) but fails server-side UV verification.
+	dev.SetUserVerified(false)
+	for i := range 6 {
+		if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("bad assertion %d must refuse unauthenticated, got %v", i, err)
+		}
+	}
+	// The account is now backed off: even a valid assertion is refused by
+	// admission before any signature work.
+	dev.SetUserVerified(true)
+	if _, err := discoverableLogin(t, auth, ctx, dev); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("after repeated bad assertions login must throttle, got %v", err)
+	}
+}
+
+func TestWebAuthnStepUpThrottleSQLite(t *testing.T) {
+	runWebAuthnStepUpThrottle(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnStepUpThrottlePostgres(t *testing.T) {
+	runWebAuthnStepUpThrottle(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnStepUpThrottle proves step-up no longer bypasses admission (A2):
+// the account is known up front, so a bad step-up assertion advances the
+// per-account backoff and, once armed, the next step-up finish is refused before
+// verification. Reauth shares the identical finishAssertionElevation gate.
+func runWebAuthnStepUpThrottle(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	dev := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
+
+	stepUp := func() error {
+		opts, err := auth.StepUpPasskeyStart(ctx, token)
+		if err != nil {
+			return err
+		}
+		resp, err := dev.Assert(opts)
+		if err != nil {
+			t.Fatalf("device assert (step-up): %v", err)
+		}
+		_, err = auth.StepUpPasskeyFinish(ctx, token, resp)
+		return err
+	}
+
+	dev.SetUserVerified(false)
+	for i := range 6 {
+		if err := stepUp(); !errors.Is(err, domain.ErrUnauthenticated) {
+			t.Fatalf("bad step-up %d must refuse unauthenticated, got %v", i, err)
+		}
+	}
+	dev.SetUserVerified(true)
+	if err := stepUp(); !errors.Is(err, admission.ErrOverloaded) {
+		t.Fatalf("after repeated bad step-up assertions the finish must throttle, got %v", err)
+	}
+}
+
+func TestWebAuthnCeremonyExpirySQLite(t *testing.T) {
+	runWebAuthnCeremonyExpiry(t, seededDB(t, openSQLite))
+}
+func TestWebAuthnCeremonyExpiryPostgres(t *testing.T) {
+	runWebAuthnCeremonyExpiry(t, seededDB(t, openPostgres))
+}
+
+// runWebAuthnCeremonyExpiry is the ceremony-lifetime regression (A3): a login
+// ceremony aged past its lifetime is refused — the finish re-validates expiry
+// against the current clock (both before verification and again inside the write
+// tx), so a challenge accepted just before expiry cannot complete after it.
+func runWebAuthnCeremonyExpiry(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	// A controllable server clock, installed after bootstrap so the ceremony's
+	// life is measured against it.
+	clk := time.Now().UTC()
+	auth.Now = func() time.Time { return clk }
+	dev := webauthntest.New(waRPID, waOrigin)
+	enrolPasskey(t, auth, ctx, token, waPassword, dev)
+
+	opts, err := auth.PasskeyLoginStart(ctx)
+	if err != nil {
+		t.Fatalf("login start: %v", err)
+	}
+	assertion, err := dev.Assert(opts)
+	if err != nil {
+		t.Fatalf("device assert: %v", err)
+	}
+	// Age the clock past the ceremony lifetime, then finish.
+	clk = clk.Add(service.WebAuthnCeremonyLifetime + time.Minute)
+	if _, err := auth.PasskeyLoginFinish(ctx, assertion); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("a ceremony used after expiry must be refused, got %v", err)
+	}
+}
+
+func TestRecoveryLastCodePasswordlessSQLite(t *testing.T) {
+	runRecoveryLastCodePasswordless(t, seededDB(t, openSQLite))
+}
+func TestRecoveryLastCodePasswordlessPostgres(t *testing.T) {
+	runRecoveryLastCodePasswordless(t, seededDB(t, openPostgres))
+}
+
+// runRecoveryLastCodePasswordless is the recovery-floor regression (A1):
+// consuming the FINAL recovery code on a passwordless (passkey-only) account is
+// refused fail-closed — it would strand the account with no password and no
+// recovery batch. The refusal is non-destructive: the batch is not re-sealed, so
+// the reserve code is not burned (its row_version is unchanged).
+func runRecoveryLastCodePasswordless(t *testing.T, db *store.DB) {
+	auth, accountID, token := bootstrapWebAuthnAdmin(t, db)
+	ctx := t.Context()
+	// A legitimate passkey-only account: two discoverable passkeys and a batch.
+	token = enrolPasskey(t, auth, ctx, token, waPassword, webauthntest.New(waRPID, waOrigin))
+	token = enrolPasskey(t, auth, ctx, token, waPassword, webauthntest.New(waRPID, waOrigin))
+	codes, _, err := auth.GenerateRecoveryCodes(ctx, token, waPassword)
+	if err != nil {
+		t.Fatalf("generate recovery codes: %v", err)
+	}
+
+	// Consume every code but the last while the account still holds a password,
+	// so those consumptions are unconstrained by the floor.
+	for i := range len(codes) - 1 {
+		if _, err := auth.ConsumeRecoveryCode(ctx, waAdmin, codes[i]); err != nil {
+			t.Fatalf("consuming code %d: %v", i, err)
+		}
+	}
+	// Become passwordless — no endpoint drops a password, so the fixture does it
+	// directly to reach the passkey-only state.
+	execRaw(t, db, "DELETE FROM password_credentials WHERE account_id = '"+accountID+"'")
+	rvBefore := queryInt(t, db, "SELECT row_version FROM recovery_codes WHERE account_id = '"+accountID+"'")
+
+	// The final code on a passwordless account is refused, fail-closed.
+	if _, err := auth.ConsumeRecoveryCode(ctx, waAdmin, codes[len(codes)-1]); !errors.Is(err, service.ErrPasskeyOnlyViolation) {
+		t.Fatalf("consuming the last recovery code on a passwordless account must be refused, got %v", err)
+	}
+	// Non-destructive: the batch was rolled back, not re-sealed — the code survives.
+	if rvAfter := queryInt(t, db, "SELECT row_version FROM recovery_codes WHERE account_id = '"+accountID+"'"); rvAfter != rvBefore {
+		t.Errorf("the refused consume mutated the batch (row_version %d -> %d): the reserve code was burned", rvBefore, rvAfter)
 	}
 }
 

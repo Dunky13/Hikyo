@@ -1443,7 +1443,7 @@ components:
 
     LoginResult:
       type: object
-      required: [session_token, session, principal]
+      required: [session, principal]
       properties:
         session_token:
           type: string
@@ -1451,7 +1451,10 @@ components:
             The bearer value, returned exactly once. A replayable credential:
             cookie attributes constrain browsers, not an attacker holding the
             value, which is why lifetimes are short and revocation is a
-            delete.
+            delete. OMITTED for a browser-artifact session: that token is
+            delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+            same-origin script cannot read it. A CLI-artifact session, which has
+            no cookie channel, still carries it here.
         session:
           $ref: "#/components/schemas/Session"
         principal:

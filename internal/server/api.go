@@ -167,7 +167,7 @@ func (a *API) LocalLogin(ctx context.Context, req apigen.LocalLoginRequestObject
 		}
 	}
 	return apigen.LocalLogin200JSONResponse{
-		SessionToken: result.SessionToken,
+		SessionToken: optional(result.SessionToken),
 		Session: apigen.Session{
 			Id:                result.SessionID,
 			Artifact:          result.Artifact,
@@ -406,6 +406,13 @@ func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.Regenerate
 func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequestObject) (apigen.BeginRecoveryResponseObject, error) {
 	result, err := a.Auth.ConsumeRecoveryCode(ctx, req.Body.Username, req.Body.Code)
 	if err != nil {
+		// The passkey-only floor refusal (A1): consuming the last code on a
+		// passwordless account is refused loudly. Only a caller holding a VALID
+		// code reaches it, so naming the structural state reveals nothing an
+		// enumerator could not already learn — and the refusal is non-destructive.
+		if errors.Is(err, service.ErrPasskeyOnlyViolation) {
+			return apigen.BeginRecovery400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
 		switch classify(err) {
 		case apigen.ErrorCodeUnauthenticated:
 			return apigen.BeginRecovery401JSONResponse{
@@ -426,10 +433,17 @@ func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequest
 	}, nil
 }
 
-// loginResultOf renders a freshly minted or rotated session for the wire.
+// loginResultOf renders a freshly minted or rotated session for the wire. A
+// browser-artifact token is delivered ONLY on the __Host-wenv HttpOnly cookie
+// and is never echoed into the script-readable body (B2); a CLI artifact has no
+// cookie channel, so its token stays in the body.
 func loginResultOf(r service.LoginResult) apigen.LoginResult {
+	var token *string
+	if r.Artifact != service.ArtifactBrowser {
+		token = optional(r.SessionToken)
+	}
 	return apigen.LoginResult{
-		SessionToken: r.SessionToken,
+		SessionToken: token,
 		Session: apigen.Session{
 			Id:                r.SessionID,
 			Artifact:          r.Artifact,

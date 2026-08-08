@@ -36,6 +36,17 @@ func webauthnPrecondition(err error) bool {
 		errors.Is(err, service.ErrNoProofCredential)
 }
 
+// loginPrecondition is the login-endpoint precondition: ONLY the instance-wide
+// "WebAuthn not configured" refusal is a loud 400 — it carries no per-account
+// signal. Every other login outcome (missing/disabled/unowned/invalid
+// credential, no live ceremony) normalises to the uniform 401 so login-start
+// and finish cannot be probed for whether a discoverable passkey exists or which
+// credential ids are enrolled (B3). Structural 400s stay on the OWN-account
+// surfaces (enrol/step-up/reauth/remove), never on pre-auth login.
+func loginPrecondition(err error) bool {
+	return errors.Is(err, service.ErrWebAuthnUnavailable)
+}
+
 // webauthnOptions decodes the opaque service options bytes into the free-form
 // wire object. Round-tripping through a map preserves every field verbatim.
 func webauthnOptions(raw []byte) (apigen.WebauthnOptions, error) {
@@ -172,7 +183,7 @@ func (a *API) EnrolPasskeyFinish(ctx context.Context, req apigen.EnrolPasskeyFin
 func (a *API) PasskeyLoginStart(ctx context.Context, _ apigen.PasskeyLoginStartRequestObject) (apigen.PasskeyLoginStartResponseObject, error) {
 	raw, err := a.Auth.PasskeyLoginStart(ctx)
 	if err != nil {
-		if webauthnPrecondition(err) {
+		if loginPrecondition(err) {
 			return apigen.PasskeyLoginStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
 		switch classify(err) {
@@ -200,7 +211,7 @@ func (a *API) PasskeyLoginFinish(ctx context.Context, req apigen.PasskeyLoginFin
 	}
 	result, err := a.Auth.PasskeyLoginFinish(ctx, raw)
 	if err != nil {
-		if webauthnPrecondition(err) {
+		if loginPrecondition(err) {
 			return apigen.PasskeyLoginFinish400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 		}
 		switch classify(err) {

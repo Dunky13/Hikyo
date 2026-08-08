@@ -69,9 +69,12 @@ UPDATE webauthn_credentials
 SET disabled_at = ?, row_version = row_version + 1
 WHERE id = ? AND row_version = ? AND disabled_at IS NULL;
 
+-- De-enrolment under an account_id predicate (defence in depth): even if the
+-- service-layer ownership check regresses, the DELETE cannot touch a row another
+-- account owns, and zero affected rows is the caller's fail-closed refusal.
 -- wenv:authn-resolution
--- name: DeleteWebAuthnCredential :exec
-DELETE FROM webauthn_credentials WHERE id = ?;
+-- name: DeleteWebAuthnCredential :execrows
+DELETE FROM webauthn_credentials WHERE id = ? AND account_id = ?;
 
 -- The clone session sweep (B9): every session a passkey login minted through a
 -- given credential dies when that credential is found cloned. A session traces

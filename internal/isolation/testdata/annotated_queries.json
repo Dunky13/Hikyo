@@ -123,7 +123,7 @@
     "engine": "postgres",
     "name": "DeleteWebAuthnCredential",
     "annotation": "authn-resolution",
-    "hash": "3d33da383fcd28737530f41979cc386d905871a0bbe7d173a8e74e24dd111fd4"
+    "hash": "92093928e009648fe75728b93f7d6cd033a5b0683e47fee32f0fed97d21f88b4"
   },
   {
     "engine": "postgres",
@@ -579,7 +579,7 @@
     "engine": "sqlite",
     "name": "DeleteWebAuthnCredential",
     "annotation": "authn-resolution",
-    "hash": "7bfc04891b24d117a6fb4511fed1f1d10365dd94868807495aebeff9eaee4c06"
+    "hash": "443d5378182f8dd2f6f7612fa18d5b8fdaa5dc76e134182ff77f6bc8f089a0ab"
   },
   {
     "engine": "sqlite",

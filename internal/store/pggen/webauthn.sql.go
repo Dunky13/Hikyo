@@ -83,14 +83,25 @@ func (q *Queries) DeleteSessionsForWebAuthnCredential(ctx context.Context, crede
 	return result.RowsAffected(), nil
 }
 
-const deleteWebAuthnCredential = `-- name: DeleteWebAuthnCredential :exec
-DELETE FROM webauthn_credentials WHERE id = $1
+const deleteWebAuthnCredential = `-- name: DeleteWebAuthnCredential :execrows
+DELETE FROM webauthn_credentials WHERE id = $1 AND account_id = $2
 `
 
+type DeleteWebAuthnCredentialParams struct {
+	ID        string
+	AccountID string
+}
+
+// De-enrolment under an account_id predicate (defence in depth): even if the
+// service-layer ownership check regresses, the DELETE cannot touch a row another
+// account owns, and zero affected rows is the caller's fail-closed refusal.
 // wenv:authn-resolution
-func (q *Queries) DeleteWebAuthnCredential(ctx context.Context, id string) error {
-	_, err := q.db.Exec(ctx, deleteWebAuthnCredential, id)
-	return err
+func (q *Queries) DeleteWebAuthnCredential(ctx context.Context, arg DeleteWebAuthnCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWebAuthnCredential, arg.ID, arg.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const disableWebAuthnCredential = `-- name: DisableWebAuthnCredential :execrows

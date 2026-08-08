@@ -263,12 +263,17 @@ func (r *Resolver) DisableWebAuthnCredential(ctx context.Context, id string, row
 	return n == 1, err
 }
 
-// DeleteWebAuthnCredential removes a credential (de-enrolment).
-func (r *Resolver) DeleteWebAuthnCredential(ctx context.Context, id string) error {
+// DeleteWebAuthnCredential removes a credential (de-enrolment) under an
+// account_id predicate. False means zero rows matched — the credential is not
+// this account's (or is already gone) — which the caller refuses fail-closed,
+// so an IDOR cannot appear even if a service-layer ownership check regresses.
+func (r *Resolver) DeleteWebAuthnCredential(ctx context.Context, id, accountID string) (bool, error) {
 	if r.sq != nil {
-		return r.sq.DeleteWebAuthnCredential(ctx, id)
+		n, err := r.sq.DeleteWebAuthnCredential(ctx, sqlitegen.DeleteWebAuthnCredentialParams{ID: id, AccountID: accountID})
+		return n == 1, err
 	}
-	return r.pg.DeleteWebAuthnCredential(ctx, id)
+	n, err := r.pg.DeleteWebAuthnCredential(ctx, pggen.DeleteWebAuthnCredentialParams{ID: id, AccountID: accountID})
+	return n == 1, err
 }
 
 // DeleteSessionsForWebAuthnCredential sweeps every session a passkey login

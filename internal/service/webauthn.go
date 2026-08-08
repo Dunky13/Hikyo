@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
@@ -417,7 +418,17 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 
 	// Resolve + verify the assertion. The lookup loads the account the user
 	// handle names and its non-disabled credentials so go-webauthn can verify
-	// the signature; a disabled (cloned) credential is not offered.
+	// the signature; a disabled (cloned) credential is not offered. A discoverable
+	// login learns the account only here, so the per-account admission backoff is
+	// applied inside the lookup — keyed on the resolved account, BEFORE the
+	// signature verification (A2). A backed-off account short-circuits via a
+	// side-channel flag rather than errors.Is through go-webauthn, which may wrap
+	// the lookup error in its own protocol error and eat the chain.
+	var (
+		resolved     authz.Account
+		haveResolved bool
+		delayRefused bool
+	)
 	lookup := func(rawID, userHandle []byte) (webauthnrp.User, error) {
 		var u webauthnrp.User
 		lerr := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
@@ -425,6 +436,7 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			if err != nil {
 				return err
 			}
+			resolved, haveResolved = acc, true
 			creds, err := az.WebAuthnCredentialsForAccount(ctx, acc.ID)
 			if err != nil {
 				return err
@@ -432,10 +444,26 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 			u = rpUser(userHandle, acc, creds)
 			return nil
 		})
-		return u, lerr
+		if lerr != nil {
+			return webauthnrp.User{}, lerr
+		}
+		if s.Admission.AccountDelay(resolved.ID) > 0 {
+			delayRefused = true
+			return webauthnrp.User{}, admission.ErrOverloaded
+		}
+		return u, nil
 	}
 	assertion, err := s.WebAuthn.FinishDiscoverableLogin(ceremony.SessionData, responseJSON, lookup)
 	if err != nil {
+		if delayRefused {
+			return LoginResult{}, admission.ErrOverloaded
+		}
+		// A bad assertion against a resolved account advances that account's
+		// backoff (A2); an unresolved subject records nothing, mirroring login's
+		// unknown-subject path.
+		if haveResolved {
+			s.recordFactorFailure(ctx, resolved.PrincipalID, resolved.ID)
+		}
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
 
@@ -446,7 +474,10 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		refused = nil
 		now := s.now()
-		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
+		// Reload the ceremony inside the write tx and re-validate against the tx
+		// clock/epoch (A3): a ceremony accepted just before expiry must not
+		// complete after it, and one from a superseded epoch is inert.
+		fresh, err := az.WebAuthnCeremonyByChallenge(ctx, challengeVerifier(challenge))
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				refused = domain.ErrUnauthenticated
@@ -458,7 +489,19 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 		if err != nil {
 			return err
 		}
-		if stored.Disabled || stored.CredentialEpoch != epoch || !stored.Discoverable || ceremony.CredentialEpoch != epoch {
+		if !validCeremony(fresh, "login", "", "", now) || fresh.CredentialEpoch != epoch {
+			refused = domain.ErrUnauthenticated
+			return nil
+		}
+		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				refused = domain.ErrUnauthenticated
+				return nil
+			}
+			return err
+		}
+		if stored.Disabled || stored.CredentialEpoch != epoch || !stored.Discoverable {
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
@@ -468,7 +511,7 @@ func (s *Auth) attemptPasskeyLogin(ctx context.Context, responseJSON []byte) (Lo
 		}
 		// Re-consume the ceremony under the write lock: a replayed assertion
 		// cannot win the phase gap.
-		consumed, err := az.ConsumeWebAuthnCeremony(ctx, ceremony.ID, stored.ID, now)
+		consumed, err := az.ConsumeWebAuthnCeremony(ctx, fresh.ID, stored.ID, now)
 		if err != nil {
 			return err
 		}
@@ -805,8 +848,20 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 	if !validCeremony(ceremony, purpose, account.ID, acting.SessionID, s.now()) {
 		return LoginResult{}, ErrNoWebAuthnCeremony
 	}
+
+	// Per-account admission (A2): the account is known up front for step-up and
+	// reauth, so check AccountDelay + Enter the expensive-work budget before the
+	// signature verification, exactly as the factor proof paths do. Held across
+	// the verification and the write tx; a bad assertion advances the backoff.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	defer release()
+
 	assertion, err := s.WebAuthn.FinishLogin(rpUser(handle, account, creds), ceremony.SessionData, responseJSON)
 	if err != nil {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
 		return LoginResult{}, domain.ErrUnauthenticated
 	}
 
@@ -828,7 +883,10 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		if live.Principal != account.PrincipalID {
 			return domain.ErrUnauthenticated
 		}
-		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
+		// Reload + re-validate the ceremony against the tx clock/epoch (A3): a
+		// ceremony accepted just before expiry must not complete after it, and one
+		// from a superseded epoch is inert. The reloaded row is what is consumed.
+		fresh, err := az.WebAuthnCeremonyByChallenge(ctx, challengeVerifier(challenge))
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				refused = domain.ErrUnauthenticated
@@ -840,11 +898,23 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 		if err != nil {
 			return err
 		}
-		if stored.AccountID != account.ID || stored.Disabled || stored.CredentialEpoch != epoch || ceremony.CredentialEpoch != epoch {
+		if !validCeremony(fresh, purpose, account.ID, acting.SessionID, now) || fresh.CredentialEpoch != epoch {
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
-		consumed, err := az.ConsumeWebAuthnCeremony(ctx, ceremony.ID, stored.ID, now)
+		stored, err := az.WebAuthnCredentialByCredentialID(ctx, assertion.CredentialID)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				refused = domain.ErrUnauthenticated
+				return nil
+			}
+			return err
+		}
+		if stored.AccountID != account.ID || stored.Disabled || stored.CredentialEpoch != epoch {
+			refused = domain.ErrUnauthenticated
+			return nil
+		}
+		consumed, err := az.ConsumeWebAuthnCeremony(ctx, fresh.ID, stored.ID, now)
 		if err != nil {
 			return err
 		}
@@ -856,6 +926,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			if err := s.respondToClone(ctx, az, account, stored, now); err != nil {
 				return err
 			}
+			s.Admission.RecordFailure(account.ID)
 			refused = domain.ErrUnauthenticated
 			return nil
 		}
@@ -882,7 +953,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			return err
 		}
 		if effect != nil {
-			if err := effect(ctx, az, account, ceremony, now); err != nil {
+			if err := effect(ctx, az, account, fresh, now); err != nil {
 				return err
 			}
 		}
@@ -912,6 +983,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 	if refused != nil {
 		return LoginResult{}, refused
 	}
+	s.Admission.RecordSuccess(account.ID)
 	return result, nil
 }
 
@@ -994,8 +1066,16 @@ func (s *Auth) RemovePasskey(ctx context.Context, presented, credentialID, passw
 		if current.AccountID != account.ID {
 			return ErrNoPasskey
 		}
-		if err := az.DeleteWebAuthnCredential(ctx, credentialID); err != nil {
+		// The account_id predicate is defence in depth behind the ownership check
+		// above: zero rows deleted (a regressed check, or a concurrent delete)
+		// refuses on the same ErrNoPasskey disposition an unowned credential does,
+		// so the fail-closed path stays indistinguishable from "not yours".
+		deleted, err := az.DeleteWebAuthnCredential(ctx, credentialID, account.ID)
+		if err != nil {
 			return err
+		}
+		if !deleted {
+			return ErrNoPasskey
 		}
 		// Post-state invariant, re-evaluated against the committed inventory (B4).
 		if err := s.assertPasskeyOnlyInvariant(ctx, az, account.ID); err != nil {
