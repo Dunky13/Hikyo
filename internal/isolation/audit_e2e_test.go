@@ -91,7 +91,7 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func runAuditSuite(t *testing.T, db *store.DB) {
-	audits := &service.Audits{DB: db, SettleHorizon: service.ZeroSettleHorizon}
+	audits := &service.Audits{DB: db}
 	envs := &service.Environments{DB: db}
 	projects := &service.Projects{DB: db}
 	orgsSvc := &service.Orgs{DB: db}
@@ -297,34 +297,6 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 	})
 
-	t.Run("export_ceiling_excludes_unsettled_writes", func(t *testing.T) {
-		// With the production horizon, an export must NOT reach events
-		// written moments ago: those are exactly the ones whose transaction
-		// may still be in flight, and whose seq an earlier page's cursor
-		// could otherwise step past (cross-model R3). Same export, ceiling
-		// disabled, sees them — so this asserts the ceiling, not an empty
-		// trail.
-		lagged := &service.Audits{DB: db, SettleHorizon: time.Hour}
-		var buf bytes.Buffer
-		if err := lagged.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &buf); err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.TrimSpace(buf.String()); n != "" {
-			t.Errorf("export reached events inside the settle horizon:\n%s", n)
-		}
-		var live bytes.Buffer
-		if err := audits.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &live); err != nil {
-			t.Fatal(err)
-		}
-		if strings.TrimSpace(live.String()) == "" {
-			t.Fatal("ceiling-free export is also empty — the assertion above proves nothing")
-		}
-		// The started event records the ceiling it actually applied.
-		if n := countTenant("type = 'audit.export_started' AND payload LIKE '%filter_to%'"); n == 0 {
-			t.Error("export_started does not record the effective ceiling")
-		}
-	})
-
 	t.Run("human_authentication_flow", func(t *testing.T) {
 		// The A1 slice end to end on a real datastore: bootstrap the first
 		// administrator, refuse a bad authority, establish the credential,
@@ -507,6 +479,223 @@ func TestAuditCoreSQLite(t *testing.T) {
 
 func TestAuditCorePostgres(t *testing.T) {
 	runAuditSuite(t, seededDB(t, openPostgres))
+}
+
+// TestPostgresAuditExportCommitOrder is #84's regression: sequence allocation
+// order is not commit order. The lower-seq row stays uncommitted while the
+// higher-seq row crosses the first export page, then commits. A gap-free
+// export must still emit both rows.
+func TestPostgresAuditExportCommitOrder(t *testing.T) {
+	db := seededDB(t, openPostgres)
+	audits := &service.Audits{DB: db}
+
+	insert := `INSERT INTO audit_tenant_events (
+		id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+		actor_id, actor_class, scope_class, org_id, outcome, origin, payload
+	) VALUES ($1, 'settings.project_created', 1, clock_timestamp(), FALSE, clock_timestamp(),
+		'usr_alice', 'human', 'org', 'org_a', 'success', 'cli', '{}')
+	RETURNING seq`
+
+	lowTx, err := db.PG().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lowTx.Rollback(context.Background()) })
+
+	var lowSeq int64
+	if err := lowTx.QueryRow(t.Context(), insert, "evt_gap_low").Scan(&lowSeq); err != nil {
+		t.Fatal(err)
+	}
+	var highSeq int64
+	if err := db.PG().QueryRow(t.Context(), insert, "evt_gap_high").Scan(&highSeq); err != nil {
+		t.Fatal(err)
+	}
+	if lowSeq >= highSeq {
+		t.Fatalf("fixture seq order = low %d, high %d", lowSeq, highSeq)
+	}
+
+	firstPage := make(chan struct{})
+	w := &hookWriter{onFirst: func() { close(firstPage) }}
+	exportDone := make(chan error, 1)
+	go func() {
+		// A one-row page forces the full-page path before the exporter reaches
+		// its short-page barrier and rereads the later lower-seq commit.
+		exportDone <- audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 1, w)
+	}()
+
+	select {
+	case <-firstPage:
+	case err := <-exportDone:
+		t.Fatalf("export ended before first page crossed the higher seq: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("export did not emit its first page")
+	}
+
+	deadline := time.After(5 * time.Second)
+	for queryInt(t, db, `SELECT COUNT(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND classid = 1464159830 AND objid = 85 AND NOT granted`) == 0 {
+		select {
+		case err := <-exportDone:
+			t.Fatalf("export ended before waiting for the in-flight lower seq: %v", err)
+		case <-deadline:
+			t.Fatal("export did not wait at the in-flight audit barrier")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if err := lowTx.Commit(t.Context()); err != nil {
+		t.Fatalf("commit lower-seq event after first page: %v", err)
+	}
+	select {
+	case err := <-exportDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("export did not finish after the in-flight event committed")
+	}
+
+	lines := strings.Split(strings.TrimSpace(w.buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("exported %d events, want both concurrent commits:\n%s", len(lines), w.buf.String())
+	}
+	var first, second exportLineForTest
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != "evt_gap_high" || first.Seq != highSeq {
+		t.Fatalf("first page = %+v, want committed higher seq %d", first, highSeq)
+	}
+	if second.ID != "evt_gap_low" || second.Seq != lowSeq {
+		t.Fatalf("second page = %+v, want later commit with lower seq %d", second, lowSeq)
+	}
+	interactive, err := audits.Query(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{
+		Limit:          10,
+		Order:          store.AuditPageByCommit,
+		AfterCommitSeq: store.AuditCommitSeq(1 << 62),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(interactive) < 2 || interactive[0].Seq != lowSeq || interactive[1].Seq != highSeq {
+		t.Fatalf("interactive query honored export-only cursor/order: %+v", interactive)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE commit_seq IS NULL"); n != 0 {
+		t.Fatalf("committed tenant audit rows without commit order = %d", n)
+	}
+	_, err = db.PG().Exec(t.Context(), `INSERT INTO audit_tenant_events (
+		id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+		actor_id, actor_class, scope_class, org_id, outcome, origin, payload, commit_seq
+	) VALUES ('evt_gap_forged', 'settings.project_created', 1, clock_timestamp(), FALSE, clock_timestamp(),
+		'usr_alice', 'human', 'org', 'org_a', 'success', 'cli', '{}', 999999)`)
+	if err == nil || !strings.Contains(err.Error(), "commit_seq is database-owned") {
+		t.Fatalf("caller-supplied commit order refusal = %v", err)
+	}
+}
+
+// TestPostgresAuditExportCutoffRegistration closes the other side of #84's
+// termination race. A writer paused before the production writer gate must be
+// timestamped after the cutoff when it resumes; otherwise the completed export
+// has silently omitted an event that its own cutoff says was eligible.
+func TestPostgresAuditExportCutoffRegistration(t *testing.T) {
+	db := seededDB(t, openPostgres)
+	audits := &service.Audits{DB: db}
+
+	execRaw(t, db, `CREATE FUNCTION audit_test_pause_before_gate() RETURNS TRIGGER
+		LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.id = 'evt_cutoff_race' THEN
+				PERFORM pg_advisory_xact_lock_shared(1464159830, 86);
+			END IF;
+			RETURN NEW;
+		END;
+		$$`)
+	execRaw(t, db, `CREATE TRIGGER audit_000_test_pause_before_gate
+		BEFORE INSERT ON audit_tenant_events
+		FOR EACH ROW EXECUTE FUNCTION audit_test_pause_before_gate()`)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.PG().Exec(ctx, "DROP TRIGGER IF EXISTS audit_000_test_pause_before_gate ON audit_tenant_events"); err != nil {
+			t.Errorf("drop cutoff-race test trigger: %v", err)
+		}
+		if _, err := db.PG().Exec(ctx, "DROP FUNCTION IF EXISTS audit_test_pause_before_gate()"); err != nil {
+			t.Errorf("drop cutoff-race test function: %v", err)
+		}
+	})
+
+	blocker, err := db.PG().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback(context.Background()) })
+	if _, err := blocker.Exec(t.Context(), "SELECT pg_advisory_xact_lock(1464159830, 86)"); err != nil {
+		t.Fatal(err)
+	}
+
+	insertDone := make(chan error, 1)
+	go func() {
+		_, err := db.PG().Exec(t.Context(), `INSERT INTO audit_tenant_events (
+			id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+			actor_id, actor_class, scope_class, org_id, outcome, origin, payload
+		) VALUES ('evt_cutoff_race', 'settings.project_created', 1,
+			clock_timestamp(), FALSE, clock_timestamp(), 'usr_alice', 'human',
+			'org', 'org_a', 'success', 'cli', '{}')`)
+		insertDone <- err
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for queryInt(t, db, `SELECT COUNT(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND classid = 1464159830 AND objid = 86 AND NOT granted`) == 0 {
+		select {
+		case err := <-insertDone:
+			t.Fatalf("writer passed the pre-gate pause unexpectedly: %v", err)
+		case <-deadline:
+			t.Fatal("writer did not pause before the production export gate")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	var cutoff time.Time
+	if err := db.PG().QueryRow(t.Context(), "SELECT clock_timestamp()").Scan(&cutoff); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{To: cutoff}, 2, &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "evt_cutoff_race") {
+		t.Fatal("uncommitted cutoff-race event appeared in export")
+	}
+
+	if err := blocker.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-insertDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer did not finish after the pre-gate pause was released")
+	}
+
+	var recordedAt time.Time
+	if err := db.PG().QueryRow(t.Context(),
+		"SELECT recorded_at FROM audit_tenant_events WHERE id = 'evt_cutoff_race'").Scan(&recordedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !recordedAt.After(cutoff) {
+		t.Fatalf("writer recorded_at = %s, want after export cutoff %s", recordedAt, cutoff)
+	}
+}
+
+type exportLineForTest struct {
+	Seq int64  `json:"seq"`
+	ID  string `json:"id"`
 }
 
 // TestPostgresDurabilityBootRefusal is the A4 CI leg the unit test cannot

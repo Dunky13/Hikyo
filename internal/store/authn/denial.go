@@ -59,7 +59,11 @@ func (r *Resolver) writeProofFreeEvent(ctx context.Context, e audit.Event, trail
 		return fmt.Errorf("authn: %s actor resolution: %w", what, err)
 	}
 	e.Actor = actor
-	row, err := audit.BuildRow(e, trail, scope, time.Now())
+	recordedAt := time.Time{}
+	if r.sq != nil {
+		recordedAt = time.Now()
+	}
+	row, err := audit.BuildRow(e, trail, scope, recordedAt)
 	if err != nil {
 		return fmt.Errorf("authn: %s event refused at the write boundary: %w", what, err)
 	}

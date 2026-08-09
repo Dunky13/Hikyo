@@ -37,6 +37,7 @@ type AuditInstanceEvent struct {
 	UserAgent         pgtype.Text
 	Origin            string
 	Payload           string
+	CommitSeq         pgtype.Int8
 }
 
 type AuditTenantEvent struct {
@@ -63,6 +64,7 @@ type AuditTenantEvent struct {
 	UserAgent         pgtype.Text
 	Origin            string
 	Payload           string
+	CommitSeq         pgtype.Int8
 }
 
 type AuthInstanceState struct {

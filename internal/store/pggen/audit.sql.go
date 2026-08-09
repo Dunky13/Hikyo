@@ -13,16 +13,16 @@ import (
 
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
 INSERT INTO audit_instance_events (
-    id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    id, type, schema_version, occurred_at, occurred_asserted,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6,
-    $7, $8, $9, $10,
-    $11, $12, $13, $14,
-    $15, $16, $17, $18
+    $5,
+    $6, $7, $8, $9,
+    $10, $11, $12, $13,
+    $14, $15, $16, $17
 )
 `
 
@@ -32,7 +32,6 @@ type InsertInstanceAuditEventParams struct {
 	SchemaVersion     int32
 	OccurredAt        pgtype.Timestamptz
 	OccurredAsserted  bool
-	RecordedAt        pgtype.Timestamptz
 	ActorID           pgtype.Text
 	ActorClass        string
 	ActorCredentialID pgtype.Text
@@ -54,7 +53,6 @@ func (q *Queries) InsertInstanceAuditEvent(ctx context.Context, arg InsertInstan
 		arg.SchemaVersion,
 		arg.OccurredAt,
 		arg.OccurredAsserted,
-		arg.RecordedAt,
 		arg.ActorID,
 		arg.ActorClass,
 		arg.ActorCredentialID,
@@ -74,18 +72,18 @@ func (q *Queries) InsertInstanceAuditEvent(ctx context.Context, arg InsertInstan
 const insertTenantAuditEvent = `-- name: InsertTenantAuditEvent :exec
 
 INSERT INTO audit_tenant_events (
-    id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    id, type, schema_version, occurred_at, occurred_asserted,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6,
-    $7, $8, $9, $10,
-    $11, $12, $13, $14,
-    $15, $16, $17, $18,
-    $19, $20, $21, $22
+    $5,
+    $6, $7, $8, $9,
+    $10, $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19, $20, $21
 )
 `
 
@@ -95,7 +93,6 @@ type InsertTenantAuditEventParams struct {
 	SchemaVersion     int32
 	OccurredAt        pgtype.Timestamptz
 	OccurredAsserted  bool
-	RecordedAt        pgtype.Timestamptz
 	ActorID           pgtype.Text
 	ActorClass        string
 	ActorCredentialID pgtype.Text
@@ -120,9 +117,9 @@ type InsertTenantAuditEventParams struct {
 // for the denial writer, by the authorization package's enumerated surface)
 // from resolved chains only - never from caller arguments.
 //
-// Page order is seq (allocation order); the cursor is `seq > $n`. On this
-// engine seq is allocation-ordered, not a commit-order total (stated in the
-// migration and the ADR).
+// Query page order is seq (allocation order). Export pages use commit_seq,
+// assigned by the deferred commit appender in migration 00010; the public
+// after_seq filter remains a seq lower bound.
 func (q *Queries) InsertTenantAuditEvent(ctx context.Context, arg InsertTenantAuditEventParams) error {
 	_, err := q.db.Exec(ctx, insertTenantAuditEvent,
 		arg.ID,
@@ -130,7 +127,6 @@ func (q *Queries) InsertTenantAuditEvent(ctx context.Context, arg InsertTenantAu
 		arg.SchemaVersion,
 		arg.OccurredAt,
 		arg.OccurredAsserted,
-		arg.RecordedAt,
 		arg.ActorID,
 		arg.ActorClass,
 		arg.ActorCredentialID,
@@ -155,7 +151,7 @@ const pageInstanceAudit = `-- name: PageInstanceAudit :many
 SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
-    source_ip, user_agent, origin, payload
+    source_ip, user_agent, origin, payload, commit_seq
 FROM audit_instance_events
 WHERE seq > $1
     AND recorded_at >= $2 AND recorded_at <= $3
@@ -203,6 +199,73 @@ func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditPa
 			&i.UserAgent,
 			&i.Origin,
 			&i.Payload,
+			&i.CommitSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageInstanceAuditExport = `-- name: PageInstanceAuditExport :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload, commit_seq
+FROM audit_instance_events
+WHERE seq > $1 AND commit_seq > $2
+    AND recorded_at >= $3 AND recorded_at <= $4
+ORDER BY commit_seq LIMIT $5
+`
+
+type PageInstanceAuditExportParams struct {
+	AfterSeq       int64
+	AfterCommitSeq pgtype.Int8
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	PageLimit      int32
+}
+
+func (q *Queries) PageInstanceAuditExport(ctx context.Context, arg PageInstanceAuditExportParams) ([]AuditInstanceEvent, error) {
+	rows, err := q.db.Query(ctx, pageInstanceAuditExport,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditInstanceEvent
+	for rows.Next() {
+		var i AuditInstanceEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+			&i.CommitSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -219,7 +282,7 @@ SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_a
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
-    source_ip, user_agent, origin, payload
+    source_ip, user_agent, origin, payload, commit_seq
 FROM audit_tenant_events
 WHERE org_id = $1 AND project_id = $2
     AND env_id = $3 AND seq > $4
@@ -278,6 +341,236 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 			&i.UserAgent,
 			&i.Origin,
 			&i.Payload,
+			&i.CommitSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportEnv = `-- name: PageTenantAuditExportEnv :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload, commit_seq
+FROM audit_tenant_events
+WHERE org_id = $1 AND project_id = $2
+    AND env_id = $3
+    AND seq > $4 AND commit_seq > $5
+    AND recorded_at >= $6 AND recorded_at <= $7
+ORDER BY commit_seq LIMIT $8
+`
+
+type PageTenantAuditExportEnvParams struct {
+	ChainOrgID     string
+	ChainProjectID pgtype.Text
+	ChainEnvID     pgtype.Text
+	AfterSeq       int64
+	AfterCommitSeq pgtype.Int8
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	PageLimit      int32
+}
+
+func (q *Queries) PageTenantAuditExportEnv(ctx context.Context, arg PageTenantAuditExportEnvParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.Query(ctx, pageTenantAuditExportEnv,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+			&i.CommitSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportOrg = `-- name: PageTenantAuditExportOrg :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload, commit_seq
+FROM audit_tenant_events
+WHERE org_id = $1
+    AND seq > $2 AND commit_seq > $3
+    AND recorded_at >= $4 AND recorded_at <= $5
+ORDER BY commit_seq LIMIT $6
+`
+
+type PageTenantAuditExportOrgParams struct {
+	ChainOrgID     string
+	AfterSeq       int64
+	AfterCommitSeq pgtype.Int8
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	PageLimit      int32
+}
+
+func (q *Queries) PageTenantAuditExportOrg(ctx context.Context, arg PageTenantAuditExportOrgParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.Query(ctx, pageTenantAuditExportOrg,
+		arg.ChainOrgID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+			&i.CommitSeq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportProject = `-- name: PageTenantAuditExportProject :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload, commit_seq
+FROM audit_tenant_events
+WHERE org_id = $1 AND project_id = $2
+    AND seq > $3 AND commit_seq > $4
+    AND recorded_at >= $5 AND recorded_at <= $6
+ORDER BY commit_seq LIMIT $7
+`
+
+type PageTenantAuditExportProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID pgtype.Text
+	AfterSeq       int64
+	AfterCommitSeq pgtype.Int8
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	PageLimit      int32
+}
+
+func (q *Queries) PageTenantAuditExportProject(ctx context.Context, arg PageTenantAuditExportProjectParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.Query(ctx, pageTenantAuditExportProject,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+			&i.CommitSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -294,7 +587,7 @@ SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_a
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
-    source_ip, user_agent, origin, payload
+    source_ip, user_agent, origin, payload, commit_seq
 FROM audit_tenant_events
 WHERE org_id = $1 AND seq > $2
     AND recorded_at >= $3 AND recorded_at <= $4
@@ -348,6 +641,7 @@ func (q *Queries) PageTenantAuditOrg(ctx context.Context, arg PageTenantAuditOrg
 			&i.UserAgent,
 			&i.Origin,
 			&i.Payload,
+			&i.CommitSeq,
 		); err != nil {
 			return nil, err
 		}
@@ -364,7 +658,7 @@ SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_a
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
-    source_ip, user_agent, origin, payload
+    source_ip, user_agent, origin, payload, commit_seq
 FROM audit_tenant_events
 WHERE org_id = $1 AND project_id = $2
     AND seq > $3
@@ -421,6 +715,7 @@ func (q *Queries) PageTenantAuditProject(ctx context.Context, arg PageTenantAudi
 			&i.UserAgent,
 			&i.Origin,
 			&i.Payload,
+			&i.CommitSeq,
 		); err != nil {
 			return nil, err
 		}

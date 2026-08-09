@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/Dunky13/wenv/internal/audit"
 	"github.com/Dunky13/wenv/internal/authz"
@@ -22,48 +21,6 @@ import (
 // page read in its own transaction under a fresh proof.
 type Audits struct {
 	DB *store.DB
-	// SettleHorizon is how far back an EXPORT's ceiling is held from now.
-	// Zero means DefaultSettleHorizon; tests set it to zero-lag explicitly.
-	//
-	// Why an export has one: `seq` is allocated before commit on postgres,
-	// so a row can become visible with a seq BELOW a cursor an earlier page
-	// already passed — silently dropping it from the export. Neither a txid
-	// predicate nor a MIN(seq) bound fixes that: an in-flight row is
-	// invisible to the very query that would have to bound it.
-	//
-	// This ceiling is HARM REDUCTION, NOT A GUARANTEE, and the handoff says
-	// so. recorded_at is stamped inside the writing transaction and the
-	// transaction package enforces a 15 s deadline, so in the ordinary case
-	// a row older than the horizon has settled. It does NOT hold under
-	// clock skew beyond the horizon (recorded_at comes from the writer's
-	// clock, the ceiling from the exporter's) or a transaction outliving
-	// its client-side deadline. A gap-free cursor needs a serialization
-	// point the audit-model ADR defers past v1; #25 must satisfy it before
-	// an export route ships. sqlite is unaffected — one write connection
-	// makes allocation order commit order.
-	SettleHorizon time.Duration
-}
-
-// DefaultSettleHorizon is twice the transaction package's hard 15 s
-// deadline: one deadline for the write to end, one of margin for clock skew
-// between instances writing to one postgres. Skew beyond that margin is the
-// documented residual, not a covered case. Ops-spec territory (#32) once it
-// owns the concrete values.
-const DefaultSettleHorizon = 30 * time.Second
-
-// ZeroSettleHorizon disables the export ceiling. It exists for tests that
-// export events they just wrote; production paths take the default.
-const ZeroSettleHorizon = time.Duration(-1)
-
-func (s *Audits) settleCeiling(now time.Time) (time.Time, bool) {
-	h := s.SettleHorizon
-	if h == ZeroSettleHorizon {
-		return time.Time{}, false
-	}
-	if h <= 0 {
-		h = DefaultSettleHorizon
-	}
-	return now.Add(-h), true
 }
 
 func auditQueryOp(scope domain.Scope) (authz.Operation, error) {
@@ -113,6 +70,10 @@ func queryEvent(ctx context.Context, principal domain.PrincipalID, f store.Audit
 // transaction — the event is durable before any byte of the response exists
 // outside it.
 func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, f store.AuditFilter) ([]store.AuditEvent, error) {
+	// Commit order is export-only. Ignore internal cursor fields if a caller
+	// constructs AuditFilter directly instead of using an API decoder.
+	f.Order = store.AuditPageBySeq
+	f.AfterCommitSeq = 0
 	op, err := auditQueryOp(scope)
 	if err != nil {
 		return nil, err
@@ -142,6 +103,9 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 // InstanceQuery is Query for the instance trail, under an instance-scope
 // audit-read grant — grant-evaluated, never route-implied.
 func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID, f store.AuditFilter) ([]store.AuditEvent, error) {
+	// Commit order is export-only; interactive queries always expose seq order.
+	f.Order = store.AuditPageBySeq
+	f.AfterCommitSeq = 0
 	var page []store.AuditEvent
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, authz.OpAuditInstanceQuery, domain.Scope{})
@@ -274,24 +238,22 @@ func (s *Audits) export(
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
 ) error {
-	// The export ceiling: everything at or before it has settled, so the
-	// seq cursor cannot step past a row that is still in flight. Recorded in
-	// the started event's normalized filters, so the trail shows the range
-	// the export actually covered.
-	if ceiling, ok := s.settleCeiling(time.Now()); ok && (f.To.IsZero() || f.To.After(ceiling)) {
-		f.To = ceiling
+	snapshotTime, err := s.DB.AuditExportSnapshotTime(ctx)
+	if err != nil {
+		return err
 	}
-
+	if f.To.IsZero() || f.To.After(snapshotTime) {
+		f.To = snapshotTime
+	}
 	started, err := newAuditEvent(ctx, audit.EventAuditExportStarted, principal, audit.Object{}, audit.OutcomeIntent, "", f.Normalized())
 	if err != nil {
 		return err
 	}
 
-	// INTENT: export_started, durable before the first byte. The
-	// settled-transaction watermark is captured here and held for every
-	// page: it keeps a later-committing lower seq from being skipped
-	// forever (postgres allocates seq before commit) AND makes the export a
-	// terminating snapshot instead of a chase of live writes.
+	// INTENT: export_started, durable before the first byte. Postgres assigns
+	// database-owned commit_seq immediately before commit; every page advances
+	// that cursor instead of allocation-ordered seq. sqlite's single writer
+	// makes commit_seq equivalent to seq.
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 		if err != nil {
@@ -328,15 +290,17 @@ func (s *Audits) export(
 	}
 
 	streamed := 0
-	cursor := f.AfterSeq
+	commitCursor := store.AuditCommitSeq(0)
+	writersSettled := false
 	for {
 		// Each page: its own transaction, its own freshly minted proof —
 		// #15's re-authorize-before-every-sensitive-step and #23's
 		// proof-dies-with-its-transaction, applied literally.
 		var rows []store.AuditEvent
 		pf := f
-		pf.AfterSeq = cursor
 		pf.Limit = pageSize
+		pf.Order = store.AuditPageByCommit
+		pf.AfterCommitSeq = commitCursor
 		err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 			p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
 			if err != nil {
@@ -370,9 +334,19 @@ func (s *Audits) export(
 				return fmt.Errorf("service: export sink: %w", werr)
 			}
 			streamed++
-			cursor = e.Seq
+			commitCursor = e.CommitSeq
 		}
 		if len(rows) < pageSize {
+			if !writersSettled {
+				if err := s.DB.AwaitAuditExportWriters(ctx); err != nil {
+					if cerr := completed(audit.OutcomeFailure, "writer-barrier-failed", streamed); cerr != nil {
+						return fmt.Errorf("service: export writer barrier failed and its terminal event failed too: %w", fmt.Errorf("%w; %w", cerr, err))
+					}
+					return err
+				}
+				writersSettled = true
+				continue
+			}
 			return completed(audit.OutcomeSuccess, "", streamed)
 		}
 	}

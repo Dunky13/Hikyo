@@ -106,9 +106,10 @@ type InsertTenantAuditEventParams struct {
 // writer, by the authorization package's enumerated surface) from resolved
 // chains only - never from caller arguments.
 //
-// Page order is seq (allocation order); the cursor is `seq > ?`. Timestamps
-// are fixed-width UTC microsecond text on this engine, so recorded_at range
-// predicates compare correctly.
+// Interactive and export page order is seq (allocation equals commit order on
+// sqlite). Export queries use the same seq column for their selection floor
+// and internal page cursor. Timestamps are fixed-width UTC microsecond text,
+// so recorded_at range predicates compare correctly.
 func (q *Queries) InsertTenantAuditEvent(ctx context.Context, arg InsertTenantAuditEventParams) error {
 	_, err := q.db.ExecContext(ctx, insertTenantAuditEvent,
 		arg.ID,
@@ -202,6 +203,74 @@ func (q *Queries) PageInstanceAudit(ctx context.Context, arg PageInstanceAuditPa
 	return items, nil
 }
 
+const pageInstanceAuditExport = `-- name: PageInstanceAuditExport :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload
+FROM audit_instance_events
+WHERE seq > ?1 AND seq > ?2
+    AND recorded_at >= ?3 AND recorded_at <= ?4
+ORDER BY seq LIMIT ?5
+`
+
+type PageInstanceAuditExportParams struct {
+	AfterSeq       int64
+	AfterCommitSeq int64
+	FromTime       string
+	ToTime         string
+	PageLimit      int64
+}
+
+func (q *Queries) PageInstanceAuditExport(ctx context.Context, arg PageInstanceAuditExportParams) ([]AuditInstanceEvent, error) {
+	rows, err := q.db.QueryContext(ctx, pageInstanceAuditExport,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditInstanceEvent
+	for rows.Next() {
+		var i AuditInstanceEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pageTenantAuditEnv = `-- name: PageTenantAuditEnv :many
 SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,
@@ -232,6 +301,244 @@ func (q *Queries) PageTenantAuditEnv(ctx context.Context, arg PageTenantAuditEnv
 		arg.RecordedAt,
 		arg.RecordedAt_2,
 		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportEnv = `-- name: PageTenantAuditExportEnv :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload
+FROM audit_tenant_events
+WHERE org_id = ?1 AND project_id = ?2
+    AND env_id = ?3
+    AND seq > ?4 AND seq > ?5
+    AND recorded_at >= ?6 AND recorded_at <= ?7
+ORDER BY seq LIMIT ?8
+`
+
+type PageTenantAuditExportEnvParams struct {
+	ChainOrgID     string
+	ChainProjectID sql.NullString
+	ChainEnvID     sql.NullString
+	AfterSeq       int64
+	AfterCommitSeq int64
+	FromTime       string
+	ToTime         string
+	PageLimit      int64
+}
+
+func (q *Queries) PageTenantAuditExportEnv(ctx context.Context, arg PageTenantAuditExportEnvParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.QueryContext(ctx, pageTenantAuditExportEnv,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportOrg = `-- name: PageTenantAuditExportOrg :many
+
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload
+FROM audit_tenant_events
+WHERE org_id = ?1
+    AND seq > ?2 AND seq > ?3
+    AND recorded_at >= ?4 AND recorded_at <= ?5
+ORDER BY seq LIMIT ?6
+`
+
+type PageTenantAuditExportOrgParams struct {
+	ChainOrgID     string
+	AfterSeq       int64
+	AfterCommitSeq int64
+	FromTime       string
+	ToTime         string
+	PageLimit      int64
+}
+
+// Export query names mirror postgres for the predicate-confinement parity
+// invariant. sqlite's single writer makes commit order equal seq order.
+func (q *Queries) PageTenantAuditExportOrg(ctx context.Context, arg PageTenantAuditExportOrgParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.QueryContext(ctx, pageTenantAuditExportOrg,
+		arg.ChainOrgID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditTenantEvent
+	for rows.Next() {
+		var i AuditTenantEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.ID,
+			&i.Type,
+			&i.SchemaVersion,
+			&i.OccurredAt,
+			&i.OccurredAsserted,
+			&i.RecordedAt,
+			&i.ActorID,
+			&i.ActorClass,
+			&i.ActorCredentialID,
+			&i.AuthorityID,
+			&i.ScopeClass,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvID,
+			&i.ObjectType,
+			&i.ObjectID,
+			&i.Outcome,
+			&i.CorrelationID,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.Origin,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pageTenantAuditExportProject = `-- name: PageTenantAuditExportProject :many
+SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    actor_id, actor_class, actor_credential_id, authority_id,
+    scope_class, org_id, project_id, env_id,
+    object_type, object_id, outcome, correlation_id,
+    source_ip, user_agent, origin, payload
+FROM audit_tenant_events
+WHERE org_id = ?1 AND project_id = ?2
+    AND seq > ?3 AND seq > ?4
+    AND recorded_at >= ?5 AND recorded_at <= ?6
+ORDER BY seq LIMIT ?7
+`
+
+type PageTenantAuditExportProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID sql.NullString
+	AfterSeq       int64
+	AfterCommitSeq int64
+	FromTime       string
+	ToTime         string
+	PageLimit      int64
+}
+
+func (q *Queries) PageTenantAuditExportProject(ctx context.Context, arg PageTenantAuditExportProjectParams) ([]AuditTenantEvent, error) {
+	rows, err := q.db.QueryContext(ctx, pageTenantAuditExportProject,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.AfterSeq,
+		arg.AfterCommitSeq,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err

@@ -57,3 +57,13 @@ func TestVerifyPGDurability(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditExportCoordinationRejectsUnknownEngine(t *testing.T) {
+	db := &DB{engine: Engine("future")}
+	if _, err := db.AuditExportSnapshotTime(t.Context()); err == nil || !strings.Contains(err.Error(), "unknown engine") {
+		t.Fatalf("snapshot time unknown-engine refusal = %v", err)
+	}
+	if err := db.AwaitAuditExportWriters(t.Context()); err == nil || !strings.Contains(err.Error(), "unknown engine") {
+		t.Fatalf("writer barrier unknown-engine refusal = %v", err)
+	}
+}
