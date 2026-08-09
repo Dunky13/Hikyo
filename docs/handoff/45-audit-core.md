@@ -187,7 +187,7 @@ secret, free-text filter fixtures.
 
 ## Accepted residuals, stated
 
-- **Postgres export-order residual resolved by #84.** Migration `00010`
+- **Postgres export-order residual resolved by #84.** Migration `00011`
   adds database-owned `commit_seq` metadata. A deferred per-row trigger
   takes the global audit-appender transaction advisory lock and assigns
   `commit_seq` immediately before commit; the lock remains held through commit. Export

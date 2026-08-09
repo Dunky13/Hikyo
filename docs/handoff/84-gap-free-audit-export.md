@@ -6,7 +6,7 @@ before an export route ships).
 ## Decision
 
 Postgres audit rows retain public `seq` allocation order and gain internal
-`commit_seq` export order. Migration `00010_audit_export_order.sql` installs a
+`commit_seq` export order. Migration `00011_audit_export_order.sql` installs a
 deferred constraint trigger on each trail. During commit, the trigger takes the
 global audit-appender transaction advisory lock, assigns the next `commit_seq`, and holds
 the lock until commit finishes. Rollbacks may leave sequence-number gaps; they
@@ -72,7 +72,7 @@ Postgres transaction advisory locks are built in and need no server setting,
 so #84 adds no boot-verification requirement beyond the existing `fsync=on`
 and `synchronous_commit=on` checks.
 
-Migration `00010` must remain transactional. The supported `wenv migrate` and
+Migration `00011` must remain transactional. The supported `wenv migrate` and
 auto-migrate paths use goose's transactional default, so no writer can commit
 between the backfill and trigger installation. Running the statements manually
 or marking this migration `NO TRANSACTION` is unsupported: either can strand a
