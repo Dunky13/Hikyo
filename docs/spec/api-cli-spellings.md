@@ -36,6 +36,7 @@ Joins the **existing `instance-config` verb surface** — no new top-level verb 
 
 ```
 wenv instance-config provider create --kind saml --name <name> \
+    --entity-id <byte-exact-entityID> \
     (--metadata-file <xml> | --metadata-url <url>)    # URL fetch runs the fingerprint ceremony
 wenv instance-config provider list
 wenv instance-config provider show    <name>
@@ -43,12 +44,27 @@ wenv instance-config provider update  <name> …
 wenv instance-config provider disable <name>
 wenv instance-config provider remove  <name>
 wenv instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
+
+wenv instance-config saml-sp-key list
+wenv instance-config saml-sp-key rotate                 # old active becomes retiring; both publish
+wenv instance-config saml-sp-key retire <fingerprint>   # retiring only; erases the private key
+wenv instance-config saml-sp-key compromise-retire <fingerprint> # active only; replace atomically
 ```
 
-All under `instance-config` capability, grant-evaluated `InstanceProof`, network path — never the local-admin class. `refresh-metadata` is the ADR's "action on the provider resource".
+All under `instance-config` capability, grant-evaluated `InstanceProof`, network path — never the local-admin class. `refresh-metadata` is the ADR's "action on the provider resource". SP keys are instance-wide, so their noun is deliberately a sibling of `provider`, not a provider subresource. Fingerprints are `sha256:` plus URL-safe unpadded base64 of SubjectPublicKeyInfo, so the exact value is safe as one path segment. `rotate` atomically marks the active key retiring and mints its replacement. Ordinary `retire` accepts only a retiring fingerprint; `compromise-retire` accepts only the active fingerprint and atomically erases and replaces it without an overlap window.
+
+Admin REST resources (ordinary `/api/v1` grammar, proof-carrying):
+
+- `GET /api/v1/instance/saml-sp-keys`
+- `POST /api/v1/instance/saml-sp-keys/rotate`
+- `DELETE /api/v1/instance/saml-sp-keys/{fingerprint}`
+- `POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire`
+
+Provider list/show responses carry a required `warnings` array. Its closed warning codes are `metadata_expires_soon`, `metadata_expired`, `signing_certificate_not_yet_valid`, and `signing_certificate_expired`; each item carries `severity`, the relevant timestamp, a server-authored message, and a certificate fingerprint where applicable. The 30-day metadata threshold is server-authoritative. Provider table output names warnings, JSON preserves the structured array, and the existing top-level `wenv doctor [--instance REF] [-o table|json]` reports the same server-authoritative items (no second warning calculation and no additional endpoint). Doctor returns success for no findings or warning-severity findings; metadata-expired is error severity and returns the stable refused exit code after rendering the findings.
 
 Identity-protocol endpoints (exception class, per-provider, parity-exempt):
 
+- Start: `POST /api/v1/auth/saml/{provider}/start` (server-mints the AuthnRequest, RelayState transaction and path-scoped initiator binding)
 - ACS: `POST /api/v1/auth/saml/{provider}/acs`
 - SP metadata: `GET /api/v1/auth/saml/{provider}/metadata` (unauthenticated, documentation-class, pre-auth admission)
 
