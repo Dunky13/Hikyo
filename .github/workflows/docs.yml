@@ -1,0 +1,72 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "scripts/ci/check-docs-live*"
+      - "scripts/ci/check-oss-policy*"
+      - "CONTRIBUTING.md"
+      - "GOVERNANCE.md"
+      - "LICENSE"
+      - "README.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
+      - "TRADEMARK.md"
+  workflow_dispatch:
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      pages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install (frozen lockfile)
+        working-directory: docs/site
+        run: pnpm install --frozen-lockfile
+      - name: Verify dependency peers
+        working-directory: docs/site
+        run: pnpm peers check
+      - name: Typecheck, build, and assert O4-O6 policy content
+        working-directory: docs/site
+        run: pnpm run verify
+      - name: Policy gate refusal fixtures
+        run: |
+          ./scripts/ci/check-oss-policy_test.sh
+          ./scripts/ci/check-docs-live_test.sh
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: docs/site/dist
+
+  deploy:
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Wenv">
+  <rect width="64" height="64" rx="8" fill="#092b31"/>
+  <path d="M10 16h9l5 27 7-19h7l7 19 5-27h9L50 50H41l-7-18-7 18h-9z" fill="#92dfd9"/>
+</svg>
