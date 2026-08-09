@@ -25,7 +25,7 @@ Granularity note: this is the wayfinding-level SAML ADR. It fixes the library an
 | #219: assertion sig unverified when response-signed | Assertion signature mandatory + the structural verification algorithm (§ *The validation algorithm*) binding verification to extraction |
 | Unsigned LogoutRequest/Response acceptance history | SLO excluded from profile — no logout endpoint exists |
 | IdP-initiated SSO accepted implicitly | Unsolicited responses refused by name (`InResponseTo` mandatory) |
-| Audience/Conditions violations returned as warnings | Wrapper promotes **every** `WarningInfo` to a hard error — an empty warning set is a precondition of login |
+| Audience/Conditions violations returned as warnings | The exact-node wrapper independently re-enforces every condition represented by gosaml2 `WarningInfo` as a hard error on the verifier-returned assertion; no warning-only result can reach extraction |
 | `Destination` checked only if present | Wrapper requires `Destination` present and exact |
 | No `InResponseTo` validation | Wrapper binds to the server-side transaction store (§ *The SAML transaction*) |
 | No replay cache | Wrapper maintains a durable one (§ *The validation algorithm*) |
@@ -68,7 +68,7 @@ An algorithm or transform not on the list is **refused, not evaluated** — the 
 
 ## The validation algorithm
 
-The wrapper's acceptance decision is one closed conjunction over the single parse tree; every clause is a hard error with a distinct, enumerated, audited cause. Library validation runs first and the wrapper promotes **every** `WarningInfo` to a hard error (an empty warning set is a precondition); the wrapper then asserts, in order:
+The wrapper's acceptance decision is one closed conjunction over the single parse tree; every clause is a hard error with a distinct, enumerated, audited cause. Wenv deliberately does **not** call gosaml2's public response-validation path: that path reparses and returns detached typed values, breaking the parse-once and verification-to-extraction binding. The wrapper invokes goxmldsig verification on the exact detached assertion node, consumes the verifier-returned node, and independently re-enforces every condition represented by gosaml2 `WarningInfo` as a hard error before extraction. There is therefore no warning channel to promote and no warning-only result that can reach extraction. The wrapper then asserts, in order:
 
 **Structural XSW defence — verification bound to extraction:**
 
@@ -96,7 +96,7 @@ The wrapper's acceptance decision is one closed conjunction over the single pars
 
 **Values** (defaults fixed here; catalogued as tunable ops-spec entries at synthesis): clock skew 60 s (the machine-identity precedent), transaction TTL 10 min, `IssueInstant` max age 5 min, document bounds as § *XML processing*.
 
-**Refusals are enumerated, not generic**: unsolicited response, unknown/consumed transaction, initiator mismatch, purpose mismatch, issuer mismatch (each leg), wrong ACS, destination mismatch, structural-XSW refusals (duplicate ID, assertion cardinality, reference shape, extra signature invalid), unknown certificate, disallowed algorithm/transform/canonicalization, audience missing/mismatched, confirmation-method unsupported, missing `NotOnOrAfter` (either), stale/early conditions, stale `IssueInstant`, replayed assertion, AuthnStatement cardinality, encrypted-assertion present, DTD present, document bounds exceeded, warning-set nonempty. Each maps to a distinct audited failure cause (§ *Audit*), because "SAML login failed" is not a diagnosable event.
+**Refusals are enumerated, not generic**: unsolicited response, unknown/consumed transaction, initiator mismatch, purpose mismatch, issuer mismatch (each leg), wrong ACS, destination mismatch, structural-XSW refusals (duplicate ID, assertion cardinality, reference shape, extra signature invalid), unknown certificate, disallowed algorithm/transform/canonicalization, audience missing/mismatched, confirmation-method unsupported, missing `NotOnOrAfter` (either), stale/early conditions, stale `IssueInstant`, replayed assertion, AuthnStatement cardinality, encrypted-assertion present, DTD present, document bounds exceeded, and every warning-equivalent audience/conditions violation independently enforced by the wrapper. Each maps to a distinct audited failure cause (§ *Audit*), because "SAML login failed" is not a diagnosable event.
 
 **`SessionNotOnOrAfter` is ignored, and the ADR says so plainly.** Without SLO, Wenv does not track IdP session state; honouring one field of it would claim a coupling that does not exist. The Wenv session minted from a SAML login lives under Wenv's own lifetimes ([ops-spec.md](./ops-spec.md)), exactly like an OIDC-minted session.
 
