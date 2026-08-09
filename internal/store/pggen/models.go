@@ -234,6 +234,67 @@ type RecoveryCode struct {
 	GeneratedAt     pgtype.Timestamptz
 }
 
+type SamlProvider struct {
+	ID                              string
+	Slug                            string
+	DisplayName                     string
+	Kind                            string
+	EntityID                        string
+	AcsUrl                          string
+	SsoRedirectUrl                  string
+	SigningCertificates             []byte
+	AssurancePolicy                 pgtype.Text
+	AllowEmailNameid                int64
+	ForceSignRequests               int64
+	MetadataWantAuthnRequestsSigned int64
+	MetadataSource                  string
+	MetadataUrl                     pgtype.Text
+	MetadataSigned                  int64
+	MetadataSigningFingerprint      pgtype.Text
+	MetadataValidUntil              pgtype.Timestamptz
+	Enabled                         int64
+	RowVersion                      int64
+	CreatedAt                       pgtype.Timestamptz
+	UpdatedAt                       pgtype.Timestamptz
+}
+
+type SamlReplay struct {
+	Issuer      string
+	AssertionID string
+	ExpiresAt   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+}
+
+type SamlSpKey struct {
+	ID                  string
+	State               string
+	EncryptedPrivateKey []byte
+	CertificateDer      []byte
+	Fingerprint         string
+	DekVersion          int64
+	RowVersion          int64
+	CreatedAt           pgtype.Timestamptz
+}
+
+type SamlTransaction struct {
+	ID                  string
+	RequestID           string
+	RelayStateVerifier  []byte
+	InitiatorVerifier   []byte
+	ProviderID          string
+	EntityID            string
+	AcsUrl              string
+	Purpose             string
+	InitiatingSessionID pgtype.Text
+	AccountID           pgtype.Text
+	EnvironmentID       pgtype.Text
+	CeremonyID          pgtype.Text
+	CredentialEpoch     int64
+	CreatedAt           pgtype.Timestamptz
+	ExpiresAt           pgtype.Timestamptz
+	ConsumedAt          pgtype.Timestamptz
+}
+
 type Session struct {
 	ID                string
 	PrincipalID       string
@@ -253,6 +314,7 @@ type Session struct {
 	UserAgent         string
 	CsrfVerifier      []byte
 	ProviderID        pgtype.Text
+	SamlProviderID    pgtype.Text
 }
 
 type Tier3Key struct {

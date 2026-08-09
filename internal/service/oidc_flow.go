@@ -644,7 +644,7 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 		}
 		ev, e := newAuditEvent(ctx, audit.EventIdentityLinked, account.PrincipalID,
 			audit.Object{Type: "external_identity", ID: identityID}, audit.OutcomeSuccess, "",
-			audit.Payload{"account_id": account.ID, "identity_id": identityID, "provider_id": prov.ID, "authorizing_credential": "password"})
+			audit.Payload{"kind": OIDCKind, "account_id": account.ID, "identity_id": identityID, "provider_id": prov.ID, "authorizing_credential": "password"})
 		if e != nil {
 			return e
 		}
@@ -967,6 +967,7 @@ func joinAMR(amr []string) string {
 type AuthMethodProvider struct {
 	Slug        string
 	DisplayName string
+	Kind        string
 }
 
 // AuthMethods returns the enabled OIDC providers and whether local login is on.
@@ -980,7 +981,16 @@ func (s *Auth) AuthMethods(ctx context.Context) ([]AuthMethodProvider, bool, err
 		}
 		for _, p := range rows {
 			if p.Enabled {
-				out = append(out, AuthMethodProvider{Slug: p.Slug, DisplayName: p.DisplayName})
+				out = append(out, AuthMethodProvider{Slug: p.Slug, DisplayName: p.DisplayName, Kind: OIDCKind})
+			}
+		}
+		samlProviders, e := az.ListSAMLProviders(ctx)
+		if e != nil {
+			return e
+		}
+		for _, p := range samlProviders {
+			if p.Enabled {
+				out = append(out, AuthMethodProvider{Slug: p.Slug, DisplayName: p.DisplayName, Kind: SAMLKind})
 			}
 		}
 		return nil
@@ -992,6 +1002,7 @@ func (s *Auth) AuthMethods(ctx context.Context) ([]AuthMethodProvider, bool, err
 // internal/server needs no authz import.
 type ExternalIdentityView struct {
 	ID         string
+	Kind       string
 	Issuer     string
 	Subject    string
 	ProviderID string
@@ -1016,7 +1027,7 @@ func (s *Auth) ListIdentities(ctx context.Context, presented string) ([]External
 		}
 		for _, r := range rows {
 			out = append(out, ExternalIdentityView{
-				ID: r.ID, Issuer: r.Issuer, Subject: r.Subject, ProviderID: r.ProviderID, CreatedAt: r.CreatedAt,
+				ID: r.ID, Kind: r.Kind, Issuer: r.Issuer, Subject: r.Subject, ProviderID: r.ProviderID, CreatedAt: r.CreatedAt,
 			})
 		}
 		return nil
@@ -1029,8 +1040,9 @@ func (s *Auth) ListIdentities(ctx context.Context, presented string) ([]External
 // shape), verifies the pre-existing password, and reissues the acting session.
 func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof string) (LoginResult, error) {
 	var (
-		account authz.Account
-		cred    authz.PasswordCredential
+		account      authz.Account
+		cred         authz.PasswordCredential
+		identityKind string
 	)
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, e := az.Authenticate(ctx, presented, s.now())
@@ -1048,6 +1060,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 		if e != nil {
 			return e
 		}
+		identityKind = identity.Kind
 		cred, e = az.PasswordCredentialFor(ctx, account.ID)
 		if errors.Is(e, domain.ErrNotFound) {
 			return ErrNoProofCredential
@@ -1101,7 +1114,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 		}
 		ev, e := newAuditEvent(ctx, audit.EventIdentityUnlinked, account.PrincipalID,
 			audit.Object{Type: "external_identity", ID: identityID}, audit.OutcomeSuccess, "",
-			audit.Payload{"account_id": account.ID, "identity_id": identityID, "authorizing_credential": "password"})
+			audit.Payload{"kind": identityKind, "account_id": account.ID, "identity_id": identityID, "authorizing_credential": "password"})
 		if e != nil {
 			return e
 		}

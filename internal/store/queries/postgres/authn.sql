@@ -81,6 +81,13 @@ SELECT id, principal_id, artifact, session_generation, credential_epoch,
 FROM sessions WHERE verifier = $1;
 
 -- wenv:authn-resolution
+-- name: GetSessionByID :one
+SELECT id, principal_id, artifact, session_generation, credential_epoch,
+       auth_method, factors, authenticated_at, ceremony_id, created_at,
+       last_seen_at, idle_expires_at, absolute_expires_at
+FROM sessions WHERE id = $1;
+
+-- wenv:authn-resolution
 -- name: GetCredentialAuthorityByVerifier :one
 SELECT id, account_id, purpose, issued_by, credential_epoch, expires_at,
        consumed_at, created_at
@@ -309,6 +316,17 @@ FROM external_identities WHERE account_id = $1 ORDER BY created_at;
 INSERT INTO external_identities
     (id, account_id, kind, issuer, subject, provider_id, credential_epoch, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- Re-adding the same byte-exact SAML entity creates a new provider row while
+-- preserving the human link. The old provider id is a provenance CAS guard:
+-- only the identity just verified by that entity may move to the live row.
+-- wenv:authn-resolution
+-- name: RebindSAMLExternalIdentityProvider :execrows
+UPDATE external_identities
+SET provider_id = sqlc.arg(new_provider_id)
+WHERE id = sqlc.arg(id)
+  AND kind = 'saml'
+  AND provider_id = sqlc.arg(expected_provider_id);
 
 -- wenv:authn-resolution
 -- name: DeleteExternalIdentity :exec

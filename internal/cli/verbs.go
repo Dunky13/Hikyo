@@ -70,6 +70,10 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runEnv(ctx, io, rest)
 	case "folder":
 		err = runFolder(ctx, io, rest)
+	case "instance-config":
+		err = runInstanceConfig(ctx, io, rest)
+	case "doctor":
+		err = runDoctor(ctx, io, rest)
 	default:
 		fmt.Fprintf(io.Stderr, "wenv: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
@@ -106,6 +110,9 @@ contexts:
   wenv context delete <name>
   wenv context delete --instance <ref>            forget a trust-store entry
 
+diagnostics:
+  wenv doctor [--instance REF] [-o table|json]     report server-authoritative provider health
+
 hierarchy:
   wenv org list [-o table|json]
   wenv org show <org> [-o table|json]
@@ -123,6 +130,14 @@ hierarchy:
   wenv folder list|show|create|rename|delete       --org/--project select the project
   wenv folder create --path <path>
   wenv folder rename <folder> --path <new-path>
+
+instance configuration:
+  wenv instance-config provider create --kind saml --name <name> --entity-id <entityID> \
+      (--metadata-file <xml> | --metadata-url <url>)
+  wenv instance-config provider list|show|update|disable|remove
+  wenv instance-config provider refresh-metadata <name>
+  wenv instance-config saml-sp-key list|rotate
+  wenv instance-config saml-sp-key retire|compromise-retire <fingerprint>
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context

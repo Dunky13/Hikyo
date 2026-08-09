@@ -27,12 +27,18 @@ const (
 	KindInt
 	// KindBool is a boolean fact.
 	KindBool
+	// KindStringList is an ordered or set-like collection of trusted
+	// identifiers. Keeping it structured avoids lossy delimiter encoding.
+	KindStringList
+	// KindObject is a nested, closed-schema object.
+	KindObject
 )
 
 // FieldSpec declares one payload field.
 type FieldSpec struct {
-	Kind     FieldKind
-	Required bool
+	Kind         FieldKind
+	Required     bool
+	ObjectSchema Schema
 }
 
 // Schema is one event type's closed payload field set.
@@ -49,6 +55,19 @@ func (s Schema) validate(t EventType, p Payload) error {
 		if !present {
 			if spec.Required {
 				return fmt.Errorf("audit: %s: payload missing required field %q", t, name)
+			}
+			continue
+		}
+		if spec.Kind == KindObject {
+			object, ok := objectPayload(v)
+			if !ok {
+				return fmt.Errorf("audit: %s: payload field %q: want object, got %T", t, name, v)
+			}
+			if spec.ObjectSchema == nil {
+				return fmt.Errorf("audit: %s: payload field %q: object schema is missing", t, name)
+			}
+			if err := spec.ObjectSchema.validate(t, object); err != nil {
+				return fmt.Errorf("audit: %s: payload field %q: %w", t, name, err)
 			}
 			continue
 		}
@@ -83,8 +102,25 @@ func checkKind(k FieldKind, v any) error {
 		if _, ok := v.(bool); !ok {
 			return fmt.Errorf("want bool, got %T", v)
 		}
+	case KindStringList:
+		if _, ok := v.([]string); !ok {
+			return fmt.Errorf("want []string, got %T", v)
+		}
+	case KindObject:
+		return fmt.Errorf("object kind requires a nested schema")
 	default:
 		return fmt.Errorf("unknown field kind %d", k)
 	}
 	return nil
+}
+
+func objectPayload(v any) (Payload, bool) {
+	switch object := v.(type) {
+	case Payload:
+		return object, true
+	case map[string]any:
+		return Payload(object), true
+	default:
+		return nil, false
+	}
 }

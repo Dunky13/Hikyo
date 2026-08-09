@@ -772,6 +772,51 @@ func (q *Queries) GetRecoveryCodes(ctx context.Context, accountID string) (Recov
 	return i, err
 }
 
+const getSessionByID = `-- name: GetSessionByID :one
+SELECT id, principal_id, artifact, session_generation, credential_epoch,
+       auth_method, factors, authenticated_at, ceremony_id, created_at,
+       last_seen_at, idle_expires_at, absolute_expires_at
+FROM sessions WHERE id = ?
+`
+
+type GetSessionByIDRow struct {
+	ID                string
+	PrincipalID       string
+	Artifact          string
+	SessionGeneration int64
+	CredentialEpoch   int64
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   string
+	CeremonyID        sql.NullString
+	CreatedAt         string
+	LastSeenAt        string
+	IdleExpiresAt     string
+	AbsoluteExpiresAt string
+}
+
+// wenv:authn-resolution
+func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByID, id)
+	var i GetSessionByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.Artifact,
+		&i.SessionGeneration,
+		&i.CredentialEpoch,
+		&i.AuthMethod,
+		&i.Factors,
+		&i.AuthenticatedAt,
+		&i.CeremonyID,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.IdleExpiresAt,
+		&i.AbsoluteExpiresAt,
+	)
+	return i, err
+}
+
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
@@ -1336,6 +1381,32 @@ func (q *Queries) LockPrincipalRow(ctx context.Context, id string) (string, erro
 	var id_2 string
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const rebindSAMLExternalIdentityProvider = `-- name: RebindSAMLExternalIdentityProvider :execrows
+UPDATE external_identities
+SET provider_id = ?1
+WHERE id = ?2
+  AND kind = 'saml'
+  AND provider_id = ?3
+`
+
+type RebindSAMLExternalIdentityProviderParams struct {
+	NewProviderID      string
+	ID                 string
+	ExpectedProviderID string
+}
+
+// Re-adding the same byte-exact SAML entity creates a new provider row while
+// preserving the human link. The old provider id is a provenance CAS guard:
+// only the identity just verified by that entity may move to the live row.
+// wenv:authn-resolution
+func (q *Queries) RebindSAMLExternalIdentityProvider(ctx context.Context, arg RebindSAMLExternalIdentityProviderParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rebindSAMLExternalIdentityProvider, arg.NewProviderID, arg.ID, arg.ExpectedProviderID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const resolveEnvChain = `-- name: ResolveEnvChain :one

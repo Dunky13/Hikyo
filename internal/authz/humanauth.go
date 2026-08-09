@@ -351,6 +351,12 @@ func (a *TxAuthorizer) CreateExternalIdentity(ctx context.Context, n NewExternal
 	return a.r.CreateExternalIdentity(ctx, n)
 }
 
+// RebindSAMLExternalIdentityProvider compare-and-swaps provider provenance
+// after the same byte-exact entity has been removed and configured again.
+func (a *TxAuthorizer) RebindSAMLExternalIdentityProvider(ctx context.Context, id, expectedProviderID, newProviderID string) (bool, error) {
+	return a.r.RebindSAMLExternalIdentityProvider(ctx, id, expectedProviderID, newProviderID)
+}
+
 // RemoveExternalIdentity removes a link (unlink).
 func (a *TxAuthorizer) RemoveExternalIdentity(ctx context.Context, id string) error {
 	return a.r.DeleteExternalIdentity(ctx, id)
@@ -385,6 +391,139 @@ func (a *TxAuthorizer) SlideReauthWindow(ctx context.Context, id string, windowE
 // false means it was already spent (B11 double-spend).
 func (a *TxAuthorizer) ConsumeSingleDecisionWindow(ctx context.Context, id string, at time.Time) (bool, error) {
 	return a.r.ConsumeSingleDecisionWindow(ctx, id, at)
+}
+
+// SAML seam (#72). The strict XML/signature policy lives in internal/samlsp;
+// this surface only keeps its durable resolution and write phase inside the
+// transaction that will mint or rotate a session.
+
+// SAMLProvider is a resolved SAML identity-provider row.
+type SAMLProvider = authn.SAMLProvider
+
+// NewSAMLProvider is the provider insert carrier.
+type NewSAMLProvider = authn.NewSAMLProvider
+
+// SAMLProviderUpdate is the provider compare-and-swap carrier.
+type SAMLProviderUpdate = authn.SAMLProviderUpdate
+
+// SAMLTransaction is a server-side AuthnRequest transaction.
+type SAMLTransaction = authn.SAMLTransaction
+
+// NewSAMLTransaction is the transaction insert carrier.
+type NewSAMLTransaction = authn.NewSAMLTransaction
+
+// NewSAMLReplay is the durable assertion replay insert carrier.
+type NewSAMLReplay = authn.NewSAMLReplay
+
+// SAMLSPKey is stored SP signing material.
+type SAMLSPKey = authn.SAMLSPKey
+
+// NewSAMLSPKey is the SP signing-key insert carrier.
+type NewSAMLSPKey = authn.NewSAMLSPKey
+
+// SAMLProviderBySlug resolves a provider in any state for administration.
+func (a *TxAuthorizer) SAMLProviderBySlug(ctx context.Context, slug string) (SAMLProvider, error) {
+	return a.r.SAMLProviderBySlug(ctx, slug)
+}
+
+// SAMLProviderForCallback resolves the provider pinned by a transaction.
+func (a *TxAuthorizer) SAMLProviderForCallback(ctx context.Context, id string) (SAMLProvider, error) {
+	return a.r.SAMLProviderForCallback(ctx, id)
+}
+
+// ListSAMLProviders lists all configured SAML providers.
+func (a *TxAuthorizer) ListSAMLProviders(ctx context.Context) ([]SAMLProvider, error) {
+	return a.r.ListSAMLProviders(ctx)
+}
+
+// CreateSAMLProvider inserts a provider after instance-config authorization.
+func (a *TxAuthorizer) CreateSAMLProvider(ctx context.Context, provider NewSAMLProvider) error {
+	return a.r.CreateSAMLProvider(ctx, provider)
+}
+
+// UpdateSAMLProvider compare-and-swaps a provider configuration.
+func (a *TxAuthorizer) UpdateSAMLProvider(ctx context.Context, provider SAMLProviderUpdate) (bool, error) {
+	return a.r.UpdateSAMLProvider(ctx, provider)
+}
+
+// LockSAMLProviderForDelete serializes provider deletion against Phase-C mints.
+func (a *TxAuthorizer) LockSAMLProviderForDelete(ctx context.Context, id string) error {
+	return a.r.LockSAMLProviderForDelete(ctx, id)
+}
+
+// DeleteSAMLProvider removes a locked provider row.
+func (a *TxAuthorizer) DeleteSAMLProvider(ctx context.Context, id string) error {
+	return a.r.DeleteSAMLProvider(ctx, id)
+}
+
+// GuardSAMLProviderForMint proves the provider still matches the Phase-A
+// snapshot immediately before a session or reauth window is written.
+func (a *TxAuthorizer) GuardSAMLProviderForMint(ctx context.Context, id string, rowVersion int64, entityID string) (bool, error) {
+	return a.r.GuardSAMLProviderForMint(ctx, id, rowVersion, entityID)
+}
+
+// CreateSAMLTransaction writes a single-use AuthnRequest transaction.
+func (a *TxAuthorizer) CreateSAMLTransaction(ctx context.Context, transaction NewSAMLTransaction) error {
+	return a.r.CreateSAMLTransaction(ctx, transaction)
+}
+
+// SAMLTransactionByRelayState resolves the opaque front-channel handle before
+// the strict wrapper's single response-validation pass.
+func (a *TxAuthorizer) SAMLTransactionByRelayState(ctx context.Context, verifier []byte) (SAMLTransaction, error) {
+	return a.r.SAMLTransactionByRelayState(ctx, verifier)
+}
+
+// ConsumeSAMLTransaction spends a transaction on first presentation, success
+// or failure.
+func (a *TxAuthorizer) ConsumeSAMLTransaction(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.ConsumeSAMLTransaction(ctx, id, at)
+}
+
+// ClaimSAMLReplay atomically records an assertion ID. False means replay.
+func (a *TxAuthorizer) ClaimSAMLReplay(ctx context.Context, replay NewSAMLReplay) (bool, error) {
+	return a.r.ClaimSAMLReplay(ctx, replay)
+}
+
+// DeleteExpiredSAMLReplay removes replay rows after their signed validity plus
+// skew has elapsed.
+func (a *TxAuthorizer) DeleteExpiredSAMLReplay(ctx context.Context, at time.Time) (int64, error) {
+	return a.r.DeleteExpiredSAMLReplay(ctx, at)
+}
+
+// ActiveSAMLSPKey resolves the signing key used for AuthnRequests.
+func (a *TxAuthorizer) ActiveSAMLSPKey(ctx context.Context) (SAMLSPKey, error) {
+	return a.r.ActiveSAMLSPKey(ctx)
+}
+
+// SAMLSPKeys lists active and overlap-retiring public material.
+func (a *TxAuthorizer) SAMLSPKeys(ctx context.Context) ([]SAMLSPKey, error) {
+	return a.r.SAMLSPKeys(ctx)
+}
+
+// CreateSAMLSPKey stores a freshly minted encrypted private key.
+func (a *TxAuthorizer) CreateSAMLSPKey(ctx context.Context, key NewSAMLSPKey) error {
+	return a.r.CreateSAMLSPKey(ctx, key)
+}
+
+// MarkSAMLSPKeyRetiring compare-and-swaps an active key into overlap state.
+func (a *TxAuthorizer) MarkSAMLSPKeyRetiring(ctx context.Context, id string, rowVersion int64) (bool, error) {
+	return a.r.MarkSAMLSPKeyRetiring(ctx, id, rowVersion)
+}
+
+// DeleteRetiringSAMLSPKey erases a retiring key.
+func (a *TxAuthorizer) DeleteRetiringSAMLSPKey(ctx context.Context, id string) (bool, error) {
+	return a.r.DeleteRetiringSAMLSPKey(ctx, id)
+}
+
+// BindSessionToSAMLProvider records SAML provider provenance in the same
+// transaction that mints the session.
+func (a *TxAuthorizer) BindSessionToSAMLProvider(ctx context.Context, sessionID, providerID string) (bool, error) {
+	return a.r.BindSessionToSAMLProvider(ctx, sessionID, providerID)
+}
+
+// SweepSessionsForSAMLProvider deletes all sessions minted through a SAML IdP.
+func (a *TxAuthorizer) SweepSessionsForSAMLProvider(ctx context.Context, providerID string) (int64, error) {
+	return a.r.DeleteSessionsForSAMLProvider(ctx, providerID)
 }
 
 // InvalidateReauthWindowsForEnvironment deletes every open window on one

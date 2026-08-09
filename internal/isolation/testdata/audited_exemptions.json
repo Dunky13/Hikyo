@@ -9,6 +9,7 @@
     "http:GET /api/v1/meta": "unauthenticated capability print: server version, API revision and which auth protocol flows this instance serves \u2014 no principal, no tenant data, no state change, and the ADR declares no event type for it (same class as cli:version, which it is the network form of)",
     "http:GET /api/v1/auth/whoami": "reports the session the caller already holds and writes nothing; the session's creation, method and assurance are already recorded by auth.session_created, so an event here would duplicate that record once per poll",
     "http:GET /api/v1/auth/methods": "unauthenticated public discovery: the enabled provider slugs and whether local login is on, instance-level and never per-account; no principal, no tenant data, no state change, same class as GET /api/v1/meta",
+    "http:GET /api/v1/auth/saml/{provider}/metadata": "unauthenticated documentation-class SP metadata: public entityID, ACS, certificate and request-signing policy; no principal, tenant data or state change, and the SAML ADR declares no read event",
     "http:GET /api/v1/auth/identities": "reports the caller's own linked identities and writes nothing; a self read whose subjects are already recorded at link/unlink time (auth.identity_linked / auth.identity_unlinked), so an event here would duplicate that once per poll, exactly like whoami",
     "http:GET /api/v1/auth/webauthn/credentials": "reports the caller's own enrolled passkeys and writes nothing; a self read whose subjects are already recorded at add/remove time (auth.passkey_added / auth.passkey_removed), so an event here would duplicate that once per poll, exactly like the identities read",
     "http:POST /api/v1/auth/webauthn/login/start": "opens a discoverable-credential ceremony and returns opaque options; no proof is validated, no credential or account is resolved, and no state a probe could distinguish is created \u2014 the login lands at login/finish, which carries the events",
@@ -22,7 +23,9 @@
     "cli:org": "client transport for the /api/v1/orgs routes, whose operations carry the audit mapping",
     "cli:project": "client transport for the tenant-scoped project routes, whose operations carry the audit mapping",
     "cli:env": "client transport for the tenant-scoped environment routes, whose operations carry the audit mapping",
-    "cli:folder": "client transport for the tenant-scoped folder routes, whose operations carry the audit mapping"
+    "cli:folder": "client transport for the tenant-scoped folder routes, whose operations carry the audit mapping",
+    "cli:instance-config": "client transport for the instance-scoped provider routes, whose operations carry the audit mapping",
+    "cli:doctor": "client transport for GET /api/v1/instance/saml-providers; the server audits that provider read and returns the canonical warnings"
   },
   "operations": {}
 }
