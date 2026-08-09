@@ -49,7 +49,9 @@ both trails. sqlite keeps using
 - Interactive query pages stay allocation-ordered by `seq`.
 - Export pages retain the caller's `AfterSeq` lower bound, then page by
   `commit_seq` on postgres.
-- Postgres stamps `recorded_at` with `clock_timestamp()` in the INSERT.
+- The Postgres BEFORE INSERT trigger first acquires the shared writer gate,
+  then stamps `recorded_at` with `clock_timestamp()`. Eligibility therefore
+  cannot predate the writer's registration at the export barrier.
 - An unbounded export captures that same server clock before its INTENT event
   and holds it as a fixed `To`, so pre-cutoff in-flight rows remain eligible
   while post-cutoff writes cannot create an endless chase.

@@ -52,6 +52,10 @@ CREATE OR REPLACE FUNCTION mark_audit_write_in_flight() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
     PERFORM pg_advisory_xact_lock_shared(1464159830, 85);
+    -- Eligibility is stamped only after registration at the writer gate. This
+    -- closes the interval where an INSERT expression could obtain a
+    -- pre-snapshot timestamp before the export barrier could see the writer.
+    NEW.recorded_at := clock_timestamp();
     RETURN NEW;
 END;
 $$;

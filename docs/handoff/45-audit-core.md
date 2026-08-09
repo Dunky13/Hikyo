@@ -29,8 +29,9 @@ mvp-boundary rows A4 and A6.
     writers so they cannot drift. Fixed-width microsecond UTC text
     timestamps on sqlite (lexicographic order == time order, so range
     predicates work); timestamptz on postgres. Since #84, postgres
-    `recorded_at` is stamped by `clock_timestamp()` in the INSERT rather
-    than by an application instance.
+    the BEFORE INSERT trigger acquires the export writer gate and then stamps
+    `recorded_at` with `clock_timestamp()`, rather than trusting an application
+    instance clock.
   - `Context`/`WithContext`/`FromContext`: per-request wire metadata
     (source IP, user agent, origin), sanitized at capture. Absent context =
     `origin: system`, structural absence. **The HTTP/CLI layers (#47/#48)
@@ -197,8 +198,9 @@ secret, free-text filter fixtures.
 
   An export without a caller-supplied `To` captures `clock_timestamp()`
   before writing `audit.export_started` and holds that fixed upper bound for
-  every page. A transaction that inserted before the cutoff remains eligible
-  when it commits later. Audit INSERTs hold a shared in-flight advisory lock;
+    every page. A transaction registered and timestamped before the cutoff
+    remains eligible when it commits later. Audit INSERTs acquire a shared
+    in-flight advisory lock before the database stamps `recorded_at`;
   before accepting a final short page, the exporter queues the exclusive side,
   waits for every pre-cutoff writer, then rereads. Writes inserted after the
   cutoff cannot turn the export into an endless chase or make it export its own

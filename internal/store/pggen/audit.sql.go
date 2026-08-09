@@ -13,13 +13,13 @@ import (
 
 const insertInstanceAuditEvent = `-- name: InsertInstanceAuditEvent :exec
 INSERT INTO audit_instance_events (
-    id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    id, type, schema_version, occurred_at, occurred_asserted,
     actor_id, actor_class, actor_credential_id, authority_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 ) VALUES (
     $1, $2, $3, $4,
-    $5, clock_timestamp(),
+    $5,
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17
@@ -72,14 +72,14 @@ func (q *Queries) InsertInstanceAuditEvent(ctx context.Context, arg InsertInstan
 const insertTenantAuditEvent = `-- name: InsertTenantAuditEvent :exec
 
 INSERT INTO audit_tenant_events (
-    id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+    id, type, schema_version, occurred_at, occurred_asserted,
     actor_id, actor_class, actor_credential_id, authority_id,
     scope_class, org_id, project_id, env_id,
     object_type, object_id, outcome, correlation_id,
     source_ip, user_agent, origin, payload
 ) VALUES (
     $1, $2, $3, $4,
-    $5, clock_timestamp(),
+    $5,
     $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16, $17,

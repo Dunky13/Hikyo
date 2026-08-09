@@ -579,6 +579,103 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 	}
 }
 
+// TestPostgresAuditExportCutoffRegistration closes the other side of #84's
+// termination race. A writer paused before the production writer gate must be
+// timestamped after the cutoff when it resumes; otherwise the completed export
+// has silently omitted an event that its own cutoff says was eligible.
+func TestPostgresAuditExportCutoffRegistration(t *testing.T) {
+	db := seededDB(t, openPostgres)
+	audits := &service.Audits{DB: db}
+
+	execRaw(t, db, `CREATE FUNCTION audit_test_pause_before_gate() RETURNS TRIGGER
+		LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.id = 'evt_cutoff_race' THEN
+				PERFORM pg_advisory_xact_lock_shared(1464159830, 86);
+			END IF;
+			RETURN NEW;
+		END;
+		$$`)
+	execRaw(t, db, `CREATE TRIGGER audit_000_test_pause_before_gate
+		BEFORE INSERT ON audit_tenant_events
+		FOR EACH ROW EXECUTE FUNCTION audit_test_pause_before_gate()`)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := db.PG().Exec(ctx, "DROP TRIGGER IF EXISTS audit_000_test_pause_before_gate ON audit_tenant_events"); err != nil {
+			t.Errorf("drop cutoff-race test trigger: %v", err)
+		}
+		if _, err := db.PG().Exec(ctx, "DROP FUNCTION IF EXISTS audit_test_pause_before_gate()"); err != nil {
+			t.Errorf("drop cutoff-race test function: %v", err)
+		}
+	})
+
+	blocker, err := db.PG().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocker.Rollback(context.Background()) })
+	if _, err := blocker.Exec(t.Context(), "SELECT pg_advisory_xact_lock(1464159830, 86)"); err != nil {
+		t.Fatal(err)
+	}
+
+	insertDone := make(chan error, 1)
+	go func() {
+		_, err := db.PG().Exec(t.Context(), `INSERT INTO audit_tenant_events (
+			id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+			actor_id, actor_class, scope_class, org_id, outcome, origin, payload
+		) VALUES ('evt_cutoff_race', 'settings.project_created', 1,
+			clock_timestamp(), FALSE, clock_timestamp(), 'usr_alice', 'human',
+			'org', 'org_a', 'success', 'cli', '{}')`)
+		insertDone <- err
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for queryInt(t, db, `SELECT COUNT(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND classid = 1464159830 AND objid = 86 AND NOT granted`) == 0 {
+		select {
+		case err := <-insertDone:
+			t.Fatalf("writer passed the pre-gate pause unexpectedly: %v", err)
+		case <-deadline:
+			t.Fatal("writer did not pause before the production export gate")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	var cutoff time.Time
+	if err := db.PG().QueryRow(t.Context(), "SELECT clock_timestamp()").Scan(&cutoff); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{To: cutoff}, 2, &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "evt_cutoff_race") {
+		t.Fatal("uncommitted cutoff-race event appeared in export")
+	}
+
+	if err := blocker.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-insertDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("writer did not finish after the pre-gate pause was released")
+	}
+
+	var recordedAt time.Time
+	if err := db.PG().QueryRow(t.Context(),
+		"SELECT recorded_at FROM audit_tenant_events WHERE id = 'evt_cutoff_race'").Scan(&recordedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !recordedAt.After(cutoff) {
+		t.Fatalf("writer recorded_at = %s, want after export cutoff %s", recordedAt, cutoff)
+	}
+}
+
 type exportLineForTest struct {
 	Seq int64  `json:"seq"`
 	ID  string `json:"id"`
