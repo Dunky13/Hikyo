@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   fallback-channel:
@@ -23,3 +24,34 @@ jobs:
           ./scripts/ci/check-fallback-channel-test.sh
           release/repository/fallback-channel-test.json
           security@developwent.io
+      - name: Surface fallback-channel degradation
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Fallback security channel health check failed'
+          issue_number=$(gh issue list --state open --search "$title in:title" \
+            --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+          if [ -n "$issue_number" ]; then
+            printf 'Degradation is already tracked in issue #%s\n' "$issue_number"
+            exit 0
+          fi
+          gh issue create --title "$title" \
+            --body "The scheduled fallback-channel gate failed: $RUN_URL"
+      - name: Close resolved fallback-channel alert
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          title='Fallback security channel health check failed'
+          issue_number=$(gh issue list --state open --search "$title in:title" \
+            --json number,title \
+            --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" \
+              --comment 'The scheduled fallback-channel gate is healthy again.'
+          fi

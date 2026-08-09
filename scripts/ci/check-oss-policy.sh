@@ -39,6 +39,17 @@ for path in README.md GOVERNANCE.md TRADEMARK.md CONTRIBUTING.md SECURITY.md SUP
 	require_file "$repo_root/$path"
 done
 
+issue_chooser="$repo_root/.github/ISSUE_TEMPLATE/config.yml"
+require_file "$issue_chooser"
+require_text "$issue_chooser" 'https://github.com/Dunky13/wenv/security/advisories/new'
+require_text "$issue_chooser" 'Do not report vulnerabilities in public issues.'
+
+security_channel_workflow="$repo_root/.github/workflows/security-channel.yml"
+require_file "$security_channel_workflow"
+require_text "$security_channel_workflow" 'issues: write'
+require_text "$security_channel_workflow" 'if: failure()'
+require_text "$security_channel_workflow" 'Fallback security channel health check failed'
+
 main_gate="$repo_root/release/repository/main-ci-gate.json"
 require_file "$main_gate"
 require_text "$main_gate" '{"context": "docs"}'
