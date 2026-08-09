@@ -55,6 +55,12 @@ type AuthService interface {
 	ResetCredential(ctx context.Context, actor service.Actor, targetPrincipal, delivery string) (service.ResetResult, error)
 }
 
+type SAMLAuthService interface {
+	SAMLStart(ctx context.Context, slug, purpose, environmentID, presented, proof string) (service.SAMLStartResult, error)
+	SAMLACS(ctx context.Context, slug, encodedResponse, relayState, initiatorCookie string) (service.LoginResult, error)
+	SAMLMetadata(ctx context.Context, slug string) ([]byte, error)
+}
+
 // authnIdentity is the transport's view of a linked identity (the service
 // returns authz.ExternalIdentity; this alias keeps internal/server off the
 // authz import, which the boundary test forbids).
@@ -66,6 +72,21 @@ type ProviderService interface {
 	Get(ctx context.Context, actor service.Actor, slug string) (service.ProviderView, error)
 	List(ctx context.Context, actor service.Actor) ([]service.ProviderView, error)
 	Delete(ctx context.Context, actor service.Actor, slug string) error
+}
+
+// SAMLProviderService is the instance-scoped SAML provider administration
+// surface, including the metadata diff-and-confirm ceremony.
+type SAMLProviderService interface {
+	Put(ctx context.Context, actor service.Actor, slug string, in service.SAMLProviderInput) (service.SAMLProviderMutationResult, error)
+	Patch(ctx context.Context, actor service.Actor, slug string, in service.SAMLProviderPatch) (service.SAMLProviderView, error)
+	Get(ctx context.Context, actor service.Actor, slug string) (service.SAMLProviderView, error)
+	List(ctx context.Context, actor service.Actor) ([]service.SAMLProviderView, error)
+	Delete(ctx context.Context, actor service.Actor, slug string) error
+	RefreshMetadata(ctx context.Context, actor service.Actor, slug string, in service.SAMLMetadataRefreshInput) (service.SAMLProviderMutationResult, error)
+	ListSPKeys(ctx context.Context, actor service.Actor) ([]service.SAMLSPKeyView, error)
+	RotateSPKey(ctx context.Context, actor service.Actor) (service.SAMLSPKeyView, error)
+	RetireSPKey(ctx context.Context, actor service.Actor, fingerprint string) error
+	CompromiseRetireSPKey(ctx context.Context, actor service.Actor, fingerprint string) (service.SAMLSPKeyView, error)
 }
 
 // OrgService is the domain surface this slice exposes.
@@ -88,12 +109,14 @@ type OrgService interface {
 
 // API implements the generated strict server.
 type API struct {
-	Auth         AuthService
-	Orgs         OrgService
-	Projects     ProjectService
-	Environments EnvironmentService
-	Folders      FolderService
-	Providers    ProviderService
+	Auth          AuthService
+	SAMLAuth      SAMLAuthService
+	Orgs          OrgService
+	Projects      ProjectService
+	Environments  EnvironmentService
+	Folders       FolderService
+	Providers     ProviderService
+	SAMLProviders SAMLProviderService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP

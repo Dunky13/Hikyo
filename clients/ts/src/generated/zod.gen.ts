@@ -112,7 +112,9 @@ export const zCredentialResetResult = z.object({
 export const zSessionArtifact = z.string();
 
 /**
- * OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+ * OPEN enum — `oidc:<issuer>` and `saml:<entityID>` values are
+ * instance-specific by construction.
+ *
  */
 export const zAuthMethod = z.string();
 
@@ -304,16 +306,6 @@ export const zFolderList = z.object({
     count: z.int().gte(0)
 });
 
-export const zAuthMethodProvider = z.object({
-    slug: z.string(),
-    display_name: z.string()
-});
-
-export const zAuthMethods = z.object({
-    providers: z.array(zAuthMethodProvider),
-    local_login_enabled: z.boolean()
-});
-
 export const zOidcStartRequest = z.object({
     purpose: z.enum([
         'login',
@@ -328,6 +320,25 @@ export const zOidcStartResult = z.object({
     authorization_url: z.string()
 });
 
+export const zSamlStartRequest = z.object({
+    purpose: z.enum([
+        'login',
+        'link',
+        'reauth'
+    ]),
+    environment_id: z.optional(z.string().max(64)),
+    proof: z.optional(z.string().max(1024))
+});
+
+export const zSamlStartResult = z.object({
+    redirect_url: z.url()
+});
+
+export const zSamlAcsRequest = z.object({
+    SAMLResponse: z.string().min(1).max(524288),
+    RelayState: z.string().min(16).max(512)
+});
+
 export const zIdentityLinkRequest = z.object({
     provider: z.string().max(64),
     proof: z.string().max(1024)
@@ -335,18 +346,6 @@ export const zIdentityLinkRequest = z.object({
 
 export const zIdentityUnlinkRequest = z.object({
     proof: z.string().max(1024)
-});
-
-export const zExternalIdentity = z.object({
-    id: zId,
-    issuer: z.string(),
-    subject: z.string(),
-    provider_id: z.string(),
-    created_at: zTimestamp
-});
-
-export const zIdentityList = z.object({
-    identities: z.array(zExternalIdentity)
 });
 
 export const zOidcProviderInput = z.object({
@@ -386,6 +385,184 @@ export const zOidcProvider = z.object({
 
 export const zOidcProviderList = z.object({
     providers: z.array(zOidcProvider)
+});
+
+/**
+ * Closed protocol discriminator in the byte-exact external-identity key.
+ */
+export const zIdentityProviderKind = z.enum(['oidc', 'saml']);
+
+export const zAuthMethodProvider = z.object({
+    slug: z.string(),
+    display_name: z.string(),
+    kind: zIdentityProviderKind
+});
+
+export const zAuthMethods = z.object({
+    providers: z.array(zAuthMethodProvider),
+    local_login_enabled: z.boolean()
+});
+
+export const zExternalIdentity = z.object({
+    id: zId,
+    kind: zIdentityProviderKind,
+    issuer: z.string(),
+    subject: z.string(),
+    provider_id: z.string(),
+    created_at: zTimestamp
+});
+
+export const zIdentityList = z.object({
+    identities: z.array(zExternalIdentity)
+});
+
+/**
+ * Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+ */
+export const zSamlMetadataSource = z.enum(['file', 'url']);
+
+/**
+ * SAML authentication configuration. Exactly one of `metadata_document`
+ * and `metadata_url` must match `metadata_source`; the service enforces
+ * that conditional before fetching or parsing. No JIT member exists:
+ * SAML never provisions accounts.
+ *
+ */
+export const zSamlProviderInput = z.object({
+    display_name: z.string().min(1).max(256),
+    entity_id: z.string().min(1).max(2048),
+    metadata_source: zSamlMetadataSource,
+    metadata_document: z.optional(z.union([
+        z.string().max(262144),
+        z.null()
+    ])),
+    metadata_url: z.optional(z.union([
+        z.url().max(2048),
+        z.null()
+    ])),
+    confirmed_fingerprints: z.optional(z.array(z.string().min(1).max(128)).max(64)),
+    confirmed_endpoints: z.optional(z.array(z.url().max(2048)).max(32)),
+    assurance_policy: z.optional(z.union([
+        z.array(z.string().min(1).max(2048)).max(32),
+        z.null()
+    ])),
+    allow_email_nameid: z.boolean(),
+    force_sign_requests: z.boolean(),
+    enabled: z.boolean()
+});
+
+export const zSamlMetadataRefreshRequest = z.object({
+    metadata_document: z.optional(z.union([
+        z.string().max(262144),
+        z.null()
+    ])),
+    confirmed_fingerprints: z.optional(z.array(z.string().min(1).max(128)).max(64)),
+    confirmed_endpoints: z.optional(z.array(z.url().max(2048)).max(32))
+});
+
+/**
+ * Omitted members preserve their stored values.
+ */
+export const zSamlProviderPatch = z.object({
+    display_name: z.optional(z.string().min(1).max(256)),
+    assurance_policy: z.optional(z.union([
+        z.array(z.string().min(1).max(2048)).max(32),
+        z.null()
+    ])),
+    allow_email_nameid: z.optional(z.boolean()),
+    force_sign_requests: z.optional(z.boolean()),
+    enabled: z.optional(z.boolean())
+});
+
+export const zSamlProviderWarning = z.object({
+    code: z.enum([
+        'metadata_expires_soon',
+        'metadata_expired',
+        'signing_certificate_not_yet_valid',
+        'signing_certificate_expired'
+    ]),
+    severity: z.enum(['warning', 'error']),
+    message: z.string().max(512),
+    effective_at: zTimestamp,
+    fingerprint: z.optional(z.string())
+});
+
+export const zSamlProvider = z.object({
+    slug: z.string(),
+    display_name: z.string(),
+    kind: z.enum(['saml']),
+    entity_id: z.string(),
+    acs_url: z.url(),
+    sso_redirect_url: z.url(),
+    signing_certificate_fingerprints: z.array(z.string()),
+    assurance_policy: z.optional(z.union([
+        z.array(z.string()),
+        z.null()
+    ])),
+    allow_email_nameid: z.boolean(),
+    force_sign_requests: z.boolean(),
+    metadata_source: zSamlMetadataSource,
+    metadata_url: z.optional(z.union([
+        z.url(),
+        z.null()
+    ])),
+    metadata_signed: z.boolean(),
+    metadata_signing_fingerprint: z.optional(z.union([
+        z.string(),
+        z.null()
+    ])),
+    metadata_valid_until: z.optional(z.union([
+        zTimestamp,
+        z.null()
+    ])),
+    warnings: z.array(zSamlProviderWarning),
+    enabled: z.boolean(),
+    row_version: z.int().gte(1),
+    created_at: zTimestamp,
+    updated_at: zTimestamp
+});
+
+export const zSamlProviderList = z.object({
+    providers: z.array(zSamlProvider)
+});
+
+export const zSamlSpKey = z.object({
+    fingerprint: z.string(),
+    state: z.enum(['active', 'retiring']),
+    created_at: zTimestamp
+});
+
+export const zSamlSpKeyList = z.object({
+    keys: z.array(zSamlSpKey)
+});
+
+export const zSamlMetadataDiff = z.object({
+    endpoints_added: z.array(z.string()),
+    endpoints_removed: z.array(z.string()),
+    certs_added_fps: z.array(z.string()),
+    certs_removed_fps: z.array(z.string()),
+    valid_until: z.optional(z.union([
+        zTimestamp,
+        z.null()
+    ]))
+});
+
+/**
+ * `applied=false` is the first leg of the metadata ceremony: no trust
+ * state changed, `diff` is displayed, and every value in
+ * `required_fingerprints` and `required_endpoints` must be explicitly
+ * supplied on a rerun.
+ *
+ */
+export const zSamlProviderMutationResult = z.object({
+    applied: z.boolean(),
+    provider: z.optional(z.union([
+        zSamlProvider,
+        z.null()
+    ])),
+    diff: zSamlMetadataDiff,
+    required_fingerprints: z.array(z.string()),
+    required_endpoints: z.array(z.url())
 });
 
 /**
@@ -472,12 +649,12 @@ export const zEnvironmentId = zId;
 export const zFolderId = zId;
 
 /**
- * OIDC provider slug.
+ * Identity-provider slug.
  */
 export const zProviderSlug = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 
 /**
- * OIDC provider slug.
+ * Identity-provider slug.
  */
 export const zProviderSlugPath = z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 
@@ -948,6 +1125,45 @@ export const zOidcCallbackData = z.object({
  */
 export const zOidcCallbackResponse = zLoginResult;
 
+export const zSamlStartData = z.object({
+    body: zSamlStartRequest,
+    path: z.object({
+        provider: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The signed or unsigned IdP HTTP-Redirect URL.
+ */
+export const zSamlStartResponse = zSamlStartResult;
+
+export const zSamlAcsData = z.object({
+    body: zSamlAcsRequest,
+    path: z.object({
+        provider: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The minted or rotated ordinary Wenv session.
+ */
+export const zSamlAcsResponse = zLoginResult;
+
+export const zSamlMetadataData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        provider: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * SAML 2.0 SP metadata XML.
+ */
+export const zSamlMetadataResponse = z.string();
+
 export const zListIdentitiesData = z.object({
     body: z.optional(z.never()),
     path: z.optional(z.never()),
@@ -1157,3 +1373,127 @@ export const zPutOidcProviderData = z.object({
  * The created or reconfigured provider.
  */
 export const zPutOidcProviderResponse = zOidcProvider;
+
+export const zListSamlProvidersData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The configured SAML providers.
+ */
+export const zListSamlProvidersResponse = zSamlProviderList;
+
+export const zDeleteSamlProviderData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Removed.
+ */
+export const zDeleteSamlProviderResponse = z.void();
+
+export const zGetSamlProviderData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The provider.
+ */
+export const zGetSamlProviderResponse = zSamlProvider;
+
+export const zPatchSamlProviderData = z.object({
+    body: zSamlProviderPatch,
+    path: z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The updated provider.
+ */
+export const zPatchSamlProviderResponse = zSamlProvider;
+
+export const zPutSamlProviderData = z.object({
+    body: zSamlProviderInput,
+    path: z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Applied provider or metadata diff requiring explicit confirmation.
+ */
+export const zPutSamlProviderResponse = zSamlProviderMutationResult;
+
+export const zRefreshSamlProviderMetadataData = z.object({
+    body: zSamlMetadataRefreshRequest,
+    path: z.object({
+        slug: z.string().min(1).max(64).regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Applied provider or metadata diff requiring explicit confirmation.
+ */
+export const zRefreshSamlProviderMetadataResponse = zSamlProviderMutationResult;
+
+export const zListSamlSpKeysData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Active and overlap-retiring SP keys.
+ */
+export const zListSamlSpKeysResponse = zSamlSpKeyList;
+
+export const zRotateSamlSpKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The newly active key.
+ */
+export const zRotateSamlSpKeyResponse = zSamlSpKey;
+
+export const zRetireSamlSpKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        fingerprint: z.string()
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Retired key erased and removed from SP metadata.
+ */
+export const zRetireSamlSpKeyResponse = z.void();
+
+export const zCompromiseRetireSamlSpKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        fingerprint: z.string()
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The newly active replacement key.
+ */
+export const zCompromiseRetireSamlSpKeyResponse = zSamlSpKey;

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -52,21 +53,39 @@ func (e ErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for IdentityProviderKind.
+const (
+	IdentityProviderKindOidc IdentityProviderKind = "oidc"
+	IdentityProviderKindSaml IdentityProviderKind = "saml"
+)
+
+// Valid indicates whether the value is a known member of the IdentityProviderKind enum.
+func (e IdentityProviderKind) Valid() bool {
+	switch e {
+	case IdentityProviderKindOidc:
+		return true
+	case IdentityProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OidcStartRequestPurpose.
 const (
-	Link   OidcStartRequestPurpose = "link"
-	Login  OidcStartRequestPurpose = "login"
-	Reauth OidcStartRequestPurpose = "reauth"
+	OidcStartRequestPurposeLink   OidcStartRequestPurpose = "link"
+	OidcStartRequestPurposeLogin  OidcStartRequestPurpose = "login"
+	OidcStartRequestPurposeReauth OidcStartRequestPurpose = "reauth"
 )
 
 // Valid indicates whether the value is a known member of the OidcStartRequestPurpose enum.
 func (e OidcStartRequestPurpose) Valid() bool {
 	switch e {
-	case Link:
+	case OidcStartRequestPurposeLink:
 		return true
-	case Login:
+	case OidcStartRequestPurposeLogin:
 		return true
-	case Reauth:
+	case OidcStartRequestPurposeReauth:
 		return true
 	default:
 		return false
@@ -91,6 +110,120 @@ func (e PrincipalKind) Valid() bool {
 	}
 }
 
+// Defines values for SamlMetadataSource.
+const (
+	File SamlMetadataSource = "file"
+	Url  SamlMetadataSource = "url"
+)
+
+// Valid indicates whether the value is a known member of the SamlMetadataSource enum.
+func (e SamlMetadataSource) Valid() bool {
+	switch e {
+	case File:
+		return true
+	case Url:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SamlProviderKind.
+const (
+	SamlProviderKindSaml SamlProviderKind = "saml"
+)
+
+// Valid indicates whether the value is a known member of the SamlProviderKind enum.
+func (e SamlProviderKind) Valid() bool {
+	switch e {
+	case SamlProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SamlProviderWarningCode.
+const (
+	MetadataExpired               SamlProviderWarningCode = "metadata_expired"
+	MetadataExpiresSoon           SamlProviderWarningCode = "metadata_expires_soon"
+	SigningCertificateExpired     SamlProviderWarningCode = "signing_certificate_expired"
+	SigningCertificateNotYetValid SamlProviderWarningCode = "signing_certificate_not_yet_valid"
+)
+
+// Valid indicates whether the value is a known member of the SamlProviderWarningCode enum.
+func (e SamlProviderWarningCode) Valid() bool {
+	switch e {
+	case MetadataExpired:
+		return true
+	case MetadataExpiresSoon:
+		return true
+	case SigningCertificateExpired:
+		return true
+	case SigningCertificateNotYetValid:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SamlProviderWarningSeverity.
+const (
+	SamlProviderWarningSeverityError   SamlProviderWarningSeverity = "error"
+	SamlProviderWarningSeverityWarning SamlProviderWarningSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the SamlProviderWarningSeverity enum.
+func (e SamlProviderWarningSeverity) Valid() bool {
+	switch e {
+	case SamlProviderWarningSeverityError:
+		return true
+	case SamlProviderWarningSeverityWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SamlSpKeyState.
+const (
+	Active   SamlSpKeyState = "active"
+	Retiring SamlSpKeyState = "retiring"
+)
+
+// Valid indicates whether the value is a known member of the SamlSpKeyState enum.
+func (e SamlSpKeyState) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Retiring:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SamlStartRequestPurpose.
+const (
+	SamlStartRequestPurposeLink   SamlStartRequestPurpose = "link"
+	SamlStartRequestPurposeLogin  SamlStartRequestPurpose = "login"
+	SamlStartRequestPurposeReauth SamlStartRequestPurpose = "reauth"
+)
+
+// Valid indicates whether the value is a known member of the SamlStartRequestPurpose enum.
+func (e SamlStartRequestPurpose) Valid() bool {
+	switch e {
+	case SamlStartRequestPurposeLink:
+		return true
+	case SamlStartRequestPurposeLogin:
+		return true
+	case SamlStartRequestPurposeReauth:
+		return true
+	default:
+		return false
+	}
+}
+
 // Assurance How **this session** authenticated — not what the account owns.
 // Authorization of an MFA-mandatory capability consults this record at
 // the same chokepoint as `authorize()`, in the same transaction,
@@ -106,17 +239,22 @@ type Assurance struct {
 	// Factors The factor classes actually presented in this session.
 	Factors []FactorClass `json:"factors"`
 
-	// Method OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+	// Method OPEN enum — `oidc:<issuer>` and `saml:<entityID>` values are
+	// instance-specific by construction.
 	Method AuthMethod `json:"method"`
 }
 
-// AuthMethod OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+// AuthMethod OPEN enum — `oidc:<issuer>` and `saml:<entityID>` values are
+// instance-specific by construction.
 type AuthMethod = string
 
 // AuthMethodProvider defines model for AuthMethodProvider.
 type AuthMethodProvider struct {
 	DisplayName string `json:"display_name"`
-	Slug        string `json:"slug"`
+
+	// Kind Closed protocol discriminator in the byte-exact external-identity key.
+	Kind IdentityProviderKind `json:"kind"`
+	Slug string               `json:"slug"`
 }
 
 // AuthMethods defines model for AuthMethods.
@@ -291,10 +429,13 @@ type ExternalIdentity struct {
 	CreatedAt Timestamp `json:"created_at"`
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
-	Id         ID     `json:"id"`
-	Issuer     string `json:"issuer"`
-	ProviderId string `json:"provider_id"`
-	Subject    string `json:"subject"`
+	Id     ID     `json:"id"`
+	Issuer string `json:"issuer"`
+
+	// Kind Closed protocol discriminator in the byte-exact external-identity key.
+	Kind       IdentityProviderKind `json:"kind"`
+	ProviderId string               `json:"provider_id"`
+	Subject    string               `json:"subject"`
 }
 
 // FactorClass OPEN enum — new factor classes are additive.
@@ -357,6 +498,9 @@ type IdentityLinkRequest struct {
 type IdentityList struct {
 	Identities []ExternalIdentity `json:"identities"`
 }
+
+// IdentityProviderKind Closed protocol discriminator in the byte-exact external-identity key.
+type IdentityProviderKind string
 
 // IdentityUnlinkRequest defines model for IdentityUnlinkRequest.
 type IdentityUnlinkRequest struct {
@@ -603,6 +747,189 @@ type RenameRequest struct {
 	Name EntityName `json:"name"`
 }
 
+// SamlACSRequest defines model for SamlACSRequest.
+type SamlACSRequest struct {
+	// RelayState Server-minted opaque transaction handle, never a continuation URL.
+	RelayState string `json:"RelayState"`
+
+	// SAMLResponse Base64-encoded SAML Response; decoded XML is capped at 256 KiB.
+	SAMLResponse string `json:"SAMLResponse"`
+}
+
+// SamlMetadataDiff defines model for SamlMetadataDiff.
+type SamlMetadataDiff struct {
+	CertsAddedFps    []string   `json:"certs_added_fps"`
+	CertsRemovedFps  []string   `json:"certs_removed_fps"`
+	EndpointsAdded   []string   `json:"endpoints_added"`
+	EndpointsRemoved []string   `json:"endpoints_removed"`
+	ValidUntil       *Timestamp `json:"valid_until,omitempty"`
+}
+
+// SamlMetadataRefreshRequest defines model for SamlMetadataRefreshRequest.
+type SamlMetadataRefreshRequest struct {
+	ConfirmedEndpoints    *[]string `json:"confirmed_endpoints,omitempty"`
+	ConfirmedFingerprints *[]string `json:"confirmed_fingerprints,omitempty"`
+
+	// MetadataDocument Replacement XML for a file-backed provider; absent for URL-backed providers.
+	MetadataDocument *string `json:"metadata_document,omitempty"`
+}
+
+// SamlMetadataSource Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+type SamlMetadataSource string
+
+// SamlProvider defines model for SamlProvider.
+type SamlProvider struct {
+	AcsUrl           string    `json:"acs_url"`
+	AllowEmailNameid bool      `json:"allow_email_nameid"`
+	AssurancePolicy  *[]string `json:"assurance_policy,omitempty"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt   Timestamp `json:"created_at"`
+	DisplayName string    `json:"display_name"`
+	Enabled     bool      `json:"enabled"`
+
+	// EntityId Byte-exact IdP entityID; immutable after create.
+	EntityId                   string           `json:"entity_id"`
+	ForceSignRequests          bool             `json:"force_sign_requests"`
+	Kind                       SamlProviderKind `json:"kind"`
+	MetadataSigned             bool             `json:"metadata_signed"`
+	MetadataSigningFingerprint *string          `json:"metadata_signing_fingerprint,omitempty"`
+
+	// MetadataSource Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+	MetadataSource                 SamlMetadataSource `json:"metadata_source"`
+	MetadataUrl                    *string            `json:"metadata_url,omitempty"`
+	MetadataValidUntil             *Timestamp         `json:"metadata_valid_until,omitempty"`
+	RowVersion                     int                `json:"row_version"`
+	SigningCertificateFingerprints []string           `json:"signing_certificate_fingerprints"`
+	Slug                           string             `json:"slug"`
+	SsoRedirectUrl                 string             `json:"sso_redirect_url"`
+
+	// UpdatedAt RFC 3339 UTC, microsecond precision.
+	UpdatedAt Timestamp             `json:"updated_at"`
+	Warnings  []SamlProviderWarning `json:"warnings"`
+}
+
+// SamlProviderKind defines model for SamlProvider.Kind.
+type SamlProviderKind string
+
+// SamlProviderInput SAML authentication configuration. Exactly one of `metadata_document`
+// and `metadata_url` must match `metadata_source`; the service enforces
+// that conditional before fetching or parsing. No JIT member exists:
+// SAML never provisions accounts.
+type SamlProviderInput struct {
+	// AllowEmailNameid Explicit opt-in to opaque emailAddress NameID values; never email linking.
+	AllowEmailNameid bool `json:"allow_email_nameid"`
+
+	// AssurancePolicy Accepted AuthnContextClassRef values; null means single-factor.
+	AssurancePolicy *[]string `json:"assurance_policy,omitempty"`
+
+	// ConfirmedEndpoints New endpoint URLs explicitly confirmed in the current ceremony.
+	ConfirmedEndpoints *[]string `json:"confirmed_endpoints,omitempty"`
+
+	// ConfirmedFingerprints Fingerprints explicitly confirmed in the current ceremony.
+	ConfirmedFingerprints *[]string `json:"confirmed_fingerprints,omitempty"`
+	DisplayName           string    `json:"display_name"`
+	Enabled               bool      `json:"enabled"`
+
+	// EntityId Configured byte-exact IdP entityID used to select exactly one
+	// EntityDescriptor from metadata; immutable after create.
+	EntityId string `json:"entity_id"`
+
+	// ForceSignRequests Force signed AuthnRequests even when metadata does not demand them.
+	ForceSignRequests bool `json:"force_sign_requests"`
+
+	// MetadataDocument Raw IdP metadata XML for a file-backed configuration.
+	MetadataDocument *string `json:"metadata_document,omitempty"`
+
+	// MetadataSource Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+	MetadataSource SamlMetadataSource `json:"metadata_source"`
+
+	// MetadataUrl One-shot WebPKI URL; redirects off-origin are refused.
+	MetadataUrl *string `json:"metadata_url,omitempty"`
+}
+
+// SamlProviderList defines model for SamlProviderList.
+type SamlProviderList struct {
+	Providers []SamlProvider `json:"providers"`
+}
+
+// SamlProviderMutationResult `applied=false` is the first leg of the metadata ceremony: no trust
+// state changed, `diff` is displayed, and every value in
+// `required_fingerprints` and `required_endpoints` must be explicitly
+// supplied on a rerun.
+type SamlProviderMutationResult struct {
+	Applied              bool             `json:"applied"`
+	Diff                 SamlMetadataDiff `json:"diff"`
+	Provider             *SamlProvider    `json:"provider,omitempty"`
+	RequiredEndpoints    []string         `json:"required_endpoints"`
+	RequiredFingerprints []string         `json:"required_fingerprints"`
+}
+
+// SamlProviderPatch Omitted members preserve their stored values.
+type SamlProviderPatch struct {
+	AllowEmailNameid  *bool     `json:"allow_email_nameid,omitempty"`
+	AssurancePolicy   *[]string `json:"assurance_policy,omitempty"`
+	DisplayName       *string   `json:"display_name,omitempty"`
+	Enabled           *bool     `json:"enabled,omitempty"`
+	ForceSignRequests *bool     `json:"force_sign_requests,omitempty"`
+}
+
+// SamlProviderWarning defines model for SamlProviderWarning.
+type SamlProviderWarning struct {
+	Code SamlProviderWarningCode `json:"code"`
+
+	// EffectiveAt RFC 3339 UTC, microsecond precision.
+	EffectiveAt Timestamp `json:"effective_at"`
+
+	// Fingerprint Present only for certificate warnings.
+	Fingerprint *string                     `json:"fingerprint,omitempty"`
+	Message     string                      `json:"message"`
+	Severity    SamlProviderWarningSeverity `json:"severity"`
+}
+
+// SamlProviderWarningCode defines model for SamlProviderWarning.Code.
+type SamlProviderWarningCode string
+
+// SamlProviderWarningSeverity defines model for SamlProviderWarning.Severity.
+type SamlProviderWarningSeverity string
+
+// SamlSpKey defines model for SamlSpKey.
+type SamlSpKey struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Fingerprint URL-safe unpadded base64 SHA-256 fingerprint of SubjectPublicKeyInfo, prefixed by `sha256:`.
+	Fingerprint string         `json:"fingerprint"`
+	State       SamlSpKeyState `json:"state"`
+}
+
+// SamlSpKeyState defines model for SamlSpKey.State.
+type SamlSpKeyState string
+
+// SamlSpKeyList defines model for SamlSpKeyList.
+type SamlSpKeyList struct {
+	Keys []SamlSpKey `json:"keys"`
+}
+
+// SamlStartRequest defines model for SamlStartRequest.
+type SamlStartRequest struct {
+	// EnvironmentId Required for reauth; the reveal-window scope.
+	EnvironmentId *string `json:"environment_id,omitempty"`
+
+	// Proof Required for link; the pre-existing account-security proof.
+	Proof   *string                 `json:"proof,omitempty"`
+	Purpose SamlStartRequestPurpose `json:"purpose"`
+}
+
+// SamlStartRequestPurpose defines model for SamlStartRequest.Purpose.
+type SamlStartRequestPurpose string
+
+// SamlStartResult defines model for SamlStartResult.
+type SamlStartResult struct {
+	// RedirectUrl The IdP HTTP-Redirect URL carrying the AuthnRequest.
+	RedirectUrl string `json:"redirect_url"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	// AbsoluteExpiresAt RFC 3339 UTC, microsecond precision.
@@ -799,6 +1126,12 @@ type RegenerateRecoveryCodesJSONRequestBody = RecoveryProofRequest
 // BeginRecoveryJSONRequestBody defines body for BeginRecovery for application/json ContentType.
 type BeginRecoveryJSONRequestBody = RecoveryBeginRequest
 
+// SamlACSFormdataRequestBody defines body for SamlACS for application/x-www-form-urlencoded ContentType.
+type SamlACSFormdataRequestBody = SamlACSRequest
+
+// SamlStartJSONRequestBody defines body for SamlStart for application/json ContentType.
+type SamlStartJSONRequestBody = SamlStartRequest
+
 // RemoveTotpJSONRequestBody defines body for RemoveTotp for application/json ContentType.
 type RemoveTotpJSONRequestBody = TotpProofRequest
 
@@ -834,6 +1167,15 @@ type StepUpPasskeyFinishJSONRequestBody = WebauthnResponse
 
 // PutOidcProviderJSONRequestBody defines body for PutOidcProvider for application/json ContentType.
 type PutOidcProviderJSONRequestBody = OidcProviderInput
+
+// PatchSamlProviderJSONRequestBody defines body for PatchSamlProvider for application/json ContentType.
+type PatchSamlProviderJSONRequestBody = SamlProviderPatch
+
+// PutSamlProviderJSONRequestBody defines body for PutSamlProvider for application/json ContentType.
+type PutSamlProviderJSONRequestBody = SamlProviderInput
+
+// RefreshSamlProviderMetadataJSONRequestBody defines body for RefreshSamlProviderMetadata for application/json ContentType.
+type RefreshSamlProviderMetadataJSONRequestBody = SamlMetadataRefreshRequest
 
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody = CreateOrgRequest
@@ -900,6 +1242,15 @@ type ServerInterface interface {
 	// BeginRecovery Consume a recovery code for a credential-establishment authority.
 	// (POST /api/v1/auth/recovery/begin)
 	BeginRecovery(w http.ResponseWriter, r *http.Request)
+	// SamlACS Complete an SP-initiated SAML transaction over HTTP-POST.
+	// (POST /api/v1/auth/saml/{provider}/acs)
+	SamlACS(w http.ResponseWriter, r *http.Request, provider ProviderSlug)
+	// SamlMetadata Publish this provider's SAML SP metadata.
+	// (GET /api/v1/auth/saml/{provider}/metadata)
+	SamlMetadata(w http.ResponseWriter, r *http.Request, provider ProviderSlug)
+	// SamlStart Begin an SP-initiated SAML transaction (login, link or reauth).
+	// (POST /api/v1/auth/saml/{provider}/start)
+	SamlStart(w http.ResponseWriter, r *http.Request, provider ProviderSlug)
 	// RemoveTotp Remove the confirmed TOTP factor.
 	// (DELETE /api/v1/auth/totp)
 	RemoveTotp(w http.ResponseWriter, r *http.Request)
@@ -957,6 +1308,36 @@ type ServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// ListSamlProviders List configured SAML providers.
+	// (GET /api/v1/instance/saml-providers)
+	ListSamlProviders(w http.ResponseWriter, r *http.Request)
+	// DeleteSamlProvider Remove a SAML provider.
+	// (DELETE /api/v1/instance/saml-providers/{slug})
+	DeleteSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// GetSamlProvider Read one SAML provider.
+	// (GET /api/v1/instance/saml-providers/{slug})
+	GetSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// PatchSamlProvider Partially update SAML provider policy or disable the provider.
+	// (PATCH /api/v1/instance/saml-providers/{slug})
+	PatchSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// PutSamlProvider Create or reconfigure a SAML provider from pinned metadata.
+	// (PUT /api/v1/instance/saml-providers/{slug})
+	PutSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// RefreshSamlProviderMetadata Refresh and explicitly confirm a SAML provider's metadata diff.
+	// (POST /api/v1/instance/saml-providers/{slug}/refresh-metadata)
+	RefreshSamlProviderMetadata(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// ListSamlSpKeys List SAML SP signing-key lifecycle state.
+	// (GET /api/v1/instance/saml-sp-keys)
+	ListSamlSpKeys(w http.ResponseWriter, r *http.Request)
+	// RotateSamlSpKey Rotate the active SAML SP signing key with an overlap window.
+	// (POST /api/v1/instance/saml-sp-keys/rotate)
+	RotateSamlSpKey(w http.ResponseWriter, r *http.Request)
+	// RetireSamlSpKey Retire and erase an overlap-retiring SAML SP key.
+	// (DELETE /api/v1/instance/saml-sp-keys/{fingerprint})
+	RetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string)
+	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
+	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
+	CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
@@ -1101,6 +1482,24 @@ func (_ Unimplemented) BeginRecovery(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SamlACS Complete an SP-initiated SAML transaction over HTTP-POST.
+// (POST /api/v1/auth/saml/{provider}/acs)
+func (_ Unimplemented) SamlACS(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SamlMetadata Publish this provider's SAML SP metadata.
+// (GET /api/v1/auth/saml/{provider}/metadata)
+func (_ Unimplemented) SamlMetadata(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SamlStart Begin an SP-initiated SAML transaction (login, link or reauth).
+// (POST /api/v1/auth/saml/{provider}/start)
+func (_ Unimplemented) SamlStart(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RemoveTotp Remove the confirmed TOTP factor.
 // (DELETE /api/v1/auth/totp)
 func (_ Unimplemented) RemoveTotp(w http.ResponseWriter, r *http.Request) {
@@ -1212,6 +1611,66 @@ func (_ Unimplemented) GetOidcProvider(w http.ResponseWriter, r *http.Request, s
 // PutOidcProvider Create or reconfigure an OIDC provider.
 // (PUT /api/v1/instance/oidc-providers/{slug})
 func (_ Unimplemented) PutOidcProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSamlProviders List configured SAML providers.
+// (GET /api/v1/instance/saml-providers)
+func (_ Unimplemented) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteSamlProvider Remove a SAML provider.
+// (DELETE /api/v1/instance/saml-providers/{slug})
+func (_ Unimplemented) DeleteSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSamlProvider Read one SAML provider.
+// (GET /api/v1/instance/saml-providers/{slug})
+func (_ Unimplemented) GetSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PatchSamlProvider Partially update SAML provider policy or disable the provider.
+// (PATCH /api/v1/instance/saml-providers/{slug})
+func (_ Unimplemented) PatchSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PutSamlProvider Create or reconfigure a SAML provider from pinned metadata.
+// (PUT /api/v1/instance/saml-providers/{slug})
+func (_ Unimplemented) PutSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshSamlProviderMetadata Refresh and explicitly confirm a SAML provider's metadata diff.
+// (POST /api/v1/instance/saml-providers/{slug}/refresh-metadata)
+func (_ Unimplemented) RefreshSamlProviderMetadata(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSamlSpKeys List SAML SP signing-key lifecycle state.
+// (GET /api/v1/instance/saml-sp-keys)
+func (_ Unimplemented) ListSamlSpKeys(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RotateSamlSpKey Rotate the active SAML SP signing key with an overlap window.
+// (POST /api/v1/instance/saml-sp-keys/rotate)
+func (_ Unimplemented) RotateSamlSpKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RetireSamlSpKey Retire and erase an overlap-retiring SAML SP key.
+// (DELETE /api/v1/instance/saml-sp-keys/{fingerprint})
+func (_ Unimplemented) RetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
+// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
+func (_ Unimplemented) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1627,6 +2086,84 @@ func (siw *ServerInterfaceWrapper) BeginRecovery(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// SamlACS operation middleware
+func (siw *ServerInterfaceWrapper) SamlACS(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "provider" -------------
+	var provider ProviderSlug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SamlACS(w, r, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SamlMetadata operation middleware
+func (siw *ServerInterfaceWrapper) SamlMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "provider" -------------
+	var provider ProviderSlug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SamlMetadata(w, r, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SamlStart operation middleware
+func (siw *ServerInterfaceWrapper) SamlStart(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "provider" -------------
+	var provider ProviderSlug
+
+	err = runtime.BindStyledParameterWithOptions("simple", "provider", chi.URLParam(r, "provider"), &provider, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "provider", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SamlStart(w, r, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RemoveTotp operation middleware
 func (siw *ServerInterfaceWrapper) RemoveTotp(w http.ResponseWriter, r *http.Request) {
 
@@ -1932,6 +2469,230 @@ func (siw *ServerInterfaceWrapper) PutOidcProvider(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PutOidcProvider(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSamlProviders operation middleware
+func (siw *ServerInterfaceWrapper) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSamlProviders(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSamlProvider operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSamlProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug ProviderSlugPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSamlProvider(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSamlProvider operation middleware
+func (siw *ServerInterfaceWrapper) GetSamlProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug ProviderSlugPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSamlProvider(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchSamlProvider operation middleware
+func (siw *ServerInterfaceWrapper) PatchSamlProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug ProviderSlugPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchSamlProvider(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutSamlProvider operation middleware
+func (siw *ServerInterfaceWrapper) PutSamlProvider(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug ProviderSlugPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutSamlProvider(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshSamlProviderMetadata operation middleware
+func (siw *ServerInterfaceWrapper) RefreshSamlProviderMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "slug" -------------
+	var slug ProviderSlugPath
+
+	err = runtime.BindStyledParameterWithOptions("simple", "slug", chi.URLParam(r, "slug"), &slug, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "slug", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshSamlProviderMetadata(w, r, slug)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSamlSpKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListSamlSpKeys(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSamlSpKeys(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RotateSamlSpKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateSamlSpKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateSamlSpKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetireSamlSpKey operation middleware
+func (siw *ServerInterfaceWrapper) RetireSamlSpKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "fingerprint" -------------
+	var fingerprint string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fingerprint", chi.URLParam(r, "fingerprint"), &fingerprint, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fingerprint", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetireSamlSpKey(w, r, fingerprint)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompromiseRetireSamlSpKey operation middleware
+func (siw *ServerInterfaceWrapper) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "fingerprint" -------------
+	var fingerprint string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fingerprint", chi.URLParam(r, "fingerprint"), &fingerprint, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fingerprint", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompromiseRetireSamlSpKey(w, r, fingerprint)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2876,6 +3637,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/api/v1/auth/oidc/{provider}/callback", wrapper.OidcCallback)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/saml/{provider}/start", wrapper.SamlStart)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/saml/{provider}/acs", wrapper.SamlACS)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/saml/{provider}/metadata", wrapper.SamlMetadata)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/identities", wrapper.ListIdentities)
 	})
 	r.Group(func(r chi.Router) {
@@ -2928,6 +3698,36 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/instance/oidc-providers/{slug}", wrapper.PutOidcProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/saml-providers", wrapper.ListSamlProviders)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/saml-providers/{slug}", wrapper.DeleteSamlProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/saml-providers/{slug}", wrapper.GetSamlProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/instance/saml-providers/{slug}", wrapper.PatchSamlProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/instance/saml-providers/{slug}", wrapper.PutSamlProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/saml-providers/{slug}/refresh-metadata", wrapper.RefreshSamlProviderMetadata)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/saml-sp-keys", wrapper.ListSamlSpKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/saml-sp-keys/rotate", wrapper.RotateSamlSpKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/saml-sp-keys/{fingerprint}", wrapper.RetireSamlSpKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire", wrapper.CompromiseRetireSamlSpKey)
 	})
 
 	return r
@@ -3809,6 +4609,223 @@ func (response BeginRecovery429JSONResponse) VisitBeginRecoveryResponse(w http.R
 type BeginRecovery500JSONResponse struct{ InternalJSONResponse }
 
 func (response BeginRecovery500JSONResponse) VisitBeginRecoveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlACSRequestObject struct {
+	Provider ProviderSlug `json:"provider"`
+	Body     *SamlACSFormdataRequestBody
+}
+
+type SamlACSResponseObject interface {
+	VisitSamlACSResponse(w http.ResponseWriter) error
+}
+
+type SamlACS200JSONResponse LoginResult
+
+func (response SamlACS200JSONResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlACS400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SamlACS400JSONResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlACS401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SamlACS401JSONResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlACS429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SamlACS429JSONResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlACS500JSONResponse struct{ InternalJSONResponse }
+
+func (response SamlACS500JSONResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlMetadataRequestObject struct {
+	Provider ProviderSlug `json:"provider"`
+}
+
+type SamlMetadataResponseObject interface {
+	VisitSamlMetadataResponse(w http.ResponseWriter) error
+}
+
+type SamlMetadata200ApplicationsamlmetadataXmlResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response SamlMetadata200ApplicationsamlmetadataXmlResponse) VisitSamlMetadataResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/samlmetadata+xml")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type SamlMetadata404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SamlMetadata404JSONResponse) VisitSamlMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlMetadata429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SamlMetadata429JSONResponse) VisitSamlMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlMetadata500JSONResponse struct{ InternalJSONResponse }
+
+func (response SamlMetadata500JSONResponse) VisitSamlMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlStartRequestObject struct {
+	Provider ProviderSlug `json:"provider"`
+	Body     *SamlStartJSONRequestBody
+}
+
+type SamlStartResponseObject interface {
+	VisitSamlStartResponse(w http.ResponseWriter) error
+}
+
+type SamlStart200JSONResponse SamlStartResult
+
+func (response SamlStart200JSONResponse) VisitSamlStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlStart401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SamlStart401JSONResponse) VisitSamlStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlStart429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SamlStart429JSONResponse) VisitSamlStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SamlStart500JSONResponse struct{ InternalJSONResponse }
+
+func (response SamlStart500JSONResponse) VisitSamlStartResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5315,6 +6332,1008 @@ func (response PutOidcProvider429JSONResponse) VisitPutOidcProviderResponse(w ht
 type PutOidcProvider500JSONResponse struct{ InternalJSONResponse }
 
 func (response PutOidcProvider500JSONResponse) VisitPutOidcProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlProvidersRequestObject struct {
+}
+
+type ListSamlProvidersResponseObject interface {
+	VisitListSamlProvidersResponse(w http.ResponseWriter) error
+}
+
+type ListSamlProviders200JSONResponse SamlProviderList
+
+func (response ListSamlProviders200JSONResponse) VisitListSamlProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlProviders401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSamlProviders401JSONResponse) VisitListSamlProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlProviders403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSamlProviders403JSONResponse) VisitListSamlProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlProviders429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListSamlProviders429JSONResponse) VisitListSamlProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlProviders500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListSamlProviders500JSONResponse) VisitListSamlProvidersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSamlProviderRequestObject struct {
+	Slug ProviderSlugPath `json:"slug"`
+}
+
+type DeleteSamlProviderResponseObject interface {
+	VisitDeleteSamlProviderResponse(w http.ResponseWriter) error
+}
+
+type DeleteSamlProvider204Response struct {
+}
+
+func (response DeleteSamlProvider204Response) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteSamlProvider401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteSamlProvider401JSONResponse) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSamlProvider403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteSamlProvider403JSONResponse) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSamlProvider404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteSamlProvider404JSONResponse) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSamlProvider429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteSamlProvider429JSONResponse) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSamlProvider500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteSamlProvider500JSONResponse) VisitDeleteSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProviderRequestObject struct {
+	Slug ProviderSlugPath `json:"slug"`
+}
+
+type GetSamlProviderResponseObject interface {
+	VisitGetSamlProviderResponse(w http.ResponseWriter) error
+}
+
+type GetSamlProvider200JSONResponse SamlProvider
+
+func (response GetSamlProvider200JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProvider401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetSamlProvider401JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProvider403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetSamlProvider403JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProvider404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSamlProvider404JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProvider429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetSamlProvider429JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSamlProvider500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetSamlProvider500JSONResponse) VisitGetSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProviderRequestObject struct {
+	Slug ProviderSlugPath `json:"slug"`
+	Body *PatchSamlProviderJSONRequestBody
+}
+
+type PatchSamlProviderResponseObject interface {
+	VisitPatchSamlProviderResponse(w http.ResponseWriter) error
+}
+
+type PatchSamlProvider200JSONResponse SamlProvider
+
+func (response PatchSamlProvider200JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PatchSamlProvider400JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PatchSamlProvider401JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PatchSamlProvider403JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PatchSamlProvider404JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PatchSamlProvider409JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response PatchSamlProvider429JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchSamlProvider500JSONResponse struct{ InternalJSONResponse }
+
+func (response PatchSamlProvider500JSONResponse) VisitPatchSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProviderRequestObject struct {
+	Slug ProviderSlugPath `json:"slug"`
+	Body *PutSamlProviderJSONRequestBody
+}
+
+type PutSamlProviderResponseObject interface {
+	VisitPutSamlProviderResponse(w http.ResponseWriter) error
+}
+
+type PutSamlProvider200JSONResponse SamlProviderMutationResult
+
+func (response PutSamlProvider200JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutSamlProvider400JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PutSamlProvider401JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutSamlProvider403JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutSamlProvider409JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response PutSamlProvider429JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutSamlProvider500JSONResponse struct{ InternalJSONResponse }
+
+func (response PutSamlProvider500JSONResponse) VisitPutSamlProviderResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadataRequestObject struct {
+	Slug ProviderSlugPath `json:"slug"`
+	Body *RefreshSamlProviderMetadataJSONRequestBody
+}
+
+type RefreshSamlProviderMetadataResponseObject interface {
+	VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error
+}
+
+type RefreshSamlProviderMetadata200JSONResponse SamlProviderMutationResult
+
+func (response RefreshSamlProviderMetadata200JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RefreshSamlProviderMetadata400JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RefreshSamlProviderMetadata401JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RefreshSamlProviderMetadata403JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RefreshSamlProviderMetadata404JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RefreshSamlProviderMetadata409JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RefreshSamlProviderMetadata429JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RefreshSamlProviderMetadata500JSONResponse struct{ InternalJSONResponse }
+
+func (response RefreshSamlProviderMetadata500JSONResponse) VisitRefreshSamlProviderMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlSpKeysRequestObject struct {
+}
+
+type ListSamlSpKeysResponseObject interface {
+	VisitListSamlSpKeysResponse(w http.ResponseWriter) error
+}
+
+type ListSamlSpKeys200JSONResponse SamlSpKeyList
+
+func (response ListSamlSpKeys200JSONResponse) VisitListSamlSpKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlSpKeys401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListSamlSpKeys401JSONResponse) VisitListSamlSpKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlSpKeys403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListSamlSpKeys403JSONResponse) VisitListSamlSpKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlSpKeys429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListSamlSpKeys429JSONResponse) VisitListSamlSpKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSamlSpKeys500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListSamlSpKeys500JSONResponse) VisitListSamlSpKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKeyRequestObject struct {
+}
+
+type RotateSamlSpKeyResponseObject interface {
+	VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateSamlSpKey200JSONResponse SamlSpKey
+
+func (response RotateSamlSpKey200JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateSamlSpKey401JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RotateSamlSpKey403JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateSamlSpKey404JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RotateSamlSpKey409JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateSamlSpKey429JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateSamlSpKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateSamlSpKey500JSONResponse) VisitRotateSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKeyRequestObject struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
+type RetireSamlSpKeyResponseObject interface {
+	VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error
+}
+
+type RetireSamlSpKey204Response struct {
+}
+
+func (response RetireSamlSpKey204Response) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RetireSamlSpKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RetireSamlSpKey401JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKey403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RetireSamlSpKey403JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RetireSamlSpKey404JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RetireSamlSpKey409JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RetireSamlSpKey429JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RetireSamlSpKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RetireSamlSpKey500JSONResponse) VisitRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKeyRequestObject struct {
+	Fingerprint string `json:"fingerprint"`
+}
+
+type CompromiseRetireSamlSpKeyResponseObject interface {
+	VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error
+}
+
+type CompromiseRetireSamlSpKey200JSONResponse SamlSpKey
+
+func (response CompromiseRetireSamlSpKey200JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CompromiseRetireSamlSpKey401JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CompromiseRetireSamlSpKey403JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CompromiseRetireSamlSpKey404JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CompromiseRetireSamlSpKey409JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CompromiseRetireSamlSpKey429JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CompromiseRetireSamlSpKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response CompromiseRetireSamlSpKey500JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7384,6 +9403,15 @@ type StrictServerInterface interface {
 	// BeginRecovery Consume a recovery code for a credential-establishment authority.
 	// (POST /api/v1/auth/recovery/begin)
 	BeginRecovery(ctx context.Context, request BeginRecoveryRequestObject) (BeginRecoveryResponseObject, error)
+	// SamlACS Complete an SP-initiated SAML transaction over HTTP-POST.
+	// (POST /api/v1/auth/saml/{provider}/acs)
+	SamlACS(ctx context.Context, request SamlACSRequestObject) (SamlACSResponseObject, error)
+	// SamlMetadata Publish this provider's SAML SP metadata.
+	// (GET /api/v1/auth/saml/{provider}/metadata)
+	SamlMetadata(ctx context.Context, request SamlMetadataRequestObject) (SamlMetadataResponseObject, error)
+	// SamlStart Begin an SP-initiated SAML transaction (login, link or reauth).
+	// (POST /api/v1/auth/saml/{provider}/start)
+	SamlStart(ctx context.Context, request SamlStartRequestObject) (SamlStartResponseObject, error)
 	// RemoveTotp Remove the confirmed TOTP factor.
 	// (DELETE /api/v1/auth/totp)
 	RemoveTotp(ctx context.Context, request RemoveTotpRequestObject) (RemoveTotpResponseObject, error)
@@ -7441,6 +9469,36 @@ type StrictServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(ctx context.Context, request PutOidcProviderRequestObject) (PutOidcProviderResponseObject, error)
+	// ListSamlProviders List configured SAML providers.
+	// (GET /api/v1/instance/saml-providers)
+	ListSamlProviders(ctx context.Context, request ListSamlProvidersRequestObject) (ListSamlProvidersResponseObject, error)
+	// DeleteSamlProvider Remove a SAML provider.
+	// (DELETE /api/v1/instance/saml-providers/{slug})
+	DeleteSamlProvider(ctx context.Context, request DeleteSamlProviderRequestObject) (DeleteSamlProviderResponseObject, error)
+	// GetSamlProvider Read one SAML provider.
+	// (GET /api/v1/instance/saml-providers/{slug})
+	GetSamlProvider(ctx context.Context, request GetSamlProviderRequestObject) (GetSamlProviderResponseObject, error)
+	// PatchSamlProvider Partially update SAML provider policy or disable the provider.
+	// (PATCH /api/v1/instance/saml-providers/{slug})
+	PatchSamlProvider(ctx context.Context, request PatchSamlProviderRequestObject) (PatchSamlProviderResponseObject, error)
+	// PutSamlProvider Create or reconfigure a SAML provider from pinned metadata.
+	// (PUT /api/v1/instance/saml-providers/{slug})
+	PutSamlProvider(ctx context.Context, request PutSamlProviderRequestObject) (PutSamlProviderResponseObject, error)
+	// RefreshSamlProviderMetadata Refresh and explicitly confirm a SAML provider's metadata diff.
+	// (POST /api/v1/instance/saml-providers/{slug}/refresh-metadata)
+	RefreshSamlProviderMetadata(ctx context.Context, request RefreshSamlProviderMetadataRequestObject) (RefreshSamlProviderMetadataResponseObject, error)
+	// ListSamlSpKeys List SAML SP signing-key lifecycle state.
+	// (GET /api/v1/instance/saml-sp-keys)
+	ListSamlSpKeys(ctx context.Context, request ListSamlSpKeysRequestObject) (ListSamlSpKeysResponseObject, error)
+	// RotateSamlSpKey Rotate the active SAML SP signing key with an overlap window.
+	// (POST /api/v1/instance/saml-sp-keys/rotate)
+	RotateSamlSpKey(ctx context.Context, request RotateSamlSpKeyRequestObject) (RotateSamlSpKeyResponseObject, error)
+	// RetireSamlSpKey Retire and erase an overlap-retiring SAML SP key.
+	// (DELETE /api/v1/instance/saml-sp-keys/{fingerprint})
+	RetireSamlSpKey(ctx context.Context, request RetireSamlSpKeyRequestObject) (RetireSamlSpKeyResponseObject, error)
+	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
+	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
+	CompromiseRetireSamlSpKey(ctx context.Context, request CompromiseRetireSamlSpKeyRequestObject) (CompromiseRetireSamlSpKeyResponseObject, error)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
@@ -7887,6 +9945,102 @@ func (sh *strictHandler) BeginRecovery(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(BeginRecoveryResponseObject); ok {
 		if err := validResponse.VisitBeginRecoveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SamlACS operation middleware
+func (sh *strictHandler) SamlACS(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	var request SamlACSRequestObject
+
+	request.Provider = provider
+
+	if err := r.ParseForm(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode formdata: %w", err))
+		return
+	}
+	var body SamlACSFormdataRequestBody
+	if err := runtime.BindForm(&body, r.Form, nil, nil); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't bind formdata: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SamlACS(ctx, request.(SamlACSRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SamlACS")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SamlACSResponseObject); ok {
+		if err := validResponse.VisitSamlACSResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SamlMetadata operation middleware
+func (sh *strictHandler) SamlMetadata(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	var request SamlMetadataRequestObject
+
+	request.Provider = provider
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SamlMetadata(ctx, request.(SamlMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SamlMetadata")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SamlMetadataResponseObject); ok {
+		if err := validResponse.VisitSamlMetadataResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SamlStart operation middleware
+func (sh *strictHandler) SamlStart(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	var request SamlStartRequestObject
+
+	request.Provider = provider
+
+	var body SamlStartJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SamlStart(ctx, request.(SamlStartRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SamlStart")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SamlStartResponseObject); ok {
+		if err := validResponse.VisitSamlStartResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -8435,6 +10589,281 @@ func (sh *strictHandler) PutOidcProvider(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PutOidcProviderResponseObject); ok {
 		if err := validResponse.VisitPutOidcProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSamlProviders operation middleware
+func (sh *strictHandler) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
+	var request ListSamlProvidersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSamlProviders(ctx, request.(ListSamlProvidersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSamlProviders")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSamlProvidersResponseObject); ok {
+		if err := validResponse.VisitListSamlProvidersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSamlProvider operation middleware
+func (sh *strictHandler) DeleteSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	var request DeleteSamlProviderRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSamlProvider(ctx, request.(DeleteSamlProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSamlProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSamlProviderResponseObject); ok {
+		if err := validResponse.VisitDeleteSamlProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSamlProvider operation middleware
+func (sh *strictHandler) GetSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	var request GetSamlProviderRequestObject
+
+	request.Slug = slug
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSamlProvider(ctx, request.(GetSamlProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSamlProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSamlProviderResponseObject); ok {
+		if err := validResponse.VisitGetSamlProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchSamlProvider operation middleware
+func (sh *strictHandler) PatchSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	var request PatchSamlProviderRequestObject
+
+	request.Slug = slug
+
+	var body PatchSamlProviderJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchSamlProvider(ctx, request.(PatchSamlProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchSamlProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PatchSamlProviderResponseObject); ok {
+		if err := validResponse.VisitPatchSamlProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutSamlProvider operation middleware
+func (sh *strictHandler) PutSamlProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	var request PutSamlProviderRequestObject
+
+	request.Slug = slug
+
+	var body PutSamlProviderJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutSamlProvider(ctx, request.(PutSamlProviderRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutSamlProvider")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutSamlProviderResponseObject); ok {
+		if err := validResponse.VisitPutSamlProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RefreshSamlProviderMetadata operation middleware
+func (sh *strictHandler) RefreshSamlProviderMetadata(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath) {
+	var request RefreshSamlProviderMetadataRequestObject
+
+	request.Slug = slug
+
+	var body RefreshSamlProviderMetadataJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RefreshSamlProviderMetadata(ctx, request.(RefreshSamlProviderMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RefreshSamlProviderMetadata")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RefreshSamlProviderMetadataResponseObject); ok {
+		if err := validResponse.VisitRefreshSamlProviderMetadataResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListSamlSpKeys operation middleware
+func (sh *strictHandler) ListSamlSpKeys(w http.ResponseWriter, r *http.Request) {
+	var request ListSamlSpKeysRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSamlSpKeys(ctx, request.(ListSamlSpKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSamlSpKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSamlSpKeysResponseObject); ok {
+		if err := validResponse.VisitListSamlSpKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RotateSamlSpKey operation middleware
+func (sh *strictHandler) RotateSamlSpKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateSamlSpKeyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateSamlSpKey(ctx, request.(RotateSamlSpKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateSamlSpKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateSamlSpKeyResponseObject); ok {
+		if err := validResponse.VisitRotateSamlSpKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetireSamlSpKey operation middleware
+func (sh *strictHandler) RetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string) {
+	var request RetireSamlSpKeyRequestObject
+
+	request.Fingerprint = fingerprint
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetireSamlSpKey(ctx, request.(RetireSamlSpKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetireSamlSpKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetireSamlSpKeyResponseObject); ok {
+		if err := validResponse.VisitRetireSamlSpKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CompromiseRetireSamlSpKey operation middleware
+func (sh *strictHandler) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string) {
+	var request CompromiseRetireSamlSpKeyRequestObject
+
+	request.Fingerprint = fingerprint
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CompromiseRetireSamlSpKey(ctx, request.(CompromiseRetireSamlSpKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CompromiseRetireSamlSpKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CompromiseRetireSamlSpKeyResponseObject); ok {
+		if err := validResponse.VisitCompromiseRetireSamlSpKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

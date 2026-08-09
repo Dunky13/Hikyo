@@ -230,7 +230,9 @@ export type Assurance = {
 };
 
 /**
- * OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+ * OPEN enum — `oidc:<issuer>` and `saml:<entityID>` values are
+ * instance-specific by construction.
+ *
  */
 export type AuthMethod = string;
 
@@ -416,6 +418,7 @@ export type AuthMethods = {
 export type AuthMethodProvider = {
     slug: string;
     display_name: string;
+    kind: IdentityProviderKind;
 };
 
 export type OidcStartRequest = {
@@ -437,6 +440,36 @@ export type OidcStartResult = {
     authorization_url: string;
 };
 
+export type SamlStartRequest = {
+    purpose: 'login' | 'link' | 'reauth';
+    /**
+     * Required for reauth; the reveal-window scope.
+     */
+    environment_id?: string;
+    /**
+     * Required for link; the pre-existing account-security proof.
+     */
+    proof?: string;
+};
+
+export type SamlStartResult = {
+    /**
+     * The IdP HTTP-Redirect URL carrying the AuthnRequest.
+     */
+    redirect_url: string;
+};
+
+export type SamlAcsRequest = {
+    /**
+     * Base64-encoded SAML Response; decoded XML is capped at 256 KiB.
+     */
+    SAMLResponse: string;
+    /**
+     * Server-minted opaque transaction handle, never a continuation URL.
+     */
+    RelayState: string;
+};
+
 export type IdentityLinkRequest = {
     provider: string;
     proof: string;
@@ -448,6 +481,7 @@ export type IdentityUnlinkRequest = {
 
 export type ExternalIdentity = {
     id: Id;
+    kind: IdentityProviderKind;
     issuer: string;
     subject: string;
     provider_id: string;
@@ -495,6 +529,160 @@ export type OidcProvider = {
 
 export type OidcProviderList = {
     providers: Array<OidcProvider>;
+};
+
+/**
+ * Closed protocol discriminator in the byte-exact external-identity key.
+ */
+export type IdentityProviderKind = 'oidc' | 'saml';
+
+/**
+ * Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+ */
+export type SamlMetadataSource = 'file' | 'url';
+
+/**
+ * SAML authentication configuration. Exactly one of `metadata_document`
+ * and `metadata_url` must match `metadata_source`; the service enforces
+ * that conditional before fetching or parsing. No JIT member exists:
+ * SAML never provisions accounts.
+ *
+ */
+export type SamlProviderInput = {
+    display_name: string;
+    /**
+     * Configured byte-exact IdP entityID used to select exactly one
+     * EntityDescriptor from metadata; immutable after create.
+     *
+     */
+    entity_id: string;
+    metadata_source: SamlMetadataSource;
+    /**
+     * Raw IdP metadata XML for a file-backed configuration.
+     */
+    metadata_document?: string | null;
+    /**
+     * One-shot WebPKI URL; redirects off-origin are refused.
+     */
+    metadata_url?: string | null;
+    /**
+     * Fingerprints explicitly confirmed in the current ceremony.
+     */
+    confirmed_fingerprints?: Array<string>;
+    /**
+     * New endpoint URLs explicitly confirmed in the current ceremony.
+     */
+    confirmed_endpoints?: Array<string>;
+    /**
+     * Accepted AuthnContextClassRef values; null means single-factor.
+     */
+    assurance_policy?: Array<string> | null;
+    /**
+     * Explicit opt-in to opaque emailAddress NameID values; never email linking.
+     */
+    allow_email_nameid: boolean;
+    /**
+     * Force signed AuthnRequests even when metadata does not demand them.
+     */
+    force_sign_requests: boolean;
+    enabled: boolean;
+};
+
+export type SamlMetadataRefreshRequest = {
+    /**
+     * Replacement XML for a file-backed provider; absent for URL-backed providers.
+     */
+    metadata_document?: string | null;
+    confirmed_fingerprints?: Array<string>;
+    confirmed_endpoints?: Array<string>;
+};
+
+/**
+ * Omitted members preserve their stored values.
+ */
+export type SamlProviderPatch = {
+    display_name?: string;
+    assurance_policy?: Array<string> | null;
+    allow_email_nameid?: boolean;
+    force_sign_requests?: boolean;
+    enabled?: boolean;
+};
+
+export type SamlProvider = {
+    slug: string;
+    display_name: string;
+    kind: 'saml';
+    /**
+     * Byte-exact IdP entityID; immutable after create.
+     */
+    entity_id: string;
+    acs_url: string;
+    sso_redirect_url: string;
+    signing_certificate_fingerprints: Array<string>;
+    assurance_policy?: Array<string> | null;
+    allow_email_nameid: boolean;
+    force_sign_requests: boolean;
+    metadata_source: SamlMetadataSource;
+    metadata_url?: string | null;
+    metadata_signed: boolean;
+    metadata_signing_fingerprint?: string | null;
+    metadata_valid_until?: Timestamp | null;
+    warnings: Array<SamlProviderWarning>;
+    enabled: boolean;
+    row_version: number;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+};
+
+export type SamlProviderWarning = {
+    code: 'metadata_expires_soon' | 'metadata_expired' | 'signing_certificate_not_yet_valid' | 'signing_certificate_expired';
+    severity: 'warning' | 'error';
+    message: string;
+    effective_at: Timestamp;
+    /**
+     * Present only for certificate warnings.
+     */
+    fingerprint?: string;
+};
+
+export type SamlProviderList = {
+    providers: Array<SamlProvider>;
+};
+
+export type SamlSpKey = {
+    /**
+     * URL-safe unpadded base64 SHA-256 fingerprint of SubjectPublicKeyInfo, prefixed by `sha256:`.
+     */
+    fingerprint: string;
+    state: 'active' | 'retiring';
+    created_at: Timestamp;
+};
+
+export type SamlSpKeyList = {
+    keys: Array<SamlSpKey>;
+};
+
+export type SamlMetadataDiff = {
+    endpoints_added: Array<string>;
+    endpoints_removed: Array<string>;
+    certs_added_fps: Array<string>;
+    certs_removed_fps: Array<string>;
+    valid_until?: Timestamp | null;
+};
+
+/**
+ * `applied=false` is the first leg of the metadata ceremony: no trust
+ * state changed, `diff` is displayed, and every value in
+ * `required_fingerprints` and `required_endpoints` must be explicitly
+ * supplied on a rerun.
+ *
+ */
+export type SamlProviderMutationResult = {
+    applied: boolean;
+    provider?: SamlProvider | null;
+    diff: SamlMetadataDiff;
+    required_fingerprints: Array<string>;
+    required_endpoints: Array<string>;
 };
 
 /**
@@ -600,12 +788,12 @@ export type EnvironmentId = Id;
 export type FolderId = Id;
 
 /**
- * OIDC provider slug.
+ * Identity-provider slug.
  */
 export type ProviderSlug = string;
 
 /**
- * OIDC provider slug.
+ * Identity-provider slug.
  */
 export type ProviderSlugPath = string;
 
@@ -2443,7 +2631,7 @@ export type OidcStartData = {
     body: OidcStartRequest;
     path: {
         /**
-         * OIDC provider slug.
+         * Identity-provider slug.
          */
         provider: string;
     };
@@ -2486,7 +2674,7 @@ export type OidcCallbackData = {
     body?: never;
     path: {
         /**
-         * OIDC provider slug.
+         * Identity-provider slug.
          */
         provider: string;
     };
@@ -2536,6 +2724,141 @@ export type OidcCallbackResponses = {
 };
 
 export type OidcCallbackResponse = OidcCallbackResponses[keyof OidcCallbackResponses];
+
+export type SamlStartData = {
+    body: SamlStartRequest;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/saml/{provider}/start';
+};
+
+export type SamlStartErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SamlStartError = SamlStartErrors[keyof SamlStartErrors];
+
+export type SamlStartResponses = {
+    /**
+     * The signed or unsigned IdP HTTP-Redirect URL.
+     */
+    200: SamlStartResult;
+};
+
+export type SamlStartResponse = SamlStartResponses[keyof SamlStartResponses];
+
+export type SamlAcsData = {
+    body: SamlAcsRequest;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/saml/{provider}/acs';
+};
+
+export type SamlAcsErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SamlAcsError = SamlAcsErrors[keyof SamlAcsErrors];
+
+export type SamlAcsResponses = {
+    /**
+     * The minted or rotated ordinary Wenv session.
+     */
+    200: LoginResult;
+};
+
+export type SamlAcsResponse = SamlAcsResponses[keyof SamlAcsResponses];
+
+export type SamlMetadataData = {
+    body?: never;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        provider: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/saml/{provider}/metadata';
+};
+
+export type SamlMetadataErrors = {
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SamlMetadataError = SamlMetadataErrors[keyof SamlMetadataErrors];
+
+export type SamlMetadataResponses = {
+    /**
+     * SAML 2.0 SP metadata XML.
+     */
+    200: string;
+};
+
+export type SamlMetadataResponse = SamlMetadataResponses[keyof SamlMetadataResponses];
 
 export type ListIdentitiesData = {
     body?: never;
@@ -3226,7 +3549,7 @@ export type DeleteOidcProviderData = {
     body?: never;
     path: {
         /**
-         * OIDC provider slug.
+         * Identity-provider slug.
          */
         slug: string;
     };
@@ -3292,7 +3615,7 @@ export type GetOidcProviderData = {
     body?: never;
     path: {
         /**
-         * OIDC provider slug.
+         * Identity-provider slug.
          */
         slug: string;
     };
@@ -3358,7 +3681,7 @@ export type PutOidcProviderData = {
     body: OidcProviderInput;
     path: {
         /**
-         * OIDC provider slug.
+         * Identity-provider slug.
          */
         slug: string;
     };
@@ -3420,3 +3743,705 @@ export type PutOidcProviderResponses = {
 };
 
 export type PutOidcProviderResponse = PutOidcProviderResponses[keyof PutOidcProviderResponses];
+
+export type ListSamlProvidersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/saml-providers';
+};
+
+export type ListSamlProvidersErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListSamlProvidersError = ListSamlProvidersErrors[keyof ListSamlProvidersErrors];
+
+export type ListSamlProvidersResponses = {
+    /**
+     * The configured SAML providers.
+     */
+    200: SamlProviderList;
+};
+
+export type ListSamlProvidersResponse = ListSamlProvidersResponses[keyof ListSamlProvidersResponses];
+
+export type DeleteSamlProviderData = {
+    body?: never;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-providers/{slug}';
+};
+
+export type DeleteSamlProviderErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteSamlProviderError = DeleteSamlProviderErrors[keyof DeleteSamlProviderErrors];
+
+export type DeleteSamlProviderResponses = {
+    /**
+     * Removed.
+     */
+    204: void;
+};
+
+export type DeleteSamlProviderResponse = DeleteSamlProviderResponses[keyof DeleteSamlProviderResponses];
+
+export type GetSamlProviderData = {
+    body?: never;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-providers/{slug}';
+};
+
+export type GetSamlProviderErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetSamlProviderError = GetSamlProviderErrors[keyof GetSamlProviderErrors];
+
+export type GetSamlProviderResponses = {
+    /**
+     * The provider.
+     */
+    200: SamlProvider;
+};
+
+export type GetSamlProviderResponse = GetSamlProviderResponses[keyof GetSamlProviderResponses];
+
+export type PatchSamlProviderData = {
+    body: SamlProviderPatch;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-providers/{slug}';
+};
+
+export type PatchSamlProviderErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type PatchSamlProviderError = PatchSamlProviderErrors[keyof PatchSamlProviderErrors];
+
+export type PatchSamlProviderResponses = {
+    /**
+     * The updated provider.
+     */
+    200: SamlProvider;
+};
+
+export type PatchSamlProviderResponse = PatchSamlProviderResponses[keyof PatchSamlProviderResponses];
+
+export type PutSamlProviderData = {
+    body: SamlProviderInput;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-providers/{slug}';
+};
+
+export type PutSamlProviderErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type PutSamlProviderError = PutSamlProviderErrors[keyof PutSamlProviderErrors];
+
+export type PutSamlProviderResponses = {
+    /**
+     * Applied provider or metadata diff requiring explicit confirmation.
+     */
+    200: SamlProviderMutationResult;
+};
+
+export type PutSamlProviderResponse = PutSamlProviderResponses[keyof PutSamlProviderResponses];
+
+export type RefreshSamlProviderMetadataData = {
+    body: SamlMetadataRefreshRequest;
+    path: {
+        /**
+         * Identity-provider slug.
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-providers/{slug}/refresh-metadata';
+};
+
+export type RefreshSamlProviderMetadataErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RefreshSamlProviderMetadataError = RefreshSamlProviderMetadataErrors[keyof RefreshSamlProviderMetadataErrors];
+
+export type RefreshSamlProviderMetadataResponses = {
+    /**
+     * Applied provider or metadata diff requiring explicit confirmation.
+     */
+    200: SamlProviderMutationResult;
+};
+
+export type RefreshSamlProviderMetadataResponse = RefreshSamlProviderMetadataResponses[keyof RefreshSamlProviderMetadataResponses];
+
+export type ListSamlSpKeysData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/saml-sp-keys';
+};
+
+export type ListSamlSpKeysErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListSamlSpKeysError = ListSamlSpKeysErrors[keyof ListSamlSpKeysErrors];
+
+export type ListSamlSpKeysResponses = {
+    /**
+     * Active and overlap-retiring SP keys.
+     */
+    200: SamlSpKeyList;
+};
+
+export type ListSamlSpKeysResponse = ListSamlSpKeysResponses[keyof ListSamlSpKeysResponses];
+
+export type RotateSamlSpKeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/saml-sp-keys/rotate';
+};
+
+export type RotateSamlSpKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateSamlSpKeyError = RotateSamlSpKeyErrors[keyof RotateSamlSpKeyErrors];
+
+export type RotateSamlSpKeyResponses = {
+    /**
+     * The newly active key.
+     */
+    200: SamlSpKey;
+};
+
+export type RotateSamlSpKeyResponse = RotateSamlSpKeyResponses[keyof RotateSamlSpKeyResponses];
+
+export type RetireSamlSpKeyData = {
+    body?: never;
+    path: {
+        /**
+         * Exact `sha256:<base64url>` public-key fingerprint returned by the list operation.
+         */
+        fingerprint: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-sp-keys/{fingerprint}';
+};
+
+export type RetireSamlSpKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RetireSamlSpKeyError = RetireSamlSpKeyErrors[keyof RetireSamlSpKeyErrors];
+
+export type RetireSamlSpKeyResponses = {
+    /**
+     * Retired key erased and removed from SP metadata.
+     */
+    204: void;
+};
+
+export type RetireSamlSpKeyResponse = RetireSamlSpKeyResponses[keyof RetireSamlSpKeyResponses];
+
+export type CompromiseRetireSamlSpKeyData = {
+    body?: never;
+    path: {
+        /**
+         * Exact active-key fingerprint returned by the list operation.
+         */
+        fingerprint: string;
+    };
+    query?: never;
+    url: '/api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire';
+};
+
+export type CompromiseRetireSamlSpKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CompromiseRetireSamlSpKeyError = CompromiseRetireSamlSpKeyErrors[keyof CompromiseRetireSamlSpKeyErrors];
+
+export type CompromiseRetireSamlSpKeyResponses = {
+    /**
+     * The newly active replacement key.
+     */
+    200: SamlSpKey;
+};
+
+export type CompromiseRetireSamlSpKeyResponse = CompromiseRetireSamlSpKeyResponses[keyof CompromiseRetireSamlSpKeyResponses];

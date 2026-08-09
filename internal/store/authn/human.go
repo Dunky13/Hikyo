@@ -288,6 +288,32 @@ func (r *Resolver) SessionByVerifier(ctx context.Context, verifier []byte) (Sess
 	}, nil
 }
 
+// SessionByID resolves a session already bound to a server-side ceremony.
+// It is deliberately not a general authentication primitive: the caller must
+// first prove the ceremony's independent opaque initiator binding, then apply
+// the same liveness checks as artifact authentication inside one transaction.
+func (r *Resolver) SessionByID(ctx context.Context, id string) (SessionRow, error) {
+	if r.sq != nil {
+		row, err := r.sq.GetSessionByID(ctx, id)
+		if err != nil {
+			return SessionRow{}, notFoundOr(err)
+		}
+		return sqliteSessionByID(row)
+	}
+	row, err := r.pg.GetSessionByID(ctx, id)
+	if err != nil {
+		return SessionRow{}, notFoundOr(err)
+	}
+	return SessionRow{
+		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID), Artifact: row.Artifact,
+		SessionGeneration: row.SessionGeneration, CredentialEpoch: row.CredentialEpoch,
+		AuthMethod: row.AuthMethod, Factors: row.Factors,
+		AuthenticatedAt: row.AuthenticatedAt.Time, CeremonyID: row.CeremonyID.String,
+		CreatedAt: row.CreatedAt.Time, LastSeenAt: row.LastSeenAt.Time,
+		IdleExpiresAt: row.IdleExpiresAt.Time, AbsoluteExpiresAt: row.AbsoluteExpiresAt.Time,
+	}, nil
+}
+
 // CredentialAuthorityByVerifier resolves a presented establishment authority.
 func (r *Resolver) CredentialAuthorityByVerifier(ctx context.Context, verifier []byte) (CredentialAuthority, error) {
 	if r.sq != nil {
@@ -553,24 +579,39 @@ func pgAccount(id, principalID, username, displayName string, createdAt time.Tim
 }
 
 func sqliteSession(row sqlitegen.GetSessionByVerifierRow) (SessionRow, error) {
+	return sqliteSessionFields(row.ID, row.PrincipalID, row.Artifact, row.SessionGeneration,
+		row.CredentialEpoch, row.AuthMethod, row.Factors, row.AuthenticatedAt,
+		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt)
+}
+
+func sqliteSessionByID(row sqlitegen.GetSessionByIDRow) (SessionRow, error) {
+	return sqliteSessionFields(row.ID, row.PrincipalID, row.Artifact, row.SessionGeneration,
+		row.CredentialEpoch, row.AuthMethod, row.Factors, row.AuthenticatedAt,
+		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt)
+}
+
+func sqliteSessionFields(id, principalID, artifact string, sessionGeneration, credentialEpoch int64,
+	authMethod, factors, authenticatedAt string, ceremonyID sql.NullString,
+	createdAt, lastSeenAt, idleExpiresAt, absoluteExpiresAt string,
+) (SessionRow, error) {
 	var (
 		out SessionRow
 		err error
 	)
 	out = SessionRow{
-		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID), Artifact: row.Artifact,
-		SessionGeneration: row.SessionGeneration, CredentialEpoch: row.CredentialEpoch,
-		AuthMethod: row.AuthMethod, Factors: row.Factors, CeremonyID: row.CeremonyID.String,
+		ID: id, PrincipalID: domain.PrincipalID(principalID), Artifact: artifact,
+		SessionGeneration: sessionGeneration, CredentialEpoch: credentialEpoch,
+		AuthMethod: authMethod, Factors: factors, CeremonyID: ceremonyID.String,
 	}
 	for _, f := range []struct {
 		src string
 		dst *time.Time
 	}{
-		{row.AuthenticatedAt, &out.AuthenticatedAt},
-		{row.CreatedAt, &out.CreatedAt},
-		{row.LastSeenAt, &out.LastSeenAt},
-		{row.IdleExpiresAt, &out.IdleExpiresAt},
-		{row.AbsoluteExpiresAt, &out.AbsoluteExpiresAt},
+		{authenticatedAt, &out.AuthenticatedAt},
+		{createdAt, &out.CreatedAt},
+		{lastSeenAt, &out.LastSeenAt},
+		{idleExpiresAt, &out.IdleExpiresAt},
+		{absoluteExpiresAt, &out.AbsoluteExpiresAt},
 	} {
 		if *f.dst, err = decodeTime(f.src); err != nil {
 			return SessionRow{}, errors.New("authn: session row carries an unparseable timestamp")

@@ -116,6 +116,19 @@ const (
 	EventOIDCProviderChanged EventType = "auth.provider_changed"
 	EventOIDCProviderRead    EventType = "auth.provider_read"
 
+	// auth.* SAML events (#72, saml-sp ADR). Login and reauth outcomes keep
+	// their distinct ceremony semantics; provider, certificate, metadata and
+	// SP-key lifecycle events make every trust-root transition attributable.
+	EventSAMLLogin                 EventType = "auth.saml_login"
+	EventSAMLReauth                EventType = "auth.saml_reauth"
+	EventSAMLProviderConfigure     EventType = "auth.saml_provider_configure"
+	EventSAMLProviderRefresh       EventType = "auth.saml_provider_refresh"
+	EventSAMLProviderRemove        EventType = "auth.saml_provider_remove"
+	EventSAMLCertChange            EventType = "auth.saml_cert_change"
+	EventSAMLEmailNameIDOptIn      EventType = "auth.saml_nameid_email_optin"
+	EventSAMLSPKey                 EventType = "auth.saml_sp_key"
+	EventSAMLMetadataExpiryWarning EventType = "auth.saml_metadata_expiry_warning"
+
 	// auth.credential_reset_issued records an administrator-issued or break-glass
 	// credential-establishment authority minted for a target (#54, human-auth ADR
 	// - Recovery), naming the issuer tier and whether it ran under network
@@ -457,6 +470,7 @@ var registry = map[EventType]TypeSpec{
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
 		Trails:        map[Trail]bool{TrailInstance: true},
 		Schema: Schema{
+			"kind":                   {Kind: KindString, Required: true},
 			"account_id":             {Kind: KindString, Required: true},
 			"identity_id":            {Kind: KindString, Required: true},
 			"provider_id":            {Kind: KindString, Required: true},
@@ -469,6 +483,7 @@ var registry = map[EventType]TypeSpec{
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
 		Trails:        map[Trail]bool{TrailInstance: true},
 		Schema: Schema{
+			"kind":                   {Kind: KindString, Required: true},
 			"account_id":             {Kind: KindString, Required: true},
 			"identity_id":            {Kind: KindString, Required: true},
 			"authorizing_credential": {Kind: KindString, Required: true},
@@ -504,6 +519,57 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"query":     {Kind: KindString, Required: true}, // get | list
 			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventSAMLLogin:             samlCeremonyEvent(),
+	EventSAMLReauth:            samlCeremonyEvent(),
+	EventSAMLProviderConfigure: samlProviderEvent(),
+	EventSAMLProviderRefresh:   samlProviderEvent(),
+	EventSAMLProviderRemove:    samlProviderEvent(),
+	EventSAMLCertChange: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id": {Kind: KindString, Required: true},
+			"entity_id":   {Kind: KindString, Required: true},
+			"change":      {Kind: KindString, Required: true},
+			"fingerprint": {Kind: KindString, Required: true},
+		},
+	},
+	EventSAMLEmailNameIDOptIn: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id": {Kind: KindString, Required: true},
+			"entity_id":   {Kind: KindString, Required: true},
+			"state":       {Kind: KindString, Required: true},
+		},
+	},
+	EventSAMLSPKey: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"action":                {Kind: KindString, Required: true},
+			"key_fingerprint":       {Kind: KindString, Required: true},
+			"prior_key_fingerprint": {Kind: KindString},
+		},
+	},
+	EventSAMLMetadataExpiryWarning: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id": {Kind: KindString, Required: true},
+			"entity_id":   {Kind: KindString, Required: true},
+			"valid_until": {Kind: KindString, Required: true},
+			"threshold":   {Kind: KindString, Required: true},
 		},
 	},
 	EventAuthCredentialResetIssued: {
@@ -618,6 +684,50 @@ var registry = map[EventType]TypeSpec{
 	EventFolderCreated: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
 	EventFolderRenamed: hierarchyEvent(renameSchema("namespace")),
 	EventFolderDeleted: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
+}
+
+func samlCeremonyEvent() TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id":                {Kind: KindString, Required: true},
+			"entity_id":                  {Kind: KindString, Required: true},
+			"purpose":                    {Kind: KindString, Required: true},
+			"transaction_id":             {Kind: KindString, Required: true},
+			"pinned_certificate_expired": {Kind: KindBool},
+			"cause":                      {Kind: KindString},
+			"name_id_format":             {Kind: KindString},
+			"authn_context_class_ref":    {Kind: KindString},
+		},
+	}
+}
+
+func samlProviderEvent() TypeSpec {
+	diffSchema := Schema{
+		"endpoints_added":   {Kind: KindStringList, Required: true},
+		"endpoints_removed": {Kind: KindStringList, Required: true},
+		"certs_added_fps":   {Kind: KindStringList, Required: true},
+		"certs_removed_fps": {Kind: KindStringList, Required: true},
+		"valid_until":       {Kind: KindString},
+	}
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"provider_id":   {Kind: KindString, Required: true},
+			"entity_id":     {Kind: KindString, Required: true},
+			"source":        {Kind: KindString, Required: true},
+			"signed":        {Kind: KindBool, Required: true},
+			"diff":          {Kind: KindObject, Required: true, ObjectSchema: diffSchema},
+			"confirmed_fps": {Kind: KindStringList, Required: true},
+			"cause":         {Kind: KindString},
+		},
+	}
 }
 
 // hierarchyEvent is the shared shape of every hierarchy-lifecycle row. It

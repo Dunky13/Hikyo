@@ -58,6 +58,20 @@ const (
 	OpProviderList   Operation = "oidc-provider.list"
 	OpProviderDelete Operation = "oidc-provider.delete"
 
+	// SAML provider administration (#72, saml-sp ADR). These join the same
+	// instance-config capability surface as OIDC. Metadata refresh is an action
+	// on the provider resource, not a new authority or noun family.
+	OpSAMLProviderPut             Operation = "saml-provider.put"
+	OpSAMLProviderPatch           Operation = "saml-provider.patch"
+	OpSAMLProviderGet             Operation = "saml-provider.get"
+	OpSAMLProviderList            Operation = "saml-provider.list"
+	OpSAMLProviderDelete          Operation = "saml-provider.delete"
+	OpSAMLProviderRefreshMetadata Operation = "saml-provider.refresh-metadata"
+	OpSAMLSPKeyList               Operation = "saml-sp-key.list"
+	OpSAMLSPKeyRotate             Operation = "saml-sp-key.rotate"
+	OpSAMLSPKeyRetire             Operation = "saml-sp-key.retire"
+	OpSAMLSPKeyCompromiseRetire   Operation = "saml-sp-key.compromise-retire"
+
 	// Administrator-issued credential reset (#54, human-auth ADR - Recovery).
 	// The capability is credential-reset, valid at org and instance scope only.
 	// One route dispatches between these two by the target's grant
@@ -312,6 +326,87 @@ var operations = map[Operation]opSpec{
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventOIDCProviderChanged},
+	},
+
+	// SAML provider administration (#72). Provider storage and session sweeps
+	// are proof-free authentication-resolution operations after this gate, just
+	// like OIDC administration; the operation registry therefore owns the
+	// instance-config proof and audit linkage, not those storage calls.
+	OpSAMLProviderPut: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventSAMLProviderConfigure,
+			audit.EventSAMLCertChange,
+			audit.EventSAMLEmailNameIDOptIn,
+			audit.EventSAMLSPKey,
+			audit.EventSAMLMetadataExpiryWarning,
+		},
+	},
+	OpSAMLProviderPatch: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventSAMLProviderConfigure,
+			audit.EventSAMLEmailNameIDOptIn,
+		},
+	},
+	OpSAMLProviderGet: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		// auth.provider_read is protocol-neutral on the wire even though its Go
+		// constant predates SAML; the locked SAML event list adds no second read
+		// event, and instance reads cannot take audited-none.
+		events: []audit.EventType{audit.EventOIDCProviderRead, audit.EventSAMLMetadataExpiryWarning},
+	},
+	OpSAMLProviderList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderRead, audit.EventSAMLMetadataExpiryWarning},
+	},
+	OpSAMLProviderDelete: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventSAMLProviderRemove},
+	},
+	OpSAMLProviderRefreshMetadata: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventSAMLProviderRefresh,
+			audit.EventSAMLCertChange,
+			audit.EventSAMLMetadataExpiryWarning,
+		},
+	},
+	OpSAMLSPKeyList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventOIDCProviderRead},
+	},
+	OpSAMLSPKeyRotate: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventSAMLSPKey},
+	},
+	OpSAMLSPKeyRetire: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventSAMLSPKey},
+	},
+	OpSAMLSPKeyCompromiseRetire: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventSAMLSPKey},
 	},
 
 	// Credential reset (#54). The formula IS the ADR's org-bounded rule: at the

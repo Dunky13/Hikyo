@@ -186,6 +186,23 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"CreateProvider": true,
 	"UpdateProvider": true,
 	"DeleteProvider": true,
+	// SAML (#72): provider administration, request/replay lifecycle, SP-key
+	// rotation and provider-bound session lifecycle. Each writer is explicit so
+	// growth of the proof-free SAML surface remains a reviewed change.
+	"CreateSAMLProvider":                 true,
+	"UpdateSAMLProvider":                 true,
+	"DeleteSAMLProvider":                 true,
+	"GuardSAMLProviderForMint":           true,
+	"CreateSAMLTransaction":              true,
+	"ConsumeSAMLTransaction":             true,
+	"ClaimSAMLReplay":                    true,
+	"DeleteExpiredSAMLReplay":            true,
+	"CreateSAMLSPKey":                    true,
+	"MarkSAMLSPKeyRetiring":              true,
+	"DeleteRetiringSAMLSPKey":            true,
+	"BindSessionToSAMLProvider":          true,
+	"DeleteSessionsForSAMLProvider":      true,
+	"RebindSAMLExternalIdentityProvider": true,
 	// WebAuthn (#54): credential, ceremony and user-handle writers, plus the
 	// clone session sweep. None can hold a proof — they mutate the artifacts that
 	// decide who a caller is and how strongly they authenticated, which is

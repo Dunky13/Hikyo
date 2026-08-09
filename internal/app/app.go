@@ -23,11 +23,10 @@ import (
 	"github.com/Dunky13/wenv/internal/store/migrate"
 )
 
-// ClientVerbs are the fixed client-side subcommands (system-architecture
-// ADR § Component set); each is a stub until its ticket lands. Exported so
-// the classification-totality invariant can enumerate them — a verb missing
-// from the wire registry fails the build.
-var ClientVerbs = []string{"run", "render", "sync", "adopt", "doctor", "definitions", "import"}
+// ClientVerbs are the fixed not-yet-implemented client-side subcommands from
+// the system-architecture component set. Implemented verbs move to cli.Verbs;
+// both lists are enumerated by the classification-totality invariant.
+var ClientVerbs = []string{"run", "render", "sync", "adopt", "definitions", "import"}
 
 // Version is the build's version string, set from main's linker-stamped
 // value. It is what /api/v1/meta advertises, so a client that refuses an
@@ -174,6 +173,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin}
+	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
 	// configured external origin, never a request header (WebAuthn ADR §5). An
 	// origin that cannot yield a valid relying party is a boot refusal, not a
@@ -197,11 +197,13 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 
 	api := &server.API{
 		Auth:           authSvc,
+		SAMLAuth:       authSvc,
 		Orgs:           &service.Orgs{DB: db},
 		Projects:       &service.Projects{DB: db},
 		Environments:   &service.Environments{DB: db},
 		Folders:        &service.Folders{DB: db},
 		Providers:      &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
+		SAMLProviders:  samlProviders,
 		Admission:      limiter,
 		Version:        Version,
 		Log:            log,

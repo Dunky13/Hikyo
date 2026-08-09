@@ -53,6 +53,15 @@ var oidcrpImporters = map[string]bool{
 	module + "/internal/app":     true, // construction wiring only
 }
 
+// samlspImporters confines the SAML/XML-DSIG implementation behind the strict
+// relying-party policy wrapper (#72). The service consumes the wrapper; no
+// handler or domain package may interpret signed XML directly.
+var samlspImporters = map[string]bool{
+	module + "/internal/service":  true,
+	module + "/internal/samlsp":   true,
+	module + "/internal/samltest": true, // signed-IdP fixture harness (tests only)
+}
+
 // webauthnrpImporters is the allowlist for the WebAuthn relying-party wrapper
 // (#54). The protocol library (go-webauthn) is confined behind it, and only the
 // service layer and the test harness consume it - relying-party policy has
@@ -174,6 +183,21 @@ func TestOIDCRPImportAllowlist(t *testing.T) {
 		for _, imp := range allImports(p) {
 			if imp == oidcrp && !oidcrpImporters[p.ImportPath] {
 				t.Errorf("%s imports %s: not on the oidcrp-importer allowlist", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+func TestSAMLSPImportAllowlist(t *testing.T) {
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			if (imp == "github.com/russellhaering/gosaml2" ||
+				strings.HasPrefix(imp, "github.com/russellhaering/gosaml2/") ||
+				imp == "github.com/russellhaering/goxmldsig" ||
+				strings.HasPrefix(imp, "github.com/russellhaering/goxmldsig/") ||
+				imp == "github.com/mattermost/xml-roundtrip-validator") &&
+				!samlspImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: SAML/XML-DSIG libraries are confined to internal/samlsp", p.ImportPath, imp)
 			}
 		}
 	}
