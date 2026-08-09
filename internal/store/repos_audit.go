@@ -38,8 +38,8 @@ type AuditFilter struct {
 	To             time.Time
 	AfterSeq       int64
 	Limit          int
-	Order          AuditPageOrder // internal page mode; excluded from Normalized
-	AfterCommitSeq AuditCommitSeq // internal export cursor; excluded from Normalized
+	Order          AuditPageOrder // service-controlled page mode; excluded from Normalized
+	AfterCommitSeq AuditCommitSeq // service-controlled export cursor; excluded from Normalized
 }
 
 // AuditPageOrder names the storage order for an audit page.
@@ -120,7 +120,8 @@ type AuditReader interface {
 type AuditRepo interface {
 	AuditReader
 	// InsertTenant writes one tenant-trail event. The event's chain is the
-	// proof's resolved chain; recorded_at is assigned here.
+	// proof's resolved chain; the engine assigns recorded_at at its durable
+	// insert boundary.
 	InsertTenant(ctx context.Context, p authz.Proof, e audit.Event) error
 	// InsertInstance writes one instance-trail event.
 	InsertInstance(ctx context.Context, p authz.Proof, e audit.Event) error
@@ -333,7 +334,7 @@ func (a pgAudit) InsertTenant(ctx context.Context, p authz.Proof, e audit.Event)
 		return err
 	}
 	// Chain columns: proof-bound, never caller input.
-	row, err := audit.BuildRow(e, audit.TrailTenant, chain, time.Now())
+	row, err := audit.BuildRow(e, audit.TrailTenant, chain, time.Time{})
 	if err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Even
 	if err != nil {
 		return err
 	}
-	row, err := audit.BuildRow(e, audit.TrailInstance, domain.Scope{}, time.Now())
+	row, err := audit.BuildRow(e, audit.TrailInstance, domain.Scope{}, time.Time{})
 	if err != nil {
 		return err
 	}

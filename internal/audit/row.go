@@ -60,10 +60,10 @@ type Row struct {
 }
 
 // BuildRow validates e for the trail and renders it into its storage shape.
-// scope is the trusted-layer-bound chain (see Event); recordedAt is the
-// server-assigned durable-insert timestamp — authoritative for retention and
-// display ordering, honestly divergent from occurred_at on reconciled
-// records. A validation failure MUST fail the emitting operation.
+// scope is the trusted-layer-bound chain (see Event). sqlite supplies its
+// durable-insert timestamp as recordedAt; postgres passes zero because its
+// BEFORE INSERT trigger owns recorded_at. A validation failure MUST fail the
+// emitting operation.
 func BuildRow(e Event, trail Trail, scope domain.Scope, recordedAt time.Time) (Row, error) {
 	if err := Validate(e, trail, scope); err != nil {
 		return Row{}, err

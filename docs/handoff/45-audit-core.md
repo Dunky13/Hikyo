@@ -28,8 +28,8 @@ mvp-boundary rows A4 and A6.
   - `Row`/`BuildRow`: the single envelope→column mapping, shared by both
     writers so they cannot drift. Fixed-width microsecond UTC text
     timestamps on sqlite (lexicographic order == time order, so range
-    predicates work); timestamptz on postgres. Since #84, postgres
-    the BEFORE INSERT trigger acquires the export writer gate and then stamps
+    predicates work); timestamptz on postgres. Since #84, the postgres
+    BEFORE INSERT trigger acquires the export writer gate and then stamps
     `recorded_at` with `clock_timestamp()`, rather than trusting an application
     instance clock.
   - `Context`/`WithContext`/`FromContext`: per-request wire metadata

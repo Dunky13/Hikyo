@@ -4,9 +4,10 @@
 -- writer, by the authorization package's enumerated surface) from resolved
 -- chains only - never from caller arguments.
 --
--- Page order is seq (allocation order); the cursor is `seq > ?`. Timestamps
--- are fixed-width UTC microsecond text on this engine, so recorded_at range
--- predicates compare correctly.
+-- Interactive and export page order is seq (allocation equals commit order on
+-- sqlite). Export queries use the same seq column for their selection floor
+-- and internal page cursor. Timestamps are fixed-width UTC microsecond text,
+-- so recorded_at range predicates compare correctly.
 
 -- name: InsertTenantAuditEvent :exec
 INSERT INTO audit_tenant_events (

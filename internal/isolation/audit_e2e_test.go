@@ -568,6 +568,17 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 	if second.ID != "evt_gap_low" || second.Seq != lowSeq {
 		t.Fatalf("second page = %+v, want later commit with lower seq %d", second, lowSeq)
 	}
+	interactive, err := audits.Query(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{
+		Limit:          10,
+		Order:          store.AuditPageByCommit,
+		AfterCommitSeq: store.AuditCommitSeq(1 << 62),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(interactive) < 2 || interactive[0].Seq != lowSeq || interactive[1].Seq != highSeq {
+		t.Fatalf("interactive query honored export-only cursor/order: %+v", interactive)
+	}
 	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE commit_seq IS NULL"); n != 0 {
 		t.Fatalf("committed tenant audit rows without commit order = %d", n)
 	}

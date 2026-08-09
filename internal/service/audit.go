@@ -70,6 +70,10 @@ func queryEvent(ctx context.Context, principal domain.PrincipalID, f store.Audit
 // transaction — the event is durable before any byte of the response exists
 // outside it.
 func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope domain.Scope, f store.AuditFilter) ([]store.AuditEvent, error) {
+	// Commit order is export-only. Ignore internal cursor fields if a caller
+	// constructs AuditFilter directly instead of using an API decoder.
+	f.Order = store.AuditPageBySeq
+	f.AfterCommitSeq = 0
 	op, err := auditQueryOp(scope)
 	if err != nil {
 		return nil, err
@@ -99,6 +103,9 @@ func (s *Audits) Query(ctx context.Context, principal domain.PrincipalID, scope 
 // InstanceQuery is Query for the instance trail, under an instance-scope
 // audit-read grant — grant-evaluated, never route-implied.
 func (s *Audits) InstanceQuery(ctx context.Context, principal domain.PrincipalID, f store.AuditFilter) ([]store.AuditEvent, error) {
+	// Commit order is export-only; interactive queries always expose seq order.
+	f.Order = store.AuditPageBySeq
+	f.AfterCommitSeq = 0
 	var page []store.AuditEvent
 	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, authz.OpAuditInstanceQuery, domain.Scope{})
