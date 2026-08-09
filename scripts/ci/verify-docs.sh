@@ -3,8 +3,20 @@ set -eu
 
 CDPATH=
 repo_root=$(cd -- "$(dirname "$0")/../.." && pwd)
+package_manager=$(node -p 'require(process.argv[1]).packageManager' \
+	"$repo_root/docs/site/package.json")
+
+case "$package_manager" in
+	pnpm@*) ;;
+	*)
+		printf 'docs verification: expected a pinned pnpm packageManager, got %s\n' \
+			"$package_manager" >&2
+		exit 1
+		;;
+esac
 
 corepack enable
+corepack install --global "$package_manager"
 pnpm --dir "$repo_root/docs/site" install --frozen-lockfile
 pnpm --dir "$repo_root/docs/site" peers check
 pnpm --dir "$repo_root/docs/site" run verify
