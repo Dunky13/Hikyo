@@ -9,9 +9,12 @@ trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 "$repo_root/scripts/ci/check-oss-policy.sh" "$repo_root" "$repo_root/docs/site/dist"
 
 mkdir -p "$fixture_dir/site/.well-known"
+mkdir -p "$fixture_dir/release/repository"
 for path in README.md GOVERNANCE.md TRADEMARK.md CONTRIBUTING.md LICENSE; do
 	cp "$repo_root/$path" "$fixture_dir/$path"
 done
+cp "$repo_root/release/repository/main-ci-gate.json" \
+	"$fixture_dir/release/repository/main-ci-gate.json"
 
 if "$repo_root/scripts/ci/check-oss-policy.sh" "$fixture_dir" "$fixture_dir/site" >/dev/null 2>&1; then
 	printf 'OSS policy fixture failed: missing SECURITY.md was accepted\n' >&2

@@ -10,6 +10,7 @@ docs_origin=${1%/}
 fallback_email=$2
 CURL_BIN=${CURL_BIN:-curl}
 JQ_BIN=${JQ_BIN:-jq}
+NODE_BIN=${NODE_BIN:-node}
 
 case "$docs_origin" in
 	https://*) ;;
@@ -53,6 +54,18 @@ security_txt=$(fetch "$docs_origin/.well-known/security.txt")
 require_response_text "$security_txt" 'Contact: https://github.com/Dunky13/wenv/security/advisories/new'
 require_response_text "$security_txt" "Contact: mailto:$fallback_email"
 require_response_text "$security_txt" "Canonical: $docs_origin/.well-known/security.txt"
+expires=$(printf '%s\n' "$security_txt" | awk -F ': ' '$1 == "Expires" {print $2}')
+[ -n "$expires" ] || {
+	printf 'live docs gate: security.txt has no expiry\n' >&2
+	exit 1
+}
+"$NODE_BIN" -e '
+const expiry = Date.parse(process.argv[1]);
+if (!Number.isFinite(expiry) || expiry <= Date.now()) process.exit(1);
+' "$expires" || {
+	printf 'live docs gate: security.txt expiry is invalid or elapsed\n' >&2
+	exit 1
+}
 
 security_page=$(fetch "$docs_origin/security/")
 require_response_text "$security_page" 'The default embargo is 90 days from the report itself.'

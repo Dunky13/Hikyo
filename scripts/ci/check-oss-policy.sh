@@ -38,6 +38,10 @@ for path in README.md GOVERNANCE.md TRADEMARK.md CONTRIBUTING.md SECURITY.md SUP
 	require_file "$repo_root/$path"
 done
 
+main_gate="$repo_root/release/repository/main-ci-gate.json"
+require_file "$main_gate"
+require_text "$main_gate" '{"context": "docs"}'
+
 license_sha=$(sha256sum "$repo_root/LICENSE" | awk '{print $1}')
 [ "$license_sha" = '3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04' ] || {
 	printf 'OSS policy gate: LICENSE is not the exact MPL-2.0 text\n' >&2
@@ -71,6 +75,7 @@ security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
 require_text "$security_txt" 'Contact: https://github.com/Dunky13/wenv/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
+require_text "$security_txt" 'Expires: 2027-08-09T00:00:00Z'
 require_text "$security_txt" 'Canonical: https://dunky13.github.io/wenv/.well-known/security.txt'
 
 require_text "$repo_root/SUPPORT.md" 'Wenv supports exactly one version: the latest patch release of the latest minor'

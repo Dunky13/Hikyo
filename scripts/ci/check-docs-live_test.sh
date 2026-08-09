@@ -16,6 +16,7 @@ case "$url" in
 		printf '%s\n' \
 			'Contact: https://github.com/Dunky13/wenv/security/advisories/new' \
 			'Contact: mailto:security@developwent.io' \
+			'Expires: 2099-08-09T00:00:00Z' \
 			'Canonical: https://dunky13.github.io/wenv/.well-known/security.txt'
 		;;
 	*/security/)
