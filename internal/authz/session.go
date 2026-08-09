@@ -8,6 +8,7 @@ import (
 
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/store/authn"
 )
 
 // Session resolution sits HERE, on the transaction's authorizer, because the
@@ -141,6 +142,24 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 	if rowErr != nil && !errors.Is(rowErr, domain.ErrNotFound) {
 		return Identity{}, rowErr
 	}
+	return a.authenticateResolvedSession(ctx, row, rowErr, now)
+}
+
+// AuthenticateSessionByID revalidates the session recorded in a server-side
+// cross-site ceremony after that ceremony's independent opaque cookie has
+// been proven. A session id by itself is never accepted from the wire.
+func (a *TxAuthorizer) AuthenticateSessionByID(ctx context.Context, id string, now time.Time) (Identity, error) {
+	if id == "" {
+		return Identity{}, domain.ErrUnauthenticated
+	}
+	row, rowErr := a.r.SessionByID(ctx, id)
+	if rowErr != nil && !errors.Is(rowErr, domain.ErrNotFound) {
+		return Identity{}, rowErr
+	}
+	return a.authenticateResolvedSession(ctx, row, rowErr, now)
+}
+
+func (a *TxAuthorizer) authenticateResolvedSession(ctx context.Context, row authn.SessionRow, rowErr error, now time.Time) (Identity, error) {
 	live := rowErr == nil
 
 	// A missing session still reads a generation, for the empty principal —

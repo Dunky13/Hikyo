@@ -3,6 +3,7 @@ module github.com/Dunky13/wenv
 go 1.26.2
 
 require (
+	github.com/beevik/etree v1.7.0
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/descope/virtualwebauthn v1.0.5
 	github.com/getkin/kin-openapi v0.146.0
@@ -11,10 +12,13 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/mattermost/xml-roundtrip-validator v0.1.0
 	github.com/oapi-codegen/runtime v1.6.0
 	github.com/oasdiff/oasdiff v1.28.0
 	github.com/pquerna/otp v1.5.0
 	github.com/pressly/goose/v3 v3.27.3
+	github.com/russellhaering/gosaml2 v0.12.0
+	github.com/russellhaering/goxmldsig v1.6.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.47.0
@@ -54,6 +58,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-sqlite3 v0.32.0 // indirect

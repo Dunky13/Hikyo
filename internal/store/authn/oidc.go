@@ -554,6 +554,22 @@ func (r *Resolver) CreateExternalIdentity(ctx context.Context, n NewExternalIden
 	})
 }
 
+// RebindSAMLExternalIdentityProvider updates only the row whose previous
+// provider provenance still matches. It is used after a signed response from
+// the same byte-exact entity proves that a removed provider was re-added.
+func (r *Resolver) RebindSAMLExternalIdentityProvider(ctx context.Context, id, expectedProviderID, newProviderID string) (bool, error) {
+	if r.sq != nil {
+		n, err := r.sq.RebindSAMLExternalIdentityProvider(ctx, sqlitegen.RebindSAMLExternalIdentityProviderParams{
+			NewProviderID: newProviderID, ID: id, ExpectedProviderID: expectedProviderID,
+		})
+		return n == 1, err
+	}
+	n, err := r.pg.RebindSAMLExternalIdentityProvider(ctx, pggen.RebindSAMLExternalIdentityProviderParams{
+		NewProviderID: newProviderID, ID: id, ExpectedProviderID: expectedProviderID,
+	})
+	return n == 1, err
+}
+
 // DeleteExternalIdentity removes a link (unlink).
 func (r *Resolver) DeleteExternalIdentity(ctx context.Context, id string) error {
 	if r.sq != nil {

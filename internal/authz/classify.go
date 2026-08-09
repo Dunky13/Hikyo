@@ -72,6 +72,25 @@ var wireRegistry = map[string]Class{
 	"http:GET /api/v1/auth/identities":               ClassUnauthenticated,
 	"http:POST /api/v1/auth/identities/link":         ClassUnauthenticated,
 	"http:DELETE /api/v1/auth/identities/{id}":       ClassUnauthenticated,
+
+	// SAML SP (#72). Start and ACS are purpose-polymorphic identity-protocol
+	// endpoints: login is pre-auth, while link/reauth bind an existing session;
+	// enumeration uniformity is therefore their probe contract. Metadata is
+	// documentation-class public material under pre-auth admission. Provider
+	// administration is instance-config.
+	"http:POST /api/v1/auth/saml/{provider}/start":                            ClassUnauthenticated,
+	"http:POST /api/v1/auth/saml/{provider}/acs":                              ClassUnauthenticated,
+	"http:GET /api/v1/auth/saml/{provider}/metadata":                          ClassUnauthenticated,
+	"http:GET /api/v1/instance/saml-providers":                                ClassInstance,
+	"http:GET /api/v1/instance/saml-providers/{slug}":                         ClassInstance,
+	"http:PUT /api/v1/instance/saml-providers/{slug}":                         ClassInstance,
+	"http:PATCH /api/v1/instance/saml-providers/{slug}":                       ClassInstance,
+	"http:DELETE /api/v1/instance/saml-providers/{slug}":                      ClassInstance,
+	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata":       ClassInstance,
+	"http:GET /api/v1/instance/saml-sp-keys":                                  ClassInstance,
+	"http:POST /api/v1/instance/saml-sp-keys/rotate":                          ClassInstance,
+	"http:DELETE /api/v1/instance/saml-sp-keys/{fingerprint}":                 ClassInstance,
+	"http:POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire": ClassInstance,
 	// WebAuthn / passkeys (#54). Enrolment, login, step-up, reauth, removal and
 	// the credential inventory. Login is fully pre-auth; the rest take a session
 	// but an unresolvable one is exactly the case they must not distinguish, so
@@ -173,16 +192,17 @@ var wireRegistry = map[string]Class{
 	// a verb whose class understated its reach would let an instance-scoped
 	// call ride in under a tenant probe contract. `project`, `env` and `folder`
 	// reach tenant routes exclusively.
-	"cli:org":     ClassInstance,
-	"cli:project": ClassTenant,
-	"cli:env":     ClassTenant,
-	"cli:folder":  ClassTenant,
+	"cli:org":             ClassInstance,
+	"cli:project":         ClassTenant,
+	"cli:env":             ClassTenant,
+	"cli:folder":          ClassTenant,
+	"cli:instance-config": ClassInstance,
+	"cli:doctor":          ClassInstance,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
 	"cli:sync":        ClassStub,
 	"cli:adopt":       ClassStub,
-	"cli:doctor":      ClassStub,
 	"cli:definitions": ClassStub,
 	"cli:import":      ClassStub,
 
@@ -287,6 +307,14 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthSessionCreated,
 		audit.EventAuthThrottleCrossed,
 	},
+	"http:POST /api/v1/auth/saml/{provider}/start": {audit.EventAuthThrottleCrossed},
+	"http:POST /api/v1/auth/saml/{provider}/acs": {
+		audit.EventSAMLLogin,
+		audit.EventSAMLReauth,
+		audit.EventIdentityLinked,
+		audit.EventAuthSessionCreated,
+		audit.EventAuthThrottleCrossed,
+	},
 
 	// Credential reset (#54). A successful reset mints a credential-establishment
 	// authority (its own record, factors MEDIUM-7) and records the reset issuance
@@ -376,6 +404,18 @@ var wireRoutes = map[string][]Operation{
 	"http:GET /api/v1/instance/oidc-providers/{slug}":    {OpProviderGet},
 	"http:PUT /api/v1/instance/oidc-providers/{slug}":    {OpProviderPut},
 	"http:DELETE /api/v1/instance/oidc-providers/{slug}": {OpProviderDelete},
+
+	// SAML provider administration (#72), under the same instance-config atom.
+	"http:GET /api/v1/instance/saml-providers":                                {OpSAMLProviderList},
+	"http:GET /api/v1/instance/saml-providers/{slug}":                         {OpSAMLProviderGet},
+	"http:PUT /api/v1/instance/saml-providers/{slug}":                         {OpSAMLProviderPut},
+	"http:PATCH /api/v1/instance/saml-providers/{slug}":                       {OpSAMLProviderPatch},
+	"http:DELETE /api/v1/instance/saml-providers/{slug}":                      {OpSAMLProviderDelete},
+	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata":       {OpSAMLProviderRefreshMetadata},
+	"http:GET /api/v1/instance/saml-sp-keys":                                  {OpSAMLSPKeyList},
+	"http:POST /api/v1/instance/saml-sp-keys/rotate":                          {OpSAMLSPKeyRotate},
+	"http:DELETE /api/v1/instance/saml-sp-keys/{fingerprint}":                 {OpSAMLSPKeyRetire},
+	"http:POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire": {OpSAMLSPKeyCompromiseRetire},
 
 	// Credential reset (#54). ONE route dispatches at runtime between the
 	// org-scoped and instance-scoped credential-reset operations by the target's

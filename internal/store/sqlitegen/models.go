@@ -234,6 +234,67 @@ type RecoveryCode struct {
 	GeneratedAt     string
 }
 
+type SamlProvider struct {
+	ID                              string
+	Slug                            string
+	DisplayName                     string
+	Kind                            string
+	EntityID                        string
+	AcsUrl                          string
+	SsoRedirectUrl                  string
+	SigningCertificates             []byte
+	AssurancePolicy                 sql.NullString
+	AllowEmailNameid                int64
+	ForceSignRequests               int64
+	MetadataWantAuthnRequestsSigned int64
+	MetadataSource                  string
+	MetadataUrl                     sql.NullString
+	MetadataSigned                  int64
+	MetadataSigningFingerprint      sql.NullString
+	MetadataValidUntil              sql.NullString
+	Enabled                         int64
+	RowVersion                      int64
+	CreatedAt                       string
+	UpdatedAt                       string
+}
+
+type SamlReplay struct {
+	Issuer      string
+	AssertionID string
+	ExpiresAt   string
+	CreatedAt   string
+}
+
+type SamlSpKey struct {
+	ID                  string
+	State               string
+	EncryptedPrivateKey []byte
+	CertificateDer      []byte
+	Fingerprint         string
+	DekVersion          int64
+	RowVersion          int64
+	CreatedAt           string
+}
+
+type SamlTransaction struct {
+	ID                  string
+	RequestID           string
+	RelayStateVerifier  []byte
+	InitiatorVerifier   []byte
+	ProviderID          string
+	EntityID            string
+	AcsUrl              string
+	Purpose             string
+	InitiatingSessionID sql.NullString
+	AccountID           sql.NullString
+	EnvironmentID       sql.NullString
+	CeremonyID          sql.NullString
+	CredentialEpoch     int64
+	CreatedAt           string
+	ExpiresAt           string
+	ConsumedAt          sql.NullString
+}
+
 type Session struct {
 	ID                string
 	PrincipalID       string
@@ -253,6 +314,7 @@ type Session struct {
 	UserAgent         string
 	CsrfVerifier      []byte
 	ProviderID        sql.NullString
+	SamlProviderID    sql.NullString
 }
 
 type Tier3Key struct {

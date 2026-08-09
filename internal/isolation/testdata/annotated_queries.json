@@ -19,6 +19,12 @@
   },
   {
     "engine": "postgres",
+    "name": "BindSessionToSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "b5d86c12b60fdc2fdb44dd2e16bc2125228867912d25fa5903747154c73d6aad"
+  },
+  {
+    "engine": "postgres",
     "name": "ConfirmTOTP",
     "annotation": "authn-resolution",
     "hash": "59095ca36fdf72afb548db9b485dfbf9c7ce601731f47058aace861616a2ab2b"
@@ -40,6 +46,12 @@
     "name": "ConsumeOutstandingAuthoritiesForAccount",
     "annotation": "authn-resolution",
     "hash": "5b7148c41eb4adca7ce1a134eb83c646fd65b8355615883c53db8030677c89f5"
+  },
+  {
+    "engine": "postgres",
+    "name": "ConsumeSAMLTransaction",
+    "annotation": "authn-resolution",
+    "hash": "8bf467c7a1f61280362fb1aaecf56fb1c812947a8481a9864cf8ba1ac1490858"
   },
   {
     "engine": "postgres",
@@ -79,6 +91,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteExpiredSAMLReplay",
+    "annotation": "authn-resolution",
+    "hash": "ed638e4662868fd19c7eb790f2ed6cacba3d6665ec8133ce146d5151c0030061"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "ce3fc198e5d22eee48a2e571cd645cb564b86549cf38ce4a1a63650060063338"
@@ -103,6 +121,18 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteRetiringSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "b716e5c85b7c3deb64752f900e1a2787f911989f39d625af9c11c3d24a137485"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "d01b50344ff24566f970b6bb1a73ca733a62bab2eeacae3973263db07de7356e"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "11e96cfd8c2736f13ce55975ea910dd68640f6f14e38a4b3342d514804e3de27"
@@ -118,6 +148,12 @@
     "name": "DeleteSessionsForProvider",
     "annotation": "authn-resolution",
     "hash": "35d7b8c347de725e6dd5bab401b88e4090c75f86f466552f917c58a8ab86f00c"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSessionsForSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "b577c8c09993139c94565926ea9138eb1d8d39615035166e24296e7366dac4d5"
   },
   {
     "engine": "postgres",
@@ -172,6 +208,12 @@
     "name": "GetAccountByWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "11e088cb124c985290a84e85acca9b128d989580ee4a505c349f24f39149461f"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetActiveSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "6a41f8fc6cea1daad9205204f49249707cf46b0ed744db50fc2d071d58ac6f2a"
   },
   {
     "engine": "postgres",
@@ -271,6 +313,30 @@
   },
   {
     "engine": "postgres",
+    "name": "GetSAMLProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "c8ab42a4a029f2d425b3769ae74e7ba96cb0e4d62237e36cde35f4755a8cc439"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetSAMLProviderForCallback",
+    "annotation": "authn-resolution",
+    "hash": "5ec068505eaeb5adfb7505bb74adca9630f238943563a45bd705f32577f09181"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetSAMLTransactionByRelayState",
+    "annotation": "authn-resolution",
+    "hash": "b6cb619426d8b08f98cdc49030be174538d6569798eaddc052f55a6d50fe8fb5"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetSessionByID",
+    "annotation": "authn-resolution",
+    "hash": "69dc4c2bc6adcb20ee6d2335466a7899b50bfa54c4a4c85be0e5531a5cd94457"
+  },
+  {
+    "engine": "postgres",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
     "hash": "4bd8c86ddb49353001338e51d22434a29cb2f900d0433f1e4ed58e78c485b342"
@@ -310,6 +376,12 @@
     "name": "GuardOIDCProviderForMint",
     "annotation": "authn-resolution",
     "hash": "ff01b9bb77e6a1537c04912e54d56b4eefdd8b62ce5cc6e5b1b5f109e1e18f46"
+  },
+  {
+    "engine": "postgres",
+    "name": "GuardSAMLProviderForMint",
+    "annotation": "authn-resolution",
+    "hash": "d0d444ace89520b1b04b34684f358a97335c867741c45d8b82a75911faf7fee9"
   },
   {
     "engine": "postgres",
@@ -367,6 +439,30 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "b1f125250064bfd3c833c03b7848614bb4801783c1e4425cf2f65e5aa78815e4"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertSAMLReplay",
+    "annotation": "authn-resolution",
+    "hash": "9af9f8349dc4ae41d756dede6e14be426efda0a8506810bc524a41e46f4dc10d"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "3d2112c3338eae1254aa0a2a44fbf3888b3ca3f9255cc9bd61f20e8edb1f8ac8"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertSAMLTransaction",
+    "annotation": "authn-resolution",
+    "hash": "04d5e554c13160cfbe0226437a405f8388faf1ccb925a139f73a3a865abda889"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertSession",
     "annotation": "authn-resolution",
     "hash": "667da5bdb247df0e5a80c4a80134f8fd6d2ebd2912786fbaf464d905d1eaa27f"
@@ -421,6 +517,18 @@
   },
   {
     "engine": "postgres",
+    "name": "ListSAMLProviders",
+    "annotation": "authn-resolution",
+    "hash": "77b9bcf7312b4be8cee4a7786f88b899e8c858451c43f18e679faf1c47594564"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListSAMLSPKeys",
+    "annotation": "authn-resolution",
+    "hash": "77f8c3d9e1f516626df74b6bf5c1d4631a1cce7ea07009e6d879143d99c4c6c7"
+  },
+  {
+    "engine": "postgres",
     "name": "ListWebAuthnCredentialsForAccount",
     "annotation": "authn-resolution",
     "hash": "0393cf6c111cddb0a59e89add48421f43180ba7b8d235586ee435502c8177b34"
@@ -436,6 +544,24 @@
     "name": "LockPrincipalRow",
     "annotation": "authn-resolution",
     "hash": "dc379a18027f0fc520065a13023ee7b1ccd38935199770bc8143d1ca39859a6a"
+  },
+  {
+    "engine": "postgres",
+    "name": "LockSAMLProviderForDelete",
+    "annotation": "authn-resolution",
+    "hash": "3d3e4b9bf6a519d6cfd39919b62804473f9408c1c2afe6d99a9641fd809de165"
+  },
+  {
+    "engine": "postgres",
+    "name": "MarkSAMLSPKeyRetiringCAS",
+    "annotation": "authn-resolution",
+    "hash": "fcfa1609192d4062059f8e375a8ca832255856a52bbd936c72026e36a194bb4d"
+  },
+  {
+    "engine": "postgres",
+    "name": "RebindSAMLExternalIdentityProvider",
+    "annotation": "authn-resolution",
+    "hash": "5e7e022bd30f720586e24fc548d35032553ac795430e1caab2335a93b3cfb635"
   },
   {
     "engine": "postgres",
@@ -504,6 +630,12 @@
     "hash": "4667385c505bd218fcedcb6ecb7feb637dd6526c55fa2733757431ff15121e66"
   },
   {
+    "engine": "postgres",
+    "name": "UpdateSAMLProviderCAS",
+    "annotation": "authn-resolution",
+    "hash": "27b152cf5c55d12f514084806822630971b0e7f5faae5603cd4fcc2737604ace"
+  },
+  {
     "engine": "sqlite",
     "name": "AdvancePrincipalGeneration",
     "annotation": "authn-resolution",
@@ -520,6 +652,12 @@
     "name": "AdvanceWebAuthnSignCount",
     "annotation": "authn-resolution",
     "hash": "1402c9cb4fdad89f64263e82ef83f2f274fa8b8402c98ba98b1b4061f7170864"
+  },
+  {
+    "engine": "sqlite",
+    "name": "BindSessionToSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "0641ec905f2c406364637e77395f062fb8e295ff51e1b75025c35f8d7551c2c8"
   },
   {
     "engine": "sqlite",
@@ -544,6 +682,12 @@
     "name": "ConsumeOutstandingAuthoritiesForAccount",
     "annotation": "authn-resolution",
     "hash": "f1bbdcf248a4111592adc73223aec7342356e7c234ba27117f41d7358562edc9"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ConsumeSAMLTransaction",
+    "annotation": "authn-resolution",
+    "hash": "c389ac04b39b3005afb25916c67d7ae9bc9a725370a9a9b033925ff03f409a08"
   },
   {
     "engine": "sqlite",
@@ -583,6 +727,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteExpiredSAMLReplay",
+    "annotation": "authn-resolution",
+    "hash": "b29f86673369c5897a2785f6b08d78f2a0decb6189d14fdd20e80891581a4ef0"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "574453c51e84c4da03caec855e0349be62c896361ff20697f106e03907d4e8e2"
@@ -607,6 +757,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteRetiringSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "13dcc61ddcfc7b13adca2775f3775c9ab980dfbc818d486fe6aae1c0be1fd27a"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "b7770091c2529fbce9b91be2aa7735f8618ab43de5eb4c03772c950a7653c43e"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "4c0c29fb3d9f50d5c04e9d5db62e3f64d8df43b42d5991d7c85276873e24167b"
@@ -622,6 +784,12 @@
     "name": "DeleteSessionsForProvider",
     "annotation": "authn-resolution",
     "hash": "a788c304710e8d6ddaf13b14e16612ad276c0a6f235272243172d6e93319d9c6"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSessionsForSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "af3a02e83604cc34b48992aae4418f4c85df1e5ca978c80492a48745dd6567e7"
   },
   {
     "engine": "sqlite",
@@ -676,6 +844,12 @@
     "name": "GetAccountByWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "d53db61a786ceadf23eb30f7754b1414fc86d0dee3e7797f3a8ac14ecd3cc7cc"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetActiveSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "6a41f8fc6cea1daad9205204f49249707cf46b0ed744db50fc2d071d58ac6f2a"
   },
   {
     "engine": "sqlite",
@@ -775,6 +949,30 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetSAMLProviderBySlug",
+    "annotation": "authn-resolution",
+    "hash": "bb80f0a1bdc320ddbc66f3a11e1241379b4add95f4508fde1d0147f3369a628c"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetSAMLProviderForCallback",
+    "annotation": "authn-resolution",
+    "hash": "9574be4ef46995f00cbd0c30ed7f1c60494c49b3a4e3fb861cfd782d9eeaa9ca"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetSAMLTransactionByRelayState",
+    "annotation": "authn-resolution",
+    "hash": "40f527dedf0180dc12e2b810d4272fc6c84d5ff4c1ce5c8e925d67ceebf06100"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetSessionByID",
+    "annotation": "authn-resolution",
+    "hash": "1f1b4d1c6d96b6f69b5bb12367ec852686b7d8f9fa5448ad40e8979dbbf8e833"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
     "hash": "1741b6bd0bb2fbccb016346d83588d5aec8782b1ec6c433a3687105e508060ed"
@@ -814,6 +1012,12 @@
     "name": "GuardOIDCProviderForMint",
     "annotation": "authn-resolution",
     "hash": "437d333086a9a1dc36a8bf4a7cf9855f64a5796be6c3c5c1ef23d11431c13891"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GuardSAMLProviderForMint",
+    "annotation": "authn-resolution",
+    "hash": "f63c8d9aa594ec27d856ba069577ea081d901d23a07c520d914ff98f89e75348"
   },
   {
     "engine": "sqlite",
@@ -871,6 +1075,30 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertSAMLProvider",
+    "annotation": "authn-resolution",
+    "hash": "6beb1bcbcfcb3203a701542c08d23bb940d9e31993da1111cbb0fbcfd8152c65"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertSAMLReplay",
+    "annotation": "authn-resolution",
+    "hash": "97c86141f3e04f6c03da974b8a55c71b2e3d2114c048704fc9f4da1e43aa35e6"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertSAMLSPKey",
+    "annotation": "authn-resolution",
+    "hash": "3ad64731ff0901504ee1a2ca0811992bae114b6d3849443728d000012cb5db70"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertSAMLTransaction",
+    "annotation": "authn-resolution",
+    "hash": "ee54944d35b2811cc2223821ae83d11f6cdaa7416d094cf399bdaeeca8ac9cef"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertSession",
     "annotation": "authn-resolution",
     "hash": "782da14d7d18c3c19b5d7a2b4e0468dfffdf1a3429edde2b85b026e78c9fc195"
@@ -925,6 +1153,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListSAMLProviders",
+    "annotation": "authn-resolution",
+    "hash": "77b9bcf7312b4be8cee4a7786f88b899e8c858451c43f18e679faf1c47594564"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListSAMLSPKeys",
+    "annotation": "authn-resolution",
+    "hash": "77f8c3d9e1f516626df74b6bf5c1d4631a1cce7ea07009e6d879143d99c4c6c7"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListWebAuthnCredentialsForAccount",
     "annotation": "authn-resolution",
     "hash": "a61a59f9064c68633753d2abde2e3be0c92e8dceed8d942103954590e1448858"
@@ -940,6 +1180,24 @@
     "name": "LockPrincipalRow",
     "annotation": "authn-resolution",
     "hash": "3da3cb65ce3abc134c0d6e2914b5f9566a9e3a445da14b4e5bebf32088eb2a28"
+  },
+  {
+    "engine": "sqlite",
+    "name": "LockSAMLProviderForDelete",
+    "annotation": "authn-resolution",
+    "hash": "ded1aae6fc490e2dbf1bc5790536b50a3fabfb94e076a7d6db979b893a49282e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "MarkSAMLSPKeyRetiringCAS",
+    "annotation": "authn-resolution",
+    "hash": "13fd254838e1a82f2d75dd438b0c2f979f4c233c7e3e09191d7129aec5bb3d89"
+  },
+  {
+    "engine": "sqlite",
+    "name": "RebindSAMLExternalIdentityProvider",
+    "annotation": "authn-resolution",
+    "hash": "5e7e022bd30f720586e24fc548d35032553ac795430e1caab2335a93b3cfb635"
   },
   {
     "engine": "sqlite",
@@ -1006,5 +1264,11 @@
     "name": "UpdateRecoveryCodesCAS",
     "annotation": "authn-resolution",
     "hash": "c8d3cd4c31fef6bb52b9c001422cc2f3814afbe415f5dc637f86d1ca63e72d39"
+  },
+  {
+    "engine": "sqlite",
+    "name": "UpdateSAMLProviderCAS",
+    "annotation": "authn-resolution",
+    "hash": "d061f9058bee068f5994e147f82ab3b9c36661b4fbbd4f7b3ceb9b6217392904"
   }
 ]

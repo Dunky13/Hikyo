@@ -390,6 +390,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// passkey_removed are emitted before the emitter check.
 		runWebAuthnLifecycle(t, auth, ctx, "e2e-admin", password)
 
+		// The SAML lifecycle emits every registered SAML audit family through
+		// real provider configuration, failed login/reauth, refresh, and removal.
+		runSAMLAuditLifecycle(t, auth, boot.PrincipalID, password)
+
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
 			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")

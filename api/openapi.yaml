@@ -1287,6 +1287,112 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/saml/{provider}/start:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    post:
+      operationId: samlStart
+      tags: [auth]
+      summary: Begin an SP-initiated SAML transaction (login, link or reauth).
+      description: |
+        Mints the server-side request, RelayState and initiator binding before
+        returning the IdP HTTP-Redirect URL. `login` is anonymous; `link` and
+        `reauth` require and bind the acting human session. The initiator cookie
+        is delivered only as a Secure, HttpOnly, SameSite=None cookie scoped to
+        this provider's ACS path; it is never returned in JSON.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none, human-session]
+      x-wenv-min-revision: 1
+      security:
+        - {}
+        - wenvSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SamlStartRequest"
+      responses:
+        "200":
+          description: The signed or unsigned IdP HTTP-Redirect URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlStartResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/saml/{provider}/acs:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    post:
+      operationId: samlACS
+      tags: [auth]
+      summary: Complete an SP-initiated SAML transaction over HTTP-POST.
+      description: |
+        The only accepted response binding. The per-provider path, exact
+        Destination, both Issuer legs, RelayState, InResponseTo and initiator
+        binding must all resolve to the same live transaction before an
+        ordinary session can be minted, linked or reauthenticated.
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none, human-session]
+      x-wenv-min-revision: 1
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/SamlACSRequest"
+      responses:
+        "200":
+          description: The minted or rotated ordinary Wenv session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/saml/{provider}/metadata:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlug"
+    get:
+      operationId: samlMetadata
+      tags: [auth]
+      summary: Publish this provider's SAML SP metadata.
+      description: |
+        Documentation-class public material: entityID, this provider's ACS,
+        the active and retiring SP signing certificates, and the signed-request
+        policy. Served under pre-authentication admission controls.
+      security: []
+      x-wenv-class: unauthenticated
+      x-wenv-artifacts: [none]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: SAML 2.0 SP metadata XML.
+          content:
+            application/samlmetadata+xml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/identities:
     get:
       operationId: listIdentities
@@ -1867,6 +1973,343 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/saml-providers:
+    get:
+      operationId: listSamlProviders
+      tags: [instance]
+      summary: List configured SAML providers.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.list
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The configured SAML providers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlProviderList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-providers/{slug}:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlugPath"
+    get:
+      operationId: getSamlProvider
+      tags: [instance]
+      summary: Read one SAML provider.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.get
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlProvider"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: putSamlProvider
+      tags: [instance]
+      summary: Create or reconfigure a SAML provider from pinned metadata.
+      description: |
+        The configured entityID selects exactly one metadata descriptor and is
+        immutable after create. File and one-shot URL sources enter the same
+        diff-and-confirm ceremony;
+        certificate, endpoint and assurance-policy changes sweep this
+        provider's sessions. SAML never provisions accounts, so no JIT member
+        exists in this request schema.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.put
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SamlProviderInput"
+      responses:
+        "200":
+          description: Applied provider or metadata diff requiring explicit confirmation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlProviderMutationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: patchSamlProvider
+      tags: [instance]
+      summary: Partially update SAML provider policy or disable the provider.
+      description: |
+        Omitted members preserve their stored values. Metadata, entityID and
+        certificate changes cannot ride this path: they remain behind the
+        metadata diff-and-confirm ceremony. Disabling sweeps this provider's
+        sessions. This additive endpoint supports the locked `update` and
+        `disable` CLI spellings without requiring unreadable metadata input.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.patch
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SamlProviderPatch"
+      responses:
+        "200":
+          description: The updated provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlProvider"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteSamlProvider
+      tags: [instance]
+      summary: Remove a SAML provider.
+      description: Deletes every session authenticated through this provider.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.delete
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-providers/{slug}/refresh-metadata:
+    parameters:
+      - $ref: "#/components/parameters/ProviderSlugPath"
+    post:
+      operationId: refreshSamlProviderMetadata
+      tags: [instance]
+      summary: Refresh and explicitly confirm a SAML provider's metadata diff.
+      description: |
+        Performs one URL fetch for URL-backed providers. Any new endpoint,
+        assertion-signing certificate or metadata-signing fingerprint remains
+        refused until named in `confirmed_fingerprints` and committed through
+        this action. File-backed providers supply the replacement document.
+      x-wenv-class: instance
+      x-wenv-operation: saml-provider.refresh-metadata
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SamlMetadataRefreshRequest"
+      responses:
+        "200":
+          description: Applied provider or metadata diff requiring explicit confirmation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlProviderMutationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-sp-keys:
+    get:
+      operationId: listSamlSpKeys
+      tags: [instance]
+      summary: List SAML SP signing-key lifecycle state.
+      description: Returns fingerprints and public lifecycle metadata only; private key material never leaves the server.
+      x-wenv-class: instance
+      x-wenv-operation: saml-sp-key.list
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: Active and overlap-retiring SP keys.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlSpKeyList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-sp-keys/rotate:
+    post:
+      operationId: rotateSamlSpKey
+      tags: [instance]
+      summary: Rotate the active SAML SP signing key with an overlap window.
+      description: Atomically marks the old active key retiring and publishes a new active key; both certificates remain in SP metadata until explicit retirement.
+      x-wenv-class: instance
+      x-wenv-operation: saml-sp-key.rotate
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The newly active key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlSpKey"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-sp-keys/{fingerprint}:
+    parameters:
+      - name: fingerprint
+        in: path
+        required: true
+        description: Exact `sha256:<base64url>` public-key fingerprint returned by the list operation.
+        schema:
+          type: string
+    delete:
+      operationId: retireSamlSpKey
+      tags: [instance]
+      summary: Retire and erase an overlap-retiring SAML SP key.
+      description: Refuses the active key; rotate first so request-signing continuity is explicit.
+      x-wenv-class: instance
+      x-wenv-operation: saml-sp-key.retire
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Retired key erased and removed from SP metadata.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire:
+    parameters:
+      - name: fingerprint
+        in: path
+        required: true
+        description: Exact active-key fingerprint returned by the list operation.
+        schema:
+          type: string
+    post:
+      operationId: compromiseRetireSamlSpKey
+      tags: [instance]
+      summary: Immediately erase and replace a compromised active SAML SP key.
+      description: Atomically removes the named active key and mints its replacement without publishing an overlap window.
+      x-wenv-class: instance
+      x-wenv-operation: saml-sp-key.compromise-retire
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The newly active replacement key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SamlSpKey"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     wenvSession:
@@ -1911,7 +2354,7 @@ components:
       name: provider
       in: path
       required: true
-      description: OIDC provider slug.
+      description: Identity-provider slug.
       schema:
         type: string
         minLength: 1
@@ -1921,7 +2364,7 @@ components:
       name: slug
       in: path
       required: true
-      description: OIDC provider slug.
+      description: Identity-provider slug.
       schema:
         type: string
         minLength: 1
@@ -2114,6 +2557,7 @@ components:
         - loopback-handoff
         - device-code
         - oidc
+        - saml
         - webauthn
 
     EstablishCredentialRequest:
@@ -2345,7 +2789,9 @@ components:
 
     AuthMethod:
       type: string
-      description: OPEN enum — `oidc:<issuer>` values are instance-specific by construction.
+      description: |
+        OPEN enum — `oidc:<issuer>` and `saml:<entityID>` values are
+        instance-specific by construction.
       x-extensible-enum:
         - local-password
         - local-passkey
@@ -2628,12 +3074,14 @@ components:
     AuthMethodProvider:
       type: object
       additionalProperties: false
-      required: [slug, display_name]
+      required: [slug, display_name, kind]
       properties:
         slug:
           type: string
         display_name:
           type: string
+        kind:
+          $ref: "#/components/schemas/IdentityProviderKind"
 
     OidcStartRequest:
       type: object
@@ -2661,6 +3109,49 @@ components:
           type: string
           description: The IdP authorization URL to redirect the browser to.
 
+    SamlStartRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose:
+          type: string
+          enum: [login, link, reauth]
+        environment_id:
+          type: string
+          maxLength: 64
+          description: Required for reauth; the reveal-window scope.
+        proof:
+          type: string
+          maxLength: 1024
+          description: Required for link; the pre-existing account-security proof.
+
+    SamlStartResult:
+      type: object
+      additionalProperties: false
+      required: [redirect_url]
+      properties:
+        redirect_url:
+          type: string
+          format: uri
+          description: The IdP HTTP-Redirect URL carrying the AuthnRequest.
+
+    SamlACSRequest:
+      type: object
+      additionalProperties: false
+      required: [SAMLResponse, RelayState]
+      properties:
+        SAMLResponse:
+          type: string
+          minLength: 1
+          maxLength: 524288
+          description: Base64-encoded SAML Response; decoded XML is capped at 256 KiB.
+        RelayState:
+          type: string
+          minLength: 16
+          maxLength: 512
+          description: Server-minted opaque transaction handle, never a continuation URL.
+
     IdentityLinkRequest:
       type: object
       additionalProperties: false
@@ -2685,10 +3176,12 @@ components:
     ExternalIdentity:
       type: object
       additionalProperties: false
-      required: [id, issuer, subject, provider_id, created_at]
+      required: [id, kind, issuer, subject, provider_id, created_at]
       properties:
         id:
           $ref: "#/components/schemas/ID"
+        kind:
+          $ref: "#/components/schemas/IdentityProviderKind"
         issuer:
           type: string
         subject:
@@ -2774,6 +3267,329 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OidcProvider"
+
+    IdentityProviderKind:
+      type: string
+      description: Closed protocol discriminator in the byte-exact external-identity key.
+      enum: [oidc, saml]
+
+    SamlMetadataSource:
+      type: string
+      description: Closed source set; URL means one-shot admin-initiated fetch, never a poller.
+      enum: [file, url]
+
+    SamlProviderInput:
+      type: object
+      additionalProperties: false
+      description: |
+        SAML authentication configuration. Exactly one of `metadata_document`
+        and `metadata_url` must match `metadata_source`; the service enforces
+        that conditional before fetching or parsing. No JIT member exists:
+        SAML never provisions accounts.
+      required:
+        - display_name
+        - entity_id
+        - metadata_source
+        - allow_email_nameid
+        - force_sign_requests
+        - enabled
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        entity_id:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: |
+            Configured byte-exact IdP entityID used to select exactly one
+            EntityDescriptor from metadata; immutable after create.
+        metadata_source:
+          $ref: "#/components/schemas/SamlMetadataSource"
+        metadata_document:
+          type: [string, "null"]
+          maxLength: 262144
+          description: Raw IdP metadata XML for a file-backed configuration.
+        metadata_url:
+          type: [string, "null"]
+          format: uri
+          maxLength: 2048
+          description: One-shot WebPKI URL; redirects off-origin are refused.
+        confirmed_fingerprints:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: Fingerprints explicitly confirmed in the current ceremony.
+        confirmed_endpoints:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+          description: New endpoint URLs explicitly confirmed in the current ceremony.
+        assurance_policy:
+          type: [array, "null"]
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+          description: Accepted AuthnContextClassRef values; null means single-factor.
+        allow_email_nameid:
+          type: boolean
+          description: Explicit opt-in to opaque emailAddress NameID values; never email linking.
+        force_sign_requests:
+          type: boolean
+          description: Force signed AuthnRequests even when metadata does not demand them.
+        enabled:
+          type: boolean
+
+    SamlMetadataRefreshRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        metadata_document:
+          type: [string, "null"]
+          maxLength: 262144
+          description: Replacement XML for a file-backed provider; absent for URL-backed providers.
+        confirmed_fingerprints:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        confirmed_endpoints:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
+            maxLength: 2048
+
+    SamlProviderPatch:
+      type: object
+      additionalProperties: false
+      description: Omitted members preserve their stored values.
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        assurance_policy:
+          type: [array, "null"]
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2048
+        allow_email_nameid:
+          type: boolean
+        force_sign_requests:
+          type: boolean
+        enabled:
+          type: boolean
+
+    SamlProvider:
+      type: object
+      additionalProperties: false
+      required:
+        - slug
+        - display_name
+        - kind
+        - entity_id
+        - acs_url
+        - sso_redirect_url
+        - signing_certificate_fingerprints
+        - allow_email_nameid
+        - force_sign_requests
+        - metadata_source
+        - metadata_signed
+        - warnings
+        - enabled
+        - row_version
+        - created_at
+        - updated_at
+      properties:
+        slug:
+          type: string
+        display_name:
+          type: string
+        kind:
+          type: string
+          enum: [saml]
+        entity_id:
+          type: string
+          description: Byte-exact IdP entityID; immutable after create.
+        acs_url:
+          type: string
+          format: uri
+        sso_redirect_url:
+          type: string
+          format: uri
+        signing_certificate_fingerprints:
+          type: array
+          items:
+            type: string
+        assurance_policy:
+          type: [array, "null"]
+          items:
+            type: string
+        allow_email_nameid:
+          type: boolean
+        force_sign_requests:
+          type: boolean
+        metadata_source:
+          $ref: "#/components/schemas/SamlMetadataSource"
+        metadata_url:
+          type: [string, "null"]
+          format: uri
+        metadata_signed:
+          type: boolean
+        metadata_signing_fingerprint:
+          type: [string, "null"]
+        metadata_valid_until:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SamlProviderWarning"
+        enabled:
+          type: boolean
+        row_version:
+          type: integer
+          minimum: 1
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    SamlProviderWarning:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message, effective_at]
+      properties:
+        code:
+          type: string
+          enum:
+            - metadata_expires_soon
+            - metadata_expired
+            - signing_certificate_not_yet_valid
+            - signing_certificate_expired
+        severity:
+          type: string
+          enum: [warning, error]
+        message:
+          type: string
+          maxLength: 512
+        effective_at:
+          $ref: "#/components/schemas/Timestamp"
+        fingerprint:
+          type: string
+          description: Present only for certificate warnings.
+
+    SamlProviderList:
+      type: object
+      additionalProperties: false
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SamlProvider"
+
+    SamlSpKey:
+      type: object
+      additionalProperties: false
+      required: [fingerprint, state, created_at]
+      properties:
+        fingerprint:
+          type: string
+          description: URL-safe unpadded base64 SHA-256 fingerprint of SubjectPublicKeyInfo, prefixed by `sha256:`.
+        state:
+          type: string
+          enum: [active, retiring]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    SamlSpKeyList:
+      type: object
+      additionalProperties: false
+      required: [keys]
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/SamlSpKey"
+
+    SamlMetadataDiff:
+      type: object
+      additionalProperties: false
+      required:
+        - endpoints_added
+        - endpoints_removed
+        - certs_added_fps
+        - certs_removed_fps
+      properties:
+        endpoints_added:
+          type: array
+          items: { type: string }
+        endpoints_removed:
+          type: array
+          items: { type: string }
+        certs_added_fps:
+          type: array
+          items: { type: string }
+        certs_removed_fps:
+          type: array
+          items: { type: string }
+        valid_until:
+          oneOf:
+            - $ref: "#/components/schemas/Timestamp"
+            - type: "null"
+
+    SamlProviderMutationResult:
+      type: object
+      additionalProperties: false
+      description: |
+        `applied=false` is the first leg of the metadata ceremony: no trust
+        state changed, `diff` is displayed, and every value in
+        `required_fingerprints` and `required_endpoints` must be explicitly
+        supplied on a rerun.
+      required: [applied, diff, required_fingerprints, required_endpoints]
+      properties:
+        applied:
+          type: boolean
+        provider:
+          oneOf:
+            - $ref: "#/components/schemas/SamlProvider"
+            - type: "null"
+        diff:
+          $ref: "#/components/schemas/SamlMetadataDiff"
+        required_fingerprints:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        required_endpoints:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uri
 
     WebauthnOptions:
       type: object
