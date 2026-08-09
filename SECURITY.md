@@ -57,5 +57,11 @@ leaves the GHSA as the canonical reference.
 
 ## Supported versions
 
-Wenv supports exactly the version described in [SUPPORT.md](./SUPPORT.md).
-Prereleases are never supported.
+| Version | Supported |
+| --- | --- |
+| Latest patch release of the latest minor | Yes |
+| All older stable releases | No |
+| Prereleases | No |
+
+The table is the concise form of the complete [support policy](./SUPPORT.md).
+There are no backports or overlapping support windows.

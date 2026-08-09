@@ -10,6 +10,10 @@ export default defineConfig({
       description: 'Fully open-source secrets and configuration across environments.',
       favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
+      components: {
+        ThemeProvider: './src/components/ThemeProvider.astro',
+        ThemeSelect: './src/components/ThemeSelect.astro',
+      },
       defaultLocale: 'root',
       editLink: {
         baseUrl: 'https://github.com/Dunky13/wenv/edit/main/',

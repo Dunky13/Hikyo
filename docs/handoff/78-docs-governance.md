@@ -1,21 +1,23 @@
 # Issue #78 handoff — docs site and governance artifacts
 
-## Outcome
+## Implemented outcome
 
-Issue #78 implements MVP acceptance criteria O4–O6:
+This branch implements the repository-side work for MVP acceptance criteria
+O4–O6:
 
 - Starlight generates a GitHub Pages site at `https://dunky13.github.io/wenv/`.
 - Root policy files remain canonical; `docs/site/scripts/prepare-content.mjs`
   derives site pages at build time.
 - Release CI fails when locked security, governance, licensing, or support text is
   missing from source or built HTML.
-- Release CI checks the live `security.txt`, security/support pages, and the MX
-  route for `security@developwent.io`.
+- Release CI checks the live `security.txt`, security/support pages, and the
+  independently hosted MX route for `security@developwent.io`.
 
 ## Policy artifacts
 
 - `SECURITY.md`: PVR primary, `security@developwent.io` fallback, 7-day
-  acknowledgement, 14/30/next-release fix targets, and 90-day embargo rules.
+  acknowledgement, 14/30/next-release fix targets, 90-day embargo rules, and
+  the required supported-versions table.
 - `GOVERNANCE.md`: honest BDFL authority, 12-month continuity threshold, locked
   amendment procedure, and full no-`/ee` pledge.
 - `SUPPORT.md`: exactly one supported version, same-day previous-minor EOL, no
@@ -36,6 +38,23 @@ The GitHub repository settings were applied while implementing this ticket:
 The first live deployment starts only after this branch reaches `main`; the
 release live gate intentionally remains red until that deployment exists.
 
+The repository is still owned by the personal `Dunky13` account. Branch and tag
+protections are active, but organization-wide 2FA cannot be enforced until the
+repository is transferred to a dedicated organization. `GOVERNANCE.md` states
+that limitation instead of claiming a control that does not exist.
+
+## External completion gates
+
+- Send a quarterly notification test to `security@developwent.io` and record
+  successful receipt. CI proves the independently hosted domain has an MX
+  route; it cannot prove mailbox acceptance or monitoring end to end.
+- Choose a dedicated GitHub organization and transfer the repository before
+  claiming organization-wide 2FA enforcement.
+- Merge this branch and verify the first Pages deployment; the public URL is
+  currently HTTP 404.
+- Complete the blocking Claude Opus 5 review. The configured Claude CLI hit its
+  weekly limit and reports a reset at 2026-08-12 11:00 Europe/Amsterdam.
+
 ## Validation
 
 - Go: build, vet, and 399 tests passed across 30 packages.
@@ -44,7 +63,9 @@ release live gate intentionally remains red until that deployment exists.
   built; O4–O6 source and served-site gates passed.
 - CI: ShellCheck and actionlint passed; all release fixture scripts passed.
 - Browser: Chromium at 1440×900 and 390×844; no console errors or horizontal
-  overflow; mobile hero actions are exactly 44px high.
+  overflow; mobile hero actions are exactly 44px high. The final theme control
+  defaults to dark, persists light selection, and its social/theme targets are
+  exactly 44px high.
 
 ## Deployment verification after merge
 

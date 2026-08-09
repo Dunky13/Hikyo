@@ -44,8 +44,10 @@ may be amended only by reopening its originating ticket, running the same
 adversarial cross-model review that locked it, and recording the amendment in
 the ADR itself. Amendments to this governance document follow that procedure.
 
-Repository branch and tag protections and organization 2FA are enforced,
-auditable settings, not aspirations.
+Repository branch and tag protections are enforced and auditable. Organization-wide
+2FA enforcement remains pending until the repository is transferred from its current
+personal owner to a dedicated organization. Wenv does not claim that control is
+active before the transfer is complete and verified.
 
 ## Fully-open pledge
 

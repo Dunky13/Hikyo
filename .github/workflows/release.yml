@@ -85,12 +85,7 @@ jobs:
 
       - name: Assert O4-O6 docs and governance release gates
         run: |
-          corepack enable
-          pnpm --dir docs/site install --frozen-lockfile
-          pnpm --dir docs/site peers check
-          pnpm --dir docs/site run verify
-          ./scripts/ci/check-oss-policy_test.sh
-          ./scripts/ci/check-docs-live_test.sh
+          ./scripts/ci/verify-docs.sh
           ./scripts/ci/check-docs-live.sh \
             https://dunky13.github.io/wenv security@developwent.io
 

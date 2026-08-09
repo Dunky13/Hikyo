@@ -145,21 +145,8 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
-      - name: Enable pnpm
-        run: corepack enable
-      - name: Install docs dependencies (frozen lockfile)
-        working-directory: docs/site
-        run: pnpm install --frozen-lockfile
-      - name: Verify docs dependency peers
-        working-directory: docs/site
-        run: pnpm peers check
       - name: Typecheck, build, and assert O4-O6 policy content
-        working-directory: docs/site
-        run: pnpm run verify
-      - name: Policy gate refusal fixtures
-        run: |
-          ./scripts/ci/check-oss-policy_test.sh
-          ./scripts/ci/check-docs-live_test.sh
+        run: ./scripts/ci/verify-docs.sh
 
   test:
     runs-on: ubuntu-latest

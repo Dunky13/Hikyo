@@ -8,6 +8,7 @@ on:
       - "docs/**"
       - "scripts/ci/check-docs-live*"
       - "scripts/ci/check-oss-policy*"
+      - "scripts/ci/verify-docs.sh"
       - "CONTRIBUTING.md"
       - "GOVERNANCE.md"
       - "LICENSE"
@@ -34,21 +35,8 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
-      - name: Enable pnpm
-        run: corepack enable
-      - name: Install (frozen lockfile)
-        working-directory: docs/site
-        run: pnpm install --frozen-lockfile
-      - name: Verify dependency peers
-        working-directory: docs/site
-        run: pnpm peers check
       - name: Typecheck, build, and assert O4-O6 policy content
-        working-directory: docs/site
-        run: pnpm run verify
-      - name: Policy gate refusal fixtures
-        run: |
-          ./scripts/ci/check-oss-policy_test.sh
-          ./scripts/ci/check-docs-live_test.sh
+        run: ./scripts/ci/verify-docs.sh
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
       - name: Upload Pages artifact

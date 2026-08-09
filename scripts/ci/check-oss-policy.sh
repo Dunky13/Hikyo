@@ -70,6 +70,12 @@ require_text "$repo_root/SECURITY.md" 'The clock never waits on'
 require_text "$repo_root/SECURITY.md" 'Active exploitation'
 require_text "$repo_root/SECURITY.md" 'it never extends the embargo.'
 require_text "$repo_root/SECURITY.md" 'beyond 90 days requires mutual agreement'
+require_text "$repo_root/SECURITY.md" '| Latest patch release of the latest minor | Yes |'
+require_text "$repo_root/SECURITY.md" '| All older stable releases | No |'
+require_text "$repo_root/SECURITY.md" '| Prereleases | No |'
+require_text "$repo_root/GOVERNANCE.md" 'Organization-wide'
+require_text "$repo_root/GOVERNANCE.md" '2FA enforcement remains pending'
+reject_text "$repo_root/GOVERNANCE.md" 'organization 2FA are enforced'
 
 security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
@@ -101,6 +107,8 @@ cmp "$security_txt" "$site_root/.well-known/security.txt" >/dev/null || {
 
 require_text "$site_root/security/index.html" 'The default embargo is 90 days from the report itself.'
 require_text "$site_root/security/index.html" 'security@developwent.io'
+require_text "$site_root/security/index.html" 'Latest patch release of the latest minor'
+require_text "$site_root/security/index.html" 'All older stable releases'
 require_text "$site_root/support/index.html" 'Wenv supports exactly one version'
 require_text "$site_root/support/index.html" 'end-of-life on the same day a new minor is released'
 require_text "$site_root/support/index.html" 'Wenv does not maintain backport branches.'

@@ -125,6 +125,14 @@ button,
   border-radius: 4px;
 }
 
+.social-icons a {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
