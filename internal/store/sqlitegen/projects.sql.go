@@ -34,3 +34,120 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) er
 	)
 	return err
 }
+
+const deleteProject = `-- name: DeleteProject :execrows
+DELETE FROM projects WHERE org_id = ? AND id = ?
+`
+
+type DeleteProjectParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteProject, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const getProject = `-- name: GetProject :one
+SELECT id, org_id, name, created_at FROM projects
+WHERE org_id = ? AND id = ?
+`
+
+type GetProjectParams struct {
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, getProject, arg.OrgID, arg.ID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT id, org_id, name, created_at FROM projects
+WHERE org_id = ? ORDER BY name
+`
+
+func (q *Queries) ListProjects(ctx context.Context, orgID string) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, listProjects, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockProject = `-- name: LockProject :one
+SELECT id FROM projects WHERE org_id = ? AND id = ?
+`
+
+type LockProjectParams struct {
+	OrgID string
+	ID    string
+}
+
+// LockProject takes the project row for the length of the transaction, so
+// every environment-set mutation on one project serializes. It is what makes
+// the environment cap and the append position race-free: two creates at cap-1
+// would otherwise both read the same count and both insert.
+//
+// On sqlite this statement is a plain read: the write pool is a single
+// connection opened with _txlock=immediate, so write transactions already
+// serialize instance-wide and there is nothing finer to take. The query exists
+// on both engines because the store method must, and because the cross-engine
+// check requires the same query names.
+func (q *Queries) LockProject(ctx context.Context, arg LockProjectParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockProject, arg.OrgID, arg.ID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const renameProject = `-- name: RenameProject :execrows
+UPDATE projects SET name = ?
+WHERE org_id = ? AND id = ?
+`
+
+type RenameProjectParams struct {
+	Name  string
+	OrgID string
+	ID    string
+}
+
+func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameProject, arg.Name, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

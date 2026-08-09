@@ -2,6 +2,7 @@ package isolation
 
 import (
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -162,4 +163,52 @@ func chiPath(p string) string {
 		panic(fmt.Sprintf("malformed path template %q", p))
 	}
 	return p
+}
+
+// TestTenantRoutesDeclareForbiddenOnlyForMFA is the registry-aware half of the
+// tenant-refusal contract, and it is an IFF in both directions.
+//
+// Grant refusal on a tenant-scoped operation is the uniform 404 — authorize()
+// returns ErrNotFound there, so a declared 403 would either be dead or a leak.
+// The one exception is the assurance leg: a caller who HOLDS an MFA-mandatory
+// capability but presents a single-factor session is refused with
+// ErrUnauthorized, deliberately, because they can already reach the object and
+// hiding it would tell a capability holder it is missing. So:
+//
+//   - MFA-mandatory tenant operation  => 403 MUST be declared (the code can
+//     produce it, and an undeclared status is a contract the server breaks).
+//   - every other tenant operation    => 403 MUST NOT be declared (unreachable,
+//     and declaring it invites a handler to start answering it).
+func TestTenantRoutesDeclareForbiddenOnlyForMFA(t *testing.T) {
+	ops, err := api.Operations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, op := range ops {
+		if op.Class != "tenant" || op.AuthzOp == "" {
+			continue
+		}
+		item := doc.Paths.Find(op.Path)
+		if item == nil {
+			t.Fatalf("%s: contract path %q vanished", id, op.Path)
+		}
+		operation := item.GetOperation(op.Method)
+		if operation == nil || operation.Responses == nil {
+			t.Fatalf("%s: no operation at %s %s", id, op.Method, op.Path)
+		}
+		declared := operation.Responses.Status(http.StatusForbidden) != nil
+		wanted := authz.FormulaDemandsMFA(authz.Operation(op.AuthzOp))
+		switch {
+		case wanted && !declared:
+			t.Errorf("%s is tenant-class with an MFA-mandatory formula (%v) but declares no 403 — the assurance refusal it can return is undeclared",
+				id, op.Formula)
+		case !wanted && declared:
+			t.Errorf("%s (formula %v) is tenant-class and not MFA-mandatory but declares a 403 — grant refusal there is the uniform 404, so the status is unreachable or a leak",
+				id, op.Formula)
+		}
+	}
 }

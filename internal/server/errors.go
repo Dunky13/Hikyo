@@ -3,12 +3,14 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/service"
 )
 
 // Uniform error rendering.
@@ -25,11 +27,22 @@ import (
 // and withholding it would make every malformed request a guessing game for
 // no security gain.
 
+// limitExceededMessage is the one fixed message that states a bound. The ops
+// spec requires the environment cap to be a NAMED refusal, and a body that may
+// carry nothing derived from the request can still carry a constant — but the
+// number is built from the constant the service enforces, not retyped here. Two
+// hand-written 50s is one of them going stale the day the cap moves.
+var limitExceededMessage = fmt.Sprintf(
+	"a structural bound was reached: a project holds at most %d environments",
+	service.MaxEnvironmentsPerProject)
+
 var messages = map[apigen.ErrorCode]string{
 	apigen.ErrorCodeBadRequest:      "the request does not satisfy the API contract",
 	apigen.ErrorCodeUnauthenticated: "authentication required",
 	apigen.ErrorCodeForbidden:       "not permitted",
 	apigen.ErrorCodeNotFound:        "not found",
+	apigen.ErrorCodeConflict:        "the current state of this resource refuses the request",
+	apigen.ErrorCodeLimitExceeded:   limitExceededMessage,
 	apigen.ErrorCodeTooManyRequests: "too many requests",
 	apigen.ErrorCodeInternal:        "internal error",
 }
@@ -39,6 +52,8 @@ var statuses = map[apigen.ErrorCode]int{
 	apigen.ErrorCodeUnauthenticated: http.StatusUnauthorized,
 	apigen.ErrorCodeForbidden:       http.StatusForbidden,
 	apigen.ErrorCodeNotFound:        http.StatusNotFound,
+	apigen.ErrorCodeConflict:        http.StatusConflict,
+	apigen.ErrorCodeLimitExceeded:   http.StatusConflict,
 	apigen.ErrorCodeTooManyRequests: http.StatusTooManyRequests,
 	apigen.ErrorCodeInternal:        http.StatusInternalServerError,
 }
@@ -77,6 +92,9 @@ func writeError(w http.ResponseWriter, code apigen.ErrorCode, detail string) {
 //     whose nonexistence could be mimicked, so the contract is grant refusal.
 //   - ErrOverloaded is the same 429 on every pre-auth path.
 //   - Anything else is a fault: 500, with the cause logged and never returned.
+//   - ErrConflict and ErrLimitExceeded are decided AFTER authorization
+//     succeeded, so they disclose nothing a caller could not already read.
+//   - ErrInvalid is decided before or independently of tenant resolution.
 func classify(err error) apigen.ErrorCode {
 	switch {
 	case errors.Is(err, domain.ErrUnauthenticated):
@@ -85,6 +103,12 @@ func classify(err error) apigen.ErrorCode {
 		return apigen.ErrorCodeNotFound
 	case errors.Is(err, domain.ErrUnauthorized):
 		return apigen.ErrorCodeForbidden
+	case errors.Is(err, domain.ErrLimitExceeded):
+		return apigen.ErrorCodeLimitExceeded
+	case errors.Is(err, domain.ErrConflict):
+		return apigen.ErrorCodeConflict
+	case errors.Is(err, domain.ErrInvalid):
+		return apigen.ErrorCodeBadRequest
 	case errors.Is(err, admission.ErrOverloaded):
 		return apigen.ErrorCodeTooManyRequests
 	default:

@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	sqlite "modernc.org/sqlite"
+	sqlitelib "modernc.org/sqlite/lib"
 
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/store/pggen"
@@ -45,14 +48,18 @@ type sqliteReadRepos struct{ r sqliteRepos }
 
 func (s sqliteReadRepos) Orgs() OrgReader                 { return s.r.Orgs() }
 func (s sqliteReadRepos) Keys() KeyReader                 { return s.r.Keys() }
+func (s sqliteReadRepos) Projects() ProjectReader         { return s.r.Projects() }
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
+func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
 func (s sqliteReadRepos) Audit() AuditReader              { return s.r.Audit() }
 
 type pgReadRepos struct{ r pgRepos }
 
 func (p pgReadRepos) Orgs() OrgReader                 { return p.r.Orgs() }
 func (p pgReadRepos) Keys() KeyReader                 { return p.r.Keys() }
+func (p pgReadRepos) Projects() ProjectReader         { return p.r.Projects() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
+func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
 func (p pgReadRepos) Audit() AuditReader              { return p.r.Audit() }
 
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
@@ -78,6 +85,60 @@ func parseTime(kind, id, raw string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
+// constraint maps an engine's integrity-constraint failure onto ErrConflict,
+// in exactly one place per engine.
+//
+// The classes this surface can hit are a duplicate name among live siblings and
+// a parent still referenced by children (v1 deletes never cascade). Both are
+// the same answer to the caller — "the current state refuses this" — and the
+// fixed-message-per-code rule means the response could not distinguish them
+// anyway.
+//
+// Detection is by TYPED extended code on both engines, never by matching the
+// driver's message text: a message is a locale- and version-dependent string,
+// and a caller-visible outcome that hinges on one is a silent behaviour change
+// waiting for a dependency bump. The named set is also deliberately narrow —
+// NOT NULL is absent from it, because a NULL reaching a NOT NULL column is a
+// defect in this package, not a state the caller can fix, and mapping it to
+// 409 is how a storage bug becomes a conflict nobody investigates.
+func constraint(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505", "23503", "23514": // unique_violation, foreign_key_violation, check_violation
+			return fmt.Errorf("%w: %s", ErrConflict, pgErr.ConstraintName)
+		}
+		return err
+	}
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		switch se.Code() {
+		case sqlitelib.SQLITE_CONSTRAINT_UNIQUE,
+			sqlitelib.SQLITE_CONSTRAINT_PRIMARYKEY,
+			sqlitelib.SQLITE_CONSTRAINT_FOREIGNKEY,
+			sqlitelib.SQLITE_CONSTRAINT_CHECK:
+			return fmt.Errorf("%w: sqlite constraint %d", ErrConflict, se.Code())
+		}
+	}
+	return err
+}
+
+// affected turns an :execrows result into the canonical outcome: zero rows
+// touched on a chain-addressed mutation means the row is not there or not
+// reachable, which are the same answer by design.
+func affected(n int64, err error) error {
+	if err != nil {
+		return constraint(err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // --- sqlite ---
 
 type sqliteRepos struct {
@@ -91,6 +152,9 @@ func (r sqliteRepos) Projects() ProjectRepo {
 }
 func (r sqliteRepos) Environments() EnvironmentRepo {
 	return sqliteEnvs{q: sqlitegen.New(r.db), tok: r.tok}
+}
+func (r sqliteRepos) Folders() FolderRepo {
+	return sqliteFolders{q: sqlitegen.New(r.db), tok: r.tok}
 }
 
 type sqliteOrgs struct {
@@ -109,20 +173,21 @@ func (o sqliteOrgs) Create(ctx context.Context, p authz.Proof, org Org) error {
 	if org.Active {
 		active = 1
 	}
-	return o.q.CreateOrg(ctx, sqlitegen.CreateOrgParams{
+	return constraint(o.q.CreateOrg(ctx, sqlitegen.CreateOrgParams{
 		ID:        org.ID,
 		Name:      org.Name,
 		Active:    active,
 		Metadata:  string(org.Metadata),
 		CreatedAt: CanonTime(org.CreatedAt).Format(timeFormat),
-	})
+	}))
 }
 
-func (o sqliteOrgs) Get(ctx context.Context, p authz.Proof, id string) (Org, error) {
-	if _, err := authz.Verify(p, authz.StoreOrgsGet, o.tok); err != nil {
+func (o sqliteOrgs) Get(ctx context.Context, p authz.Proof) (Org, error) {
+	chain, err := authz.Verify(p, authz.StoreOrgsGet, o.tok)
+	if err != nil {
 		return Org{}, err
 	}
-	row, err := o.q.GetOrg(ctx, id)
+	row, err := o.q.GetOrg(ctx, string(chain.Org)) // chain column: proof-bound
 	if errors.Is(err, sql.ErrNoRows) {
 		return Org{}, ErrNotFound
 	}
@@ -158,6 +223,25 @@ func (o sqliteOrgs) Count(ctx context.Context, p authz.Proof) (int64, error) {
 	return o.q.CountOrgs(ctx)
 }
 
+func (o sqliteOrgs) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsRename, o.tok)
+	if err != nil {
+		return err
+	}
+	return affected(o.q.RenameOrg(ctx, sqlitegen.RenameOrgParams{
+		Name: name,
+		ID:   string(chain.Org), // chain column: proof-bound
+	}))
+}
+
+func (o sqliteOrgs) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsDelete, o.tok)
+	if err != nil {
+		return err
+	}
+	return affected(o.q.DeleteOrg(ctx, string(chain.Org)))
+}
+
 func orgFromSQLite(row sqlitegen.Org) (Org, error) {
 	created, err := parseTime("org", row.ID, row.CreatedAt)
 	if err != nil {
@@ -191,12 +275,96 @@ func (r sqliteProjects) Create(ctx context.Context, p authz.Proof, proj NewProje
 	if err != nil {
 		return err
 	}
-	return r.q.CreateProject(ctx, sqlitegen.CreateProjectParams{
+	return constraint(r.q.CreateProject(ctx, sqlitegen.CreateProjectParams{
 		ID:        proj.ID,
 		OrgID:     string(chain.Org), // chain column: proof-bound, never caller input
 		Name:      proj.Name,
 		CreatedAt: CanonTime(proj.CreatedAt).Format(timeFormat),
+	}))
+}
+
+func (r sqliteProjects) Get(ctx context.Context, p authz.Proof) (Project, error) {
+	chain, err := authz.Verify(p, authz.StoreProjectsGet, r.tok)
+	if err != nil {
+		return Project{}, err
+	}
+	row, err := r.q.GetProject(ctx, sqlitegen.GetProjectParams{
+		OrgID: string(chain.Org),
+		ID:    string(chain.Project),
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
+	if err != nil {
+		return Project{}, err
+	}
+	return projectFromSQLite(row)
+}
+
+func (r sqliteProjects) List(ctx context.Context, p authz.Proof) ([]Project, error) {
+	chain, err := authz.Verify(p, authz.StoreProjectsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListProjects(ctx, string(chain.Org))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Project, 0, len(rows))
+	for _, row := range rows {
+		proj, err := projectFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, proj)
+	}
+	return out, nil
+}
+
+func (r sqliteProjects) Lock(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsLock, r.tok)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.LockProject(ctx, sqlitegen.LockProjectParams{
+		OrgID: string(chain.Org),
+		ID:    string(chain.Project),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (r sqliteProjects) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsRename, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.RenameProject(ctx, sqlitegen.RenameProjectParams{
+		Name:  name,
+		OrgID: string(chain.Org),
+		ID:    string(chain.Project),
+	}))
+}
+
+func (r sqliteProjects) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteProject(ctx, sqlitegen.DeleteProjectParams{
+		OrgID: string(chain.Org),
+		ID:    string(chain.Project),
+	}))
+}
+
+func projectFromSQLite(row sqlitegen.Project) (Project, error) {
+	created, err := parseTime("project", row.ID, row.CreatedAt)
+	if err != nil {
+		return Project{}, err
+	}
+	return Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created}, nil
 }
 
 type sqliteEnvs struct {
@@ -209,14 +377,15 @@ func (r sqliteEnvs) Create(ctx context.Context, p authz.Proof, env NewEnvironmen
 	if err != nil {
 		return err
 	}
-	return r.q.CreateEnvironment(ctx, sqlitegen.CreateEnvironmentParams{
-		ID:        env.ID,
-		OrgID:     string(chain.Org),     // chain column: proof-bound
-		ProjectID: string(chain.Project), // chain column: proof-bound
-		Name:      env.Name,
-		Note:      env.Note,
-		CreatedAt: CanonTime(env.CreatedAt).Format(timeFormat),
-	})
+	return constraint(r.q.CreateEnvironment(ctx, sqlitegen.CreateEnvironmentParams{
+		ID:           env.ID,
+		OrgID:        string(chain.Org),     // chain column: proof-bound
+		ProjectID:    string(chain.Project), // chain column: proof-bound
+		Name:         env.Name,
+		Note:         env.Note,
+		DisplayOrder: env.DisplayOrder,
+		CreatedAt:    CanonTime(env.CreatedAt).Format(timeFormat),
+	}))
 }
 
 func (r sqliteEnvs) Get(ctx context.Context, p authz.Proof) (Environment, error) {
@@ -241,8 +410,56 @@ func (r sqliteEnvs) Get(ctx context.Context, p authz.Proof) (Environment, error)
 	}
 	return Environment{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
-		Name: row.Name, Note: row.Note, CreatedAt: created,
+		Name: row.Name, Note: row.Note, DisplayOrder: row.DisplayOrder, CreatedAt: created,
 	}, nil
+}
+
+func (r sqliteEnvs) List(ctx context.Context, p authz.Proof) ([]Environment, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListEnvironments(ctx, sqlitegen.ListEnvironmentsParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Environment, 0, len(rows))
+	for _, row := range rows {
+		created, err := parseTime("environment", row.ID, row.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Environment{
+			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+			Name: row.Name, Note: row.Note, DisplayOrder: row.DisplayOrder, CreatedAt: created,
+		})
+	}
+	return out, nil
+}
+
+func (r sqliteEnvs) Count(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsCount, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountEnvironments(ctx, sqlitegen.CountEnvironmentsParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+}
+
+func (r sqliteEnvs) NextOrder(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsNextOrder, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.NextEnvironmentOrder(ctx, sqlitegen.NextEnvironmentOrderParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
 }
 
 func (r sqliteEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) error {
@@ -250,19 +467,144 @@ func (r sqliteEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) 
 	if err != nil {
 		return err
 	}
-	n, err := r.q.UpdateEnvironmentNote(ctx, sqlitegen.UpdateEnvironmentNoteParams{
+	return affected(r.q.UpdateEnvironmentNote(ctx, sqlitegen.UpdateEnvironmentNoteParams{
 		Note:      note,
 		OrgID:     string(chain.Org),
 		ProjectID: string(chain.Project),
 		ID:        string(chain.Env),
-	})
+	}))
+}
+
+func (r sqliteEnvs) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsRename, r.tok)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return ErrNotFound
+	return affected(r.q.RenameEnvironment(ctx, sqlitegen.RenameEnvironmentParams{
+		Name:      name,
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		ID:        string(chain.Env),
+	}))
+}
+
+func (r sqliteEnvs) SetOrder(ctx context.Context, p authz.Proof, id string, order int64) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsSetOrder, r.tok)
+	if err != nil {
+		return err
 	}
-	return nil
+	return affected(r.q.SetEnvironmentOrder(ctx, sqlitegen.SetEnvironmentOrderParams{
+		DisplayOrder: order,
+		OrgID:        string(chain.Org),
+		ProjectID:    string(chain.Project),
+		ID:           id,
+	}))
+}
+
+func (r sqliteEnvs) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteEnvironment(ctx, sqlitegen.DeleteEnvironmentParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		ID:        string(chain.Env),
+	}))
+}
+
+type sqliteFolders struct {
+	q   *sqlitegen.Queries
+	tok *authz.TxToken
+}
+
+func (r sqliteFolders) Create(ctx context.Context, p authz.Proof, folder NewFolder) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersCreate, r.tok)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.CreateFolder(ctx, sqlitegen.CreateFolderParams{
+		ID:        folder.ID,
+		OrgID:     string(chain.Org),     // chain column: proof-bound
+		ProjectID: string(chain.Project), // chain column: proof-bound
+		Path:      folder.Path,
+		CreatedAt: CanonTime(folder.CreatedAt).Format(timeFormat),
+	}))
+}
+
+func (r sqliteFolders) Get(ctx context.Context, p authz.Proof, id string) (Folder, error) {
+	chain, err := authz.Verify(p, authz.StoreFoldersGet, r.tok)
+	if err != nil {
+		return Folder{}, err
+	}
+	row, err := r.q.GetFolder(ctx, sqlitegen.GetFolderParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		ID:        id,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Folder{}, ErrNotFound
+	}
+	if err != nil {
+		return Folder{}, err
+	}
+	return folderFromSQLite(row)
+}
+
+func (r sqliteFolders) List(ctx context.Context, p authz.Proof) ([]Folder, error) {
+	chain, err := authz.Verify(p, authz.StoreFoldersList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListFolders(ctx, sqlitegen.ListFoldersParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Folder, 0, len(rows))
+	for _, row := range rows {
+		folder, err := folderFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, folder)
+	}
+	return out, nil
+}
+
+func (r sqliteFolders) Rename(ctx context.Context, p authz.Proof, id, path string) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersRename, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.RenameFolder(ctx, sqlitegen.RenameFolderParams{
+		Path:      path,
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		ID:        id,
+	}))
+}
+
+func (r sqliteFolders) Delete(ctx context.Context, p authz.Proof, id string) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteFolder(ctx, sqlitegen.DeleteFolderParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		ID:        id,
+	}))
+}
+
+func folderFromSQLite(row sqlitegen.Folder) (Folder, error) {
+	created, err := parseTime("folder", row.ID, row.CreatedAt)
+	if err != nil {
+		return Folder{}, err
+	}
+	return Folder{ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID, Path: row.Path, CreatedAt: created}, nil
 }
 
 // --- postgres ---
@@ -275,6 +617,7 @@ type pgRepos struct {
 func (r pgRepos) Orgs() OrgRepo                 { return pgOrgs{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Projects() ProjectRepo         { return pgProjects{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Environments() EnvironmentRepo { return pgEnvs{q: pggen.New(r.db), tok: r.tok} }
+func (r pgRepos) Folders() FolderRepo           { return pgFolders{q: pggen.New(r.db), tok: r.tok} }
 
 type pgOrgs struct {
 	q   *pggen.Queries
@@ -288,20 +631,21 @@ func (o pgOrgs) Create(ctx context.Context, p authz.Proof, org Org) error {
 	if err := validMetadata(org.Metadata); err != nil {
 		return err
 	}
-	return o.q.CreateOrg(ctx, pggen.CreateOrgParams{
+	return constraint(o.q.CreateOrg(ctx, pggen.CreateOrgParams{
 		ID:        org.ID,
 		Name:      org.Name,
 		Active:    org.Active,
 		Metadata:  string(org.Metadata),
 		CreatedAt: pgtype.Timestamptz{Time: CanonTime(org.CreatedAt), Valid: true},
-	})
+	}))
 }
 
-func (o pgOrgs) Get(ctx context.Context, p authz.Proof, id string) (Org, error) {
-	if _, err := authz.Verify(p, authz.StoreOrgsGet, o.tok); err != nil {
+func (o pgOrgs) Get(ctx context.Context, p authz.Proof) (Org, error) {
+	chain, err := authz.Verify(p, authz.StoreOrgsGet, o.tok)
+	if err != nil {
 		return Org{}, err
 	}
-	row, err := o.q.GetOrg(ctx, id)
+	row, err := o.q.GetOrg(ctx, string(chain.Org)) // chain column: proof-bound
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Org{}, ErrNotFound
 	}
@@ -337,6 +681,25 @@ func (o pgOrgs) Count(ctx context.Context, p authz.Proof) (int64, error) {
 	return o.q.CountOrgs(ctx)
 }
 
+func (o pgOrgs) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsRename, o.tok)
+	if err != nil {
+		return err
+	}
+	return affected(o.q.RenameOrg(ctx, pggen.RenameOrgParams{
+		Name:       name,
+		ChainOrgID: string(chain.Org), // chain column: proof-bound
+	}))
+}
+
+func (o pgOrgs) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsDelete, o.tok)
+	if err != nil {
+		return err
+	}
+	return affected(o.q.DeleteOrg(ctx, string(chain.Org)))
+}
+
 func orgFromPG(row pggen.Org) (Org, error) {
 	if !row.CreatedAt.Valid {
 		return Org{}, fmt.Errorf("store: org %s: null created_at", row.ID)
@@ -364,12 +727,95 @@ func (r pgProjects) Create(ctx context.Context, p authz.Proof, proj NewProject) 
 	if err != nil {
 		return err
 	}
-	return r.q.CreateProject(ctx, pggen.CreateProjectParams{
+	return constraint(r.q.CreateProject(ctx, pggen.CreateProjectParams{
 		ID:         proj.ID,
 		ChainOrgID: string(chain.Org), // chain column: proof-bound, never caller input
 		Name:       proj.Name,
 		CreatedAt:  pgtype.Timestamptz{Time: CanonTime(proj.CreatedAt), Valid: true},
+	}))
+}
+
+func (r pgProjects) Get(ctx context.Context, p authz.Proof) (Project, error) {
+	chain, err := authz.Verify(p, authz.StoreProjectsGet, r.tok)
+	if err != nil {
+		return Project{}, err
+	}
+	row, err := r.q.GetProject(ctx, pggen.GetProjectParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
+	if err != nil {
+		return Project{}, err
+	}
+	return projectFromPG(row)
+}
+
+func (r pgProjects) List(ctx context.Context, p authz.Proof) ([]Project, error) {
+	chain, err := authz.Verify(p, authz.StoreProjectsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListProjects(ctx, string(chain.Org))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Project, 0, len(rows))
+	for _, row := range rows {
+		proj, err := projectFromPG(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, proj)
+	}
+	return out, nil
+}
+
+func (r pgProjects) Lock(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsLock, r.tok)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.LockProject(ctx, pggen.LockProjectParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (r pgProjects) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsRename, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.RenameProject(ctx, pggen.RenameProjectParams{
+		Name:           name,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	}))
+}
+
+func (r pgProjects) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteProject(ctx, pggen.DeleteProjectParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	}))
+}
+
+func projectFromPG(row pggen.Project) (Project, error) {
+	if !row.CreatedAt.Valid {
+		return Project{}, fmt.Errorf("store: project %s: null created_at", row.ID)
+	}
+	return Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC()}, nil
 }
 
 type pgEnvs struct {
@@ -382,14 +828,15 @@ func (r pgEnvs) Create(ctx context.Context, p authz.Proof, env NewEnvironment) e
 	if err != nil {
 		return err
 	}
-	return r.q.CreateEnvironment(ctx, pggen.CreateEnvironmentParams{
+	return constraint(r.q.CreateEnvironment(ctx, pggen.CreateEnvironmentParams{
 		ID:             env.ID,
 		ChainOrgID:     string(chain.Org),     // chain column: proof-bound
 		ChainProjectID: string(chain.Project), // chain column: proof-bound
 		Name:           env.Name,
 		Note:           env.Note,
+		DisplayOrder:   env.DisplayOrder,
 		CreatedAt:      pgtype.Timestamptz{Time: CanonTime(env.CreatedAt), Valid: true},
-	})
+	}))
 }
 
 func (r pgEnvs) Get(ctx context.Context, p authz.Proof) (Environment, error) {
@@ -413,8 +860,57 @@ func (r pgEnvs) Get(ctx context.Context, p authz.Proof) (Environment, error) {
 	}
 	return Environment{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
-		Name: row.Name, Note: row.Note, CreatedAt: row.CreatedAt.Time.UTC(),
+		Name: row.Name, Note: row.Note, DisplayOrder: row.DisplayOrder,
+		CreatedAt: row.CreatedAt.Time.UTC(),
 	}, nil
+}
+
+func (r pgEnvs) List(ctx context.Context, p authz.Proof) ([]Environment, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListEnvironments(ctx, pggen.ListEnvironmentsParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Environment, 0, len(rows))
+	for _, row := range rows {
+		if !row.CreatedAt.Valid {
+			return nil, fmt.Errorf("store: environment %s: null created_at", row.ID)
+		}
+		out = append(out, Environment{
+			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+			Name: row.Name, Note: row.Note, DisplayOrder: row.DisplayOrder,
+			CreatedAt: row.CreatedAt.Time.UTC(),
+		})
+	}
+	return out, nil
+}
+
+func (r pgEnvs) Count(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsCount, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountEnvironments(ctx, pggen.CountEnvironmentsParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+}
+
+func (r pgEnvs) NextOrder(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsNextOrder, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.NextEnvironmentOrder(ctx, pggen.NextEnvironmentOrderParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
 }
 
 func (r pgEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) error {
@@ -422,17 +918,144 @@ func (r pgEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) erro
 	if err != nil {
 		return err
 	}
-	n, err := r.q.UpdateEnvironmentNote(ctx, pggen.UpdateEnvironmentNoteParams{
+	return affected(r.q.UpdateEnvironmentNote(ctx, pggen.UpdateEnvironmentNoteParams{
 		Note:           note,
 		ChainOrgID:     string(chain.Org),
 		ChainProjectID: string(chain.Project),
 		ChainEnvID:     string(chain.Env),
-	})
+	}))
+}
+
+func (r pgEnvs) Rename(ctx context.Context, p authz.Proof, name string) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsRename, r.tok)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return ErrNotFound
+	return affected(r.q.RenameEnvironment(ctx, pggen.RenameEnvironmentParams{
+		Name:           name,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     string(chain.Env),
+	}))
+}
+
+func (r pgEnvs) SetOrder(ctx context.Context, p authz.Proof, id string, order int64) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsSetOrder, r.tok)
+	if err != nil {
+		return err
 	}
-	return nil
+	return affected(r.q.SetEnvironmentOrder(ctx, pggen.SetEnvironmentOrderParams{
+		DisplayOrder:   order,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ID:             id,
+	}))
+}
+
+func (r pgEnvs) Delete(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteEnvironment(ctx, pggen.DeleteEnvironmentParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     string(chain.Env),
+	}))
+}
+
+type pgFolders struct {
+	q   *pggen.Queries
+	tok *authz.TxToken
+}
+
+func (r pgFolders) Create(ctx context.Context, p authz.Proof, folder NewFolder) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersCreate, r.tok)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.CreateFolder(ctx, pggen.CreateFolderParams{
+		ID:             folder.ID,
+		ChainOrgID:     string(chain.Org),     // chain column: proof-bound
+		ChainProjectID: string(chain.Project), // chain column: proof-bound
+		Path:           folder.Path,
+		CreatedAt:      pgtype.Timestamptz{Time: CanonTime(folder.CreatedAt), Valid: true},
+	}))
+}
+
+func (r pgFolders) Get(ctx context.Context, p authz.Proof, id string) (Folder, error) {
+	chain, err := authz.Verify(p, authz.StoreFoldersGet, r.tok)
+	if err != nil {
+		return Folder{}, err
+	}
+	row, err := r.q.GetFolder(ctx, pggen.GetFolderParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ID:             id,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Folder{}, ErrNotFound
+	}
+	if err != nil {
+		return Folder{}, err
+	}
+	return folderFromPG(row)
+}
+
+func (r pgFolders) List(ctx context.Context, p authz.Proof) ([]Folder, error) {
+	chain, err := authz.Verify(p, authz.StoreFoldersList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListFolders(ctx, pggen.ListFoldersParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Folder, 0, len(rows))
+	for _, row := range rows {
+		folder, err := folderFromPG(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, folder)
+	}
+	return out, nil
+}
+
+func (r pgFolders) Rename(ctx context.Context, p authz.Proof, id, path string) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersRename, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.RenameFolder(ctx, pggen.RenameFolderParams{
+		Path:           path,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ID:             id,
+	}))
+}
+
+func (r pgFolders) Delete(ctx context.Context, p authz.Proof, id string) error {
+	chain, err := authz.Verify(p, authz.StoreFoldersDelete, r.tok)
+	if err != nil {
+		return err
+	}
+	return affected(r.q.DeleteFolder(ctx, pggen.DeleteFolderParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ID:             id,
+	}))
+}
+
+func folderFromPG(row pggen.Folder) (Folder, error) {
+	if !row.CreatedAt.Valid {
+		return Folder{}, fmt.Errorf("store: folder %s: null created_at", row.ID)
+	}
+	return Folder{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+		Path: row.Path, CreatedAt: row.CreatedAt.Time.UTC(),
+	}, nil
 }

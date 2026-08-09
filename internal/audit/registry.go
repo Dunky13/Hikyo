@@ -127,20 +127,42 @@ const (
 	// WebAuthn authenticator), so the trail carries the surfaced list (#54 B6).
 	EventAuthEffectiveWindowLowered EventType = "auth.effective_window_lowered"
 
-	// settings.* — scaffolding domain events for the demonstration
-	// operations (#42/#44). Instance-scoped org administration and the
-	// tenant-chain demonstration writes audit under these until the real
-	// surfaces (#48) land their catalogue rows.
+	// settings.* — the hierarchy's own catalogue rows (#48): Organization,
+	// Project, Environment, Folder lifecycle. Every mutation has its own type,
+	// because "a project was renamed" and "a project was deleted" are different
+	// facts for an investigator and collapsing them into one changed-event
+	// would make the trail answer neither question.
+	//
+	// Reads are NOT here: a tenant-class bare-`read` operation takes the
+	// audit-model ADR's audited-none permit, so the only read event is the
+	// instance-scoped org enumeration below.
 	EventOrgCreated EventType = "settings.org_created"
-	// settings.org_read covers the instance-scoped org reads. The ADR's
+	EventOrgRenamed EventType = "settings.org_renamed"
+	EventOrgDeleted EventType = "settings.org_deleted"
+	// settings.org_read covers the instance-scoped org enumeration. The ADR's
 	// default-deny rule refuses `audited: none` to instance-class
-	// operations, and these are operator reads of cross-tenant metadata —
-	// so they are audited, at the access retention class (read volume, not
+	// operations, and that is an operator read of cross-tenant metadata —
+	// so it is audited, at the access retention class (read volume, not
 	// grant history).
-	EventOrgRead        EventType = "settings.org_read"
+	EventOrgRead EventType = "settings.org_read"
+
 	EventProjectCreated EventType = "settings.project_created"
-	EventEnvCreated     EventType = "settings.environment_created"
+	EventProjectRenamed EventType = "settings.project_renamed"
+	EventProjectDeleted EventType = "settings.project_deleted"
+
+	EventEnvCreated EventType = "settings.environment_created"
+	EventEnvRenamed EventType = "settings.environment_renamed"
+	EventEnvDeleted EventType = "settings.environment_deleted"
+	// settings.environment_reordered records one authorized rewrite of a
+	// project's whole display order, naming how many environments it covered.
+	// The ids are the object of the operation, not free text, and the count is
+	// what an investigator reads first.
+	EventEnvReordered   EventType = "settings.environment_reordered"
 	EventEnvNoteChanged EventType = "settings.environment_note_changed"
+
+	EventFolderCreated EventType = "settings.folder_created"
+	EventFolderRenamed EventType = "settings.folder_renamed"
+	EventFolderDeleted EventType = "settings.folder_deleted"
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -565,6 +587,60 @@ var registry = map[EventType]TypeSpec{
 		Trails:        map[Trail]bool{TrailTenant: true},
 		Schema:        Schema{},
 	},
+
+	// The rest of the hierarchy's lifecycle (#48). All tenant-trail,
+	// security-class, success-only: each row records a committed mutation, and
+	// a refusal is either the uniform nonexistent response (no event — the
+	// denial writer covers authorization) or a constraint refusal that
+	// rolled back, leaving nothing to record.
+	//
+	// A rename carries BOTH names: "renamed to prod" without the previous name
+	// makes the trail unable to answer what the operator actually changed.
+	EventOrgRenamed:     hierarchyEvent(renameSchema("name")),
+	EventOrgDeleted:     hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
+	EventProjectRenamed: hierarchyEvent(renameSchema("name")),
+	EventProjectDeleted: hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
+	EventEnvRenamed:     hierarchyEvent(renameSchema("name")),
+	EventEnvDeleted:     hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
+	// The resulting order, not only its length: an investigator must be able to
+	// tell "production and staging swapped" from any other permutation of the
+	// same set. audit.Schema has no list kind, so the order is one
+	// comma-joined string of server-minted ids — trusted vocabulary, not free
+	// text, so no free-text bound applies.
+	EventEnvReordered: hierarchyEvent(Schema{
+		"environment_count": {Kind: KindInt, Required: true},
+		"environment_order": {Kind: KindString, Required: true},
+	}),
+	// The folder payload field is `namespace`, not `path`: the forbidden-content
+	// guard reserves every *_path spelling for instance-derived JSON pointers
+	// into a value, and a folder path is not one — it is the namespace the
+	// domain model calls it. Keeping the guard intact is worth the rename.
+	EventFolderCreated: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
+	EventFolderRenamed: hierarchyEvent(renameSchema("namespace")),
+	EventFolderDeleted: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
+}
+
+// hierarchyEvent is the shared shape of every hierarchy-lifecycle row. It
+// exists so the fifteen rows differ in exactly the thing that differs — their
+// payload — rather than repeating four identical lines each and inviting one
+// of them to drift.
+func hierarchyEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        schema,
+	}
+}
+
+// renameSchema is the two-name payload: what it was called, and what it is
+// called now.
+func renameSchema(field string) Schema {
+	return Schema{
+		"previous_" + field: {Kind: KindFreeText, Required: true},
+		field:               {Kind: KindFreeText, Required: true},
+	}
 }
 
 // Category returns the category half of a type name; invalid names return

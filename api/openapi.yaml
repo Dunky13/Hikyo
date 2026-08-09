@@ -63,7 +63,12 @@ tags:
       one-surface rule (api-cli-surface ADR). Client-specific by nature and
       parity-exempt; never domain endpoints.
   - name: orgs
-    description: Organisation administration.
+    description: Organisation administration — instance-scoped operator work.
+  - name: hierarchy
+    description: |
+      The domain hierarchy: Organization, Project, Environment, Folder. Every
+      by-id route is tenant-scoped, so unauthorized is indistinguishable from
+      nonexistent at every level.
 
 paths:
   /api/v1/meta:
@@ -494,7 +499,8 @@ paths:
         `org.created` audit event commits in that same transaction — a write
         without its durable record does not complete.
 
-        Not idempotent: each call creates a distinct organisation.
+        Not idempotent: each call creates a distinct organisation. The name must
+        be unused among live organisations; a collision is a `conflict`.
       x-wenv-class: instance
       x-wenv-operation: org.create
       x-wenv-formula: [instance-config@instance]
@@ -519,6 +525,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -529,11 +537,17 @@ paths:
       - $ref: "#/components/parameters/OrgID"
     get:
       operationId: getOrg
-      tags: [orgs]
+      tags: [hierarchy]
       summary: Read one organisation.
-      x-wenv-class: instance
+      description: |
+        Tenant-scoped at org depth, unlike the create and list operations
+        above: an organisation the caller may not reach answers exactly like
+        one that does not exist, which is what "unauthorized access at each
+        level returns the uniform nonexistent shape" requires of the top level
+        too. There is therefore no `403` on this route — a refusal is a `404`.
+      x-wenv-class: tenant
       x-wenv-operation: org.get
-      x-wenv-formula: [instance-config@instance]
+      x-wenv-formula: [read@org]
       x-wenv-artifacts: [human-session]
       x-wenv-min-revision: 1
       responses:
@@ -545,8 +559,610 @@ paths:
                 $ref: "#/components/schemas/Org"
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameOrg
+      tags: [hierarchy]
+      summary: Rename an organisation.
+      description: |
+        Instance operator work: the permission model's closed capability set
+        holds no org-lifecycle atom (`manage-projects` is explicitly "create
+        and delete projects"), so the formula sits at instance scope while the
+        operation addresses org depth. An organisation administrator therefore
+        cannot rename the organisation they administer, and learns nothing from
+        trying — the refusal is the uniform `404`.
+      x-wenv-class: tenant
+      x-wenv-operation: org.rename
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
+      responses:
+        "200":
+          description: The renamed organisation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Org"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteOrg
+      tags: [hierarchy]
+      summary: Delete an organisation.
+      description: |
+        Never cascades. An organisation that still holds projects, or grants
+        pointing into it, is refused with `conflict` — emptying a tenant is
+        explicit, separately audited work and not a side effect of one call.
+      x-wenv-class: tenant
+      x-wenv-operation: org.delete
+      x-wenv-formula: [instance-config@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    get:
+      operationId: listProjects
+      tags: [hierarchy]
+      summary: List the organisation's projects.
+      description: |
+        A proof-scoped read at org depth. Unpaged: the hierarchy is bounded by
+        the ops spec's own caps (50 environments per project) and an
+        organisation's project list is administrative, not a data feed.
+      x-wenv-class: tenant
+      x-wenv-operation: project.list
+      x-wenv-formula: [read@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The projects in this organisation, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createProject
+      tags: [hierarchy]
+      summary: Create a project.
+      description: |
+        Not idempotent: each call creates a distinct project. The name must be
+        unused among the organisation's live projects; a collision is a
+        `conflict`, decided after authorization so it discloses nothing a
+        caller could not already read.
+      x-wenv-class: tenant
+      x-wenv-operation: project.create
+      x-wenv-formula: [manage-projects@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: The created project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: getProject
+      tags: [hierarchy]
+      summary: Read one project.
+      x-wenv-class: tenant
+      x-wenv-operation: project.get
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameProject
+      tags: [hierarchy]
+      summary: Rename a project.
+      description: |
+        Changes the mutable name only. Identity is the immutable id, so a
+        rename never breaks a reference. Idempotent: renaming to the current
+        name succeeds and changes nothing.
+      x-wenv-class: tenant
+      x-wenv-operation: project.rename
+      x-wenv-formula: [manage-projects@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
+      responses:
+        "200":
+          description: The renamed project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteProject
+      tags: [hierarchy]
+      summary: Delete a project.
+      description: |
+        Never cascades. A project that still holds environments or folders is
+        refused with `conflict`; emptying it is the caller's explicit,
+        separately audited work.
+      x-wenv-class: tenant
+      x-wenv-operation: project.delete
+      x-wenv-formula: [manage-projects@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listEnvironments
+      tags: [hierarchy]
+      summary: List the project's environments, in display order.
+      description: |
+        Ordered by `display_order`, ties broken by name so the sequence is
+        deterministic before any reorder has happened.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.list
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project's environments, in display order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createEnvironment
+      tags: [hierarchy]
+      summary: Create an environment.
+      description: |
+        Environments are user-defined per project and appended at the end of
+        the display order; `PUT .../environments/order` moves them. There is no
+        `base` pointer and no defaults layer to inherit from — every value is
+        explicit per environment (flat-model ADR).
+
+        A project holds at most 50 environments; the 51st is refused by name
+        with `limit_exceeded`, decided against a count read inside the creating
+        transaction.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.create
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnvironmentRequest"
+      responses:
+        "201":
+          description: The created environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/order:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    put:
+      operationId: reorderEnvironments
+      tags: [hierarchy]
+      summary: Rewrite the project's environment display order.
+      description: |
+        Takes the WHOLE ordered set, not one position: a single transaction
+        then cannot leave two environments sharing a position or a gap in the
+        sequence, and a concurrent reorder serializes behind it.
+
+        The list must name exactly the project's environments, once each.
+        Anything else — a short list, a duplicate, an id from elsewhere — is one
+        `bad_request` with one fixed message, so a foreign id discloses nothing.
+
+        Idempotent: applying the same order twice changes nothing.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.reorder
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentOrderRequest"
+      responses:
+        "200":
+          description: The project's environments in their new display order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: getEnvironment
+      tags: [hierarchy]
+      summary: Read one environment.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.read
+      x-wenv-formula: [read@environment]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameEnvironment
+      tags: [hierarchy]
+      summary: Rename an environment.
+      description: |
+        Environment topology, so it carries `definitions-edit` rather than
+        `edit`: renaming is a change to the project's shape, not to a value.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.rename
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRequest"
+      responses:
+        "200":
+          description: The renamed environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Environment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteEnvironment
+      tags: [hierarchy]
+      summary: Delete an environment.
+      description: |
+        The remaining environments keep their positions: display order is a
+        property of each row, not an invariant over the set, so a gap is not a
+        defect and closing it would be an unrequested write.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.delete
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/folders:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listFolders
+      tags: [hierarchy]
+      summary: List the project's folders.
+      x-wenv-class: tenant
+      x-wenv-operation: folder.list
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project's folders, by path.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FolderList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createFolder
+      tags: [hierarchy]
+      summary: Create a folder.
+      description: |
+        A folder is organizational only in v1: namespace and display grouping.
+        No grant is ever scoped to one and no value ever attaches to one.
+      x-wenv-class: tenant
+      x-wenv-operation: folder.create
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFolderRequest"
+      responses:
+        "201":
+          description: The created folder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Folder"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/folders/{folder}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/FolderID"
+    get:
+      operationId: getFolder
+      tags: [hierarchy]
+      summary: Read one folder.
+      x-wenv-class: tenant
+      x-wenv-operation: folder.get
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The folder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Folder"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameFolder
+      tags: [hierarchy]
+      summary: Move a folder to a new path.
+      description: |
+        Renames exactly the folder named. A v1 folder is a flat namespace
+        label, not a tree node with children to carry along, so there is no
+        cascade.
+      x-wenv-class: tenant
+      x-wenv-operation: folder.rename
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameFolderRequest"
+      responses:
+        "200":
+          description: The moved folder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Folder"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteFolder
+      tags: [hierarchy]
+      summary: Delete a folder.
+      x-wenv-class: tenant
+      x-wenv-operation: folder.delete
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
         "429":
@@ -1270,6 +1886,27 @@ components:
       description: Organisation identifier.
       schema:
         $ref: "#/components/schemas/ID"
+    ProjectID:
+      name: project
+      in: path
+      required: true
+      description: Project identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    EnvironmentID:
+      name: environment
+      in: path
+      required: true
+      description: Environment identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    FolderID:
+      name: folder
+      in: path
+      required: true
+      description: Folder identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
     ProviderSlug:
       name: provider
       in: path
@@ -1333,10 +1970,19 @@ components:
             $ref: "#/components/schemas/Error"
     Forbidden:
       description: |
-        The principal does not hold the operation's formula at instance scope.
-        Instance-class operations have no tenant object whose nonexistence
-        could be mimicked, so the probe contract here is grant refusal, not
-        tenancy.
+        Either the principal does not hold the operation's formula at instance
+        scope — instance-class operations have no tenant object whose
+        nonexistence could be mimicked, so the probe contract there is grant
+        refusal, not tenancy — or the principal DOES hold it and the acting
+        session's assurance is inadequate for an MFA-mandatory operation.
+
+        The second case is why two tenant-scoped operations (`renameOrg`,
+        `deleteOrg`) declare this status: their formula atom `instance-config`
+        is MFA-mandatory, and the refusal fires only AFTER the grant check
+        succeeded. A caller who reaches it can already reach the object, so
+        naming the step-up discloses nothing the uniform 404 was protecting —
+        and hiding it would tell a capability holder the object is missing.
+        Grant refusal on a tenant-scoped operation is always the 404.
       content:
         application/json:
           schema:
@@ -1345,6 +1991,17 @@ components:
       description: |
         The addressed object does not exist **or** the principal may not reach
         it — indistinguishable by design, byte-identical in status and body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: |
+        The caller is authorized, but the current state refuses: a name already
+        in use among live siblings, a parent that still has children (deletes
+        never cascade), or a structural bound reached (`limit_exceeded`, whose
+        message names the bound). Decided after authorization, so it discloses
+        nothing a caller could not already read.
       content:
         application/json:
           schema:
@@ -1414,6 +2071,8 @@ components:
         - unauthenticated
         - forbidden
         - not_found
+        - conflict
+        - limit_exceeded
         - too_many_requests
         - internal
 
@@ -1759,6 +2418,196 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Org"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+    EntityName:
+      type: string
+      description: |
+        A display name for an organisation, project or environment. Identity is
+        the immutable id, so this is a label and a rename never breaks a
+        reference. The 128-byte bound is the one the organisation contract has
+        carried since the first slice, adopted for every entity so there is one
+        number rather than four; no ADR fixes a per-entity name length. The
+        grammar itself (non-empty, no control characters, no surrounding
+        whitespace) is enforced in the domain rather than restated as a pattern
+        here — two grammars would be two things to keep in sync.
+
+        **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+        `maxLength` below counts Unicode code points, which is the only length
+        JSON Schema can express, so a name of 100 emoji satisfies this schema
+        and is still refused by the server with `bad_request`. Clients that want
+        to pre-validate must measure the UTF-8 encoding, not the string length.
+      minLength: 1
+      maxLength: 128
+
+    RenameRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+
+    Project:
+      type: object
+      required: [id, org_id, name, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    ProjectList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+    CreateEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+
+    Environment:
+      type: object
+      description: |
+        An environment carries NO `base` pointer and no defaults layer, here or
+        anywhere: the flat-model ADR deleted both, and every value is explicit
+        per environment.
+      required: [id, org_id, project_id, name, display_order, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        project_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+        display_order:
+          type: integer
+          minimum: 0
+          description: |
+            The environment's position in the project's display order. A real
+            mutable property, rewritten as a whole set by
+            `PUT .../environments/order`; ties break on name.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    EnvironmentList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Environment"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+    EnvironmentOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [environment_ids]
+      properties:
+        environment_ids:
+          type: array
+          description: |
+            Every environment in the project, exactly once, in the order they
+            should display. The whole set — not a subset — so no transaction can
+            leave two environments sharing a position.
+          # A project with no environments has the empty list as its exact
+          # whole set, so `[]` is a legal no-op rather than a schema error —
+          # the service accepts it and the schema must agree, or the two layers
+          # disagree about what "the whole set" means.
+          minItems: 0
+          # The upper bound IS the environment-count cap: a project cannot hold
+          # more environments than this, so it cannot legitimately order more.
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/ID"
+
+    FolderPath:
+      type: string
+      description: |
+        A slash-separated namespace: no leading or trailing separator, no empty
+        segment, no `.` or `..` segment, at most 32 segments. Organizational
+        only — no grant is scoped to a folder and no value attaches to one.
+
+        **Two bounds the schema cannot express, both server-authoritative and
+        both measured in UTF-8 BYTES:** the whole path is at most 256 bytes
+        (`maxLength` below counts code points), and EACH SEGMENT is at most 128
+        bytes — the same bound entity names carry. A 129-character ASCII segment
+        satisfies this schema and is refused with `bad_request`.
+      minLength: 1
+      maxLength: 256
+
+    CreateFolderRequest:
+      type: object
+      additionalProperties: false
+      required: [path]
+      properties:
+        path:
+          $ref: "#/components/schemas/FolderPath"
+
+    RenameFolderRequest:
+      type: object
+      additionalProperties: false
+      required: [path]
+      properties:
+        path:
+          $ref: "#/components/schemas/FolderPath"
+
+    Folder:
+      type: object
+      required: [id, org_id, project_id, path, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        project_id:
+          $ref: "#/components/schemas/ID"
+        path:
+          $ref: "#/components/schemas/FolderPath"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    FolderList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Folder"
         count:
           type: integer
           minimum: 0

@@ -19,13 +19,37 @@ type Operation string
 // The registered operations. Service code names operations through these
 // constants; the registry below is keyed by them.
 const (
-	OpOrgCreate     Operation = "org.create"
-	OpOrgGet        Operation = "org.get"
-	OpOrgList       Operation = "org.list"
+	// The hierarchy surface (#48): Organization, Project, Environment, Folder.
+	//
+	// Org creation and enumeration are instance-scoped — a create has no
+	// parent tenant and a list spans all of them — while every BY-ID org
+	// operation is tenant-class at org depth, so an org the caller may not
+	// reach answers exactly like one that is not there (mvp-boundary C1).
+	OpOrgCreate Operation = "org.create"
+	OpOrgGet    Operation = "org.get"
+	OpOrgList   Operation = "org.list"
+	OpOrgRename Operation = "org.rename"
+	OpOrgDelete Operation = "org.delete"
+
 	OpProjectCreate Operation = "project.create"
+	OpProjectGet    Operation = "project.get"
+	OpProjectList   Operation = "project.list"
+	OpProjectRename Operation = "project.rename"
+	OpProjectDelete Operation = "project.delete"
+
 	OpEnvCreate     Operation = "environment.create"
 	OpEnvRead       Operation = "environment.read"
+	OpEnvList       Operation = "environment.list"
+	OpEnvRename     Operation = "environment.rename"
+	OpEnvReorder    Operation = "environment.reorder"
+	OpEnvDelete     Operation = "environment.delete"
 	OpEnvUpdateNote Operation = "environment.update-note"
+
+	OpFolderCreate Operation = "folder.create"
+	OpFolderGet    Operation = "folder.get"
+	OpFolderList   Operation = "folder.list"
+	OpFolderRename Operation = "folder.rename"
+	OpFolderDelete Operation = "folder.delete"
 
 	// OIDC provider administration (#54, human-auth ADR - Login methods).
 	// Instance-config operations, MFA-mandatory like every instance capability.
@@ -70,14 +94,35 @@ const (
 type StoreOp string
 
 const (
-	StoreOrgsCreate             StoreOp = "orgs.Create"
-	StoreOrgsGet                StoreOp = "orgs.Get"
-	StoreOrgsList               StoreOp = "orgs.List"
-	StoreOrgsCount              StoreOp = "orgs.Count"
-	StoreProjectsCreate         StoreOp = "projects.Create"
+	StoreOrgsCreate StoreOp = "orgs.Create"
+	StoreOrgsGet    StoreOp = "orgs.Get"
+	StoreOrgsList   StoreOp = "orgs.List"
+	StoreOrgsCount  StoreOp = "orgs.Count"
+	StoreOrgsRename StoreOp = "orgs.Rename"
+	StoreOrgsDelete StoreOp = "orgs.Delete"
+
+	StoreProjectsCreate StoreOp = "projects.Create"
+	StoreProjectsGet    StoreOp = "projects.Get"
+	StoreProjectsList   StoreOp = "projects.List"
+	StoreProjectsLock   StoreOp = "projects.Lock"
+	StoreProjectsRename StoreOp = "projects.Rename"
+	StoreProjectsDelete StoreOp = "projects.Delete"
+
 	StoreEnvironmentsCreate     StoreOp = "environments.Create"
 	StoreEnvironmentsGet        StoreOp = "environments.Get"
+	StoreEnvironmentsList       StoreOp = "environments.List"
+	StoreEnvironmentsCount      StoreOp = "environments.Count"
+	StoreEnvironmentsNextOrder  StoreOp = "environments.NextOrder"
 	StoreEnvironmentsUpdateNote StoreOp = "environments.UpdateNote"
+	StoreEnvironmentsRename     StoreOp = "environments.Rename"
+	StoreEnvironmentsSetOrder   StoreOp = "environments.SetOrder"
+	StoreEnvironmentsDelete     StoreOp = "environments.Delete"
+
+	StoreFoldersCreate StoreOp = "folders.Create"
+	StoreFoldersGet    StoreOp = "folders.Get"
+	StoreFoldersList   StoreOp = "folders.List"
+	StoreFoldersRename StoreOp = "folders.Rename"
+	StoreFoldersDelete StoreOp = "folders.Delete"
 
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
@@ -109,7 +154,14 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreOrgsGet:                  true,
 	StoreOrgsList:                 true,
 	StoreOrgsCount:                true,
+	StoreProjectsGet:              true,
+	StoreProjectsList:             true,
 	StoreEnvironmentsGet:          true,
+	StoreEnvironmentsList:         true,
+	StoreEnvironmentsCount:        true,
+	StoreEnvironmentsNextOrder:    true,
+	StoreFoldersGet:               true,
+	StoreFoldersList:              true,
 	StoreKeysActiveMasterWrappers: true,
 	StoreKeysActiveTier3:          true,
 	StoreAuditTenantPage:          true,
@@ -173,34 +225,62 @@ type opSpec struct {
 	auditedNone bool
 }
 
-// operations is the operation registry. The demonstration set exercises the
-// mechanism at every chain depth using only capability atoms the permission
-// ADR already fixes — no new atoms, no new formula rows beyond scaffolding
-// for the walking skeleton's Org aggregate (the real endpoint enumeration
-// lands with #47/#48 against this same table; registry completeness is
-// invariant 6).
+// operations is the operation registry. Every formula is built from capability
+// atoms the permission ADR already fixes — this ticket adds no atom and
+// invents no capability. Registry completeness is invariant 6.
 var operations = map[Operation]opSpec{
-	// Scaffolding: the walking skeleton's Org aggregate. Org administration
-	// is cross-tenant by definition, so these are instance-scoped under the
-	// operator set's instance-config atom until the real surface (#48) fixes
-	// their formulas.
+	// The Org aggregate (#48). Creation and enumeration are instance-scoped
+	// under the operator set's instance-config atom: a create has no parent
+	// tenant to authorize against, and an enumeration of every org is
+	// cross-tenant by definition, so there is no tenant object whose
+	// nonexistence a refusal could mimic.
 	OpOrgCreate: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsCreate: true, StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventOrgCreated},
 	},
-	OpOrgGet: {
-		class:    ClassInstance,
-		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
-		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreAuditInstanceInsert: true},
-		events:   []audit.EventType{audit.EventOrgRead},
-	},
 	OpOrgList: {
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreOrgsList: true, StoreOrgsCount: true, StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventOrgRead},
+	},
+	// Every BY-ID org operation is tenant-class at org depth, which is what
+	// mvp-boundary C1 requires of "each level": an org the caller cannot reach
+	// answers byte-identically to one that does not exist. Reading it is bare
+	// `read`, so it takes the audited-none permit like environment.read does.
+	OpOrgGet: {
+		class:       ClassTenant,
+		level:       domain.LevelOrg,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelOrg}},
+		storeOps:    map[StoreOp]bool{StoreOrgsGet: true},
+		auditedNone: true,
+	},
+	// Renaming and deleting an org is instance operator work: the permission
+	// ADR's closed atom set has no org-lifecycle capability (`manage-projects`
+	// is explicitly "create and delete projects"), and inventing one would
+	// reopen that ADR. The atom therefore sits at instance scope while the
+	// operation addresses org depth — legal, and the honest reading: an org
+	// administrator cannot rename or delete the org they administer, and
+	// learns nothing from trying.
+	// Rename and Delete read the row first, in the same transaction, so the
+	// trail records the transition that actually happened rather than only the
+	// value the caller asked for. That read is part of the operation, hence the
+	// Get store op beside the mutation.
+	OpOrgRename: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreOrgsRename: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventOrgRenamed},
+	},
+	OpOrgDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreOrgsGet: true, StoreOrgsDelete: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventOrgDeleted},
 	},
 
 	// OIDC provider administration (#54). Instance-config, MFA-mandatory. The
@@ -253,9 +333,10 @@ var operations = map[Operation]opSpec{
 		events:  []audit.EventType{audit.EventAuthCredentialResetIssued},
 	},
 
-	// Tenant-scoped demonstration operations, one per chain depth. Their
-	// domain events are committed in-transaction with the write (audit-model
-	// ADR durability discipline).
+	// The Project aggregate (#48). `manage-projects` is the permission ADR's
+	// own wording for project lifecycle ("create and delete projects"), and a
+	// rename is lifecycle too — identity is the immutable id, so a rename
+	// changes the label an org administrator owns, nothing a reader depends on.
 	OpProjectCreate: {
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
@@ -263,12 +344,50 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreProjectsCreate: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventProjectCreated},
 	},
-	OpEnvCreate: {
+	OpProjectGet: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreProjectsGet: true},
+		auditedNone: true,
+	},
+	OpProjectList: {
+		class:       ClassTenant,
+		level:       domain.LevelOrg,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelOrg}},
+		storeOps:    map[StoreOp]bool{StoreProjectsList: true},
+		auditedNone: true,
+	},
+	OpProjectRename: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
-		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreEnvironmentsCreate: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventEnvCreated},
+		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsRename: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventProjectRenamed},
+	},
+	OpProjectDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageProjects, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreProjectsGet: true, StoreProjectsDelete: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventProjectDeleted},
+	},
+
+	// The Environment aggregate (#48). `definitions-edit` is the permission
+	// ADR's atom for "environment topology (create/delete environments)", and
+	// rename and reorder are topology under the same authority. Creation reads
+	// the count inside its own transaction: the ops-spec environment cap is
+	// enforced where the row is written, never checked earlier and hoped for.
+	OpEnvCreate: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreEnvironmentsCount: true,
+			StoreEnvironmentsNextOrder: true, StoreEnvironmentsCreate: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventEnvCreated},
 	},
 	OpEnvRead: {
 		class:    ClassTenant,
@@ -280,12 +399,86 @@ var operations = map[Operation]opSpec{
 		// rule accepts.
 		auditedNone: true,
 	},
+	OpEnvList: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreEnvironmentsList: true},
+		auditedNone: true,
+	},
+	OpEnvRename: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreEnvironmentsGet: true, StoreEnvironmentsRename: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventEnvRenamed},
+	},
+	// Reorder addresses the PROJECT: it rewrites the whole ordered set in one
+	// transaction, so no caller can observe a duplicate or a gap, and there is
+	// no per-environment write that could race another.
+	OpEnvReorder: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreEnvironmentsList: true,
+			StoreEnvironmentsSetOrder: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventEnvReordered},
+	},
+	OpEnvDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreEnvironmentsGet: true, StoreEnvironmentsDelete: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventEnvDeleted},
+	},
 	OpEnvUpdateNote: {
 		class:    ClassTenant,
 		level:    domain.LevelEnv,
 		formula:  Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{StoreEnvironmentsUpdateNote: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventEnvNoteChanged},
+	},
+
+	// The Folder aggregate (#48). Folders are organizational only: the
+	// permission ADR forbids folder-scoped grants outright, and names the
+	// folder path as `definitions-edit` territory. Every folder operation
+	// therefore addresses PROJECT depth — there is no folder scope to address.
+	OpFolderCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreFoldersCreate: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventFolderCreated},
+	},
+	OpFolderGet: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreFoldersGet: true},
+		auditedNone: true,
+	},
+	OpFolderList: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreFoldersList: true},
+		auditedNone: true,
+	},
+	OpFolderRename: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreFoldersGet: true, StoreFoldersRename: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventFolderRenamed},
+	},
+	OpFolderDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreFoldersGet: true, StoreFoldersDelete: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventFolderDeleted},
 	},
 
 	// Audit trail reads and exports (#45). Reading the trail is itself

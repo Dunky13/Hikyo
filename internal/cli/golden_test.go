@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/cli"
 )
 
@@ -98,6 +100,43 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"org without a subverb", []string{"org"}, cli.ExitUsage},
 		{"org list with no session", []string{"org", "list", "--instance", "unknown-ref"}, cli.ExitRefused},
 		{"account without the subverb", []string{"account"}, cli.ExitUsage},
+		// The hierarchy families (#48). Each refuses on its own terms before
+		// reaching a server, so the matrix pins the usage boundary of every new
+		// verb family rather than only the one that happens to be shortest.
+		{"project without a subverb", []string{"project"}, cli.ExitUsage},
+		{"unknown project subverb", []string{"project", "warp"}, cli.ExitUsage},
+		{"env without a subverb", []string{"env"}, cli.ExitUsage},
+		{"unknown env subverb", []string{"env", "warp"}, cli.ExitUsage},
+		{"folder without a subverb", []string{"folder"}, cli.ExitUsage},
+		{"unknown folder subverb", []string{"folder", "warp"}, cli.ExitUsage},
+		{"project list with no session", []string{"project", "list", "--instance", "unknown-ref", "--org", "org_x"}, cli.ExitRefused},
+		{"env list without a resolved project", []string{"env", "list", "--instance", "unknown-ref"}, cli.ExitRefused},
+		// Syntax is decided BEFORE target resolution and session lookup, so a
+		// malformed invocation answers 2 regardless of login state. Each of these
+		// names an unestablished instance deliberately: were validation still
+		// running after resolution, they would answer 4 instead.
+		{"folder create without a path", []string{"folder", "create", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"folder show without a folder", []string{"folder", "show", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"env rename without a name", []string{"env", "rename", "env_x", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"env reorder without an order", []string{"env", "reorder", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"extra positional is not silently dropped", []string{"folder", "delete", "fld_x", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// The verbs that address NO object reject a positional too — one stray
+		// word per family, so a missing guard in any of the four shows up here.
+		{"stray positional on folder list", []string{"folder", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on project create", []string{"project", "create", "stray", "--name", "p", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on env list", []string{"env", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on org list", []string{"org", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// org gets the same syntax-before-authentication ordering as the rest.
+		{"unknown org subverb", []string{"org", "warp"}, cli.ExitUsage},
+		{"org create without a name", []string{"org", "create", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"org rename without a name", []string{"org", "rename", "org_x", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"org positional contradicting --org", []string{"org", "show", "org_a", "--org", "org_b", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"positional contradicting its selector flag", []string{"project", "show", "prj_a", "--project", "prj_b", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// Project deletion refuses BEFORE reaching a server when the confirmation
+		// naming the project is absent — the permission model's locked row for an
+		// irreversible, key-shredding operation. Refused (4), not usage: the
+		// taxonomy spells a declined ceremony 4.
+		{"project delete without a confirmation", []string{"project", "delete", "prj_x", "--org", "org_x", "--instance", "unknown-ref"}, cli.ExitRefused},
 		{"passkey enrol refuses by name", []string{"account", "passkey", "enrol"}, cli.ExitRefused},
 	}
 	var report strings.Builder
@@ -294,5 +333,62 @@ func TestThereIsNoPersistentActiveContext(t *testing.T) {
 	cli.Usage(&help)
 	if strings.Contains(help.String(), "context use") {
 		t.Error("help advertises `context use`")
+	}
+}
+
+// TestHierarchyJSONShapesAreFrozen byte-pins the `-o json` document the CLI
+// emits for each hierarchy entity.
+//
+// `-o json` schemas are part of the frozen surface (api-cli-surface ADR: they
+// are additive-only within the major, and scripts branch on them); human `table`
+// output explicitly is not. So the fixture is the JSON, rendered from a fixed
+// payload through the CLI's own renderer — no server, no clock, no ids from a
+// generator, which is what makes a byte comparison meaningful. A removed or
+// renamed member is a red diff here; an added one is a reviewed diff.
+func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
+	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, tc := range []struct {
+		fixture string
+		payload any
+	}{
+		{"org-json.json", apigen.OrgList{
+			Items: []apigen.Org{{
+				Id: "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11", Name: "acme",
+				Active: true, CreatedAt: stamp,
+			}},
+			Count: 1,
+		}},
+		{"project-json.json", apigen.ProjectList{
+			Items: []apigen.Project{{
+				Id:    "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
+				OrgId: "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+				Name:  "checkout", CreatedAt: stamp,
+			}},
+			Count: 1,
+		}},
+		{"environment-json.json", apigen.EnvironmentList{
+			Items: []apigen.Environment{{
+				Id:        "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+				OrgId:     "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+				ProjectId: "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
+				Name:      "prod", DisplayOrder: 0, CreatedAt: stamp,
+			}},
+			Count: 1,
+		}},
+		{"folder-json.json", apigen.FolderList{
+			Items: []apigen.Folder{{
+				Id:        "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44",
+				OrgId:     "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+				ProjectId: "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
+				Path:      "services/api", CreatedAt: stamp,
+			}},
+			Count: 1,
+		}},
+	} {
+		var out bytes.Buffer
+		if err := cli.Render(&out, cli.FormatJSON, cli.Table{JSON: tc.payload}); err != nil {
+			t.Fatalf("%s: %v", tc.fixture, err)
+		}
+		golden(t, tc.fixture, out.Bytes())
 	}
 }

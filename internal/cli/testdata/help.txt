@@ -22,10 +22,23 @@ contexts:
   wenv context delete <name>
   wenv context delete --instance <ref>            forget a trust-store entry
 
-organisations:
+hierarchy:
   wenv org list [-o table|json]
   wenv org show <org> [-o table|json]
   wenv org create --name <name>
+  wenv org rename <org> --name <new-name>
+  wenv org delete <org>
+  wenv project list|show|create|rename|delete      --org selects the organisation
+  wenv project create --name <name>
+  wenv project rename <project> --name <new-name>
+  wenv project delete <project> --confirm <project-name>   irreversible: shreds the key
+  wenv env list|show|create|rename|reorder|delete   --org/--project select the project
+  wenv env create --name <name>
+  wenv env rename <env> --name <new-name>
+  wenv env reorder <env-id,env-id,...>             the whole ordered set, once each
+  wenv folder list|show|create|rename|delete       --org/--project select the project
+  wenv folder create --path <path>
+  wenv folder rename <folder> --path <new-path>
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context

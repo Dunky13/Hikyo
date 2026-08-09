@@ -199,7 +199,12 @@ func errorFromResponse(status int, payload []byte) error {
 	switch code {
 	case apigen.ErrorCodeUnauthenticated:
 		return failf(ExitAuth, "%s", message)
-	case apigen.ErrorCodeForbidden, apigen.ErrorCodeBadRequest:
+	case apigen.ErrorCodeForbidden, apigen.ErrorCodeBadRequest,
+		// A conflict and a structural bound are both refusals under the exit-code
+		// taxonomy's own wording ("refused: validation, policy, ceremony
+		// declined"). Left to the default they landed on ExitInternal, which told
+		// a script the server broke when it had in fact answered correctly.
+		apigen.ErrorCodeConflict, apigen.ErrorCodeLimitExceeded:
 		return failf(ExitRefused, "%s", message)
 	case apigen.ErrorCodeNotFound:
 		return failf(ExitNotFound, "%s", message)
@@ -218,7 +223,8 @@ func exitForStatus(status int) int {
 		return ExitAuth
 	case status == http.StatusNotFound:
 		return ExitNotFound
-	case status == http.StatusForbidden, status == http.StatusBadRequest:
+	case status == http.StatusForbidden, status == http.StatusBadRequest,
+		status == http.StatusConflict:
 		return ExitRefused
 	case status >= 500, status == http.StatusTooManyRequests:
 		return ExitUnavailable

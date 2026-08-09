@@ -64,6 +64,12 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runContext(ctx, io, rest)
 	case "org":
 		err = runOrg(ctx, io, rest)
+	case "project":
+		err = runProject(ctx, io, rest)
+	case "env":
+		err = runEnv(ctx, io, rest)
+	case "folder":
+		err = runFolder(ctx, io, rest)
 	default:
 		fmt.Fprintf(io.Stderr, "wenv: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
@@ -100,10 +106,23 @@ contexts:
   wenv context delete <name>
   wenv context delete --instance <ref>            forget a trust-store entry
 
-organisations:
+hierarchy:
   wenv org list [-o table|json]
   wenv org show <org> [-o table|json]
   wenv org create --name <name>
+  wenv org rename <org> --name <new-name>
+  wenv org delete <org>
+  wenv project list|show|create|rename|delete      --org selects the organisation
+  wenv project create --name <name>
+  wenv project rename <project> --name <new-name>
+  wenv project delete <project> --confirm <project-name>   irreversible: shreds the key
+  wenv env list|show|create|rename|reorder|delete   --org/--project select the project
+  wenv env create --name <name>
+  wenv env rename <env> --name <new-name>
+  wenv env reorder <env-id,env-id,...>             the whole ordered set, once each
+  wenv folder list|show|create|rename|delete       --org/--project select the project
+  wenv folder create --path <path>
+  wenv folder rename <folder> --path <new-path>
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context
@@ -934,10 +953,10 @@ func runContext(_ context.Context, ios IO, args []string) error {
 // ---------------------------------------------------------------------------
 
 func runOrg(ctx context.Context, ios IO, args []string) error {
-	if len(args) == 0 {
-		return failf(ExitUsage, "usage: wenv org list|show|create")
+	sub, rest, err := subverb("org", args, "list", "show", "create", "rename", "delete")
+	if err != nil {
+		return err
 	}
-	sub, rest := args[0], args[1:]
 
 	var (
 		format  string
@@ -945,7 +964,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	)
 	st, flags, err := parseCommon("org "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
-		if sub == "create" {
+		if sub == "create" || sub == "rename" {
 			fs.StringVar(&orgName, "name", "", "organisation name")
 		}
 	})
@@ -956,7 +975,30 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, _, err := authenticatedClient(st, ios, flags)
+	// Syntax before resolution, exactly as the project/env/folder families do it
+	// (internal/cli/hierarchy.go): an unknown subverb, a missing name or a stray
+	// positional is usage (2) whether or not a session exists.
+	switch sub {
+	case "show", "rename", "delete":
+		// Arity and flag agreement only. Whether a target is AVAILABLE is a
+		// resolution question, not a syntax one — `--org`, WENV_ORG, a pin file
+		// and a context may each supply it — so it is asked after resolution, by
+		// addressed(), exactly as the other three families ask it.
+		if err := flags.checkTarget("org "+sub, DimOrg, flags.Org); err != nil {
+			return err
+		}
+	default:
+		if err := flags.checkNoPositionals("org " + sub); err != nil {
+			return err
+		}
+	}
+	switch {
+	case sub == "create" && orgName == "":
+		return failf(ExitUsage, "usage: wenv org create --name <name>")
+	case sub == "rename" && orgName == "":
+		return failf(ExitUsage, "usage: wenv org rename <org> --name <new-name>")
+	}
+	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
 		return err
 	}
@@ -978,12 +1020,12 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 		})
 
 	case "show":
-		id := flags.positional
-		if id == "" {
-			return failf(ExitUsage, "usage: wenv org show <org>")
+		id, err := addressed(resolved, DimOrg, flags.positional(), "org show")
+		if err != nil {
+			return err
 		}
 		var org apigen.Org
-		if err := client.Do(ctx, http.MethodGet, api.PathPrefix+"/orgs/"+id, nil, &org); err != nil {
+		if err := client.Do(ctx, http.MethodGet, api.PathPrefix+"/orgs/"+url.PathEscape(id), nil, &org); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, Table{
@@ -993,9 +1035,6 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 		})
 
 	case "create":
-		if orgName == "" {
-			return failf(ExitUsage, "usage: wenv org create --name <name>")
-		}
 		var org apigen.Org
 		if err := client.Do(ctx, http.MethodPost, api.PathPrefix+"/orgs",
 			apigen.CreateOrgRequest{Name: orgName}, &org); err != nil {
@@ -1007,9 +1046,36 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 			JSON:    org,
 		})
 
-	default:
-		return failf(ExitUsage, "unknown org verb %q: use list, show or create", sub)
+	case "rename":
+		id, err := addressed(resolved, DimOrg, flags.positional(), "org rename")
+		if err != nil {
+			return err
+		}
+		var org apigen.Org
+		if err := client.Do(ctx, http.MethodPatch, api.PathPrefix+"/orgs/"+url.PathEscape(id),
+			apigen.RenameRequest{Name: orgName}, &org); err != nil {
+			return err
+		}
+		return Render(ios.Stdout, f, Table{
+			Columns: []string{"ID", "NAME", "ACTIVE", "CREATED"},
+			Rows:    [][]string{{org.Id, org.Name, boolString(org.Active), org.CreatedAt.Format("2006-01-02")}},
+			JSON:    org,
+		})
+
+	case "delete":
+		id, err := addressed(resolved, DimOrg, flags.positional(), "org delete")
+		if err != nil {
+			return err
+		}
+		if err := client.Do(ctx, http.MethodDelete, api.PathPrefix+"/orgs/"+url.PathEscape(id), nil, nil); err != nil {
+			return err
+		}
+		fmt.Fprintf(ios.Stderr, "deleted organisation %s\n", id)
+		return nil
+
 	}
+	// Unreachable: subverb() above admits only the cases enumerated here.
+	return failf(ExitInternal, "wenv org: unhandled subverb %q", sub)
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,7 +1084,53 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 
 type commonFlags struct {
 	Flags
-	positional string
+	// positionals is EVERY positional argument, not just the first. Keeping only
+	// the first is how `folder delete fld_real typo` silently acts on fld_real:
+	// the extra word is a mistake the caller wants to hear about, and a delete
+	// is the wrong place to guess.
+	positionals []string
+}
+
+// positional is the first positional argument, or "" when there is none.
+func (c commonFlags) positional() string { return first(c.positionals) }
+
+// checkTarget and checkNoPositionals are the syntax half of addressing a verb.
+// Both run BEFORE any target resolution or session lookup, so an exit code does
+// not depend on whether the caller happens to be logged in.
+//
+// Every hierarchy subverb calls exactly one of them, from a switch the subverb
+// gate already made exhaustive: a verb either takes one object or takes none,
+// and an argument the CLI would silently drop is a mistake the caller wants to
+// hear about — especially on a delete.
+//
+// checkTarget refuses a stray extra positional and a positional that
+// contradicts the matching selector flag. The contradiction is checked against
+// the FLAG only — a context or pin file naming a different object is the
+// resolution model working as designed (an explicit argument overrides it), and
+// erroring there would break the whole point of per-dimension precedence.
+func (c commonFlags) checkTarget(verb string, dim Dimension, flagValue string) error {
+	if len(c.positionals) > 1 {
+		return failf(ExitUsage, "usage: wenv %s takes one %s, got %d: %s",
+			verb, dim, len(c.positionals), strings.Join(c.positionals, " "))
+	}
+	if p := c.positional(); p != "" && flagValue != "" && p != flagValue {
+		return failf(ExitUsage,
+			"wenv %s names %s %q but --%s says %q — refusing rather than picking one",
+			verb, dim, p, dim, flagValue)
+	}
+	return nil
+}
+
+// checkNoPositionals is checkTarget's counterpart for the verbs that address no
+// object — `list` and `create`, which take their subject from selector flags.
+// Without it `folder list stray` and `project create stray --name x` parse
+// happily and drop the word.
+func (c commonFlags) checkNoPositionals(verb string) error {
+	if len(c.positionals) > 0 {
+		return failf(ExitUsage, "usage: wenv %s takes no positional arguments, got: %s",
+			verb, strings.Join(c.positionals, " "))
+	}
+	return nil
 }
 
 // parseCommon parses the per-dimension flags every server-mediated verb takes.
@@ -1038,7 +1150,7 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 	if err != nil {
 		return nil, commonFlags{}, err
 	}
-	c.positional = first(positional)
+	c.positionals = positional
 	st, err := NewState(ios.Env)
 	if err != nil {
 		return nil, commonFlags{}, err
@@ -1052,9 +1164,18 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 // the record carries that origin, and a mismatch is a hard refusal rather
 // than a best-effort send.
 func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, SessionArtifact, error) {
+	client, artifact, _, err := authenticatedTarget(st, ios, flags)
+	return client, artifact, err
+}
+
+// authenticatedTarget is authenticatedClient plus the resolved target, for the
+// verbs that address a scope rather than the instance. The resolution is the
+// same one either way — the hierarchy verbs must not invent a second
+// precedence chain.
+func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, SessionArtifact, Resolved, error) {
 	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
-		return nil, SessionArtifact{}, err
+		return nil, SessionArtifact{}, Resolved{}, err
 	}
 	instance, err := resolved.Require(DimInstance)
 	if err != nil {
@@ -1069,10 +1190,10 @@ func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, Session
 		// script deciding whether to re-authenticate.
 		entries, serr := st.Trust().Load()
 		if serr != nil {
-			return nil, SessionArtifact{}, serr
+			return nil, SessionArtifact{}, Resolved{}, serr
 		}
 		if len(entries) != 1 {
-			return nil, SessionArtifact{}, err
+			return nil, SessionArtifact{}, Resolved{}, err
 		}
 		for k := range entries {
 			instance = k
@@ -1080,25 +1201,25 @@ func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, Session
 	}
 	entry, err := st.Trust().Lookup(instance)
 	if err != nil {
-		return nil, SessionArtifact{}, err
+		return nil, SessionArtifact{}, Resolved{}, err
 	}
 	sessions, err := st.Sessions()
 	if err != nil {
-		return nil, SessionArtifact{}, err
+		return nil, SessionArtifact{}, Resolved{}, err
 	}
 	artifact, ok := sessions[instance]
 	if !ok {
-		return nil, SessionArtifact{}, failf(ExitAuth,
+		return nil, SessionArtifact{}, Resolved{}, failf(ExitAuth,
 			"no session for instance %q: run `wenv login <url> --local --as <user>`", instance)
 	}
 	if artifact.Origin != entry.Origin {
-		return nil, SessionArtifact{}, failf(ExitRefused,
+		return nil, SessionArtifact{}, Resolved{}, failf(ExitRefused,
 			"the stored session for %q was established against %s, but the trust store now records %s; log in again",
 			instance, artifact.Origin, entry.Origin)
 	}
 	client, err := NewClient(entry, artifact.Token)
 	if err != nil {
-		return nil, SessionArtifact{}, err
+		return nil, SessionArtifact{}, Resolved{}, err
 	}
 	// The disclosure echo: the fully resolved target, to stderr, before
 	// acting — including which precedence level supplied each dimension.
@@ -1106,7 +1227,7 @@ func authenticatedClient(st *State, ios IO, flags commonFlags) (*Client, Session
 		fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact human-session %s]\n",
 			echo, entry.Origin, artifact.Principal)
 	}
-	return client, artifact, nil
+	return client, artifact, resolved, nil
 }
 
 func (ios IO) readPassword(prompt string) (string, error) {

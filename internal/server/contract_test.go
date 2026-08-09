@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,8 +188,10 @@ func (stubProviders) Delete(context.Context, service.Actor, string) error {
 
 type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
-	get    func(ctx context.Context, a service.Actor, id string) (service.Org, error)
+	get    func(ctx context.Context, a service.Actor, org domain.OrgID) (service.Org, error)
 	list   func(ctx context.Context, a service.Actor) ([]service.Org, error)
+	rename func(ctx context.Context, a service.Actor, org domain.OrgID, name string) (service.Org, error)
+	del    func(ctx context.Context, a service.Actor, org domain.OrgID) error
 }
 
 func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active bool, m json.RawMessage) (service.Org, error) {
@@ -197,11 +201,25 @@ func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active 
 	return s.create(ctx, a, n, active, m)
 }
 
-func (s stubOrgs) Get(ctx context.Context, a service.Actor, id string) (service.Org, error) {
+func (s stubOrgs) Get(ctx context.Context, a service.Actor, org domain.OrgID) (service.Org, error) {
 	if s.get == nil {
 		return service.Org{}, domain.ErrNotFound
 	}
-	return s.get(ctx, a, id)
+	return s.get(ctx, a, org)
+}
+
+func (s stubOrgs) Rename(ctx context.Context, a service.Actor, org domain.OrgID, name string) (service.Org, error) {
+	if s.rename == nil {
+		return service.Org{}, domain.ErrNotFound
+	}
+	return s.rename(ctx, a, org, name)
+}
+
+func (s stubOrgs) Delete(ctx context.Context, a service.Actor, org domain.OrgID) error {
+	if s.del == nil {
+		return domain.ErrNotFound
+	}
+	return s.del(ctx, a, org)
 }
 
 func (s stubOrgs) List(ctx context.Context, a service.Actor) ([]service.Org, error) {
@@ -234,6 +252,10 @@ func newTestServer(t *testing.T, auth server.AuthService, orgs server.OrgService
 	t.Helper()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
 		Auth: auth, Orgs: orgs, Providers: stubProviders{}, Version: "test",
+		// The hierarchy services default to the uniform nonexistent answer, so a
+		// contract test that does not care about them still exercises the real
+		// router and the real response validation rather than nil-panicking.
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -358,12 +380,12 @@ func TestNotFoundAndUnauthorizedAreIndistinguishable(t *testing.T) {
 	// unauthorized ≡ nonexistent, on the wire. A tenant read the principal may
 	// not perform and one addressing nothing must produce the same bytes.
 	missing := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
-		get: func(context.Context, service.Actor, string) (service.Org, error) {
+		get: func(context.Context, service.Actor, domain.OrgID) (service.Org, error) {
 			return service.Org{}, domain.ErrNotFound
 		},
 	})
 	forbidden := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
-		get: func(context.Context, service.Actor, string) (service.Org, error) {
+		get: func(context.Context, service.Actor, domain.OrgID) (service.Org, error) {
 			// The service maps a tenant-class refusal onto ErrNotFound at the
 			// chokepoint; this fixture stands in for that having happened.
 			return service.Org{}, domain.ErrNotFound
@@ -595,5 +617,244 @@ func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
 	}
 	if !got.HttpOnly || !got.Secure {
 		t.Errorf("session cookie must be HttpOnly+Secure, got HttpOnly=%v Secure=%v", got.HttpOnly, got.Secure)
+	}
+}
+
+// stubHierarchy answers every project, environment and folder operation with a
+// configurable outcome. It defaults to ErrNotFound, which is the answer the
+// unauthorized ≡ nonexistent rule makes indistinguishable from a refusal — so a
+// stub that "does nothing" is a stub that behaves correctly.
+type stubHierarchy struct {
+	err error
+}
+
+func (s stubHierarchy) outcome() error {
+	if s.err == nil {
+		return domain.ErrNotFound
+	}
+	return s.err
+}
+
+func (s stubHierarchy) Create(context.Context, service.Actor, domain.OrgID, string) (service.Project, error) {
+	return service.Project{}, s.outcome()
+}
+
+func (s stubHierarchy) Get(context.Context, service.Actor, domain.Scope) (service.Project, error) {
+	return service.Project{}, s.outcome()
+}
+
+func (s stubHierarchy) List(context.Context, service.Actor, domain.OrgID) ([]service.Project, error) {
+	return nil, s.outcome()
+}
+
+func (s stubHierarchy) Rename(context.Context, service.Actor, domain.Scope, string) (service.Project, error) {
+	return service.Project{}, s.outcome()
+}
+
+func (s stubHierarchy) Delete(context.Context, service.Actor, domain.Scope) error {
+	return s.outcome()
+}
+
+// The environment and folder surfaces share the type; Go's method sets keep
+// them apart by signature, so the compiler still checks each interface.
+type stubEnvs struct{ stubHierarchy }
+
+func (s stubEnvs) Create(context.Context, service.Actor, domain.Scope, string) (service.Environment, error) {
+	return service.Environment{}, s.outcome()
+}
+
+func (s stubEnvs) Get(context.Context, service.Actor, domain.Scope) (service.Environment, error) {
+	return service.Environment{}, s.outcome()
+}
+
+func (s stubEnvs) List(context.Context, service.Actor, domain.Scope) ([]service.Environment, error) {
+	return nil, s.outcome()
+}
+
+func (s stubEnvs) Rename(context.Context, service.Actor, domain.Scope, string) (service.Environment, error) {
+	return service.Environment{}, s.outcome()
+}
+
+func (s stubEnvs) Reorder(context.Context, service.Actor, domain.Scope, []string) ([]service.Environment, error) {
+	return nil, s.outcome()
+}
+
+type stubFolders struct{ stubHierarchy }
+
+func (s stubFolders) Create(context.Context, service.Actor, domain.Scope, string) (service.Folder, error) {
+	return service.Folder{}, s.outcome()
+}
+
+func (s stubFolders) Get(context.Context, service.Actor, domain.Scope, string) (service.Folder, error) {
+	return service.Folder{}, s.outcome()
+}
+
+func (s stubFolders) List(context.Context, service.Actor, domain.Scope) ([]service.Folder, error) {
+	return nil, s.outcome()
+}
+
+func (s stubFolders) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.Folder, error) {
+	return service.Folder{}, s.outcome()
+}
+
+func (s stubFolders) Delete(context.Context, service.Actor, domain.Scope, string) error {
+	return s.outcome()
+}
+
+const (
+	testProjectID = "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44"
+	testEnvID     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55"
+	testFolderID  = "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66"
+)
+
+func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Projects:     stubHierarchy{err: outcome},
+		Environments: stubEnvs{stubHierarchy{err: outcome}},
+		Folders:      stubFolders{stubHierarchy{err: outcome}},
+		Version:      "test",
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// hierarchyRoutes is every by-id read and mutation on the hierarchy, one entry
+// per level, used by the uniformity tests below.
+func hierarchyRoutes() []struct {
+	method string
+	path   string
+	body   any
+} {
+	base := api.PathPrefix + "/orgs/" + testOrgID
+	project := base + "/projects/" + testProjectID
+	rename := apigen.RenameRequest{Name: "renamed"}
+	return []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodGet, base, nil},
+		{http.MethodPatch, base, rename},
+		{http.MethodDelete, base, nil},
+		{http.MethodGet, base + "/projects", nil},
+		{http.MethodPost, base + "/projects", apigen.CreateProjectRequest{Name: "p"}},
+		{http.MethodGet, project, nil},
+		{http.MethodPatch, project, rename},
+		{http.MethodDelete, project, nil},
+		{http.MethodGet, project + "/environments", nil},
+		{http.MethodPost, project + "/environments", apigen.CreateEnvironmentRequest{Name: "e"}},
+		{http.MethodPut, project + "/environments/order", apigen.EnvironmentOrderRequest{EnvironmentIds: []string{testEnvID}}},
+		{http.MethodGet, project + "/environments/" + testEnvID, nil},
+		{http.MethodPatch, project + "/environments/" + testEnvID, rename},
+		{http.MethodDelete, project + "/environments/" + testEnvID, nil},
+		{http.MethodGet, project + "/folders", nil},
+		{http.MethodPost, project + "/folders", apigen.CreateFolderRequest{Path: "f"}},
+		{http.MethodGet, project + "/folders/" + testFolderID, nil},
+		{http.MethodPatch, project + "/folders/" + testFolderID, apigen.RenameFolderRequest{Path: "g"}},
+		{http.MethodDelete, project + "/folders/" + testFolderID, nil},
+	}
+}
+
+// TestUniformNonexistentAtEveryLevel is mvp-boundary C1's wire half: at org,
+// project, environment AND folder level, a refusal and a genuine miss are the
+// same status and the same bytes. The two servers differ only in which sentinel
+// the service returned — ErrNotFound for a missing row, ErrNotFound again for a
+// tenant-class refusal, which is the whole point: the transport is given no way
+// to tell them apart.
+func TestUniformNonexistentAtEveryLevel(t *testing.T) {
+	missing := hierarchyServer(t, domain.ErrNotFound)
+	refused := hierarchyServer(t, fmt.Errorf("refused at the chokepoint: %w", domain.ErrNotFound))
+	for _, route := range hierarchyRoutes() {
+		respA, bodyA := call(t, missing, route.method, route.path, "ew_1_cli_x", route.body)
+		respB, bodyB := call(t, refused, route.method, route.path, "ew_1_cli_x", route.body)
+		if respA.StatusCode != http.StatusNotFound || respB.StatusCode != http.StatusNotFound {
+			t.Errorf("%s %s: statuses %d and %d, want both 404", route.method, route.path, respA.StatusCode, respB.StatusCode)
+			continue
+		}
+		if !bytes.Equal(bodyA, bodyB) {
+			t.Errorf("%s %s: bodies differ:\n  %s\n  %s", route.method, route.path, bodyA, bodyB)
+		}
+		body := decodeError(t, bodyA)
+		if body.Error.Detail != nil {
+			t.Errorf("%s %s: a 404 carries a detail member", route.method, route.path)
+		}
+	}
+}
+
+// TestConflictAndLimitRenderUniformly covers the two refusals this surface
+// adds. Both are decided AFTER authorization succeeded, so unlike a 404 they may
+// exist as their own codes — but the message is still fixed per code, and the
+// limit refusal must name its bound because the ops spec requires a named
+// refusal and a body may carry nothing derived from the request.
+func TestConflictAndLimitRenderUniformly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code apigen.ErrorCode
+	}{
+		{"conflict", domain.ErrConflict, apigen.ErrorCodeConflict},
+		{"limit", domain.ErrLimitExceeded, apigen.ErrorCodeLimitExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := hierarchyServer(t, fmt.Errorf("wrapped: %w", tc.err))
+			resp, payload := call(t, srv, http.MethodPost,
+				api.PathPrefix+"/orgs/"+testOrgID+"/projects", "ew_1_cli_x",
+				apigen.CreateProjectRequest{Name: "p"})
+			if resp.StatusCode != http.StatusConflict {
+				t.Fatalf("status %d, want 409", resp.StatusCode)
+			}
+			body := decodeError(t, payload)
+			if body.Error.Code != tc.code {
+				t.Fatalf("code %q, want %q", body.Error.Code, tc.code)
+			}
+			if body.Error.Detail != nil {
+				t.Error("a 409 carries a detail member — only bad_request may")
+			}
+			if tc.code == apigen.ErrorCodeLimitExceeded && !strings.Contains(body.Error.Message, "50 environments") {
+				t.Errorf("the limit refusal does not name its bound: %q", body.Error.Message)
+			}
+		})
+	}
+}
+
+// TestAssuranceRefusalOnATenantRouteIsForbidden is the non-tautological half of
+// the uniformity story. TestUniformNonexistentAtEveryLevel feeds both fixtures
+// ErrNotFound and proves the transport adds no difference; it cannot see a
+// mapping that turns some OTHER sentinel into a different status. This one
+// feeds ErrUnauthorized — the sentinel authorize() returns when the caller HOLDS
+// the grant but the session's assurance is short of an MFA-mandatory operation
+// (internal/authz/authorize.go, the assurance leg) — and pins that it renders
+// the declared 403 with the uniform body, not a 404 and not a 500.
+//
+// The org rename is the route under test because its formula atom
+// `instance-config` is in authz.MFAMandatory. That a tenant route declares 403
+// IF AND ONLY IF its formula is MFA-mandatory is asserted against the registry
+// in internal/isolation/contract_test.go, which can see both.
+func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Providers: stubProviders{},
+		Orgs: stubOrgs{
+			rename: func(context.Context, service.Actor, domain.OrgID, string) (service.Org, error) {
+				return service.Org{}, fmt.Errorf("step up first: %w", domain.ErrUnauthorized)
+			},
+		},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
+		Version: "test",
+	}))
+	t.Cleanup(srv.Close)
+
+	resp, payload := call(t, srv, http.MethodPatch, api.PathPrefix+"/orgs/"+testOrgID,
+		"ew_1_cli_x", apigen.RenameRequest{Name: "renamed"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 — an assurance refusal on a held grant is a grant-class refusal, not the nonexistent mask", resp.StatusCode)
+	}
+	body := decodeError(t, payload)
+	if body.Error.Code != apigen.ErrorCodeForbidden {
+		t.Fatalf("code %q, want forbidden", body.Error.Code)
+	}
+	if body.Error.Detail != nil {
+		t.Error("a 403 carries a detail member — only bad_request may")
 	}
 }

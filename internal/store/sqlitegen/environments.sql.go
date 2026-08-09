@@ -9,19 +9,36 @@ import (
 	"context"
 )
 
+const countEnvironments = `-- name: CountEnvironments :one
+SELECT COUNT(*) FROM environments WHERE org_id = ? AND project_id = ?
+`
+
+type CountEnvironmentsParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+func (q *Queries) CountEnvironments(ctx context.Context, arg CountEnvironmentsParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countEnvironments, arg.OrgID, arg.ProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createEnvironment = `-- name: CreateEnvironment :exec
 
-INSERT INTO environments (id, org_id, project_id, name, note, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO environments (id, org_id, project_id, name, note, display_order, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateEnvironmentParams struct {
-	ID        string
-	OrgID     string
-	ProjectID string
-	Name      string
-	Note      string
-	CreatedAt string
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	DisplayOrder int64
+	CreatedAt    string
 }
 
 // Tenant-scoped statements. The reserved chain_* parameters are bound by the
@@ -34,13 +51,32 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		arg.ProjectID,
 		arg.Name,
 		arg.Note,
+		arg.DisplayOrder,
 		arg.CreatedAt,
 	)
 	return err
 }
 
+const deleteEnvironment = `-- name: DeleteEnvironment :execrows
+DELETE FROM environments WHERE org_id = ? AND project_id = ? AND id = ?
+`
+
+type DeleteEnvironmentParams struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+}
+
+func (q *Queries) DeleteEnvironment(ctx context.Context, arg DeleteEnvironmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteEnvironment, arg.OrgID, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getEnvironment = `-- name: GetEnvironment :one
-SELECT id, org_id, project_id, name, note, created_at FROM environments
+SELECT id, org_id, project_id, name, note, created_at, display_order FROM environments
 WHERE org_id = ? AND project_id = ? AND id = ?
 `
 
@@ -60,8 +96,126 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.Name,
 		&i.Note,
 		&i.CreatedAt,
+		&i.DisplayOrder,
 	)
 	return i, err
+}
+
+const listEnvironments = `-- name: ListEnvironments :many
+SELECT id, org_id, project_id, name, note, created_at, display_order FROM environments
+WHERE org_id = ? AND project_id = ? ORDER BY display_order, name
+`
+
+type ListEnvironmentsParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]Environment, error) {
+	rows, err := q.db.QueryContext(ctx, listEnvironments, arg.OrgID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Environment
+	for rows.Next() {
+		var i Environment
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Note,
+			&i.CreatedAt,
+			&i.DisplayOrder,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const nextEnvironmentOrder = `-- name: NextEnvironmentOrder :one
+SELECT CAST(COALESCE(MAX(display_order) + 1, 0) AS INTEGER) FROM environments
+WHERE org_id = ? AND project_id = ?
+`
+
+type NextEnvironmentOrderParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+// NextEnvironmentOrder is the append position: one past the highest order in
+// use, NOT the row count. Deleting an environment deliberately leaves a gap, so
+// a count would hand the next create a position another row already holds.
+// The CAST pins the column type; without it sqlc types COALESCE as untyped.
+func (q *Queries) NextEnvironmentOrder(ctx context.Context, arg NextEnvironmentOrderParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, nextEnvironmentOrder, arg.OrgID, arg.ProjectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const renameEnvironment = `-- name: RenameEnvironment :execrows
+UPDATE environments SET name = ?
+WHERE org_id = ? AND project_id = ? AND id = ?
+`
+
+type RenameEnvironmentParams struct {
+	Name      string
+	OrgID     string
+	ProjectID string
+	ID        string
+}
+
+func (q *Queries) RenameEnvironment(ctx context.Context, arg RenameEnvironmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, renameEnvironment,
+		arg.Name,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setEnvironmentOrder = `-- name: SetEnvironmentOrder :execrows
+UPDATE environments SET display_order = ?
+WHERE org_id = ? AND project_id = ? AND id = ?
+`
+
+type SetEnvironmentOrderParams struct {
+	DisplayOrder int64
+	OrgID        string
+	ProjectID    string
+	ID           string
+}
+
+// Reorder is authorized at PROJECT depth (it rewrites the project's whole
+// ordered set), so the proof carries no environment id and `id` is an ordinary
+// caller argument. The chain conjuncts confine it: an id from another project
+// matches no row, which is the uniform nonexistent outcome the reorder service
+// turns into a refusal.
+func (q *Queries) SetEnvironmentOrder(ctx context.Context, arg SetEnvironmentOrderParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setEnvironmentOrder,
+		arg.DisplayOrder,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateEnvironmentNote = `-- name: UpdateEnvironmentNote :execrows

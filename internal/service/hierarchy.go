@@ -1,0 +1,1015 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/Dunky13/wenv/internal/audit"
+	"github.com/Dunky13/wenv/internal/authz"
+	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/wenv/internal/store/tx"
+)
+
+// The hierarchy surface (#48): Instance → Organization → Project →
+// Environment → Folder, as the domain model stands after the flat-model ADR.
+//
+// What is deliberately absent, at every layer down to the column: no `base`
+// pointer on Environment, no project-defaults layer, no masked state, no value
+// row of any kind. The flat-model ADR's own reason — "a structure that must
+// not be used is a bug that hasn't happened yet" — forbids the dormant
+// version as much as the live one, so there is nothing here to grep for later.
+//
+// Every method takes the acting principal, opens one transaction, authorizes
+// inside it, and only then calls the store with the minted proof. Identity is
+// always the immutable prefixed id: a rename changes a label, never a
+// reference.
+
+// MaxEnvironmentsPerProject is the ops spec's environment-count cap. It is
+// enforced inside the creating transaction, against a count read under the
+// same proof — a check made anywhere else is a check a concurrent create can
+// walk past.
+const MaxEnvironmentsPerProject = 50
+
+// Name and path bounds. No ADR fixes a display-name length for org, project,
+// environment or folder; 128 bytes is the bound the org contract already
+// carried since #47, adopted here for every entity so there is one number
+// rather than four. The key-name grammar (uppercase, env-var-safe) governs
+// KEYS and is deliberately not applied to entity names.
+const (
+	maxNameBytes      = 128
+	maxFolderPathLen  = 256
+	maxFolderPathSegs = 32
+)
+
+// checkName is the entity-name grammar, enforced in the domain rather than
+// only at the contract boundary: internal callers (the isolation harness,
+// future jobs) do not pass through request validation, and a name that reaches
+// the database unbounded is a bound that existed only on paper.
+//
+// `what` names the thing being checked in full ("organisation name", "folder
+// path segment"), so the message reads as a sentence at every call site rather
+// than gaining a stray "name" where the caller's subject is not one.
+func checkName(what, name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("%w: %s must not be empty", domain.ErrInvalid, what)
+	case len(name) > maxNameBytes:
+		return fmt.Errorf("%w: %s exceeds %d bytes", domain.ErrInvalid, what, maxNameBytes)
+	case !utf8.ValidString(name):
+		return fmt.Errorf("%w: %s is not valid UTF-8", domain.ErrInvalid, what)
+	case strings.TrimSpace(name) != name:
+		return fmt.Errorf("%w: %s has leading or trailing whitespace", domain.ErrInvalid, what)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: %s contains a control character", domain.ErrInvalid, what)
+		}
+	}
+	return nil
+}
+
+// checkFolderPath is the folder namespace grammar. A folder is display
+// grouping only, so its path is a plain slash-separated namespace: no leading
+// or trailing separator, no empty segment, no `.`/`..`, bounded in depth to
+// match the import spec's tree-depth bound.
+//
+// The empty-path and empty-segment cases are one case: splitting "" or "a//b"
+// yields an empty segment either way, and checkName rejects it with the right
+// sentence. There is no separate test for it, because a second test of the same
+// thing is a second thing to keep in agreement.
+func checkFolderPath(path string) error {
+	if len(path) > maxFolderPathLen {
+		return fmt.Errorf("%w: folder path exceeds %d bytes", domain.ErrInvalid, maxFolderPathLen)
+	}
+	segments := strings.Split(path, "/")
+	if len(segments) > maxFolderPathSegs {
+		return fmt.Errorf("%w: folder path exceeds %d segments", domain.ErrInvalid, maxFolderPathSegs)
+	}
+	for _, segment := range segments {
+		if segment == "." || segment == ".." {
+			return fmt.Errorf("%w: folder path segment %q is reserved", domain.ErrInvalid, segment)
+		}
+		if err := checkName("folder path segment", segment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Organization
+// ---------------------------------------------------------------------------
+
+// Org is the service layer's organisation. It is a distinct type from the
+// store row on purpose: internal/store is importable only by this package, so
+// a transport that returned store rows would either violate that boundary or
+// force it open. Field names match the store row, which keeps the conversion
+// a copy rather than a translation.
+type Org struct {
+	ID        string
+	Name      string
+	Active    bool
+	Metadata  json.RawMessage
+	CreatedAt time.Time
+}
+
+func orgOf(o store.Org) Org {
+	return Org{ID: o.ID, Name: o.Name, Active: o.Active, Metadata: o.Metadata, CreatedAt: o.CreatedAt}
+}
+
+// Orgs is the organisation surface. Creation and enumeration are
+// instance-scoped operator work; every by-id operation is tenant-scoped at org
+// depth, so an org the caller may not reach is indistinguishable from one that
+// does not exist.
+type Orgs struct {
+	DB *store.DB
+}
+
+// Create publishes a new org through the transactional boundary.
+func (s *Orgs) Create(ctx context.Context, actor Actor, name string, active bool, metadata json.RawMessage) (Org, error) {
+	if err := checkName("organisation name", name); err != nil {
+		return Org{}, err
+	}
+	id, err := newID("org")
+	if err != nil {
+		return Org{}, err
+	}
+	org := store.Org{
+		ID:        id,
+		Name:      name,
+		Active:    active,
+		Metadata:  metadata,
+		CreatedAt: store.CanonTime(time.Now()),
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgCreate, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		if err := r.Orgs().Create(ctx, p, org); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgCreated, caller.Principal,
+			audit.Object{Type: "org", ID: org.ID},
+			audit.Payload{"org_id": org.ID, "org_name": audit.SanitizeFreeText(org.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
+	})
+	if err != nil {
+		return Org{}, err
+	}
+	return orgOf(org), nil
+}
+
+// Get reads one org. It is a proof-scoped pure read at org depth, so it emits
+// no event of its own: the trail would only duplicate what the read returned,
+// which is the exact shape the audit model's default-deny permit accepts.
+func (s *Orgs) Get(ctx context.Context, actor Actor, org domain.OrgID) (Org, error) {
+	var out store.Org
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgGet, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().Get(ctx, p)
+		return err
+	})
+	if err != nil {
+		return Org{}, err
+	}
+	return orgOf(out), nil
+}
+
+// List is the instance-scoped enumeration of every org, and therefore itself
+// audited (the audit model's default-deny rule refuses `audited: none` to
+// instance-class operations). The event commits with the read, which is why
+// this runs in a write transaction: an operator read without its durable
+// record does not complete.
+func (s *Orgs) List(ctx context.Context, actor Actor) ([]Org, error) {
+	var out []store.Org
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgList, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().List(ctx, p)
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, caller.Principal, audit.Object{},
+			audit.Payload{"query": "list", "row_count": len(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Org, 0, len(out))
+	for _, o := range out {
+		list = append(list, orgOf(o))
+	}
+	return list, nil
+}
+
+func (s *Orgs) Count(ctx context.Context, actor Actor) (int64, error) {
+	var out int64
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgList, domain.Scope{})
+		if err != nil {
+			return err
+		}
+		out, err = r.Orgs().Count(ctx, p)
+		if err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgRead, caller.Principal, audit.Object{},
+			audit.Payload{"query": "count", "row_count": int(out)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertInstance(ctx, p, ev)
+	})
+	return out, err
+}
+
+// Rename changes the org's mutable name. The read that produces the previous
+// name for the trail runs inside the same transaction as the write, so the
+// recorded transition is the one that actually happened.
+func (s *Orgs) Rename(ctx context.Context, actor Actor, org domain.OrgID, name string) (Org, error) {
+	if err := checkName("organisation name", name); err != nil {
+		return Org{}, err
+	}
+	var out store.Org
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgRename, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		before, err := r.Orgs().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Orgs().Rename(ctx, p, name); err != nil {
+			return err
+		}
+		out = before
+		out.Name = name
+		ev, err := domainEvent(ctx, audit.EventOrgRenamed, caller.Principal,
+			audit.Object{Type: "org", ID: before.ID}, audit.Payload{
+				"previous_name": audit.SanitizeFreeText(before.Name),
+				"name":          audit.SanitizeFreeText(name),
+			})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Org{}, err
+	}
+	return orgOf(out), nil
+}
+
+// Delete removes an org. It never cascades: an org that still has projects (or
+// grants pointing into it) is refused by the ancestry constraints, which
+// surface as a conflict. Deleting a tenant's contents out from under it is a
+// different, auditable operation and not one this ticket invents.
+func (s *Orgs) Delete(ctx context.Context, actor Actor, org domain.OrgID) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpOrgDelete, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		before, err := r.Orgs().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Orgs().Delete(ctx, p); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventOrgDeleted, caller.Principal,
+			audit.Object{Type: "org", ID: before.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(before.Name)})
+		if err != nil {
+			return err
+		}
+		// The trail outlives its subject by design: the audit tables carry the
+		// chain as denormalized ids with no ancestry FK, which is the one
+		// declared exception to the composite-FK rule and exactly why this
+		// insert can follow the delete in the same transaction.
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Project
+// ---------------------------------------------------------------------------
+
+// Project is the service layer's project.
+type Project struct {
+	ID        string
+	OrgID     string
+	Name      string
+	CreatedAt time.Time
+}
+
+func projectOf(p store.Project) Project {
+	return Project{ID: p.ID, OrgID: p.OrgID, Name: p.Name, CreatedAt: p.CreatedAt}
+}
+
+// Projects owns the project surface.
+type Projects struct {
+	DB *store.DB
+}
+
+// Create makes a project inside org. The service addresses the scope; the
+// chain the store writes comes from the proof authorize() minted after
+// resolving that scope — never from these arguments.
+func (s *Projects) Create(ctx context.Context, actor Actor, org domain.OrgID, name string) (Project, error) {
+	if err := checkName("project name", name); err != nil {
+		return Project{}, err
+	}
+	id, err := newID("prj")
+	if err != nil {
+		return Project{}, err
+	}
+	proj := store.NewProject{ID: id, Name: name, CreatedAt: store.CanonTime(time.Now())}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectCreate, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		if err := r.Projects().Create(ctx, p, proj); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventProjectCreated, caller.Principal,
+			audit.Object{Type: "project", ID: proj.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(proj.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return Project{ID: proj.ID, OrgID: string(org), Name: proj.Name, CreatedAt: proj.CreatedAt}, nil
+}
+
+func (s *Projects) Get(ctx context.Context, actor Actor, scope domain.Scope) (Project, error) {
+	var out store.Project
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectGet, scope)
+		if err != nil {
+			return err
+		}
+		out, err = r.Projects().Get(ctx, p)
+		return err
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return projectOf(out), nil
+}
+
+func (s *Projects) List(ctx context.Context, actor Actor, org domain.OrgID) ([]Project, error) {
+	var out []store.Project
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectList, domain.Scope{Org: org})
+		if err != nil {
+			return err
+		}
+		out, err = r.Projects().List(ctx, p)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Project, 0, len(out))
+	for _, row := range out {
+		list = append(list, projectOf(row))
+	}
+	return list, nil
+}
+
+func (s *Projects) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string) (Project, error) {
+	if err := checkName("project name", name); err != nil {
+		return Project{}, err
+	}
+	var out store.Project
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectRename, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Projects().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Projects().Rename(ctx, p, name); err != nil {
+			return err
+		}
+		out = before
+		out.Name = name
+		ev, err := domainEvent(ctx, audit.EventProjectRenamed, caller.Principal,
+			audit.Object{Type: "project", ID: before.ID}, audit.Payload{
+				"previous_name": audit.SanitizeFreeText(before.Name),
+				"name":          audit.SanitizeFreeText(name),
+			})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return projectOf(out), nil
+}
+
+// Delete removes a project. Like every delete on this surface it refuses
+// rather than cascading: a project holding environments or folders is refused
+// by the ancestry constraints as a conflict.
+func (s *Projects) Delete(ctx context.Context, actor Actor, scope domain.Scope) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpProjectDelete, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Projects().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Projects().Delete(ctx, p); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventProjectDeleted, caller.Principal,
+			audit.Object{Type: "project", ID: before.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(before.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
+// Environment is the service layer's environment. DisplayOrder is its
+// user-defined position within the project. There is no base pointer and no
+// defaults layer to expose, because neither exists.
+type Environment struct {
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	DisplayOrder int64
+	CreatedAt    time.Time
+}
+
+func environmentOf(e store.Environment) Environment {
+	return Environment{
+		ID: e.ID, OrgID: e.OrgID, ProjectID: e.ProjectID,
+		Name: e.Name, Note: e.Note, DisplayOrder: e.DisplayOrder, CreatedAt: e.CreatedAt,
+	}
+}
+
+// Environments owns the environment surface.
+type Environments struct {
+	DB *store.DB
+}
+
+// Environment methods address scope as a domain.Scope — the same shape
+// authorize() takes; a wrong-depth scope is refused there (loud error).
+// Create/List/Reorder address the parent project (Org+Project); the rest
+// address the environment (full chain).
+
+// Create appends an environment at the end of the project's display order.
+// The count that bounds it is read under the same proof in the same
+// transaction as the insert, so the cap cannot be walked past by two
+// concurrent creates.
+func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (Environment, error) {
+	if err := checkName("environment name", name); err != nil {
+		return Environment{}, err
+	}
+	id, err := newID("env")
+	if err != nil {
+		return Environment{}, err
+	}
+	var created store.NewEnvironment
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvCreate, scope)
+		if err != nil {
+			return err
+		}
+		// Take the project row first. Both reads below are read-then-write, and
+		// on postgres two transactions at cap-1 would otherwise both see the
+		// same count and both insert. sqlite serializes writes on its single
+		// _txlock=immediate connection, so there the lock is a plain read.
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		n, err := r.Environments().Count(ctx, p)
+		if err != nil {
+			return err
+		}
+		if n >= MaxEnvironmentsPerProject {
+			return fmt.Errorf("%w: a project holds at most %d environments",
+				domain.ErrLimitExceeded, MaxEnvironmentsPerProject)
+		}
+		// Append past the highest position in use, NOT at the row count: a
+		// delete leaves its gap behind on purpose, so [0,1,2] minus the middle
+		// is a count of 2 and a next position of 3. Using the count there would
+		// hand the new row position 2, which the last row already holds.
+		next, err := r.Environments().NextOrder(ctx, p)
+		if err != nil {
+			return err
+		}
+		created = store.NewEnvironment{
+			ID: id, Name: name, Note: "",
+			// Reorder is what moves an environment; creation does not guess
+			// where the operator wanted it.
+			DisplayOrder: next,
+			CreatedAt:    store.CanonTime(time.Now()),
+		}
+		if err := r.Environments().Create(ctx, p, created); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvCreated, caller.Principal,
+			audit.Object{Type: "environment", ID: created.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(created.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Environment{}, err
+	}
+	return Environment{
+		ID: created.ID, OrgID: string(scope.Org), ProjectID: string(scope.Project),
+		Name: created.Name, Note: created.Note,
+		DisplayOrder: created.DisplayOrder, CreatedAt: created.CreatedAt,
+	}, nil
+}
+
+func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope) (Environment, error) {
+	var out store.Environment
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvRead, scope)
+		if err != nil {
+			return err
+		}
+		out, err = r.Environments().Get(ctx, p)
+		return err
+	})
+	if err != nil {
+		return Environment{}, err
+	}
+	return environmentOf(out), nil
+}
+
+// List returns the project's environments in display order.
+func (s *Environments) List(ctx context.Context, actor Actor, scope domain.Scope) ([]Environment, error) {
+	var out []store.Environment
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvList, scope)
+		if err != nil {
+			return err
+		}
+		out, err = r.Environments().List(ctx, p)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Environment, 0, len(out))
+	for _, row := range out {
+		list = append(list, environmentOf(row))
+	}
+	return list, nil
+}
+
+func (s *Environments) Rename(ctx context.Context, actor Actor, scope domain.Scope, name string) (Environment, error) {
+	if err := checkName("environment name", name); err != nil {
+		return Environment{}, err
+	}
+	var out store.Environment
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvRename, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Environments().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Environments().Rename(ctx, p, name); err != nil {
+			return err
+		}
+		out = before
+		out.Name = name
+		ev, err := domainEvent(ctx, audit.EventEnvRenamed, caller.Principal,
+			audit.Object{Type: "environment", ID: before.ID}, audit.Payload{
+				"previous_name": audit.SanitizeFreeText(before.Name),
+				"name":          audit.SanitizeFreeText(name),
+			})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Environment{}, err
+	}
+	return environmentOf(out), nil
+}
+
+// Reorder rewrites the project's whole display order from an ordered id list.
+//
+// It takes the WHOLE set rather than one position per call for two reasons: a
+// single transaction cannot then leave two environments sharing a position or
+// a gap in the sequence, and a concurrent reorder serializes behind it instead
+// of interleaving with it. The list must name exactly the project's
+// environments, once each; anything else is refused with one fixed message,
+// which is also why a foreign id discloses nothing — the refusal is the same
+// whether it exists or not.
+func (s *Environments) Reorder(ctx context.Context, actor Actor, scope domain.Scope, ordered []string) ([]Environment, error) {
+	var out []store.Environment
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvReorder, scope)
+		if err != nil {
+			return err
+		}
+		// Same lock as create, for the same reason one level up: two reorders
+		// interleaving their per-row writes could commit a blended permutation
+		// with duplicate positions, and a reorder racing a create would race its
+		// append position.
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		live, err := r.Environments().List(ctx, p)
+		if err != nil {
+			return err
+		}
+		known := make(map[string]store.Environment, len(live))
+		for _, e := range live {
+			known[e.ID] = e
+		}
+		// A project with no environments has the empty list as its exact whole
+		// set, and reordering it is a legal no-op. The contract's minItems
+		// matches (0), so the two layers agree rather than the schema rejecting
+		// what the service would accept.
+		seen := make(map[string]bool, len(ordered))
+		if len(ordered) != len(live) {
+			return fmt.Errorf("%w: the order must name each of the project's environments exactly once", domain.ErrInvalid)
+		}
+		out = make([]store.Environment, 0, len(ordered))
+		for i, id := range ordered {
+			env, ok := known[id]
+			if !ok || seen[id] {
+				return fmt.Errorf("%w: the order must name each of the project's environments exactly once", domain.ErrInvalid)
+			}
+			seen[id] = true
+			if err := r.Environments().SetOrder(ctx, p, id, int64(i)); err != nil {
+				return err
+			}
+			env.DisplayOrder = int64(i)
+			out = append(out, env)
+		}
+		// The resulting order itself, not only how many rows it covered:
+		// swapping production and staging must not produce the same record as
+		// any other permutation of the same three environments. Ids are trusted
+		// vocabulary (server-minted, grammar-checked), so they are a schema
+		// string rather than free text.
+		ev, err := domainEvent(ctx, audit.EventEnvReordered, caller.Principal,
+			audit.Object{Type: "project", ID: string(scope.Project)},
+			audit.Payload{
+				"environment_count": len(ordered),
+				"environment_order": strings.Join(ordered, ","),
+			})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Environment, 0, len(out))
+	for _, row := range out {
+		list = append(list, environmentOf(row))
+	}
+	return list, nil
+}
+
+// Delete removes an environment. The remaining environments keep their
+// positions: display order is a property of each row, not an invariant over
+// the set, so a gap is not a defect and closing it would be an unrequested
+// write to rows the operator did not name.
+func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Scope) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvDelete, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Environments().Get(ctx, p)
+		if err != nil {
+			return err
+		}
+		if err := r.Environments().Delete(ctx, p); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvDeleted, caller.Principal,
+			audit.Object{Type: "environment", ID: before.ID},
+			audit.Payload{"name": audit.SanitizeFreeText(before.Name)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+}
+
+// UpdateNote mutates an environment's operator note. It is the edit-authority
+// demonstration operation from #44 and has no HTTP route of its own; it stays
+// because the isolation probes ride on it to prove that `edit(E)` and
+// `definitions-edit(project)` are enforced as different authorities.
+func (s *Environments) UpdateNote(ctx context.Context, actor Actor, scope domain.Scope, note string) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpEnvUpdateNote, scope)
+		if err != nil {
+			return err
+		}
+		if err := r.Environments().UpdateNote(ctx, p, note); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventEnvNoteChanged, caller.Principal,
+			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Folder
+// ---------------------------------------------------------------------------
+
+// Folder is the service layer's folder: a project-scoped namespace and display
+// grouping, and nothing else in v1.
+type Folder struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Path      string
+	CreatedAt time.Time
+}
+
+func folderOf(f store.Folder) Folder {
+	return Folder{ID: f.ID, OrgID: f.OrgID, ProjectID: f.ProjectID, Path: f.Path, CreatedAt: f.CreatedAt}
+}
+
+// Folders owns the folder surface. Every method addresses PROJECT depth: the
+// scope lattice has no folder level (the permission ADR forbids folder-scoped
+// grants outright), so the folder id is an ordinary argument that can only
+// resolve inside the project the proof already authorized.
+type Folders struct {
+	DB *store.DB
+}
+
+func (s *Folders) Create(ctx context.Context, actor Actor, scope domain.Scope, path string) (Folder, error) {
+	if err := checkFolderPath(path); err != nil {
+		return Folder{}, err
+	}
+	id, err := newID("fld")
+	if err != nil {
+		return Folder{}, err
+	}
+	folder := store.NewFolder{ID: id, Path: path, CreatedAt: store.CanonTime(time.Now())}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpFolderCreate, scope)
+		if err != nil {
+			return err
+		}
+		if err := r.Folders().Create(ctx, p, folder); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventFolderCreated, caller.Principal,
+			audit.Object{Type: "folder", ID: folder.ID},
+			audit.Payload{"namespace": audit.SanitizeFreeText(folder.Path)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Folder{}, err
+	}
+	return Folder{
+		ID: folder.ID, OrgID: string(scope.Org), ProjectID: string(scope.Project),
+		Path: folder.Path, CreatedAt: folder.CreatedAt,
+	}, nil
+}
+
+func (s *Folders) Get(ctx context.Context, actor Actor, scope domain.Scope, id string) (Folder, error) {
+	var out store.Folder
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpFolderGet, scope)
+		if err != nil {
+			return err
+		}
+		out, err = r.Folders().Get(ctx, p, id)
+		return err
+	})
+	if err != nil {
+		return Folder{}, err
+	}
+	return folderOf(out), nil
+}
+
+func (s *Folders) List(ctx context.Context, actor Actor, scope domain.Scope) ([]Folder, error) {
+	var out []store.Folder
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpFolderList, scope)
+		if err != nil {
+			return err
+		}
+		out, err = r.Folders().List(ctx, p)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	list := make([]Folder, 0, len(out))
+	for _, row := range out {
+		list = append(list, folderOf(row))
+	}
+	return list, nil
+}
+
+// Rename moves a folder to a new path. It renames exactly the row named: a
+// folder is a flat namespace label in v1, not a tree node with children to
+// carry along, so there is no cascade to get wrong.
+func (s *Folders) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, path string) (Folder, error) {
+	if err := checkFolderPath(path); err != nil {
+		return Folder{}, err
+	}
+	var out store.Folder
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpFolderRename, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Folders().Get(ctx, p, id)
+		if err != nil {
+			return err
+		}
+		if err := r.Folders().Rename(ctx, p, id, path); err != nil {
+			return err
+		}
+		out = before
+		out.Path = path
+		ev, err := domainEvent(ctx, audit.EventFolderRenamed, caller.Principal,
+			audit.Object{Type: "folder", ID: before.ID}, audit.Payload{
+				"previous_namespace": audit.SanitizeFreeText(before.Path),
+				"namespace":          audit.SanitizeFreeText(path),
+			})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+	if err != nil {
+		return Folder{}, err
+	}
+	return folderOf(out), nil
+}
+
+func (s *Folders) Delete(ctx context.Context, actor Actor, scope domain.Scope, id string) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpFolderDelete, scope)
+		if err != nil {
+			return err
+		}
+		before, err := r.Folders().Get(ctx, p, id)
+		if err != nil {
+			return err
+		}
+		if err := r.Folders().Delete(ctx, p, id); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventFolderDeleted, caller.Principal,
+			audit.Object{Type: "folder", ID: before.ID},
+			audit.Payload{"namespace": audit.SanitizeFreeText(before.Path)})
+		if err != nil {
+			return err
+		}
+		return r.Audit().InsertTenant(ctx, p, ev)
+	})
+}

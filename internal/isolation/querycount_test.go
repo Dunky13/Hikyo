@@ -142,19 +142,28 @@ func runQueryCountChecks(t *testing.T, db *store.DB) {
 // and the grant CHECK forbids scope gaps. These are raw-SQL attempts —
 // below the store — because that is exactly the layer the constraints
 // defend.
+//
+// The display-order pair belongs here for the same reason: a negative position
+// sorts ahead of every legitimate one, and an OMITTED position must fail rather
+// than silently become zero — which is what having no column default buys, on
+// both engines.
 func runChainConstraintChecks(t *testing.T, db *store.DB) {
 	attempts := []struct {
 		name string
 		stmt string
 	}{
 		{"env_chain_crossing_orgs",
-			`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_evil', 'org_b', 'prj_a1', 'x', '', ` + ts + `)`},
+			`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_evil', 'org_b', 'prj_a1', 'x', '', ` + ts + `, 0)`},
 		{"env_parent_project_missing",
-			`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_evil', 'org_a', 'prj_missing', 'x', '', ` + ts + `)`},
+			`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_evil', 'org_a', 'prj_missing', 'x', '', ` + ts + `, 0)`},
 		{"project_parent_org_missing",
 			`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_evil', 'org_missing', 'x', ` + ts + `)`},
 		{"grant_scope_gap",
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_evil', 'usr_alice', 'read', NULL, 'prj_a1', NULL, ` + ts + `)`},
+		{"negative_display_order",
+			`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_evil', 'org_a', 'prj_a1', 'x', '', ` + ts + `, -1)`},
+		{"missing_display_order",
+			`INSERT INTO environments (id, org_id, project_id, name, note, created_at) VALUES ('env_evil', 'org_a', 'prj_a1', 'x', '', ` + ts + `)`},
 		{"grant_chain_crossing_orgs",
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_evil', 'usr_alice', 'read', 'org_b', 'prj_a1', NULL, ` + ts + `)`},
 	}

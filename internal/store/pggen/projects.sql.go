@@ -36,3 +36,112 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) er
 	)
 	return err
 }
+
+const deleteProject = `-- name: DeleteProject :execrows
+DELETE FROM projects WHERE org_id = $1 AND id = $2
+`
+
+type DeleteProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteProject, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getProject = `-- name: GetProject :one
+SELECT id, org_id, name, created_at FROM projects
+WHERE org_id = $1 AND id = $2
+`
+
+type GetProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, getProject, arg.ChainOrgID, arg.ChainProjectID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT id, org_id, name, created_at FROM projects
+WHERE org_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListProjects(ctx context.Context, chainOrgID string) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listProjects, chainOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Project
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.Name,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockProject = `-- name: LockProject :one
+SELECT id FROM projects WHERE org_id = $1 AND id = $2 FOR UPDATE
+`
+
+type LockProjectParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+// LockProject takes the project row for the length of the transaction, so
+// every environment-set mutation on one project serializes. It is what makes
+// the environment cap and the append position race-free: two creates at cap-1
+// would otherwise both read the same count and both insert. Postgres needs the
+// explicit row lock; sqlite serializes writes by construction (see its copy).
+func (q *Queries) LockProject(ctx context.Context, arg LockProjectParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockProject, arg.ChainOrgID, arg.ChainProjectID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const renameProject = `-- name: RenameProject :execrows
+UPDATE projects SET name = $1
+WHERE org_id = $2 AND id = $3
+`
+
+type RenameProjectParams struct {
+	Name           string
+	ChainOrgID     string
+	ChainProjectID string
+}
+
+func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameProject, arg.Name, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

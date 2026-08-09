@@ -456,9 +456,13 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`)); err != nil {
+		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`))
+		if err != nil {
 			t.Fatal(err)
 		}
+		// The rest of the hierarchy lifecycle (#48), so every settings.* type
+		// has a real emitter behind it before the check below reads the trails.
+		runHierarchyLifecycle(t, db, domain.OrgID(org.ID))
 		for _, typ := range audit.Types() {
 			spec, _ := audit.Spec(typ)
 			seen := int64(0)
@@ -541,5 +545,83 @@ func TestPostgresDurabilityBootRefusal(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "refusing to boot") {
 		t.Fatalf("refusal does not name itself: %v", err)
+	}
+}
+
+// runHierarchyLifecycle exercises every hierarchy mutation once, so each
+// registered settings.* event type has an emitter behind it rather than only a
+// declaration. It runs against a fresh org the instance operator just created,
+// with tenant grants seeded for it — the same shape production uses, through
+// authorize() with no test-only mint.
+func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
+	t.Helper()
+	ctx := tctx(t)
+	projects := &service.Projects{DB: db}
+	envs := &service.Environments{DB: db}
+	folders := &service.Folders{DB: db}
+	orgs := &service.Orgs{DB: db}
+
+	const who = domain.PrincipalID("usr_hierarchy_audit")
+	stmts := []string{
+		`INSERT INTO principals (id, kind, created_at) VALUES ('usr_hierarchy_audit', 'human', ` + ts + `)`,
+	}
+	for i, capability := range []string{"manage-projects", "definitions-edit", "read"} {
+		stmts = append(stmts, fmt.Sprintf(
+			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+			 VALUES ('grt_ha_%d', 'usr_hierarchy_audit', '%s', '%s', NULL, NULL, %s)`,
+			i, capability, org, ts))
+	}
+	for _, stmt := range stmts {
+		execRaw(t, db, stmt)
+	}
+	actor := service.LocalPrincipal(who)
+
+	proj, err := projects.Create(ctx, actor, org, "audited-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := domain.Scope{Org: org, Project: domain.ProjectID(proj.ID)}
+	env, err := envs.Create(ctx, actor, scope, "audited-environment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envScope := scope
+	envScope.Env = domain.EnvID(env.ID)
+	if _, err := envs.Rename(ctx, actor, envScope, "audited-environment-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := envs.Reorder(ctx, actor, scope, []string{env.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := envs.Delete(ctx, actor, envScope); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := folders.Create(ctx, actor, scope, "audited-folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := folders.Rename(ctx, actor, scope, folder.ID, "audited-folder-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := folders.Delete(ctx, actor, scope, folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := projects.Delete(ctx, actor, scope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := orgs.Rename(ctx, service.LocalPrincipal(root), org, "audited-org-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	// The org still holds this fixture's grants, so it cannot be deleted here.
+	// A throwaway org with nothing pointing at it supplies settings.org_deleted.
+	throwaway, err := orgs.Create(ctx, service.LocalPrincipal(root), "audited-org-throwaway", true, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orgs.Delete(ctx, service.LocalPrincipal(root), domain.OrgID(throwaway.ID)); err != nil {
+		t.Fatal(err)
 	}
 }

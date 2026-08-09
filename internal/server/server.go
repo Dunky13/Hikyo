@@ -54,7 +54,16 @@ func New(ready ReadyChecker, a *API) http.Handler {
 				g.Use(mw)
 			}
 			g.Use(a.SlideSessionClocks)
-			apigen.HandlerFromMux(apigen.NewStrictHandler(a, nil), g)
+			// The strict server's own error legs go through the SAME uniform
+			// writer as every handler. Left at their defaults they emit
+			// `http.Error` plain text, which is neither the contract's error
+			// shape nor uniform — and it is the leg a handler takes when it
+			// returns a bare domain error rather than building one of twenty
+			// near-identical per-operation refusal objects.
+			apigen.HandlerFromMux(apigen.NewStrictHandlerWithOptions(a, nil, apigen.StrictHTTPServerOptions{
+				RequestErrorHandlerFunc:  a.writeRequestError,
+				ResponseErrorHandlerFunc: a.writeHandlerError,
+			}), g)
 		})
 	}
 

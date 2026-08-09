@@ -105,3 +105,24 @@ var ErrUnauthorized = errors.New("unauthorized")
 // presentation reveals nothing about which artifacts exist — the same
 // indistinguishability rule as unauthorized ≡ nonexistent, one layer earlier.
 var ErrUnauthenticated = errors.New("unauthenticated")
+
+// ErrInvalid is a malformed request the contract could not reject on shape
+// alone — a name outside the grammar, a reorder list that does not name the
+// project's environments. It is decided before or independently of any tenant
+// resolution and therefore discloses nothing about what exists.
+var ErrInvalid = errors.New("invalid request")
+
+// ErrConflict is the uniform outcome for a request the caller IS authorized
+// to make but the current state refuses: a name already in use among live
+// siblings, or a parent that still has children (v1 deletes never cascade —
+// see the hierarchy handoff). It is reached only after authorization
+// succeeded, so it discloses nothing a caller could not already read; the
+// fixed message per code means it names no specific row either way.
+var ErrConflict = errors.New("conflict")
+
+// ErrLimitExceeded is a structural bound refusing an operation by name — the
+// ops spec's environment-count cap being the first. Distinct from ErrConflict
+// so the fixed-per-code message can state the bound, which is what "loud
+// refusal naming the budget" requires of a response body that may not carry
+// anything derived from the request.
+var ErrLimitExceeded = errors.New("limit exceeded")

@@ -2,6 +2,7 @@ package isolation
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Dunky13/wenv/internal/domain"
@@ -113,8 +114,14 @@ var tenantProbes = []tenantProbe{
 			return err
 		},
 		missing: func(t *testing.T, db *store.DB) error {
+			// alice, not mchA1: the twin must be AUTHORIZED-but-missing. mchA1's
+			// grant stops at project A1, so mchA1 against prj_missing is a
+			// second unauthorized call, and comparing two denials proves nothing
+			// about the genuinely-nonexistent answer. (The mchA1 twins that
+			// address prjA1 with a missing CHILD are already authorized — the
+			// grant covers the project, only the child is absent.)
 			_, _, envs := services(db)
-			_, err := envs.Create(tctx(t), service.LocalPrincipal(mchA1), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
+			_, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: "prj_missing"}, "intruder")
 			return err
 		},
 	},
@@ -172,32 +179,406 @@ var tenantProbes = []tenantProbe{
 			return err
 		},
 	},
+	// ---------------------------------------------------------------------
+	// The hierarchy surface (#48). mvp-boundary C1 requires the uniform
+	// nonexistent shape at EVERY level, so every level gets probes on all
+	// three axes, and every mutation is flagged so the no-side-effect
+	// assertion covers it.
+	//
+	// The `missing` twin of each probe is a legitimately-authorized principal
+	// addressing something that is not there — that is what makes "byte
+	// identical to genuinely nonexistent" a real comparison rather than two
+	// refusals that merely look alike.
+	// ---------------------------------------------------------------------
+
+	// Organization. Read is `read(org)`; rename and delete are
+	// instance-config, so even an org administrator is refused — and cannot
+	// tell the org apart from one that does not exist.
+	{
+		name: "org_get_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Get(tctx(t), service.LocalPrincipal(bob), orgA)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Get(tctx(t), service.LocalPrincipal(root), "org_missing")
+			return err
+		},
+	},
+	{
+		name: "org_rename_org_admin_refused", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(alice), orgA, "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned")
+			return err
+		},
+	},
+	{
+		name: "org_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(bob), orgA, "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			_, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), "org_missing", "pwned")
+			return err
+		},
+	},
+	{
+		name: "org_delete_org_admin_refused", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			return orgs.Delete(tctx(t), service.LocalPrincipal(alice), orgA)
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			orgs, _, _ := services(db)
+			return orgs.Delete(tctx(t), service.LocalPrincipal(root), "org_missing")
+		},
+	},
+
+	// Project.
+	{
+		name: "project_get_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Get(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Get(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+			return err
+		},
+	},
+	{
+		name: "project_get_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Get(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			// alice, not mchA1: the twin must be AUTHORIZED-but-missing. mchA1's
+			// grant stops at project A1, so mchA1 against prj_missing is a
+			// second unauthorized call, and comparing two denials proves nothing
+			// about the genuinely-nonexistent answer. (The mchA1 twins that
+			// address prjA1 with a missing CHILD are already authorized — the
+			// grant covers the project, only the child is absent.)
+			_, projects, _ := services(db)
+			_, err := projects.Get(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+			return err
+		},
+	},
+	{
+		name: "project_list_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.List(tctx(t), service.LocalPrincipal(bob), orgA)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.List(tctx(t), service.LocalPrincipal(alice), "org_missing")
+			return err
+		},
+	},
+	{
+		name: "project_rename_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned")
+			return err
+		},
+	},
+	{
+		name: "project_rename_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2), "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			// alice, not mchA1: the twin must be AUTHORIZED-but-missing. mchA1's
+			// grant stops at project A1, so mchA1 against prj_missing is a
+			// second unauthorized call, and comparing two denials proves nothing
+			// about the genuinely-nonexistent answer. (The mchA1 twins that
+			// address prjA1 with a missing CHILD are already authorized — the
+			// grant covers the project, only the child is absent.)
+			_, projects, _ := services(db)
+			_, err := projects.Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "pwned")
+			return err
+		},
+	},
+	{
+		name: "project_delete_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			return projects.Delete(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1))
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			return projects.Delete(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+		},
+	},
+	{
+		name: "project_delete_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			return projects.Delete(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1))
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, projects, _ := services(db)
+			return projects.Delete(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+		},
+	},
+
+	// Environment.
+	{
+		name: "env_list_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.List(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			// Authorized-but-missing: see project_get_cross_project_machine.
+			_, _, envs := services(db)
+			_, err := envs.List(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+			return err
+		},
+	},
+	{
+		name: "env_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(bob), scopeEnv(orgA, prjA1, envA1), "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned")
+			return err
+		},
+	},
+	{
+		name: "env_rename_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(reader), scopeEnv(orgA, prjA1, envA1), "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Rename(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"), "pwned")
+			return err
+		},
+	},
+	{
+		name: "env_reorder_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Reorder(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2), []string{string(envA2)})
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			// alice, not mchA1: the twin must be AUTHORIZED-but-missing. mchA1's
+			// grant stops at project A1, so mchA1 against prj_missing is a
+			// second unauthorized call, and comparing two denials proves nothing
+			// about the genuinely-nonexistent answer. (The mchA1 twins that
+			// address prjA1 with a missing CHILD are already authorized — the
+			// grant covers the project, only the child is absent.)
+			_, _, envs := services(db)
+			_, err := envs.Reorder(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), []string{string(envA2)})
+			return err
+		},
+	},
+	{
+		name: "env_reorder_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Reorder(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), []string{string(envA1)})
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			_, err := envs.Reorder(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), []string{string(envA1)})
+			return err
+		},
+	},
+	{
+		name: "env_delete_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.Delete(tctx(t), service.LocalPrincipal(bob), scopeEnv(orgA, prjA1, envA1))
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.Delete(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"))
+		},
+	},
+	{
+		name: "env_delete_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.Delete(tctx(t), service.LocalPrincipal(reader), scopeEnv(orgA, prjA1, envA1))
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, envs := services(db)
+			return envs.Delete(tctx(t), service.LocalPrincipal(alice), scopeEnv(orgA, prjA1, "env_missing"))
+		},
+	},
+
+	// Folder. Every folder operation addresses PROJECT depth, so a folder id
+	// from another project is refused by the chain predicate rather than by a
+	// folder-level check that does not exist.
+	{
+		name: "folder_get_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Get(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "fld_a1")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Get(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "fld_missing")
+			return err
+		},
+	},
+	{
+		name: "folder_get_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			// The folder exists — in the sibling project this machine cannot
+			// reach. Addressed through prjA1, which it CAN reach, so the refusal
+			// comes from the chain predicate, not from the scope check.
+			_, err := folderSvc(db).Get(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_a2")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Get(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_missing")
+			return err
+		},
+	},
+	{
+		name: "folder_list_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).List(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA2))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			// Authorized-but-missing: see project_get_cross_project_machine.
+			_, err := folderSvc(db).List(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+			return err
+		},
+	},
+	{
+		name: "folder_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			return err
+		},
+	},
+	{
+		name: "folder_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "intruder")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			return err
+		},
+	},
+	{
+		name: "folder_rename_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_a2", "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := folderSvc(db).Rename(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "fld_missing", "pwned")
+			return err
+		},
+	},
+	{
+		name: "folder_delete_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			return folderSvc(db).Delete(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), "fld_a1")
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			return folderSvc(db).Delete(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "fld_missing")
+		},
+	},
 }
 
 func runTenantProbes(t *testing.T, db *store.DB) {
 	for _, p := range tenantProbes {
 		t.Run(p.name, func(t *testing.T) {
 			before := rowCounts(t, db)
-			beforeNote := queryInt(t, db, "SELECT COUNT(*) FROM environments WHERE note = 'pwned'")
-			if beforeNote != 0 {
-				t.Fatal("fixture polluted: pwned note already present")
-			}
+			beforeState := contentSnapshot(t, db)
+			beforeAudit := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type LIKE 'settings.%'")
 			probeErr := p.run(t, db)
 			missingErr := p.missing(t, db)
 			assertUniformNotFound(t, probeErr, missingErr)
-			if p.mutation {
-				after := rowCounts(t, db)
-				for table, n := range before {
-					if after[table] != n {
-						t.Errorf("side effect: %s rows %d -> %d", table, n, after[table])
-					}
+			if !p.mutation {
+				return
+			}
+			after := rowCounts(t, db)
+			for table, n := range before {
+				if after[table] != n {
+					t.Errorf("side effect: %s rows %d -> %d", table, n, after[table])
 				}
-				if got := queryInt(t, db, "SELECT COUNT(*) FROM environments WHERE note = 'pwned'"); got != 0 {
-					t.Errorf("side effect: a probe's note update landed (%d rows)", got)
-				}
+			}
+			// Row COUNTS alone cannot see an in-place mutation: an unauthorized
+			// rename or reorder that commits and then answers ErrNotFound leaves
+			// every count untouched and would pass. The snapshot carries every
+			// mutable field this surface can write — names, notes, paths and
+			// display order — so a commit-then-lie is a diff.
+			if got := contentSnapshot(t, db); got != beforeState {
+				t.Errorf("side effect: a refused mutation changed stored content\n before: %s\n after:  %s", beforeState, got)
+			}
+			// A refusal that rolled back leaves no domain event either; one that
+			// committed its audit row and then rolled back the write would be a
+			// trail that lies about what happened.
+			if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type LIKE 'settings.%'"); got != beforeAudit {
+				t.Errorf("side effect: a refused mutation left %d new settings.* audit rows", got-beforeAudit)
 			}
 		})
 	}
+}
+
+// contentSnapshot renders every mutable field of the hierarchy fixture as one
+// comparable string, ordered deterministically. It is the mutation probes'
+// real assertion: the uniform nonexistent RESPONSE is only half the contract,
+// the other half is that nothing moved.
+func contentSnapshot(t *testing.T, db *store.DB) string {
+	t.Helper()
+	var out strings.Builder
+	for _, q := range []string{
+		"SELECT id || '=' || name || '|' FROM orgs ORDER BY id",
+		"SELECT id || '=' || name || '|' FROM projects ORDER BY id",
+		"SELECT id || '=' || name || ':' || note || ':' || display_order || '|' FROM environments ORDER BY id",
+		"SELECT id || '=' || path || '|' FROM folders ORDER BY id",
+	} {
+		out.WriteString(queryStrings(t, db, q))
+		out.WriteString(";")
+	}
+	return out.String()
 }
 
 // runInstanceProbes: instance-scoped operations are probed for grant
@@ -213,9 +594,8 @@ func runInstanceProbes(t *testing.T, db *store.DB) {
 	if _, err := orgs.List(tctx(t), service.LocalPrincipal(bob)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.list as org admin: err = %v, want ErrUnauthorized", err)
 	}
-	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(bob), string(orgA)); !errors.Is(err, domain.ErrUnauthorized) {
-		t.Errorf("org.get as org admin: err = %v, want ErrUnauthorized", err)
-	}
+	// org.get is NOT probed here: it is tenant-class at org depth (#48), so its
+	// refusal is the uniform nonexistent shape and it rides in tenantProbes.
 	if _, err := orgs.Count(tctx(t), service.LocalPrincipal(nobody)); !errors.Is(err, domain.ErrUnauthorized) {
 		t.Errorf("org.count with no grants: err = %v, want ErrUnauthorized", err)
 	}
@@ -274,8 +654,76 @@ func runPositiveControls(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatalf("root creating an org: %v", err)
 	}
-	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(root), org.ID); err != nil {
+	if _, err := orgs.Get(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID)); err != nil {
 		t.Fatalf("root reading the created org: %v", err)
+	}
+	if _, err := orgs.Rename(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID), "root-org-renamed"); err != nil {
+		t.Fatalf("root renaming the created org: %v", err)
+	}
+	if err := orgs.Delete(tctx(t), service.LocalPrincipal(root), domain.OrgID(org.ID)); err != nil {
+		t.Fatalf("root deleting the org it just created: %v", err)
+	}
+
+	// The hierarchy surface's own positive controls (#48). Without these, every
+	// denial probe above would still pass if the operation were simply broken
+	// for everyone — the least-privilege prober must SUCCEED on exactly the
+	// operations whose formula it holds, and fail on the rest.
+	folders := folderSvc(db)
+	readerActor := service.LocalPrincipal(reader)
+	if _, err := projects.Get(tctx(t), readerActor, scopeProject(orgA, prjA1)); err != nil {
+		t.Fatalf("read-only principal denied on project.read (formula is read(project)): %v", err)
+	}
+	if _, err := projects.List(tctx(t), readerActor, orgA); err != nil {
+		t.Fatalf("read-only principal denied on project.list: %v", err)
+	}
+	if _, err := envs.List(tctx(t), readerActor, scopeProject(orgA, prjA1)); err != nil {
+		t.Fatalf("read-only principal denied on environment.list: %v", err)
+	}
+	if _, err := folders.List(tctx(t), readerActor, scopeProject(orgA, prjA1)); err != nil {
+		t.Fatalf("read-only principal denied on folder.list: %v", err)
+	}
+	if _, err := folders.Get(tctx(t), readerActor, scopeProject(orgA, prjA1), "fld_a1"); err != nil {
+		t.Fatalf("read-only principal denied on folder.read: %v", err)
+	}
+
+	// alice holds definitions-edit and manage-projects in org A, so the
+	// topology and lifecycle mutations must succeed for her.
+	aliceActor := service.LocalPrincipal(alice)
+	folder, err := folders.Create(tctx(t), aliceActor, scopeProject(orgA, prjA1), "positive/control")
+	if err != nil {
+		t.Fatalf("alice creating a folder: %v", err)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM folders WHERE id = '"+folder.ID+"' AND org_id = 'org_a' AND project_id = 'prj_a1'"); n != 1 {
+		t.Fatal("created folder's chain did not come from the proof")
+	}
+	if _, err := folders.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), folder.ID, "positive/renamed"); err != nil {
+		t.Fatalf("alice renaming a folder: %v", err)
+	}
+	if err := folders.Delete(tctx(t), aliceActor, scopeProject(orgA, prjA1), folder.ID); err != nil {
+		t.Fatalf("alice deleting a folder: %v", err)
+	}
+	if _, err := envs.Rename(tctx(t), aliceActor, scopeEnv(orgA, prjA1, envA1), "renamed-dev"); err != nil {
+		t.Fatalf("alice renaming an environment: %v", err)
+	}
+	live, err := envs.List(tctx(t), aliceActor, scopeProject(orgA, prjA1))
+	if err != nil {
+		t.Fatalf("alice listing environments: %v", err)
+	}
+	ids := make([]string, 0, len(live))
+	for i := len(live) - 1; i >= 0; i-- {
+		ids = append(ids, live[i].ID)
+	}
+	reordered, err := envs.Reorder(tctx(t), aliceActor, scopeProject(orgA, prjA1), ids)
+	if err != nil {
+		t.Fatalf("alice reordering environments: %v", err)
+	}
+	for i, e := range reordered {
+		if e.DisplayOrder != int64(i) {
+			t.Fatalf("reorder left a non-dense display order: %+v", reordered)
+		}
+	}
+	if _, err := projects.Rename(tctx(t), aliceActor, scopeProject(orgA, prjA1), "renamed-a1"); err != nil {
+		t.Fatalf("alice renaming a project: %v", err)
 	}
 }
 
