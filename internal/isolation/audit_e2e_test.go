@@ -239,6 +239,8 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			// Revoke alice's audit-read after the first committed page has
 			// started streaming; the next page's fresh transaction-bound
 			// proof must fail.
+			// Origins hold the row (RESTRICT FK, #55), so the origin goes first.
+			execRaw(t, db, "DELETE FROM grant_origins WHERE grant_id = 'g_al_ar'")
 			execRaw(t, db, "DELETE FROM grants WHERE id = 'g_al_ar'")
 		}}
 		err := audits.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 1, w)
@@ -439,6 +441,9 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The rest of the hierarchy lifecycle (#48), so every settings.* type
 		// has a real emitter behind it before the check below reads the trails.
 		runHierarchyLifecycle(t, db, domain.OrgID(org.ID))
+		// The permission surface (#55): every grant.* and settings.* type gets
+		// a real emitter before the trails are read.
+		runGrantLifecycle(t, db)
 		for _, typ := range audit.Types() {
 			spec, _ := audit.Spec(typ)
 			seen := int64(0)

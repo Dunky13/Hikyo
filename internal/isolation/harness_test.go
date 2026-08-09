@@ -51,7 +51,10 @@ const (
 	envB1 = domain.EnvID("env_b1")
 )
 
-const ts = "'2026-01-01T00:00:00Z'"
+// Microsecond width, because the authn resolver's decodeTime parses grant and
+// origin timestamps with a fixed-width layout, and RFC3339Nano (which the
+// tenant tables use) accepts it too — one literal, both readers.
+const ts = "'2026-01-01T00:00:00.000000Z'"
 
 var fixtureSQL = []string{
 	`INSERT INTO orgs (id, name, active, metadata, created_at) VALUES ('org_a', 'org-a', TRUE, '{}', ` + ts + `)`,
@@ -62,6 +65,13 @@ var fixtureSQL = []string{
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a1', 'org_a', 'prj_a1', 'dev', '', ` + ts + `, 0)`,
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a2', 'org_a', 'prj_a2', 'dev', '', ` + ts + `, 0)`,
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_b1', 'org_b', 'prj_b1', 'dev', '', ` + ts + `, 0)`,
+	// env_prod is the reauthentication ceremonies' environment. It has to be a
+	// REAL row from #55 on: the effective-window seam reads the environment's
+	// own protected flag and window, and an environment that does not resolve
+	// fails closed at 0 rather than inheriting the instance default — a window
+	// opener addressing a nonexistent environment must not be handed the most
+	// permissive answer in the system.
+	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_prod', 'org_a', 'prj_a1', 'prod', '', ` + ts + `, 1)`,
 	// Folders (#48): one per fixture project, so a folder probe addresses a row
 	// that genuinely exists and fails only at the boundary.
 	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_a1', 'org_a', 'prj_a1', 'shared', ` + ts + `)`,
@@ -71,7 +81,10 @@ var fixtureSQL = []string{
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_bob', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_root', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_nobody', 'human', ` + ts + `)`,
-	`INSERT INTO principals (id, kind, created_at) VALUES ('mch_a1', 'machine', ` + ts + `)`,
+	// The fixture names its own machine class: migration 00010 deliberately
+	// backfills nothing (an unclassified machine fails closed), so a fixture
+	// that wants an automation credential has to say so.
+	`INSERT INTO principals (id, kind, class, created_at) VALUES ('mch_a1', 'machine', 'automation', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_reader', 'human', ` + ts + `)`,
 	// alice: org-scope grants in org A.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_read', 'usr_alice', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
@@ -104,6 +117,50 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_read', 'mch_a1', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_edit', 'mch_a1', 'edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_def', 'mch_a1', 'definitions-edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
+
+	// The permission-model fixtures (#55). Two member managers at different
+	// depths, because the grant-authority rule turns on WHERE the grantor
+	// holds `manage-members`, not on which depth they address: orgAdmin may
+	// hand out capabilities they do not hold, projectAdmin may not.
+	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_orgadmin', 'human', ` + ts + `)`,
+	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_prjadmin', 'human', ` + ts + `)`,
+	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_grantee', 'human', ` + ts + `)`,
+	`INSERT INTO principals (id, kind, class, created_at) VALUES ('mch_workload', 'machine', 'workload', ` + ts + `)`,
+	`INSERT INTO principals (id, kind, class, created_at) VALUES ('mch_unclassed', 'machine', NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_oa_mm', 'usr_orgadmin', 'manage-members', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_oa_ps', 'usr_orgadmin', 'project-settings', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_oa_read', 'usr_orgadmin', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
+	// projectAdmin manages members inside prj_a1 and holds exactly `read`
+	// besides — so `read` is the one capability they may hand out and every
+	// other one is the project-scope bound's refusal.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_pa_mm', 'usr_prjadmin', 'manage-members', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_pa_read', 'usr_prjadmin', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
+	// root manages members at instance scope: the operator template's own
+	// `manage-members`, and the lockout invariant's instance-scope subject.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_mm', 'usr_root', 'manage-members', NULL, NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_wl_read', 'mch_workload', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
+}
+
+// Permission-model fixture principals (#55).
+const (
+	orgAdmin = domain.PrincipalID("usr_orgadmin")
+	prjAdmin = domain.PrincipalID("usr_prjadmin")
+	grantee  = domain.PrincipalID("usr_grantee")
+	mchWork  = domain.PrincipalID("mch_workload")
+	mchNoCls = domain.PrincipalID("mch_unclassed")
+	envProd  = domain.EnvID("env_prod")
+)
+
+var orgAScope = domain.Scope{Org: orgA}
+
+// seedOrigins attaches the manual origin every fixture grant needs: a grant
+// row with no origin is the state the ADR forbids, and the membership surface
+// (an INNER JOIN onto origins) would simply not see it.
+func seedOrigins(t *testing.T, db *store.DB) {
+	t.Helper()
+	execRaw(t, db, `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at) `+
+		`SELECT 'gor_' || g.id, g.id, 'manual', g.principal_id, g.created_at FROM grants AS g `+
+		`WHERE NOT EXISTS (SELECT 1 FROM grant_origins AS o WHERE o.grant_id = g.id)`)
 }
 
 func execRaw(t *testing.T, db *store.DB, stmt string) {
@@ -184,7 +241,7 @@ func queryInt(t *testing.T, db *store.DB, q string) int64 {
 	return n
 }
 
-var fixtureTables = []string{"orgs", "projects", "environments", "folders", "principals", "grants"}
+var fixtureTables = []string{"orgs", "projects", "environments", "folders", "principals", "grants", "grant_origins"}
 
 // rowCounts is the row-diff half of the no-side-effect assertion.
 func rowCounts(t *testing.T, db *store.DB) map[string]int64 {
@@ -246,7 +303,7 @@ func openPostgres(t *testing.T) *store.DB {
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
 		"saml_providers", "oidc_providers", "accounts",
 		"auth_instance_state",
-		"grants", "folders", "environments", "projects", "principals",
+		"grant_origins", "grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",
@@ -305,6 +362,7 @@ func seededDB(t *testing.T, open func(*testing.T) *store.DB) *store.DB {
 	for _, stmt := range fixtureSQL {
 		execRaw(t, db, stmt)
 	}
+	seedOrigins(t, db)
 	return db
 }
 

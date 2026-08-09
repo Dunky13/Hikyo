@@ -705,7 +705,40 @@ const (
 	testProjectID = "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44"
 	testEnvID     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55"
 	testFolderID  = "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66"
+	// The grant target for the access-surface uniformity routes (#55).
+	testPrincipalID = "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77"
 )
+
+// stubGrants and stubSettings are the access surface's uniformity fixtures
+// (#55). Like the hierarchy stubs they answer one outcome for everything, so
+// the uniformity tests differ ONLY in which sentinel the service returned.
+type stubGrants struct{ stubHierarchy }
+
+func (s stubGrants) Create(context.Context, service.Actor, service.GrantSpec) (service.GrantResult, error) {
+	return service.GrantResult{}, s.outcome()
+}
+
+func (s stubGrants) Revoke(context.Context, service.Actor, service.GrantSpec) error {
+	return s.outcome()
+}
+
+func (s stubGrants) List(context.Context, service.Actor, domain.Scope) ([]service.Membership, error) {
+	return nil, s.outcome()
+}
+
+func (s stubGrants) ApplyTemplate(context.Context, service.Actor, domain.Template, domain.PrincipalID, domain.Scope) ([]service.GrantResult, error) {
+	return nil, s.outcome()
+}
+
+type stubSettings struct{ stubHierarchy }
+
+func (s stubSettings) GetEnvironment(context.Context, service.Actor, domain.Scope) (service.EnvironmentSettings, error) {
+	return service.EnvironmentSettings{}, s.outcome()
+}
+
+func (s stubSettings) SetEnvironment(context.Context, service.Actor, domain.Scope, service.EnvironmentSettings) (service.EnvironmentSettings, error) {
+	return service.EnvironmentSettings{}, s.outcome()
+}
 
 func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 	t.Helper()
@@ -714,6 +747,8 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 		Projects:     stubHierarchy{err: outcome},
 		Environments: stubEnvs{stubHierarchy{err: outcome}},
 		Folders:      stubFolders{stubHierarchy{err: outcome}},
+		Grants:       stubGrants{stubHierarchy{err: outcome}},
+		Settings:     stubSettings{stubHierarchy{err: outcome}},
 		Version:      "test",
 	}))
 	t.Cleanup(srv.Close)
@@ -730,6 +765,8 @@ func hierarchyRoutes() []struct {
 	base := api.PathPrefix + "/orgs/" + testOrgID
 	project := base + "/projects/" + testProjectID
 	rename := apigen.RenameRequest{Name: "renamed"}
+	grantBody := apigen.CreateGrantRequest{Principal: testPrincipalID, Capability: "read"}
+	templateBody := apigen.ApplyTemplateRequest{Principal: testPrincipalID, Template: apigen.Viewer}
 	return []struct {
 		method string
 		path   string
@@ -754,6 +791,26 @@ func hierarchyRoutes() []struct {
 		{http.MethodGet, project + "/folders/" + testFolderID, nil},
 		{http.MethodPatch, project + "/folders/" + testFolderID, apigen.RenameFolderRequest{Path: "g"}},
 		{http.MethodDelete, project + "/folders/" + testFolderID, nil},
+
+		// The access surface (#55). Handoff 44 passed the byte-shape
+		// obligation to the response layer "when routes land"; these are the
+		// grant routes landing, so they join the same assertion rather than
+		// getting a weaker one of their own. The list routes are here for the
+		// count half: a refused listing must be the uniform 404, never a 200
+		// carrying `count: 0`, which would confirm the scope exists.
+		{http.MethodGet, base + "/grants", nil},
+		{http.MethodPost, base + "/grants", grantBody},
+		{http.MethodDelete, base + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, base + "/grants/template", templateBody},
+		{http.MethodGet, project + "/grants", nil},
+		{http.MethodPost, project + "/grants", grantBody},
+		{http.MethodDelete, project + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, project + "/grants/template", templateBody},
+		{http.MethodPost, project + "/environments/" + testEnvID + "/grants", grantBody},
+		{http.MethodDelete, project + "/environments/" + testEnvID + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, project + "/environments/" + testEnvID + "/grants/template", templateBody},
+		{http.MethodGet, project + "/environments/" + testEnvID + "/settings", nil},
+		{http.MethodPut, project + "/environments/" + testEnvID + "/settings", apigen.EnvironmentSettings{Protected: true}},
 	}
 }
 
@@ -779,6 +836,33 @@ func TestUniformNonexistentAtEveryLevel(t *testing.T) {
 		body := decodeError(t, bodyA)
 		if body.Error.Detail != nil {
 			t.Errorf("%s %s: a 404 carries a detail member", route.method, route.path)
+		}
+	}
+}
+
+// TestRefusedListingLeaksNoCount is the "counts" half of unauthorized ≡
+// nonexistent for bulk reads (mvp-boundary A2). Byte-equality above already
+// proves the two servers agree; this asserts the stronger property directly,
+// because the failure it guards against is a plausible one: answering a
+// refused membership listing with 200 and `{"items":[],"count":0}` would be a
+// perfectly reasonable-looking handler that confirms the scope exists and that
+// the caller may enumerate it.
+func TestRefusedListingLeaksNoCount(t *testing.T) {
+	refused := hierarchyServer(t, fmt.Errorf("refused at the chokepoint: %w", domain.ErrNotFound))
+	base := api.PathPrefix + "/orgs/" + testOrgID
+	for _, path := range []string{
+		base + "/grants",
+		base + "/projects/" + testProjectID + "/grants",
+		base + "/projects",
+		base + "/projects/" + testProjectID + "/environments",
+	} {
+		resp, body := call(t, refused, http.MethodGet, path, "ew_1_cli_x", nil)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: status %d, want 404", path, resp.StatusCode)
+			continue
+		}
+		if bytes.Contains(body, []byte(`"count"`)) || bytes.Contains(body, []byte(`"items"`)) {
+			t.Errorf("GET %s: a refused listing carried a count or an items member: %s", path, body)
 		}
 	}
 }

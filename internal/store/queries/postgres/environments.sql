@@ -44,3 +44,15 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 
 -- name: DeleteEnvironment :execrows
 DELETE FROM environments WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);
+
+-- Protected-environment flag and per-environment reauthentication window
+-- (#55, permission ADR - The reveal guard). Both live under
+-- `project-settings`; a NULL window means "inherit the instance default".
+
+-- name: GetEnvironmentSettings :one
+SELECT protected, reauth_window_seconds FROM environments
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);
+
+-- name: SetEnvironmentSettings :execrows
+UPDATE environments SET protected = sqlc.arg(protected), reauth_window_seconds = sqlc.arg(reauth_window_seconds)
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);

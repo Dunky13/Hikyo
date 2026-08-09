@@ -169,7 +169,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
 		"oidc_providers", "accounts",
 		"auth_instance_state",
-		"grants", "folders", "environments", "projects", "principals",
+		"grant_origins", "grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",

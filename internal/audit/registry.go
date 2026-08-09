@@ -176,6 +176,38 @@ const (
 	EventFolderCreated EventType = "settings.folder_created"
 	EventFolderRenamed EventType = "settings.folder_renamed"
 	EventFolderDeleted EventType = "settings.folder_deleted"
+
+	// grant.* — the permission model's own catalogue rows (#55). The ADR's
+	// propagation to this one names created / modified / revoked with
+	// self-grants distinguishable; the three map onto the origin model
+	// exactly: a row that did not exist is created, a row an additional
+	// origin joins is modified, and a row whose LAST origin was released is
+	// revoked. `grant.template_applied` records one template expansion as a
+	// single fact beside the per-capability rows it created — without it the
+	// trail can say ten capabilities appeared but not that one administrator
+	// performed one act.
+	EventGrantCreated         EventType = "grant.created"
+	EventGrantModified        EventType = "grant.modified"
+	EventGrantRevoked         EventType = "grant.revoked"
+	EventGrantTemplateApplied EventType = "grant.template_applied"
+	// grant.membership_read is the membership surface's read event. It is not
+	// `audited: none`: that permit covers tenant-class bare-`read` operations,
+	// and "who can reveal production secrets" is administrative information
+	// under `manage-members`, not an object read. Access retention class —
+	// read volume, not grant history.
+	EventGrantMembershipRead EventType = "grant.membership_read"
+
+	// settings.reauthentication_window_changed and
+	// settings.protected_flag_changed are the `project-settings` security
+	// events the audit catalogue names — a widening and a protected-flag
+	// clearing are the two changes an investigator looks for, so widening is
+	// a field on the first and the direction is the whole of the second.
+	EventReauthWindowChanged EventType = "settings.reauthentication_window_changed"
+	EventProtectedFlagChange EventType = "settings.protected_flag_changed"
+
+	// recovery.break_glass_grant records a grant issued under local host
+	// authority — the one authorization path not evaluated against a grant.
+	EventBreakGlassGrant EventType = "recovery.break_glass_grant"
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -684,6 +716,147 @@ var registry = map[EventType]TypeSpec{
 	EventFolderCreated: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
 	EventFolderRenamed: hierarchyEvent(renameSchema("namespace")),
 	EventFolderDeleted: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
+
+	// The grant lifecycle (#55). Both trails: a grant at org/project/env
+	// scope is tenant-trail work, an instance-scope grant has no tenant to
+	// own it. Security retention — grant history is the ADR's named
+	// counter-example to the unbounded machine-fetch stream.
+	//
+	// `self_grant` is a first-class field rather than something a reader
+	// derives by comparing two ids: the ADR requires self-grants to be
+	// DISTINGUISHABLE, and a derived property is one join away from being
+	// missed. `unheld` records the org/instance escalation path being used —
+	// a grantor handing out a capability they do not themselves hold, which
+	// the ADR permits at org/instance scope and which an investigator must
+	// be able to filter for.
+	EventGrantCreated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema:        grantSchema,
+	},
+	EventGrantModified: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema:        grantSchema,
+	},
+	EventGrantRevoked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema: merged(grantSchema, Schema{
+			// A revoke that released an origin without deleting the row is a
+			// modification, and is recorded as one; this field says whether
+			// the row survived so the two are never confused.
+			"origins_remaining": {Kind: KindInt, Required: true},
+			"sessions_revoked":  {Kind: KindBool, Required: true},
+		}),
+	},
+	EventGrantTemplateApplied: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema: Schema{
+			"template":         {Kind: KindString, Required: true},
+			"target_principal": {Kind: KindString, Required: true},
+			"scope":            {Kind: KindString, Required: true},
+			"capability_count": {Kind: KindInt, Required: true},
+			"grants_created":   {Kind: KindInt, Required: true},
+			// deduped is the total that did not create a row; joined and
+			// unchanged split it, because "an existing row gained this
+			// administrator as an origin" and "nothing happened at all" are
+			// different facts and only the first is a state transition.
+			"grants_deduped":   {Kind: KindInt, Required: true},
+			"grants_joined":    {Kind: KindInt, Required: true},
+			"grants_unchanged": {Kind: KindInt, Required: true},
+			"self_grant":       {Kind: KindBool, Required: true},
+			"capabilities":     {Kind: KindString, Required: true},
+		},
+	},
+
+	// `project-settings` changes (#55). Instance trail is NOT licensed:
+	// every environment has a tenant chain, so these are tenant-trail facts.
+	EventReauthWindowChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"previous_window_seconds": {Kind: KindInt, Required: true},
+			"window_seconds":          {Kind: KindInt, Required: true},
+			// The STORED configuration either side, and whether the
+			// environment inherited the instance default. An inheritance flip
+			// changes no effective duration today and every one of them once
+			// the instance default moves, so the trail records both.
+			"previous_configured_seconds": {Kind: KindInt, Required: true},
+			"configured_seconds":          {Kind: KindInt, Required: true},
+			"previous_inherited":          {Kind: KindBool, Required: true},
+			"inherited":                   {Kind: KindBool, Required: true},
+			// Widening is the security-relevant direction, so it is its own
+			// field rather than a subtraction the reader has to perform.
+			"widened":   {Kind: KindBool, Required: true},
+			"protected": {Kind: KindBool, Required: true},
+		},
+	},
+	EventProtectedFlagChange: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"protected": {Kind: KindBool, Required: true},
+			// Marking an environment protected CAPS its window at the
+			// protected default; the capped value is part of the same fact.
+			"window_seconds": {Kind: KindInt, Required: true},
+		},
+	},
+
+	// Break-glass grants (#55, permission ADR - Break-glass). Instance trail
+	// only: local host authority has no session, no tenant actor and, by the
+	// ADR's own words, no grant to be evaluated against.
+	EventBreakGlassGrant: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"target_principal": {Kind: KindString, Required: true},
+			"capability":       {Kind: KindString, Required: true},
+			"scope":            {Kind: KindString, Required: true},
+			"authority":        {Kind: KindString, Required: true}, // local-host
+			"grant_created":    {Kind: KindBool, Required: true},
+		},
+	},
+	EventGrantMembershipRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema: Schema{
+			"scope":     {Kind: KindString, Required: true},
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+}
+
+// grantSchema is the shared shape of the three grant-lifecycle rows. The
+// scope is a rendered string rather than three chain columns because the
+// event's own chain columns already carry the tenant address; this field
+// answers "at which level was it granted", which the chain cannot.
+var grantSchema = Schema{
+	"target_principal": {Kind: KindString, Required: true},
+	"capability":       {Kind: KindString, Required: true},
+	"scope":            {Kind: KindString, Required: true},
+	"origin_kind":      {Kind: KindString, Required: true},
+	"self_grant":       {Kind: KindBool, Required: true},
+	"unheld":           {Kind: KindBool, Required: true},
+	"target_class":     {Kind: KindString, Required: true},
+	"template":         {Kind: KindString},
 }
 
 func samlCeremonyEvent() TypeSpec {

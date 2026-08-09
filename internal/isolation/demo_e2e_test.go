@@ -56,6 +56,11 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		clk = clk.Add(d)
 		clockMu.Unlock()
 	}
+	clockNow := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clk
+	}
 
 	// requests records every request the CLI actually makes. It is what turns
 	// "the command refused" into "the command refused BEFORE reaching the
@@ -84,7 +89,11 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		Projects:     &service.Projects{DB: db},
 		Environments: &service.Environments{DB: db},
 		Folders:      &service.Folders{DB: db},
-		Version:      "e2e",
+		Grants:       &service.Grants{DB: db},
+		// One Auth, so the window the settings knob writes and the window the
+		// reveal guard reads cannot come from two configurations.
+		Settings: &service.ProjectSettings{DB: db, Auth: auth},
+		Version:  "e2e",
 	})))
 	t.Cleanup(httpSrv.Close)
 
@@ -270,7 +279,32 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	// create org -> project -> environments -> folders, then list and rename
 	// them. This is the acceptance criterion's demo, executed rather than
 	// described.
-	runHierarchyDemo(t, db, ios, takeRequests)
+	// Every grant change to the ACTING principal kills its own sessions in the
+	// same transaction — the ADR working, not a demo problem — so both demos
+	// below get one closure that re-runs the login and step-up this test
+	// already performed, rather than five parameters carrying the material to
+	// redo them.
+	relogin := func() {
+		t.Helper()
+		prompts["Password for demo-admin"] = password
+		if code := cli.Run(t.Context(), ios(), []string{
+			"login", httpSrv.URL, "--local", "--as", "demo-admin",
+		}); code != cli.ExitOK {
+			t.Fatalf("re-login exited %d", code)
+		}
+		advanceClock(30 * time.Second)
+		prompts["authenticator:"] = totpCode(t, otpauthURI, clockNow())
+		if code := cli.Run(t.Context(), ios(), []string{"account", "factor", "step-up"}); code != cli.ExitOK {
+			t.Fatalf("re-step-up exited %d", code)
+		}
+	}
+
+	runHierarchyDemo(t, db, ios, takeRequests, relogin)
+
+	// The permission-model demo (#55), through the same real CLI: grant a
+	// template role, list the independent grants it expanded into, revoke one,
+	// and watch the acting session die.
+	runAccessDemo(t, db, ios, relogin)
 
 	// Logging out revokes the artifact; the next call is refused with the
 	// authentication exit code, not a stale success.
@@ -367,7 +401,7 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 // against the real server: create org → project → envs → folders, list and
 // rename them. It asserts on the CLI's own `-o json` output, because that is
 // the surface the criterion names and the one scripts consume.
-func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string) {
+func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string, relogin func()) {
 	t.Helper()
 
 	run := func(args ...string) string {
@@ -400,6 +434,31 @@ func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequest
 	var org row
 	decode(run("org", "create", "--name", "hierarchy-demo", "-o", "json"), &org)
 
+	// #55, F2: the first administrator is seeded with `operator` at instance
+	// scope — the operator set plus manage-members, and NO tenant data by
+	// bundle. Reaching into an org is an explicit audited grant, which is what
+	// the ADR means by "never by bundle": applying the `admin` template to
+	// themselves at the org they just created, through their instance
+	// manage-members (the ADR's unheld-granting power). This is also where the
+	// "bootstrap the first administrator via the admin template" clause is
+	// satisfied — at org scope, where the template is applicable, with
+	// reveal/reveal-history arriving as its separate seeded rows.
+	var me struct {
+		Principal struct{ Id string }
+	}
+	decode(run("whoami", "-o", "json"), &me)
+	var seeded struct{ Count int }
+	decode(run("access", "grant", "template", "--org", org.Id,
+		"--principal", me.Principal.Id, "--template", "admin", "-o", "json"), &seeded)
+	if seeded.Count != 12 {
+		t.Fatalf("admin at org scope expanded into %d grants, want 12", seeded.Count)
+	}
+	// A self-grant advances the administrator's own generation and deletes
+	// their sessions, in the same transaction — the ADR's rule applied to the
+	// person applying it. Log back in and step up again.
+	relogin()
+	takeRequests()
+
 	var project row
 	decode(run("project", "create", "--org", org.Id, "--name", "checkout", "-o", "json"), &project)
 
@@ -421,6 +480,19 @@ func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequest
 		if e.DisplayOrder != i {
 			t.Fatalf("env %q display_order = %d, want %d", e.Name, e.DisplayOrder, i)
 		}
+	}
+
+	// F6: `project-settings set` is TRI-STATE. A window-only update must not
+	// clear protection — a boolean flag defaulting to false, sent on every
+	// set, silently unprotected the environment through a command that never
+	// mentioned protection.
+	settingsFlags := []string{"--org", org.Id, "--project", project.Id, "--env", envs[0].Id}
+	run(append([]string{"project-settings", "set"}, append(settingsFlags, "--protected", "true")...)...)
+	run(append([]string{"project-settings", "set"}, append(settingsFlags, "--reauth-window-seconds", "0")...)...)
+	var settings struct{ Protected bool }
+	decode(run(append([]string{"project-settings", "get", "-o", "json"}, settingsFlags...)...), &settings)
+	if !settings.Protected {
+		t.Fatal("a window-only `project-settings set` cleared the protected flag")
 	}
 
 	// Reorder the whole set through the CLI, then read it back.
@@ -580,4 +652,135 @@ func delIO(ios func() cli.IO) cli.IO {
 	io := ios()
 	io.Stdout = &strings.Builder{}
 	return io
+}
+
+// runAccessDemo is #55's acceptance demo executed through the real CLI over
+// the socket, rather than described: grant a template role, watch it expand
+// into independent grants on the membership surface, revoke one, and see the
+// session die.
+//
+// The service-layer twin (isolation.TestRevokeKillsSession) stays: this one
+// proves the WIRE carries it, that one proves the policy does.
+func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()) {
+	t.Helper()
+
+	run := func(args ...string) (string, int) {
+		t.Helper()
+		out := &strings.Builder{}
+		errOut := &strings.Builder{}
+		io := ios()
+		io.Stdout = out
+		io.Stderr = errOut
+		code := cli.Run(t.Context(), io, args)
+		if code != cli.ExitOK {
+			return out.String() + errOut.String(), code
+		}
+		return out.String(), code
+	}
+	mustRun := func(args ...string) string {
+		t.Helper()
+		out, code := run(args...)
+		if code != cli.ExitOK {
+			t.Fatalf("wenv %s exited %d\n%s", strings.Join(args, " "), code, out)
+		}
+		return out
+	}
+	decode := func(raw string, into any) {
+		t.Helper()
+		if err := json.Unmarshal([]byte(raw), into); err != nil {
+			t.Fatalf("output is not JSON: %v\n%s", err, raw)
+		}
+	}
+
+	var org struct{ Id string }
+	decode(mustRun("org", "create", "--name", "access-demo", "-o", "json"), &org)
+
+	// The demo's grantee is a principal with no grants at all: a fresh machine
+	// row would hit the normative allowlists, so this is a human.
+	// A contract-shaped id: the ID schema is a prefixed UUIDv7 and the request
+	// is refused on shape before it ever reaches the chokepoint.
+	const grantee = "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f99"
+	execRaw(t, db, `INSERT INTO principals (id, kind, created_at) VALUES ('`+grantee+`', 'human', `+ts+`)`)
+
+	// 1. Grant a template role.
+	var applied struct {
+		Items []struct {
+			Capability string
+			Created    bool
+		}
+		Count int
+	}
+	decode(mustRun("access", "grant", "template", "--org", org.Id,
+		"--principal", grantee, "--template", "publisher", "-o", "json"), &applied)
+	if applied.Count != 4 || len(applied.Items) != 4 {
+		t.Fatalf("publisher expanded into count=%d items=%d, want 4 and 4", applied.Count, len(applied.Items))
+	}
+
+	// 2. The membership surface shows the expansion as INDEPENDENT capability
+	//    lines, each with its origin chips. Nothing anywhere says "publisher".
+	var members struct {
+		Items []struct {
+			PrincipalId string `json:"principal_id"`
+			Capability  string
+			Origins     []struct {
+				Kind    string
+				Subject string
+			}
+		}
+		Count int
+	}
+	decode(mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"), &members)
+	seen := map[string]int{}
+	for _, m := range members.Items {
+		if m.PrincipalId != grantee {
+			continue
+		}
+		seen[m.Capability] = len(m.Origins)
+	}
+	for _, want := range []string{"read", "edit", "publish", "pin"} {
+		if seen[want] != 1 {
+			t.Fatalf("membership line for %q has %d origin chips, want exactly 1 manual origin\n%s",
+				want, seen[want], mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"))
+		}
+	}
+
+	// 3. Revoke ONE of them. The siblings survive — the template is not a
+	//    bundle — and the count drops by exactly one.
+	mustRun("access", "grant", "remove", "--org", org.Id,
+		"--principal", grantee, "--capability", "publish")
+	decode(mustRun("access", "grant", "list", "--org", org.Id, "-o", "json"), &members)
+	after := map[string]bool{}
+	for _, m := range members.Items {
+		if m.PrincipalId == grantee {
+			after[m.Capability] = true
+		}
+	}
+	if after["publish"] {
+		t.Fatal("the revoked capability is still on the membership surface")
+	}
+	if !after["read"] || !after["edit"] || !after["pin"] {
+		t.Fatalf("revoking one template-created grant took its siblings with it: %v", after)
+	}
+
+	// 4. The session dies. The acting administrator revokes one of its OWN
+	//    capabilities; the generation advance and the session-row deletion
+	//    commit with the grant change, so the very next request over the same
+	//    session is refused — exit 3, authentication, not 5.
+	var whoami struct {
+		Principal struct{ Id string }
+	}
+	decode(mustRun("whoami", "-o", "json"), &whoami)
+	if whoami.Principal.Id == "" {
+		t.Fatal("whoami returned no principal id")
+	}
+	// `reencrypt` is one of the operator set the bootstrap template seeded, so
+	// this revokes a capability the administrator genuinely holds at instance
+	// scope — and their own session dies with it.
+	mustRun("access", "grant", "remove", "--instance-scope",
+		"--principal", whoami.Principal.Id, "--capability", "reencrypt")
+	if out, code := run("whoami", "-o", "json"); code != cli.ExitAuth {
+		t.Fatalf("after a grant revocation whoami exited %d, want %d (authentication)\n%s",
+			code, cli.ExitAuth, out)
+	}
+	relogin()
 }

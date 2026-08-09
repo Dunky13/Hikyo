@@ -1170,6 +1170,623 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  # The access surface (#55, permission-model ADR). One path per addressed
+  # scope depth, because the authorization formula differs per depth and the
+  # ADR forbids "the capability for this endpoint" as a statement: a grant
+  # addressed at environment depth is authorized by `manage-members(project)`,
+  # since `manage-members` is not grantable at environment scope at all.
+  #
+  # The grant's scope IS the addressed path. There is no scope in any body:
+  # a body-supplied scope would let a caller authorized at one depth write a
+  # grant at another, which is the whole formula defeated by a JSON field.
+  /api/v1/instance/grants:
+    get:
+      operationId: listInstanceGrants
+      tags: [access]
+      summary: List the instance-scope membership surface.
+      description: |
+        One line per capability per principal, with the origins holding it.
+        Grants inside an org are NOT listed here even though instance-scope
+        grants reach into every org: membership of a scope is what was granted
+        AT it.
+      x-wenv-class: instance
+      x-wenv-operation: grant.list-instance
+      x-wenv-formula: [manage-members@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The instance-scope grant lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createInstanceGrant
+      tags: [access]
+      summary: Grant one capability at instance scope.
+      x-wenv-class: instance
+      x-wenv-operation: grant.create-instance
+      x-wenv-formula: [manage-members@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGrantRequest"
+      responses:
+        "200":
+          description: The grant, created or joined by a second origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeInstanceGrant
+      tags: [access]
+      summary: Revoke one capability at instance scope.
+      description: |
+        Releases the origins this surface owns and deletes the grant row when
+        the last one is gone, advancing the target's session generation and
+        deleting their sessions in the same transaction. Refused when it would
+        remove the last instance `manage-members` holder.
+      x-wenv-class: instance
+      x-wenv-operation: grant.revoke-instance
+      x-wenv-formula: [manage-members@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/GrantPrincipal"
+        - $ref: "#/components/parameters/GrantCapability"
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/grants/template:
+    post:
+      operationId: applyInstanceTemplate
+      tags: [access]
+      summary: Apply a role template at instance scope.
+      description: |
+        The template expands AT GRANT TIME into individual capability grants,
+        each separately visible and separately revocable. Nothing stores the
+        template name.
+      x-wenv-class: instance
+      x-wenv-operation: grant.template-instance
+      x-wenv-formula: [manage-members@instance]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTemplateRequest"
+      responses:
+        "200":
+          description: The grants the expansion produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResultList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/grants:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    get:
+      operationId: listOrgGrants
+      tags: [access]
+      summary: List the organisation's membership surface.
+      description: |
+        Every grant line scoped inside the org — org, project and environment
+        scoped alike — with its origin chips. Instance-scope grants that reach
+        the org by inheritance are deliberately absent: listing them here would
+        invite revoking an instance operator from a page with no authority over
+        one.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.list-org
+      x-wenv-formula: [manage-members@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The organisation's grant lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createOrgGrant
+      tags: [access]
+      summary: Grant one capability at organisation scope.
+      description: |
+        `manage-members` held at org scope may grant capabilities the grantor
+        does not hold — the escalation path the threat model accepts, and the
+        one that keeps a fresh installation bootstrappable.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.create-org
+      x-wenv-formula: [manage-members@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGrantRequest"
+      responses:
+        "200":
+          description: The grant, created or joined by a second origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeOrgGrant
+      tags: [access]
+      summary: Revoke one capability at organisation scope.
+      description: |
+        Refused when it would remove the last org `manage-members` holder: an
+        unadministrable organisation is a support incident with no in-product
+        recovery.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.revoke-org
+      x-wenv-formula: [manage-members@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/GrantPrincipal"
+        - $ref: "#/components/parameters/GrantCapability"
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/grants/template:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    post:
+      operationId: applyOrgTemplate
+      tags: [access]
+      summary: Apply a role template at organisation scope.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.template-org
+      x-wenv-formula: [manage-members@org]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTemplateRequest"
+      responses:
+        "200":
+          description: The grants the expansion produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResultList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/grants:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listProjectGrants
+      tags: [access]
+      summary: List the project's membership surface.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.list-project
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project's grant lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createProjectGrant
+      tags: [access]
+      summary: Grant one capability at project scope.
+      description: |
+        `manage-members` held at PROJECT scope may grant only capabilities the
+        grantor currently holds at or above the target scope, so a stolen
+        project-admin account is exactly the authority it was given and not
+        automatic compromise of the project's secrets.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.create-project
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGrantRequest"
+      responses:
+        "200":
+          description: The grant, created or joined by a second origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeProjectGrant
+      tags: [access]
+      summary: Revoke one capability at project scope.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.revoke-project
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/GrantPrincipal"
+        - $ref: "#/components/parameters/GrantCapability"
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/grants/template:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: applyProjectTemplate
+      tags: [access]
+      summary: Apply a role template at project scope.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.template-project
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTemplateRequest"
+      responses:
+        "200":
+          description: The grants the expansion produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResultList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: createEnvGrant
+      tags: [access]
+      summary: Grant one capability on one environment.
+      description: |
+        Authorized by `manage-members(project)`, not by anything at
+        environment scope: `manage-members` is an org/project atom, so the
+        formula truncates the resolved chain to the project. There is no
+        `grant.list-env` — "who can reach this environment" must include the
+        org- and project-scoped grants that reach it, which an environment-only
+        listing would silently omit; list at org or project scope instead.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.create-env
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGrantRequest"
+      responses:
+        "200":
+          description: The grant, created or joined by a second origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeEnvGrant
+      tags: [access]
+      summary: Revoke one capability on one environment.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.revoke-env
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/GrantPrincipal"
+        - $ref: "#/components/parameters/GrantCapability"
+      responses:
+        "204":
+          description: Revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: applyEnvTemplate
+      tags: [access]
+      summary: Apply a role template on one environment.
+      x-wenv-class: tenant
+      x-wenv-operation: grant.template-env
+      x-wenv-formula: [manage-members@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTemplateRequest"
+      responses:
+        "200":
+          description: The grants the expansion produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResultList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: getEnvironmentSettings
+      tags: [access]
+      summary: Read an environment's protection state and reauthentication window.
+      description: |
+        Bare `read(E)`: an environment's protection state is part of its public
+        shape, and hiding it from a reader would make the reveal ceremony
+        inexplicable to the person subject to it.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.settings-read
+      x-wenv-formula: [read@environment]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The environment's settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentSettings"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: setEnvironmentSettings
+      tags: [access]
+      summary: Set an environment's protection state and reauthentication window.
+      description: |
+        `project-settings`, deliberately split out of `definitions-edit`: these
+        knobs exist to restrain the definitions editor, and a guard whose
+        off-switch sits in the hand it restrains is not a guard.
+
+        Both knobs are written as ONE fact, because marking an environment
+        protected CAPS its window at the protected default. Raising a protected
+        environment's window above that cap is refused, never silently clamped.
+        Omitting `reauth_window_seconds` means "inherit the instance default";
+        a null is that same statement written out.
+      x-wenv-class: tenant
+      x-wenv-operation: environment.settings-update
+      x-wenv-formula: [project-settings@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnvironmentSettings"
+      responses:
+        "200":
+          description: The settings as stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/methods:
     get:
       operationId: authMethods
@@ -2350,6 +2967,20 @@ components:
       description: Folder identifier.
       schema:
         $ref: "#/components/schemas/ID"
+    GrantPrincipal:
+      name: principal
+      in: query
+      required: true
+      description: The principal whose grant is being revoked.
+      schema:
+        $ref: "#/components/schemas/ID"
+    GrantCapability:
+      name: capability
+      in: query
+      required: true
+      description: The capability atom being revoked.
+      schema:
+        $ref: "#/components/schemas/Capability"
     ProviderSlug:
       name: provider
       in: path
@@ -3058,6 +3689,159 @@ components:
           type: integer
           minimum: 0
           description: Total rows matching, which for an unpaged list equals `items` length.
+
+    Capability:
+      type: string
+      description: |
+        One atom from the permission ADR's CLOSED capability set. The server
+        refuses anything outside it rather than storing a row nothing can ever
+        evaluate, so this is a bounded string rather than an enum only to keep
+        the contract additive as later tickets register their atoms.
+      minLength: 1
+      maxLength: 64
+      pattern: "^[a-z][a-z-]{0,63}$"
+
+    RoleTemplate:
+      type: string
+      description: The closed v1 role template set.
+      enum: [viewer, editor, publisher, revealer, historian, maintainer, admin, operator]
+
+    CreateGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [principal, capability]
+      properties:
+        principal:
+          $ref: "#/components/schemas/ID"
+        capability:
+          $ref: "#/components/schemas/Capability"
+
+    ApplyTemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [principal, template]
+      properties:
+        principal:
+          $ref: "#/components/schemas/ID"
+        template:
+          $ref: "#/components/schemas/RoleTemplate"
+
+    GrantOrigin:
+      type: object
+      additionalProperties: false
+      required: [kind, subject]
+      description: |
+        One origin holding a grant row alive. A row exists while at least one
+        origin holds it and is revoked, with the session-generation advance,
+        when its last origin is released. Origins are never consulted by
+        authorization: authority is the bare (principal, capability, scope)
+        triple.
+      properties:
+        kind:
+          type: string
+          enum: [manual, break-glass, scim, structural, lockout-retention]
+        subject:
+          type: string
+          description: |
+            The origin's holder identity, discriminated by kind: the granting
+            principal for `manual`, the fixed local-host marker for
+            `break-glass`, the binding id for `scim`/`structural`.
+          maxLength: 128
+
+    Grant:
+      type: object
+      additionalProperties: false
+      required: [id, principal_id, capability, scope, origins, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        principal_id:
+          $ref: "#/components/schemas/ID"
+        capability:
+          $ref: "#/components/schemas/Capability"
+        scope:
+          $ref: "#/components/schemas/GrantScope"
+        origins:
+          type: array
+          description: The origin chips for this capability line.
+          items:
+            $ref: "#/components/schemas/GrantOrigin"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    GrantScope:
+      type: object
+      additionalProperties: false
+      description: |
+        The scope the grant was made at. All three absent is instance scope.
+        Grants inherit downward, so a grant at a scope applies to everything
+        beneath it.
+      properties:
+        org_id:
+          $ref: "#/components/schemas/ID"
+        project_id:
+          $ref: "#/components/schemas/ID"
+        environment_id:
+          $ref: "#/components/schemas/ID"
+
+    GrantList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Grant"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+    GrantResult:
+      type: object
+      additionalProperties: false
+      required: [grant_id, capability, created, origin_added]
+      properties:
+        grant_id:
+          $ref: "#/components/schemas/ID"
+        capability:
+          $ref: "#/components/schemas/Capability"
+        created:
+          type: boolean
+          description: False when an existing row was deduplicated and this call only attached an origin.
+        origin_added:
+          type: boolean
+          description: False when the caller's own origin already held the row - a genuinely idempotent repeat.
+
+    GrantResultList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GrantResult"
+        count:
+          type: integer
+          minimum: 0
+
+    EnvironmentSettings:
+      type: object
+      additionalProperties: false
+      required: [protected]
+      properties:
+        protected:
+          type: boolean
+        reauth_window_seconds:
+          type: [integer, "null"]
+          minimum: 0
+          description: |
+            The environment's own reauthentication window. Null or absent means
+            it inherits the instance default - which is NOT the same statement
+            as 0, and 0 is a legal value meaning every disclosure
+            reauthenticates.
 
     AuthMethods:
       type: object

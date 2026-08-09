@@ -74,6 +74,10 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runInstanceConfig(ctx, io, rest)
 	case "doctor":
 		err = runDoctor(ctx, io, rest)
+	case "access":
+		err = runAccess(ctx, io, rest)
+	case "project-settings":
+		err = runProjectSettings(ctx, io, rest)
 	default:
 		fmt.Fprintf(io.Stderr, "wenv: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
@@ -138,6 +142,16 @@ instance configuration:
   wenv instance-config provider refresh-metadata <name>
   wenv instance-config saml-sp-key list|rotate
   wenv instance-config saml-sp-key retire|compromise-retire <fingerprint>
+
+access:
+  wenv access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
+  wenv access grant add --principal <id> --capability <atom>
+  wenv access grant remove --principal <id> --capability <atom>
+  wenv access grant template --principal <id> --template <name>
+  wenv access member list [--org O] [--project P] [-o table|json]
+  wenv access member remove --principal <id>
+  wenv project-settings get --env E [-o table|json]
+  wenv project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context

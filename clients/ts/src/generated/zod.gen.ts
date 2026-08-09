@@ -306,6 +306,104 @@ export const zFolderList = z.object({
     count: z.int().gte(0)
 });
 
+/**
+ * One atom from the permission ADR's CLOSED capability set. The server
+ * refuses anything outside it rather than storing a row nothing can ever
+ * evaluate, so this is a bounded string rather than an enum only to keep
+ * the contract additive as later tickets register their atoms.
+ *
+ */
+export const zCapability = z.string().min(1).max(64).regex(/^[a-z][a-z-]{0,63}$/);
+
+/**
+ * The closed v1 role template set.
+ */
+export const zRoleTemplate = z.enum([
+    'viewer',
+    'editor',
+    'publisher',
+    'revealer',
+    'historian',
+    'maintainer',
+    'admin',
+    'operator'
+]);
+
+export const zCreateGrantRequest = z.object({
+    principal: zId,
+    capability: zCapability
+});
+
+export const zApplyTemplateRequest = z.object({
+    principal: zId,
+    template: zRoleTemplate
+});
+
+/**
+ * One origin holding a grant row alive. A row exists while at least one
+ * origin holds it and is revoked, with the session-generation advance,
+ * when its last origin is released. Origins are never consulted by
+ * authorization: authority is the bare (principal, capability, scope)
+ * triple.
+ *
+ */
+export const zGrantOrigin = z.object({
+    kind: z.enum([
+        'manual',
+        'break-glass',
+        'scim',
+        'structural',
+        'lockout-retention'
+    ]),
+    subject: z.string().max(128)
+});
+
+/**
+ * The scope the grant was made at. All three absent is instance scope.
+ * Grants inherit downward, so a grant at a scope applies to everything
+ * beneath it.
+ *
+ */
+export const zGrantScope = z.object({
+    org_id: z.optional(zId),
+    project_id: z.optional(zId),
+    environment_id: z.optional(zId)
+});
+
+export const zGrant = z.object({
+    id: zId,
+    principal_id: zId,
+    capability: zCapability,
+    scope: zGrantScope,
+    origins: z.array(zGrantOrigin),
+    created_at: zTimestamp
+});
+
+export const zGrantList = z.object({
+    items: z.array(zGrant),
+    count: z.int().gte(0)
+});
+
+export const zGrantResult = z.object({
+    grant_id: zId,
+    capability: zCapability,
+    created: z.boolean(),
+    origin_added: z.boolean()
+});
+
+export const zGrantResultList = z.object({
+    items: z.array(zGrantResult),
+    count: z.int().gte(0)
+});
+
+export const zEnvironmentSettings = z.object({
+    protected: z.boolean(),
+    reauth_window_seconds: z.optional(z.union([
+        z.int().gte(0),
+        z.null()
+    ]))
+});
+
 export const zOidcStartRequest = z.object({
     purpose: z.enum([
         'login',
@@ -647,6 +745,16 @@ export const zEnvironmentId = zId;
  * Folder identifier.
  */
 export const zFolderId = zId;
+
+/**
+ * The principal whose grant is being revoked.
+ */
+export const zGrantPrincipal = zId;
+
+/**
+ * The capability atom being revoked.
+ */
+export const zGrantCapability = zCapability;
 
 /**
  * Identity-provider slug.
@@ -1082,6 +1190,245 @@ export const zRenameFolderData = z.object({
  * The moved folder.
  */
 export const zRenameFolderResponse = zFolder;
+
+export const zRevokeInstanceGrantData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.object({
+        principal: zId,
+        capability: zCapability
+    })
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeInstanceGrantResponse = z.void();
+
+export const zListInstanceGrantsData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The instance-scope grant lines.
+ */
+export const zListInstanceGrantsResponse = zGrantList;
+
+export const zCreateInstanceGrantData = z.object({
+    body: zCreateGrantRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grant, created or joined by a second origin.
+ */
+export const zCreateInstanceGrantResponse = zGrantResult;
+
+export const zApplyInstanceTemplateData = z.object({
+    body: zApplyTemplateRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grants the expansion produced.
+ */
+export const zApplyInstanceTemplateResponse = zGrantResultList;
+
+export const zRevokeOrgGrantData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.object({
+        principal: zId,
+        capability: zCapability
+    })
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeOrgGrantResponse = z.void();
+
+export const zListOrgGrantsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The organisation's grant lines.
+ */
+export const zListOrgGrantsResponse = zGrantList;
+
+export const zCreateOrgGrantData = z.object({
+    body: zCreateGrantRequest,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grant, created or joined by a second origin.
+ */
+export const zCreateOrgGrantResponse = zGrantResult;
+
+export const zApplyOrgTemplateData = z.object({
+    body: zApplyTemplateRequest,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grants the expansion produced.
+ */
+export const zApplyOrgTemplateResponse = zGrantResultList;
+
+export const zRevokeProjectGrantData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.object({
+        principal: zId,
+        capability: zCapability
+    })
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeProjectGrantResponse = z.void();
+
+export const zListProjectGrantsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's grant lines.
+ */
+export const zListProjectGrantsResponse = zGrantList;
+
+export const zCreateProjectGrantData = z.object({
+    body: zCreateGrantRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grant, created or joined by a second origin.
+ */
+export const zCreateProjectGrantResponse = zGrantResult;
+
+export const zApplyProjectTemplateData = z.object({
+    body: zApplyTemplateRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grants the expansion produced.
+ */
+export const zApplyProjectTemplateResponse = zGrantResultList;
+
+export const zRevokeEnvGrantData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.object({
+        principal: zId,
+        capability: zCapability
+    })
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeEnvGrantResponse = z.void();
+
+export const zCreateEnvGrantData = z.object({
+    body: zCreateGrantRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grant, created or joined by a second origin.
+ */
+export const zCreateEnvGrantResponse = zGrantResult;
+
+export const zApplyEnvTemplateData = z.object({
+    body: zApplyTemplateRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The grants the expansion produced.
+ */
+export const zApplyEnvTemplateResponse = zGrantResultList;
+
+export const zGetEnvironmentSettingsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment's settings.
+ */
+export const zGetEnvironmentSettingsResponse = zEnvironmentSettings;
+
+export const zSetEnvironmentSettingsData = z.object({
+    body: zEnvironmentSettings,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The settings as stored.
+ */
+export const zSetEnvironmentSettingsResponse = zEnvironmentSettings;
 
 export const zAuthMethodsData = z.object({
     body: z.optional(z.never()),

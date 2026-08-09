@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateOrgData, CreateOrgErrors, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -558,6 +558,259 @@ export const getFolder = <ThrowOnError extends boolean = false>(options: Options
 export const renameFolder = <ThrowOnError extends boolean = false>(options: Options<RenameFolderData, ThrowOnError>) => (options.client ?? client).patch<RenameFolderResponses, RenameFolderErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/projects/{project}/folders/{folder}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one capability at instance scope.
+ *
+ * Releases the origins this surface owns and deletes the grant row when
+ * the last one is gone, advancing the target's session generation and
+ * deleting their sessions in the same transaction. Refused when it would
+ * remove the last instance `manage-members` holder.
+ *
+ */
+export const revokeInstanceGrant = <ThrowOnError extends boolean = false>(options: Options<RevokeInstanceGrantData, ThrowOnError>) => (options.client ?? client).delete<RevokeInstanceGrantResponses, RevokeInstanceGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/grants',
+    ...options
+});
+
+/**
+ * List the instance-scope membership surface.
+ *
+ * One line per capability per principal, with the origins holding it.
+ * Grants inside an org are NOT listed here even though instance-scope
+ * grants reach into every org: membership of a scope is what was granted
+ * AT it.
+ *
+ */
+export const listInstanceGrants = <ThrowOnError extends boolean = false>(options?: Options<ListInstanceGrantsData, ThrowOnError>) => (options?.client ?? client).get<ListInstanceGrantsResponses, ListInstanceGrantsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/grants',
+    ...options
+});
+
+/**
+ * Grant one capability at instance scope.
+ */
+export const createInstanceGrant = <ThrowOnError extends boolean = false>(options: Options<CreateInstanceGrantData, ThrowOnError>) => (options.client ?? client).post<CreateInstanceGrantResponses, CreateInstanceGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Apply a role template at instance scope.
+ *
+ * The template expands AT GRANT TIME into individual capability grants,
+ * each separately visible and separately revocable. Nothing stores the
+ * template name.
+ *
+ */
+export const applyInstanceTemplate = <ThrowOnError extends boolean = false>(options: Options<ApplyInstanceTemplateData, ThrowOnError>) => (options.client ?? client).post<ApplyInstanceTemplateResponses, ApplyInstanceTemplateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/grants/template',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one capability at organisation scope.
+ *
+ * Refused when it would remove the last org `manage-members` holder: an
+ * unadministrable organisation is a support incident with no in-product
+ * recovery.
+ *
+ */
+export const revokeOrgGrant = <ThrowOnError extends boolean = false>(options: Options<RevokeOrgGrantData, ThrowOnError>) => (options.client ?? client).delete<RevokeOrgGrantResponses, RevokeOrgGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/grants',
+    ...options
+});
+
+/**
+ * List the organisation's membership surface.
+ *
+ * Every grant line scoped inside the org — org, project and environment
+ * scoped alike — with its origin chips. Instance-scope grants that reach
+ * the org by inheritance are deliberately absent: listing them here would
+ * invite revoking an instance operator from a page with no authority over
+ * one.
+ *
+ */
+export const listOrgGrants = <ThrowOnError extends boolean = false>(options: Options<ListOrgGrantsData, ThrowOnError>) => (options.client ?? client).get<ListOrgGrantsResponses, ListOrgGrantsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/grants',
+    ...options
+});
+
+/**
+ * Grant one capability at organisation scope.
+ *
+ * `manage-members` held at org scope may grant capabilities the grantor
+ * does not hold — the escalation path the threat model accepts, and the
+ * one that keeps a fresh installation bootstrappable.
+ *
+ */
+export const createOrgGrant = <ThrowOnError extends boolean = false>(options: Options<CreateOrgGrantData, ThrowOnError>) => (options.client ?? client).post<CreateOrgGrantResponses, CreateOrgGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Apply a role template at organisation scope.
+ */
+export const applyOrgTemplate = <ThrowOnError extends boolean = false>(options: Options<ApplyOrgTemplateData, ThrowOnError>) => (options.client ?? client).post<ApplyOrgTemplateResponses, ApplyOrgTemplateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/grants/template',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one capability at project scope.
+ */
+export const revokeProjectGrant = <ThrowOnError extends boolean = false>(options: Options<RevokeProjectGrantData, ThrowOnError>) => (options.client ?? client).delete<RevokeProjectGrantResponses, RevokeProjectGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/grants',
+    ...options
+});
+
+/**
+ * List the project's membership surface.
+ */
+export const listProjectGrants = <ThrowOnError extends boolean = false>(options: Options<ListProjectGrantsData, ThrowOnError>) => (options.client ?? client).get<ListProjectGrantsResponses, ListProjectGrantsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/grants',
+    ...options
+});
+
+/**
+ * Grant one capability at project scope.
+ *
+ * `manage-members` held at PROJECT scope may grant only capabilities the
+ * grantor currently holds at or above the target scope, so a stolen
+ * project-admin account is exactly the authority it was given and not
+ * automatic compromise of the project's secrets.
+ *
+ */
+export const createProjectGrant = <ThrowOnError extends boolean = false>(options: Options<CreateProjectGrantData, ThrowOnError>) => (options.client ?? client).post<CreateProjectGrantResponses, CreateProjectGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Apply a role template at project scope.
+ */
+export const applyProjectTemplate = <ThrowOnError extends boolean = false>(options: Options<ApplyProjectTemplateData, ThrowOnError>) => (options.client ?? client).post<ApplyProjectTemplateResponses, ApplyProjectTemplateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/grants/template',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one capability on one environment.
+ */
+export const revokeEnvGrant = <ThrowOnError extends boolean = false>(options: Options<RevokeEnvGrantData, ThrowOnError>) => (options.client ?? client).delete<RevokeEnvGrantResponses, RevokeEnvGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants',
+    ...options
+});
+
+/**
+ * Grant one capability on one environment.
+ *
+ * Authorized by `manage-members(project)`, not by anything at
+ * environment scope: `manage-members` is an org/project atom, so the
+ * formula truncates the resolved chain to the project. There is no
+ * `grant.list-env` — "who can reach this environment" must include the
+ * org- and project-scoped grants that reach it, which an environment-only
+ * listing would silently omit; list at org or project scope instead.
+ *
+ */
+export const createEnvGrant = <ThrowOnError extends boolean = false>(options: Options<CreateEnvGrantData, ThrowOnError>) => (options.client ?? client).post<CreateEnvGrantResponses, CreateEnvGrantErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Apply a role template on one environment.
+ */
+export const applyEnvTemplate = <ThrowOnError extends boolean = false>(options: Options<ApplyEnvTemplateData, ThrowOnError>) => (options.client ?? client).post<ApplyEnvTemplateResponses, ApplyEnvTemplateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Read an environment's protection state and reauthentication window.
+ *
+ * Bare `read(E)`: an environment's protection state is part of its public
+ * shape, and hiding it from a reader would make the reveal ceremony
+ * inexplicable to the person subject to it.
+ *
+ */
+export const getEnvironmentSettings = <ThrowOnError extends boolean = false>(options: Options<GetEnvironmentSettingsData, ThrowOnError>) => (options.client ?? client).get<GetEnvironmentSettingsResponses, GetEnvironmentSettingsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings',
+    ...options
+});
+
+/**
+ * Set an environment's protection state and reauthentication window.
+ *
+ * `project-settings`, deliberately split out of `definitions-edit`: these
+ * knobs exist to restrain the definitions editor, and a guard whose
+ * off-switch sits in the hand it restrains is not a guard.
+ *
+ * Both knobs are written as ONE fact, because marking an environment
+ * protected CAPS its window at the protected default. Raising a protected
+ * environment's window above that cap is refused, never silently clamped.
+ * Omitting `reauth_window_seconds` means "inherit the instance default";
+ * a null is that same statement written out.
+ *
+ */
+export const setEnvironmentSettings = <ThrowOnError extends boolean = false>(options: Options<SetEnvironmentSettingsData, ThrowOnError>) => (options.client ?? client).put<SetEnvironmentSettingsResponses, SetEnvironmentSettingsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings',
     ...options,
     headers: {
         'Content-Type': 'application/json',

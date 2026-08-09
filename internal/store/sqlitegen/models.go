@@ -85,13 +85,15 @@ type CredentialAuthority struct {
 }
 
 type Environment struct {
-	ID           string
-	OrgID        string
-	ProjectID    string
-	Name         string
-	Note         string
-	CreatedAt    string
-	DisplayOrder int64
+	ID                  string
+	OrgID               string
+	ProjectID           string
+	Name                string
+	Note                string
+	CreatedAt           string
+	DisplayOrder        int64
+	Protected           int64
+	ReauthWindowSeconds sql.NullInt64
 }
 
 type ExternalIdentity struct {
@@ -121,6 +123,14 @@ type Grant struct {
 	ProjectID   sql.NullString
 	EnvID       sql.NullString
 	CreatedAt   string
+}
+
+type GrantOrigin struct {
+	ID        string
+	GrantID   string
+	Kind      string
+	Subject   string
+	CreatedAt string
 }
 
 type KeyGeneration struct {
@@ -201,6 +211,7 @@ type Principal struct {
 	Kind              string
 	CreatedAt         string
 	SessionGeneration int64
+	Class             sql.NullString
 }
 
 type Project struct {

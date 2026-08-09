@@ -128,6 +128,22 @@
     ]
   },
   {
+    "operation": "environment.settings-read",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "environment.settings-update",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "project-settings@project"
+    ]
+  },
+  {
     "operation": "environment.update-note",
     "class": "tenant",
     "level": "environment",
@@ -173,6 +189,126 @@
     "level": "project",
     "formula": [
       "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "grant.create-env",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.create-instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "manage-members@instance"
+    ]
+  },
+  {
+    "operation": "grant.create-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "grant.create-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.list-instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "manage-members@instance"
+    ]
+  },
+  {
+    "operation": "grant.list-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "grant.list-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.revoke-env",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.revoke-instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "manage-members@instance"
+    ]
+  },
+  {
+    "operation": "grant.revoke-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "grant.revoke-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.template-env",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "manage-members@project"
+    ]
+  },
+  {
+    "operation": "grant.template-instance",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "manage-members@instance"
+    ]
+  },
+  {
+    "operation": "grant.template-org",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "grant.template-project",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-members@project"
     ]
   },
   {
