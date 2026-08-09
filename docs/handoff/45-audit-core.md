@@ -212,7 +212,9 @@ secret, free-text filter fixtures.
   exists. The 30 s application-clock settle ceiling and its clock-skew
   residual were replaced by the zero-lag server-clock snapshot. sqlite is
   unchanged: its single write connection already makes allocation order
-  commit order.
+  commit order and durably serializes `export_started` before paging. #25 must
+  treat `AfterSeq` as a selection floor, not derive a resume cursor from the
+  last emitted row; resumability would require an opaque commit-order cursor.
 
 - **Denial-path timing.** A resolvable denial evaluates grants and writes to
   the tenant trail; an unresolvable one skips the grant lookup and writes to

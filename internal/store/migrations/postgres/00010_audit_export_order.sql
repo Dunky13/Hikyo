@@ -43,6 +43,15 @@ ALTER TABLE audit_tenant_events
 ALTER TABLE audit_instance_events
     ADD CONSTRAINT audit_instance_events_commit_seq_unique UNIQUE (commit_seq);
 
+-- Export paging follows commit_seq within the proof-bound tenant scope. Keep
+-- each refinement ordered without filtering the full global commit index.
+CREATE INDEX audit_tenant_events_org_commit_seq
+    ON audit_tenant_events (org_id, commit_seq);
+CREATE INDEX audit_tenant_events_project_commit_seq
+    ON audit_tenant_events (org_id, project_id, commit_seq);
+CREATE INDEX audit_tenant_events_env_commit_seq
+    ON audit_tenant_events (org_id, project_id, env_id, commit_seq);
+
 -- Every transaction that has inserted an audit row holds this shared gate
 -- until commit. An export takes the exclusive side before its final reread,
 -- waiting for every pre-snapshot audit writer without blocking writers from

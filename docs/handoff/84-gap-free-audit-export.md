@@ -48,7 +48,10 @@ both trails. sqlite keeps using
   the row. Read conversion also fails loud on any committed NULL.
 - Interactive query pages stay allocation-ordered by `seq`.
 - Export pages retain the caller's `AfterSeq` lower bound, then page by
-  `commit_seq` on postgres.
+  `commit_seq` on postgres. `AfterSeq` is a selection floor, not a resumable
+  export cursor: #25 must not derive a continuation token from the last
+  emitted public `seq`. A future resumable route needs an opaque cursor that
+  carries the internal commit-order position.
 - The Postgres BEFORE INSERT trigger first acquires the shared writer gate,
   then stamps `recorded_at` with `clock_timestamp()`. Eligibility therefore
   cannot predate the writer's registration at the export barrier.
@@ -58,12 +61,22 @@ both trails. sqlite keeps using
 - Audit INSERTs hold a shared in-flight lock. Before a short page can terminate
   the export, the exporter waits on the exclusive side and rereads, so a row
   cannot commit between the final page and `export_completed` unnoticed.
+- sqlite needs no equivalent final barrier: the fixed cutoff is captured before
+  the durable `export_started` write, and its sole write connection settles
+  every writer stamped at or before that cutoff before paging begins. Writers
+  admitted afterward are stamped after the cutoff and are outside the export.
 - The former 30 s settle ceiling is removed; the fixed snapshot has zero lag
   and no application-clock skew.
 
 Postgres transaction advisory locks are built in and need no server setting,
 so #84 adds no boot-verification requirement beyond the existing `fsync=on`
 and `synchronous_commit=on` checks.
+
+Migration `00010` must remain transactional. The supported `wenv migrate` and
+auto-migrate paths use goose's transactional default, so no writer can commit
+between the backfill and trigger installation. Running the statements manually
+or marking this migration `NO TRANSACTION` is unsupported: either can strand a
+row with NULL `commit_seq`.
 
 ## Regression proof
 

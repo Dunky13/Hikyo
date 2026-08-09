@@ -514,7 +514,9 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 	w := &hookWriter{onFirst: func() { close(firstPage) }}
 	exportDone := make(chan error, 1)
 	go func() {
-		exportDone <- audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 2, w)
+		// A one-row page forces the full-page path before the exporter reaches
+		// its short-page barrier and rereads the later lower-seq commit.
+		exportDone <- audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 1, w)
 	}()
 
 	select {
