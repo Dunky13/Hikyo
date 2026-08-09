@@ -255,6 +255,17 @@ func openPostgres(t *testing.T) *store.DB {
 			t.Fatal(err)
 		}
 	}
+	for _, object := range []string{
+		"DROP FUNCTION IF EXISTS assign_audit_tenant_commit_seq()",
+		"DROP FUNCTION IF EXISTS assign_audit_instance_commit_seq()",
+		"DROP SEQUENCE IF EXISTS audit_tenant_commit_seq",
+		"DROP SEQUENCE IF EXISTS audit_instance_commit_seq",
+	} {
+		if _, err := pre.PG().Exec(t.Context(), object); err != nil {
+			pre.Close()
+			t.Fatal(err)
+		}
+	}
 	pre.Close()
 	if err := migrate.Run(t.Context(), cfg); err != nil {
 		t.Fatal(err)

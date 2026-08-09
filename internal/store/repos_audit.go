@@ -33,10 +33,12 @@ import (
 // AfterSeq is the page cursor; Limit is the page size and must be positive
 // (the caller's bound — ops spec owns defaults).
 type AuditFilter struct {
-	From     time.Time
-	To       time.Time
-	AfterSeq int64
-	Limit    int
+	From           time.Time
+	To             time.Time
+	AfterSeq       int64
+	Limit          int
+	CommitOrder    bool  // internal export mode; excluded from Normalized
+	AfterCommitSeq int64 // internal export cursor; excluded from Normalized
 }
 
 // auditMaxTime bounds an open-ended To (year 9999 is inside both engines'
@@ -77,6 +79,7 @@ func (f AuditFilter) Normalized() audit.Payload {
 type AuditEvent struct {
 	audit.Event
 	Seq        int64
+	CommitSeq  int64 // postgres export cursor; equals Seq on sqlite
 	RecordedAt time.Time
 	ScopeClass string
 	OrgID      string
@@ -151,6 +154,9 @@ func (a sqliteAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.
 }
 
 func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if f.CommitOrder {
+		return a.pageTenantExport(ctx, p, f)
+	}
 	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
 	if err != nil {
 		return nil, err
@@ -203,6 +209,9 @@ func (a sqliteAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilte
 }
 
 func (a sqliteAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if f.CommitOrder {
+		return a.pageInstanceExport(ctx, p, f)
+	}
 	if _, err := authz.Verify(p, authz.StoreAuditInstancePage, a.tok); err != nil {
 		return nil, err
 	}
@@ -225,6 +234,85 @@ func (a sqliteAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFil
 			return nil, err
 		}
 		out = append(out, ev)
+	}
+	return out, nil
+}
+
+func (a sqliteAudit) pageTenantExport(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
+	if err != nil {
+		return nil, err
+	}
+	from, to, err := f.bounds()
+	if err != nil {
+		return nil, err
+	}
+	level, err := chain.Level()
+	if err != nil {
+		return nil, err
+	}
+	var rows []sqlitegen.AuditTenantEvent
+	switch level {
+	case domain.LevelOrg:
+		rows, err = a.q.PageTenantAuditExportOrg(ctx, sqlitegen.PageTenantAuditExportOrgParams{
+			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq, AfterCommitSeq: f.AfterCommitSeq,
+			FromTime: audit.FormatTime(from), ToTime: audit.FormatTime(to), PageLimit: int64(f.Limit),
+		})
+	case domain.LevelProject:
+		rows, err = a.q.PageTenantAuditExportProject(ctx, sqlitegen.PageTenantAuditExportProjectParams{
+			ChainOrgID: string(chain.Org), ChainProjectID: sql.NullString{String: string(chain.Project), Valid: true},
+			AfterSeq: f.AfterSeq, AfterCommitSeq: f.AfterCommitSeq,
+			FromTime: audit.FormatTime(from), ToTime: audit.FormatTime(to), PageLimit: int64(f.Limit),
+		})
+	case domain.LevelEnv:
+		rows, err = a.q.PageTenantAuditExportEnv(ctx, sqlitegen.PageTenantAuditExportEnvParams{
+			ChainOrgID: string(chain.Org), ChainProjectID: sql.NullString{String: string(chain.Project), Valid: true},
+			ChainEnvID: sql.NullString{String: string(chain.Env), Valid: true},
+			AfterSeq:   f.AfterSeq, AfterCommitSeq: f.AfterCommitSeq,
+			FromTime: audit.FormatTime(from), ToTime: audit.FormatTime(to), PageLimit: int64(f.Limit),
+		})
+	default:
+		return nil, errors.New("store: tenant audit export page with an empty chain")
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		event, err := auditEventFromSQLiteTenant(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, nil
+}
+
+func (a sqliteAudit) pageInstanceExport(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditInstancePage, a.tok); err != nil {
+		return nil, err
+	}
+	from, to, err := f.bounds()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := a.q.PageInstanceAuditExport(ctx, sqlitegen.PageInstanceAuditExportParams{
+		AfterSeq:       f.AfterSeq,
+		AfterCommitSeq: f.AfterCommitSeq,
+		FromTime:       audit.FormatTime(from),
+		ToTime:         audit.FormatTime(to),
+		PageLimit:      int64(f.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		event, err := auditEventFromSQLiteInstance(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
 	}
 	return out, nil
 }
@@ -272,6 +360,9 @@ func (a pgAudit) InsertInstance(ctx context.Context, p authz.Proof, e audit.Even
 }
 
 func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if f.CommitOrder {
+		return a.pageTenantExport(ctx, p, f)
+	}
 	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
 	if err != nil {
 		return nil, err
@@ -324,6 +415,9 @@ func (a pgAudit) PageTenant(ctx context.Context, p authz.Proof, f AuditFilter) (
 }
 
 func (a pgAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if f.CommitOrder {
+		return a.pageInstanceExport(ctx, p, f)
+	}
 	if _, err := authz.Verify(p, authz.StoreAuditInstancePage, a.tok); err != nil {
 		return nil, err
 	}
@@ -347,6 +441,88 @@ func (a pgAudit) PageInstance(ctx context.Context, p authz.Proof, f AuditFilter)
 			return nil, err
 		}
 		out = append(out, ev)
+	}
+	return out, nil
+}
+
+func (a pgAudit) pageTenantExport(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	chain, err := authz.Verify(p, authz.StoreAuditTenantPage, a.tok)
+	if err != nil {
+		return nil, err
+	}
+	from, to, err := f.bounds()
+	if err != nil {
+		return nil, err
+	}
+	level, err := chain.Level()
+	if err != nil {
+		return nil, err
+	}
+	fromTz := pgtype.Timestamptz{Time: from, Valid: true}
+	toTz := pgtype.Timestamptz{Time: to, Valid: true}
+	commitCursor := pgtype.Int8{Int64: f.AfterCommitSeq, Valid: true}
+	var rows []pggen.AuditTenantEvent
+	switch level {
+	case domain.LevelOrg:
+		rows, err = a.q.PageTenantAuditExportOrg(ctx, pggen.PageTenantAuditExportOrgParams{
+			ChainOrgID: string(chain.Org), AfterSeq: f.AfterSeq, AfterCommitSeq: commitCursor,
+			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+		})
+	case domain.LevelProject:
+		rows, err = a.q.PageTenantAuditExportProject(ctx, pggen.PageTenantAuditExportProjectParams{
+			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
+			AfterSeq: f.AfterSeq, AfterCommitSeq: commitCursor,
+			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+		})
+	case domain.LevelEnv:
+		rows, err = a.q.PageTenantAuditExportEnv(ctx, pggen.PageTenantAuditExportEnvParams{
+			ChainOrgID: string(chain.Org), ChainProjectID: pgtype.Text{String: string(chain.Project), Valid: true},
+			ChainEnvID: pgtype.Text{String: string(chain.Env), Valid: true},
+			AfterSeq:   f.AfterSeq, AfterCommitSeq: commitCursor,
+			FromTime: fromTz, ToTime: toTz, PageLimit: int32(f.Limit),
+		})
+	default:
+		return nil, errors.New("store: tenant audit export page with an empty chain")
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		event, err := auditEventFromPGTenant(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, nil
+}
+
+func (a pgAudit) pageInstanceExport(ctx context.Context, p authz.Proof, f AuditFilter) ([]AuditEvent, error) {
+	if _, err := authz.Verify(p, authz.StoreAuditInstancePage, a.tok); err != nil {
+		return nil, err
+	}
+	from, to, err := f.bounds()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := a.q.PageInstanceAuditExport(ctx, pggen.PageInstanceAuditExportParams{
+		AfterSeq:       f.AfterSeq,
+		AfterCommitSeq: pgtype.Int8{Int64: f.AfterCommitSeq, Valid: true},
+		FromTime:       pgtype.Timestamptz{Time: from, Valid: true},
+		ToTime:         pgtype.Timestamptz{Time: to, Valid: true},
+		PageLimit:      int32(f.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		event, err := auditEventFromPGInstance(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
 	}
 	return out, nil
 }
@@ -378,7 +554,7 @@ func auditEventFromSQLiteTenant(r sqlitegen.AuditTenantEvent) (AuditEvent, error
 			SourceIP:      r.SourceIp.String, UserAgent: r.UserAgent.String,
 			Origin: audit.Origin(r.Origin),
 		},
-		Seq: r.Seq, RecordedAt: recorded, ScopeClass: r.ScopeClass,
+		Seq: r.Seq, CommitSeq: r.Seq, RecordedAt: recorded, ScopeClass: r.ScopeClass,
 		OrgID: r.OrgID, ProjectID: r.ProjectID.String, EnvID: r.EnvID.String,
 		RawPayload: r.Payload,
 	}, nil
@@ -411,13 +587,13 @@ func auditEventFromSQLiteInstance(r sqlitegen.AuditInstanceEvent) (AuditEvent, e
 			SourceIP:      r.SourceIp.String, UserAgent: r.UserAgent.String,
 			Origin: audit.Origin(r.Origin),
 		},
-		Seq: r.Seq, RecordedAt: recorded, ScopeClass: "instance", RawPayload: r.Payload,
+		Seq: r.Seq, CommitSeq: r.Seq, RecordedAt: recorded, ScopeClass: "instance", RawPayload: r.Payload,
 	}, nil
 }
 
 func auditEventFromPGTenant(r pggen.AuditTenantEvent) (AuditEvent, error) {
-	if !r.OccurredAt.Valid || !r.RecordedAt.Valid {
-		return AuditEvent{}, fmt.Errorf("store: audit event %s: null timestamp", r.ID)
+	if !r.OccurredAt.Valid || !r.RecordedAt.Valid || !r.CommitSeq.Valid {
+		return AuditEvent{}, fmt.Errorf("store: audit event %s: null timestamp or commit order", r.ID)
 	}
 	return AuditEvent{
 		Event: audit.Event{
@@ -434,15 +610,15 @@ func auditEventFromPGTenant(r pggen.AuditTenantEvent) (AuditEvent, error) {
 			SourceIP:      r.SourceIp.String, UserAgent: r.UserAgent.String,
 			Origin: audit.Origin(r.Origin),
 		},
-		Seq: r.Seq, RecordedAt: r.RecordedAt.Time.UTC(), ScopeClass: r.ScopeClass,
+		Seq: r.Seq, CommitSeq: r.CommitSeq.Int64, RecordedAt: r.RecordedAt.Time.UTC(), ScopeClass: r.ScopeClass,
 		OrgID: r.OrgID, ProjectID: r.ProjectID.String, EnvID: r.EnvID.String,
 		RawPayload: r.Payload,
 	}, nil
 }
 
 func auditEventFromPGInstance(r pggen.AuditInstanceEvent) (AuditEvent, error) {
-	if !r.OccurredAt.Valid || !r.RecordedAt.Valid {
-		return AuditEvent{}, fmt.Errorf("store: audit event %s: null timestamp", r.ID)
+	if !r.OccurredAt.Valid || !r.RecordedAt.Valid || !r.CommitSeq.Valid {
+		return AuditEvent{}, fmt.Errorf("store: audit event %s: null timestamp or commit order", r.ID)
 	}
 	return AuditEvent{
 		Event: audit.Event{
@@ -459,6 +635,6 @@ func auditEventFromPGInstance(r pggen.AuditInstanceEvent) (AuditEvent, error) {
 			SourceIP:      r.SourceIp.String, UserAgent: r.UserAgent.String,
 			Origin: audit.Origin(r.Origin),
 		},
-		Seq: r.Seq, RecordedAt: r.RecordedAt.Time.UTC(), ScopeClass: "instance", RawPayload: r.Payload,
+		Seq: r.Seq, CommitSeq: r.CommitSeq.Int64, RecordedAt: r.RecordedAt.Time.UTC(), ScopeClass: "instance", RawPayload: r.Payload,
 	}, nil
 }

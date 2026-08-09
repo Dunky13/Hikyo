@@ -1,0 +1,53 @@
+# Handoff: #84 gap-free postgres audit export ordering
+
+Issue: https://github.com/Dunky13/wenv/issues/84 (parent #41; required by #25
+before an export route ships).
+
+## Decision
+
+Postgres audit rows retain public `seq` allocation order and gain internal
+`commit_seq` export order. Migration `00010_audit_export_order.sql` installs a
+deferred constraint trigger on each trail. During commit, the trigger takes the
+global audit-appender transaction advisory lock, assigns the next `commit_seq`, and holds
+the lock until commit finishes. Rollbacks may leave sequence-number gaps; they
+cannot reorder visible commits.
+
+This is the audit ADR's single-writer serialization point without a background
+worker, non-default postgres setting, or application clock. One global lock
+also avoids opposite-order deadlocks when one transaction carries events for
+both trails. sqlite keeps using
+`seq`: its single write connection already serializes allocation and commit.
+
+## Runtime shape
+
+- `AuditEvent.Seq` remains the JSONL/public value.
+- `AuditEvent.CommitSeq` is the internal export cursor and is never serialized.
+- Interactive query pages stay allocation-ordered by `seq`.
+- Export pages retain the caller's `AfterSeq` lower bound, then page by
+  `commit_seq` on postgres.
+- Postgres stamps `recorded_at` with `clock_timestamp()` in the INSERT.
+- An unbounded export captures that same server clock before its INTENT event
+  and holds it as a fixed `To`, so pre-cutoff in-flight rows remain eligible
+  while post-cutoff writes cannot create an endless chase.
+- The former 30 s settle ceiling is removed; the fixed snapshot has zero lag
+  and no application-clock skew.
+
+Postgres transaction advisory locks are built in and need no server setting,
+so #84 adds no boot-verification requirement beyond the existing `fsync=on`
+and `synchronous_commit=on` checks.
+
+## Regression proof
+
+`isolation.TestPostgresAuditExportCommitOrder` opens a transaction that
+allocates the lower `seq`, commits a higher `seq`, exports the first one-row
+page, then commits the lower `seq`. The second page must emit that later commit.
+The pre-#84 `seq > cursor` implementation exports one row; the commit-order
+implementation exports both in visible commit order.
+
+## Validation
+
+- Focused real-postgres regression:
+  `go test ./internal/isolation -run '^TestPostgresAuditExportCommitOrder$' -count=1`
+- Audit suite on sqlite + postgres:
+  `go test ./internal/isolation -run '^(TestAuditCoreSQLite|TestAuditCorePostgres|TestPostgresAuditExportCommitOrder)$' -count=1`
+- Full suite: `go test ./...`

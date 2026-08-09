@@ -91,7 +91,7 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func runAuditSuite(t *testing.T, db *store.DB) {
-	audits := &service.Audits{DB: db, SettleHorizon: service.ZeroSettleHorizon}
+	audits := &service.Audits{DB: db}
 	envs := &service.Environments{DB: db}
 	projects := &service.Projects{DB: db}
 	orgsSvc := &service.Orgs{DB: db}
@@ -297,34 +297,6 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 	})
 
-	t.Run("export_ceiling_excludes_unsettled_writes", func(t *testing.T) {
-		// With the production horizon, an export must NOT reach events
-		// written moments ago: those are exactly the ones whose transaction
-		// may still be in flight, and whose seq an earlier page's cursor
-		// could otherwise step past (cross-model R3). Same export, ceiling
-		// disabled, sees them — so this asserts the ceiling, not an empty
-		// trail.
-		lagged := &service.Audits{DB: db, SettleHorizon: time.Hour}
-		var buf bytes.Buffer
-		if err := lagged.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &buf); err != nil {
-			t.Fatal(err)
-		}
-		if n := strings.TrimSpace(buf.String()); n != "" {
-			t.Errorf("export reached events inside the settle horizon:\n%s", n)
-		}
-		var live bytes.Buffer
-		if err := audits.Export(tctx(t), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 10, &live); err != nil {
-			t.Fatal(err)
-		}
-		if strings.TrimSpace(live.String()) == "" {
-			t.Fatal("ceiling-free export is also empty — the assertion above proves nothing")
-		}
-		// The started event records the ceiling it actually applied.
-		if n := countTenant("type = 'audit.export_started' AND payload LIKE '%filter_to%'"); n == 0 {
-			t.Error("export_started does not record the effective ceiling")
-		}
-	})
-
 	t.Run("human_authentication_flow", func(t *testing.T) {
 		// The A1 slice end to end on a real datastore: bootstrap the first
 		// administrator, refuse a bad authority, establish the credential,
@@ -503,6 +475,74 @@ func TestAuditCoreSQLite(t *testing.T) {
 
 func TestAuditCorePostgres(t *testing.T) {
 	runAuditSuite(t, seededDB(t, openPostgres))
+}
+
+// TestPostgresAuditExportCommitOrder is #84's regression: sequence allocation
+// order is not commit order. The lower-seq row stays uncommitted while the
+// higher-seq row crosses the first export page, then commits. A gap-free
+// export must still emit both rows.
+func TestPostgresAuditExportCommitOrder(t *testing.T) {
+	db := seededDB(t, openPostgres)
+	audits := &service.Audits{DB: db}
+
+	insert := `INSERT INTO audit_tenant_events (
+		id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+		actor_id, actor_class, scope_class, org_id, outcome, origin, payload
+	) VALUES ($1, 'settings.project_created', 1, clock_timestamp(), FALSE, clock_timestamp(),
+		'usr_alice', 'human', 'org', 'org_a', 'success', 'cli', '{}')
+	RETURNING seq`
+
+	lowTx, err := db.PG().Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lowTx.Rollback(context.Background()) })
+
+	var lowSeq int64
+	if err := lowTx.QueryRow(t.Context(), insert, "evt_gap_low").Scan(&lowSeq); err != nil {
+		t.Fatal(err)
+	}
+	var highSeq int64
+	if err := db.PG().QueryRow(t.Context(), insert, "evt_gap_high").Scan(&highSeq); err != nil {
+		t.Fatal(err)
+	}
+	if lowSeq >= highSeq {
+		t.Fatalf("fixture seq order = low %d, high %d", lowSeq, highSeq)
+	}
+
+	var commitErr error
+	w := &hookWriter{onFirst: func() {
+		commitErr = lowTx.Commit(t.Context())
+	}}
+	if err := audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 1, w); err != nil {
+		t.Fatal(err)
+	}
+	if commitErr != nil {
+		t.Fatalf("commit lower-seq event after first page: %v", commitErr)
+	}
+
+	lines := strings.Split(strings.TrimSpace(w.buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("exported %d events, want both concurrent commits:\n%s", len(lines), w.buf.String())
+	}
+	var first, second exportLineForTest
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != "evt_gap_high" || first.Seq != highSeq {
+		t.Fatalf("first page = %+v, want committed higher seq %d", first, highSeq)
+	}
+	if second.ID != "evt_gap_low" || second.Seq != lowSeq {
+		t.Fatalf("second page = %+v, want later commit with lower seq %d", second, lowSeq)
+	}
+}
+
+type exportLineForTest struct {
+	Seq int64  `json:"seq"`
+	ID  string `json:"id"`
 }
 
 // TestPostgresDurabilityBootRefusal is the A4 CI leg the unit test cannot

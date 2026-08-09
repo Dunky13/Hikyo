@@ -267,6 +267,22 @@ func (d *DB) SQLiteWrite() *sql.DB { return d.sqWrite }
 func (d *DB) SQLiteRead() *sql.DB  { return d.sqRead }
 func (d *DB) PG() *pgxpool.Pool    { return d.pool }
 
+// AuditExportSnapshotTime returns the authoritative upper time bound for an
+// unbounded audit export. Postgres event inserts use the same server clock, so
+// a transaction that inserted before this cutoff remains in the snapshot even
+// when it commits after paging starts. The fixed bound also keeps live writes
+// from turning an export into an endless chase.
+func (d *DB) AuditExportSnapshotTime(ctx context.Context) (time.Time, error) {
+	if d.engine == EnginePostgres {
+		var now time.Time
+		if err := d.pool.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); err != nil {
+			return time.Time{}, fmt.Errorf("store: postgres audit export snapshot time: %w", err)
+		}
+		return CanonTime(now), nil
+	}
+	return CanonTime(time.Now()), nil
+}
+
 // sqlitePragmas is the boot-enforced connection policy
 // (system-architecture ADR § Data layer). _pragma parameters apply on every
 // new connection.

@@ -28,7 +28,9 @@ mvp-boundary rows A4 and A6.
   - `Row`/`BuildRow`: the single envelope→column mapping, shared by both
     writers so they cannot drift. Fixed-width microsecond UTC text
     timestamps on sqlite (lexicographic order == time order, so range
-    predicates work); timestamptz on postgres.
+    predicates work); timestamptz on postgres. Since #84, postgres
+    `recorded_at` is stamped by `clock_timestamp()` in the INSERT rather
+    than by an application instance.
   - `Context`/`WithContext`/`FromContext`: per-request wire metadata
     (source IP, user agent, origin), sanitized at capture. Absent context =
     `origin: system`, structural absence. **The HTTP/CLI layers (#47/#48)
@@ -39,10 +41,12 @@ mvp-boundary rows A4 and A6.
   KEY AUTOINCREMENT / BIGSERIAL; `id` (UUIDv7 `evt_`) unique. **No foreign
   keys** — the composite-FK rule's single declared exception (amendment
   part 5): an audit event must outlive its subject.
-- Queries (`audit.sql`, both engines): 2 INSERTs + 4 paged SELECTs (org/
+- Queries (`audit.sql`, both engines): 2 INSERTs + paged SELECTs (org/
   project/env refinement + instance) — INSERT and SELECT only, nothing
-  else. Page order is `seq` with a `seq > ?` cursor and `recorded_at`
-  range conjuncts; an export's upper bound is the settle ceiling below.
+  else. Interactive query order remains `seq`; exports use the database-
+  assigned `commit_seq` cursor on postgres and equivalent `seq` order on
+  sqlite. Both retain `recorded_at` range conjuncts and the public `seq`
+  lower bound.
 - `internal/store/repos_audit.go` — proof-gated `AuditRepo`/`AuditReader`
   (insert tenant/instance, page tenant/instance). Tenant chains bound
   exclusively from the verified proof; the page depth follows the proof's
@@ -111,7 +115,7 @@ mvp-boundary rows A4 and A6.
 | 8 | Redaction surfaces + lint bans | `crypto.TestRedactionSurfacesAgainstPlantedSecret`, `lint.TestRedaction*`, `lint.TestSensitiveFormatting*`, `isolation.TestInvariantAuditRedaction` |
 | 9 | Retention units (envelope+per-key atomic) | vacuous — no fetch envelopes exist; arrives with the fetch path |
 | 10 | Class totality | `audit.TestRegistryWellFormed` |
-| 11 | Export pair + paging + revocation stop + settle ceiling | `isolation.TestAuditCore*/export_*` (both engines), incl. `export_ceiling_excludes_unsettled_writes` (asserts both directions: the ceiling hides recent events, the ceiling-free export sees them) |
+| 11 | Export pair + paging + revocation stop + gap-free postgres commit order | `isolation.TestAuditCore*/export_*` (both engines), plus `isolation.TestPostgresAuditExportCommitOrder` (lower `seq` commits after first page and is emitted on the next) |
 | 12 | Outcome restriction, no payload shadow | `audit.TestRegistryWellFormed`, `TestRegistryNoOutcomeShadow`, `TestValidateRefusals` |
 | 13 | FK exception named, not counted | `isolation.TestInvariantAuditFKException` |
 
@@ -182,36 +186,28 @@ secret, free-text filter fixtures.
 
 ## Accepted residuals, stated
 
-- **Export ordering is not gap-free on postgres.** `seq` is allocated
-  BEFORE commit, so a row can become visible with a `seq` below a cursor an
-  earlier page already passed, omitting it from that export. Four in-band
-  fixes were attempted and all failed cross-model review, each for the same
-  structural reason: an in-flight row is invisible to the very query that
-  would have to bound it, and no clock the application controls is
-  authoritative.
-  - `txid < snapshot-xmin` predicate — defers rows committed above a
-    long-running transaction (R2).
-  - `MIN(seq)` settled bound — cannot see an uncommitted lower-seq row (R3).
-  - 60s/30s time ceiling — `recorded_at` is stamped by the writing app
-    instance while the ceiling uses the exporter's clock, so a slow writer
-    reopens the window; and the 15 s transaction deadline is client-side,
-    which does not prove postgres settled a `COMMIT` whose cancel raced
-    (scoped verify pass).
+- **Postgres export-order residual resolved by #84.** Migration `00010`
+  adds database-owned `commit_seq` metadata. A deferred per-row trigger
+  takes the global audit-appender transaction advisory lock and assigns
+  `commit_seq` immediately before commit; the lock remains held through commit. Export
+  pages advance this commit-order cursor while the emitted/public `seq`
+  remains unchanged. A lower `seq` that commits after an earlier page is
+  therefore later in export order and cannot fall behind the cursor.
+  Existing rows are backfilled in their already-settled `seq` order.
 
-  The **30 s settle ceiling is retained as harm reduction, not as a
-  guarantee**: it removes the common case (an export written seconds after
-  the events it covers) while the residual survives only under clock skew
-  beyond the horizon or a transaction outliving its deadline. sqlite is
-  unaffected — its single write connection makes allocation order commit
-  order.
+  An export without a caller-supplied `To` captures `clock_timestamp()`
+  before writing `audit.export_started` and holds that fixed upper bound for
+  every page. A transaction that inserted before the cutoff remains eligible
+  when it commits later; writes inserted after the cutoff cannot turn the
+  export into an endless chase or make it export its own audit records.
 
-  The real fix needs a **serialization point**, which this ADR explicitly
-  defers: § *Storage* states a future hash-chain extension "must introduce
-  its own serialization point (a single-writer chain appender or
-  equivalent)", and v1 ships none. **Disposition (human, after the review
-  cap): documented here and routed to [#84](https://github.com/Dunky13/wenv/issues/84), which #25 MUST
-  satisfy before an export route ships** — no export surface exists today,
-  so no user-visible path is affected by this slice.
+  This is the serialization point anticipated by the ADR's future
+  single-writer appender. It uses built-in transaction advisory locks and
+  requires no non-default postgres server setting, so no new boot prerequisite
+  exists. The 30 s application-clock settle ceiling and its clock-skew
+  residual were replaced by the zero-lag server-clock snapshot. sqlite is
+  unchanged: its single write connection already makes allocation order
+  commit order.
 
 - **Denial-path timing.** A resolvable denial evaluates grants and writes to
   the tenant trail; an unresolvable one skips the grant lookup and writes to
