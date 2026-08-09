@@ -27,6 +27,9 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
@@ -79,6 +82,15 @@ jobs:
         run: |
           go test ./...
           ./scripts/release/test-fixtures.sh
+
+      - name: Assert O4-O6 docs and governance release gates
+        run: |
+          ./scripts/ci/verify-docs.sh
+          ./scripts/ci/check-fallback-channel-test.sh \
+            release/repository/fallback-channel-test.json \
+            security@developwent.io
+          ./scripts/ci/check-docs-live.sh \
+            https://dunky13.github.io/wenv security@developwent.io
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:

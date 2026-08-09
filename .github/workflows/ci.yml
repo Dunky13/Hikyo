@@ -136,6 +136,18 @@ jobs:
         working-directory: clients/ts
         run: pnpm run test
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Typecheck, build, and assert O4-O6 policy content
+        run: ./scripts/ci/verify-docs.sh
+
   test:
     runs-on: ubuntu-latest
     services:
