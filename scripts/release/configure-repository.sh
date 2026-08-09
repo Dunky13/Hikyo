@@ -52,6 +52,20 @@ printf '%s\n' "$immutability" | jq -e '
 	([.rules[] | select(.type == "deletion")] | length) == 1 and
 	.conditions.ref_name.include == ["refs/tags/v*"]
 ' >/dev/null
+creation_id=$(printf '%s\n' "$rulesets" | jq -r '.[] | select(.name == "release tags require admin role") | .id')
+creation=$($GH_BIN api "repos/$repository/rulesets/$creation_id")
+# GitHub expresses "only repository admins may create this ref" as an admin-role
+# bypass on a creation-block rule. Update/deletion remain in the separate
+# zero-bypass immutability ruleset asserted above.
+printf '%s\n' "$creation" | jq -e '
+	.bypass_actors == [{
+		actor_id: 5,
+		actor_type: "RepositoryRole",
+		bypass_mode: "always"
+	}] and
+	([.rules[] | select(.type == "creation")] | length) == 1 and
+	.conditions.ref_name.include == ["refs/tags/v*"]
+' >/dev/null
 $GH_BIN api "repos/$repository/immutable-releases" --jq '.enabled' | grep -x true >/dev/null
 $GH_BIN api "repos/$repository/actions/permissions" --jq '.sha_pinning_required' | grep -x true >/dev/null
 

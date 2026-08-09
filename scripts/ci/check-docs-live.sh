@@ -73,6 +73,19 @@ require_response_text "$security_page" 'The default embargo is 90 days from the 
 support_page=$(fetch "$docs_origin/support/")
 require_response_text "$support_page" 'Wenv supports exactly one version'
 
+governance_page=$(fetch "$docs_origin/governance/")
+require_response_text "$governance_page" 'may be amended only by reopening its originating ticket'
+require_response_text "$governance_page" 'Twelve consecutive months without maintainer response'
+
+trademark_page=$(fetch "$docs_origin/trademark/")
+require_response_text "$trademark_page" 'Permission is required to offer a hosted or packaged service'
+
+contributing_page=$(fetch "$docs_origin/contributing/")
+require_response_text "$contributing_page" 'Developer Certificate of Origin'
+
+license_page=$(fetch "$docs_origin/license/")
+require_response_text "$license_page" 'Mozilla Public License Version 2.0'
+
 mx_response=$("$CURL_BIN" --fail --location --silent --show-error \
 	--proto '=https' --tlsv1.2 --max-time 20 \
 	--header 'Accept: application/dns-json' \
@@ -84,4 +97,4 @@ printf '%s\n' "$mx_response" | "$JQ_BIN" -e \
 	exit 1
 }
 
-printf 'live docs gate: security.txt, policy pages, and fallback MX route passed\n'
+printf 'live docs gate: security.txt, all policy pages, and fallback MX route passed\n'

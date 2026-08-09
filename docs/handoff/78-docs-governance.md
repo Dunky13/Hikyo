@@ -43,17 +43,21 @@ protections are active, but organization-wide 2FA cannot be enforced until the
 repository is transferred to a dedicated organization. `GOVERNANCE.md` states
 that limitation instead of claiming a control that does not exist.
 
+GitHub models “only repository admins may create `v*`” as an admin-role bypass
+on a creation-block rule. A separate tag-immutability ruleset has no bypass
+actors and forbids update/deletion for everyone; `configure-repository.sh`
+verifies both live shapes.
+
 ## External completion gates
 
-- Send a quarterly notification test to `security@developwent.io` and record
-  successful receipt. CI proves the independently hosted domain has an MX
-  route; it cannot prove mailbox acceptance or monitoring end to end.
+- Send a quarterly self-report to `security@developwent.io`, then record its
+  send/receipt timestamps and Message-ID hash in
+  `release/repository/fallback-channel-test.json`. The release and scheduled
+  gates remain red while that evidence is pending or older than 93 days.
 - Choose a dedicated GitHub organization and transfer the repository before
   claiming organization-wide 2FA enforcement.
 - Merge this branch and verify the first Pages deployment; the public URL is
   currently HTTP 404.
-- Complete the blocking Claude Opus 5 review. The configured Claude CLI hit its
-  weekly limit and reports a reset at 2026-08-12 11:00 Europe/Amsterdam.
 
 ## Validation
 

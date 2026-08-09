@@ -8,6 +8,7 @@ fi
 
 repo_root=$1
 site_root=$2
+NODE_BIN=${NODE_BIN:-node}
 
 require_file() {
 	[ -f "$1" ] || {
@@ -47,6 +48,8 @@ license_sha=$(sha256sum "$repo_root/LICENSE" | awk '{print $1}')
 	printf 'OSS policy gate: LICENSE is not the exact MPL-2.0 text\n' >&2
 	exit 1
 }
+require_text "$repo_root/LICENSE" 'Mozilla Public License Version 2.0'
+require_text "$repo_root/LICENSE" 'Exhibit B - "Incompatible With Secondary Licenses" Notice'
 
 pledge='Every capability required to run Wenv in production is and will remain open'
 require_text "$repo_root/README.md" "$pledge"
@@ -81,8 +84,20 @@ security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
 require_text "$security_txt" 'Contact: https://github.com/Dunky13/wenv/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
-require_text "$security_txt" 'Expires: 2027-08-09T00:00:00Z'
+require_text "$security_txt" 'Expires:'
 require_text "$security_txt" 'Canonical: https://dunky13.github.io/wenv/.well-known/security.txt'
+source_expires=$(awk -F ': ' '$1 == "Expires" {print $2}' "$security_txt")
+"$NODE_BIN" -e '
+const expiry = Date.parse(process.argv[1]);
+if (!Number.isFinite(expiry) || expiry <= Date.now()) process.exit(1);
+' "$source_expires" || {
+	printf 'OSS policy gate: source security.txt expiry is invalid or elapsed\n' >&2
+	exit 1
+}
+
+fallback_evidence="$repo_root/release/repository/fallback-channel-test.json"
+require_file "$fallback_evidence"
+require_text "$fallback_evidence" '"address": "security@developwent.io"'
 
 require_text "$repo_root/SUPPORT.md" 'Wenv supports exactly one version: the latest patch release of the latest minor'
 require_text "$repo_root/SUPPORT.md" 'end-of-life on the same day a new minor is released'

@@ -15,6 +15,8 @@ for path in README.md GOVERNANCE.md TRADEMARK.md CONTRIBUTING.md LICENSE; do
 done
 cp "$repo_root/release/repository/main-ci-gate.json" \
 	"$fixture_dir/release/repository/main-ci-gate.json"
+cp "$repo_root/release/repository/fallback-channel-test.json" \
+	"$fixture_dir/release/repository/fallback-channel-test.json"
 
 if "$repo_root/scripts/ci/check-oss-policy.sh" "$fixture_dir" "$fixture_dir/site" >/dev/null 2>&1; then
 	printf 'OSS policy fixture failed: missing SECURITY.md was accepted\n' >&2
@@ -35,5 +37,19 @@ cp "$repo_root/SUPPORT.md" "$fixture_dir/SUPPORT.md"
 
 if "$repo_root/scripts/ci/check-oss-policy.sh" "$fixture_dir" "$fixture_dir/site" >/dev/null 2>&1; then
 	printf 'OSS policy fixture failed: unserved O4-O6 policy pages were accepted\n' >&2
+	exit 1
+fi
+
+cp -R "$repo_root/docs/site/dist/." "$fixture_dir/site/"
+sed 's/^Expires:.*/Expires: 2000-08-09T00:00:00Z/' \
+	"$fixture_dir/docs/site/public/.well-known/security.txt" \
+	>"$fixture_dir/security-expired.txt"
+mv "$fixture_dir/security-expired.txt" \
+	"$fixture_dir/docs/site/public/.well-known/security.txt"
+cp "$fixture_dir/docs/site/public/.well-known/security.txt" \
+	"$fixture_dir/site/.well-known/security.txt"
+
+if "$repo_root/scripts/ci/check-oss-policy.sh" "$fixture_dir" "$fixture_dir/site" >/dev/null 2>&1; then
+	printf 'OSS policy fixture failed: elapsed source security.txt expiry was accepted\n' >&2
 	exit 1
 fi
