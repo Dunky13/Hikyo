@@ -18,10 +18,34 @@ also avoids opposite-order deadlocks when one transaction carries events for
 both trails. sqlite keeps using
 `seq`: its single write connection already serializes allocation and commit.
 
+## Candidate evaluation
+
+1. **Server `recorded_at` + oldest active transaction:** server time is adopted
+   for the fixed export cutoff, but `pg_stat_activity.xact_start` is too broad
+   (transactions that never touch audit delay every export) and visibility is
+   role/configuration-sensitive. It still needs a reliable way to identify the
+   audit-writing subset.
+2. **`track_commit_timestamp`:** directly exposes commit time, but requires a
+   non-default restart-time server setting, boot refusal, and timestamp-retention
+   operations. Timestamps can collide, so `seq` remains a tie-breaker. This is
+   heavier operational coupling than #84 needs.
+3. **Commit-order appender + in-flight barrier (chosen):** uses built-in advisory
+   locks only. Writers share an in-flight gate from INSERT through commit; the
+   deferred appender serializes `commit_seq` assignment; the exporter takes the
+   exclusive gate before its final reread. Cost: one shared lock per audit-
+   writing transaction and a brief serialized commit-finalization step. Benefit:
+   exact ordering, no server prerequisite, and the serialization point a future
+   hash chain already needs.
+
 ## Runtime shape
 
 - `AuditEvent.Seq` remains the JSONL/public value.
 - `AuditEvent.CommitSeq` is the internal export cursor and is never serialized.
+- Postgres `commit_seq` is NULL only inside its inserting transaction because
+  postgres cannot defer a NOT NULL/CHECK constraint. The deferred constraint
+  trigger is the commit-time non-null invariant: it rejects caller-supplied
+  positions, assigns the database position, and aborts if finalization misses
+  the row. Read conversion also fails loud on any committed NULL.
 - Interactive query pages stay allocation-ordered by `seq`.
 - Export pages retain the caller's `AfterSeq` lower bound, then page by
   `commit_seq` on postgres.
@@ -29,6 +53,9 @@ both trails. sqlite keeps using
 - An unbounded export captures that same server clock before its INTENT event
   and holds it as a fixed `To`, so pre-cutoff in-flight rows remain eligible
   while post-cutoff writes cannot create an endless chase.
+- Audit INSERTs hold a shared in-flight lock. Before a short page can terminate
+  the export, the exporter waits on the exclusive side and rereads, so a row
+  cannot commit between the final page and `export_completed` unnoticed.
 - The former 30 s settle ceiling is removed; the fixed snapshot has zero lag
   and no application-clock skew.
 

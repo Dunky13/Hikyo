@@ -510,15 +510,43 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 		t.Fatalf("fixture seq order = low %d, high %d", lowSeq, highSeq)
 	}
 
-	var commitErr error
-	w := &hookWriter{onFirst: func() {
-		commitErr = lowTx.Commit(t.Context())
-	}}
-	if err := audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 1, w); err != nil {
-		t.Fatal(err)
+	firstPage := make(chan struct{})
+	w := &hookWriter{onFirst: func() { close(firstPage) }}
+	exportDone := make(chan error, 1)
+	go func() {
+		exportDone <- audits.Export(t.Context(), alice, domain.Scope{Org: orgA}, store.AuditFilter{}, 2, w)
+	}()
+
+	select {
+	case <-firstPage:
+	case err := <-exportDone:
+		t.Fatalf("export ended before first page crossed the higher seq: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("export did not emit its first page")
 	}
-	if commitErr != nil {
-		t.Fatalf("commit lower-seq event after first page: %v", commitErr)
+
+	deadline := time.After(5 * time.Second)
+	for queryInt(t, db, `SELECT COUNT(*) FROM pg_locks
+		WHERE locktype = 'advisory' AND classid = 1464159830 AND objid = 85 AND NOT granted`) == 0 {
+		select {
+		case err := <-exportDone:
+			t.Fatalf("export ended before waiting for the in-flight lower seq: %v", err)
+		case <-deadline:
+			t.Fatal("export did not wait at the in-flight audit barrier")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if err := lowTx.Commit(t.Context()); err != nil {
+		t.Fatalf("commit lower-seq event after first page: %v", err)
+	}
+	select {
+	case err := <-exportDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("export did not finish after the in-flight event committed")
 	}
 
 	lines := strings.Split(strings.TrimSpace(w.buf.String()), "\n")
@@ -537,6 +565,17 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 	}
 	if second.ID != "evt_gap_low" || second.Seq != lowSeq {
 		t.Fatalf("second page = %+v, want later commit with lower seq %d", second, lowSeq)
+	}
+	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE commit_seq IS NULL"); n != 0 {
+		t.Fatalf("committed tenant audit rows without commit order = %d", n)
+	}
+	_, err = db.PG().Exec(t.Context(), `INSERT INTO audit_tenant_events (
+		id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
+		actor_id, actor_class, scope_class, org_id, outcome, origin, payload, commit_seq
+	) VALUES ('evt_gap_forged', 'settings.project_created', 1, clock_timestamp(), FALSE, clock_timestamp(),
+		'usr_alice', 'human', 'org', 'org_a', 'success', 'cli', '{}', 999999)`)
+	if err == nil || !strings.Contains(err.Error(), "commit_seq is database-owned") {
+		t.Fatalf("caller-supplied commit order refusal = %v", err)
 	}
 }
 

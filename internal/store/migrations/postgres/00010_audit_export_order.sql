@@ -19,6 +19,8 @@ ALTER TABLE audit_instance_events ADD COLUMN commit_seq BIGINT;
 
 CREATE SEQUENCE audit_tenant_commit_seq AS BIGINT;
 CREATE SEQUENCE audit_instance_commit_seq AS BIGINT;
+ALTER SEQUENCE audit_tenant_commit_seq OWNED BY audit_tenant_events.commit_seq;
+ALTER SEQUENCE audit_instance_commit_seq OWNED BY audit_instance_events.commit_seq;
 
 -- Rows committed before this migration have no concurrency ambiguity left;
 -- preserve their existing order, then continue above the largest position.
@@ -41,28 +43,65 @@ ALTER TABLE audit_tenant_events
 ALTER TABLE audit_instance_events
     ADD CONSTRAINT audit_instance_events_commit_seq_unique UNIQUE (commit_seq);
 
+-- Every transaction that has inserted an audit row holds this shared gate
+-- until commit. An export takes the exclusive side before its final reread,
+-- waiting for every pre-snapshot audit writer without blocking writers from
+-- running concurrently with each other.
 -- +goose StatementBegin
-CREATE FUNCTION assign_audit_tenant_commit_seq() RETURNS TRIGGER
+CREATE OR REPLACE FUNCTION mark_audit_write_in_flight() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
+    PERFORM pg_advisory_xact_lock_shared(1464159830, 85);
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE TRIGGER audit_tenant_mark_write_in_flight
+BEFORE INSERT ON audit_tenant_events
+FOR EACH ROW EXECUTE FUNCTION mark_audit_write_in_flight();
+
+CREATE TRIGGER audit_instance_mark_write_in_flight
+BEFORE INSERT ON audit_instance_events
+FOR EACH ROW EXECUTE FUNCTION mark_audit_write_in_flight();
+
+-- commit_seq is intentionally NULL only inside the inserting transaction:
+-- postgres cannot defer NOT NULL/CHECK constraints, so this constraint trigger
+-- is the database-enforced commit-time non-null invariant.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION assign_audit_tenant_commit_seq() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.commit_seq IS NOT NULL THEN
+        RAISE EXCEPTION 'audit_tenant_events.commit_seq is database-owned';
+    END IF;
     -- 0x57454E56 = "WENV"; 84 names this appender's issue/lock class.
     PERFORM pg_advisory_xact_lock(1464159830, 84);
     UPDATE audit_tenant_events
     SET commit_seq = nextval('audit_tenant_commit_seq')
     WHERE seq = NEW.seq AND commit_seq IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'audit_tenant_events % has no commit-order position', NEW.seq;
+    END IF;
     RETURN NULL;
 END;
 $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE FUNCTION assign_audit_instance_commit_seq() RETURNS TRIGGER
+CREATE OR REPLACE FUNCTION assign_audit_instance_commit_seq() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF NEW.commit_seq IS NOT NULL THEN
+        RAISE EXCEPTION 'audit_instance_events.commit_seq is database-owned';
+    END IF;
     PERFORM pg_advisory_xact_lock(1464159830, 84);
     UPDATE audit_instance_events
     SET commit_seq = nextval('audit_instance_commit_seq')
     WHERE seq = NEW.seq AND commit_seq IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'audit_instance_events % has no commit-order position', NEW.seq;
+    END IF;
     RETURN NULL;
 END;
 $$;

@@ -273,14 +273,37 @@ func (d *DB) PG() *pgxpool.Pool    { return d.pool }
 // when it commits after paging starts. The fixed bound also keeps live writes
 // from turning an export into an endless chase.
 func (d *DB) AuditExportSnapshotTime(ctx context.Context) (time.Time, error) {
-	if d.engine == EnginePostgres {
+	switch d.engine {
+	case EnginePostgres:
 		var now time.Time
 		if err := d.pool.QueryRow(ctx, "SELECT clock_timestamp()").Scan(&now); err != nil {
 			return time.Time{}, fmt.Errorf("store: postgres audit export snapshot time: %w", err)
 		}
 		return CanonTime(now), nil
+	case EngineSQLite:
+		return CanonTime(time.Now()), nil
+	default:
+		return time.Time{}, fmt.Errorf("store: audit export snapshot time for unknown engine %q", d.engine)
 	}
-	return CanonTime(time.Now()), nil
+}
+
+// AwaitAuditExportWriters is the final-page barrier for a fixed audit
+// snapshot. Postgres writers acquire the shared side of this lock before
+// INSERT; taking the exclusive side waits until every pre-cutoff writer has
+// committed. The autocommit statement releases the transaction lock after it
+// establishes that barrier. sqlite's single writer needs no extra barrier.
+func (d *DB) AwaitAuditExportWriters(ctx context.Context) error {
+	switch d.engine {
+	case EnginePostgres:
+		if _, err := d.pool.Exec(ctx, "SELECT pg_advisory_xact_lock(1464159830, 85)"); err != nil {
+			return fmt.Errorf("store: postgres audit export writer barrier: %w", err)
+		}
+		return nil
+	case EngineSQLite:
+		return nil
+	default:
+		return fmt.Errorf("store: audit export writer barrier for unknown engine %q", d.engine)
+	}
 }
 
 // sqlitePragmas is the boot-enforced connection policy

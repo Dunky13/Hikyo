@@ -231,12 +231,12 @@ func (s *Audits) export(
 	insert func(context.Context, store.Repos, authz.Proof, audit.Event) error,
 	page func(context.Context, store.ReadRepos, authz.Proof, store.AuditFilter) ([]store.AuditEvent, error),
 ) error {
-	if f.To.IsZero() {
-		var err error
-		f.To, err = s.DB.AuditExportSnapshotTime(ctx)
-		if err != nil {
-			return err
-		}
+	snapshotTime, err := s.DB.AuditExportSnapshotTime(ctx)
+	if err != nil {
+		return err
+	}
+	if f.To.IsZero() || f.To.After(snapshotTime) {
+		f.To = snapshotTime
 	}
 	started, err := newAuditEvent(ctx, audit.EventAuditExportStarted, principal, audit.Object{}, audit.OutcomeIntent, "", f.Normalized())
 	if err != nil {
@@ -283,7 +283,8 @@ func (s *Audits) export(
 	}
 
 	streamed := 0
-	commitCursor := int64(0)
+	commitCursor := store.AuditCommitSeq(0)
+	writersSettled := false
 	for {
 		// Each page: its own transaction, its own freshly minted proof —
 		// #15's re-authorize-before-every-sensitive-step and #23's
@@ -291,7 +292,7 @@ func (s *Audits) export(
 		var rows []store.AuditEvent
 		pf := f
 		pf.Limit = pageSize
-		pf.CommitOrder = true
+		pf.Order = store.AuditPageByCommit
 		pf.AfterCommitSeq = commitCursor
 		err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
 			p, err := az.Authorize(ctx, authz.Identity{Principal: principal}, op, scope)
@@ -329,6 +330,16 @@ func (s *Audits) export(
 			commitCursor = e.CommitSeq
 		}
 		if len(rows) < pageSize {
+			if !writersSettled {
+				if err := s.DB.AwaitAuditExportWriters(ctx); err != nil {
+					if cerr := completed(audit.OutcomeFailure, "writer-barrier-failed", streamed); cerr != nil {
+						return fmt.Errorf("service: export writer barrier failed and its terminal event failed too: %w", fmt.Errorf("%w; %w", cerr, err))
+					}
+					return err
+				}
+				writersSettled = true
+				continue
+			}
 			return completed(audit.OutcomeSuccess, "", streamed)
 		}
 	}

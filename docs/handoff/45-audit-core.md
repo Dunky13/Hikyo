@@ -198,8 +198,11 @@ secret, free-text filter fixtures.
   An export without a caller-supplied `To` captures `clock_timestamp()`
   before writing `audit.export_started` and holds that fixed upper bound for
   every page. A transaction that inserted before the cutoff remains eligible
-  when it commits later; writes inserted after the cutoff cannot turn the
-  export into an endless chase or make it export its own audit records.
+  when it commits later. Audit INSERTs hold a shared in-flight advisory lock;
+  before accepting a final short page, the exporter queues the exclusive side,
+  waits for every pre-cutoff writer, then rereads. Writes inserted after the
+  cutoff cannot turn the export into an endless chase or make it export its own
+  audit records.
 
   This is the serialization point anticipated by the ADR's future
   single-writer appender. It uses built-in transaction advisory locks and

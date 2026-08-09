@@ -178,16 +178,6 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 			t.Fatal(err)
 		}
 	}
-	for _, object := range []string{
-		"DROP FUNCTION IF EXISTS assign_audit_tenant_commit_seq()",
-		"DROP FUNCTION IF EXISTS assign_audit_instance_commit_seq()",
-		"DROP SEQUENCE IF EXISTS audit_tenant_commit_seq",
-		"DROP SEQUENCE IF EXISTS audit_instance_commit_seq",
-	} {
-		if _, err := db.PG().Exec(t.Context(), object); err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 // --- scenarios (driven through the service layer, so tx and store are both
