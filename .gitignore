@@ -37,6 +37,7 @@ wenv-dev.db*
 
 # Cross-model review artifacts
 .xreview/
+.playwright-cli/
 
 # Release build output
 /dist/

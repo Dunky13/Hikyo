@@ -1,0 +1,9 @@
+{
+  "schema": "wenv.dev/fallback-channel-test/v1",
+  "address": "security@developwent.io",
+  "status": "pending",
+  "sent_at": null,
+  "received_at": null,
+  "message_id_sha256": null,
+  "note": "Set passed only after a self-report sent from outside the fallback system is received and its Message-ID is hashed."
+}
