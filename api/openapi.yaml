@@ -2315,7 +2315,7 @@ components:
     hikyoSession:
       type: http
       scheme: bearer
-      bearerFormat: ew_1_cli_...
+      bearerFormat: hik_1_cli_...
       description: |
         A CLI session artifact minted by an identity-protocol endpoint. The
         server trusts nothing inside the value: kind, principal, expiry and

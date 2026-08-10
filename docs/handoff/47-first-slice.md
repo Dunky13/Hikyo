@@ -92,7 +92,7 @@ transaction exists is the cross-request cache the permission model forbids.
   lives there) with the `m=64MiB, t=3, p=2` **boot floor**. Raising is allowed;
   lowering refuses to start. `VerifyPassword` deliberately does *not* enforce
   the floor, or raising it would lock out every existing account.
-- Bearer artifacts adopt the locked `ew_` grammar with the type list's
+- Bearer artifacts adopt the locked `hik_` grammar with the type list's
   existing `cli` and `bs` entries, so the audit package's redaction filter
   covers them for free and no second unfiltered grammar exists.
 - `internal/admission`: derived concurrency
@@ -151,7 +151,7 @@ members keep absent / null / value distinct.
 ## Verified empirically (real binary, sqlite)
 
 - `admin create` without a root key: refuses, names the fix.
-- `admin create --output-file`: 0600 file holding `ew_1_bs_…` and nothing else.
+- `admin create --output-file`: 0600 file holding `hik_1_bs_…` and nothing else.
 - A second `admin create`: refused — first administrator only.
 - `/api/v1/meta`: exactly the three allowlisted members.
 - Absent vs garbage bearer: byte-identical 401 bodies.

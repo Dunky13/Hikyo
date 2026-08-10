@@ -17,20 +17,23 @@ Branch: `t3code/rebrand-wenv-to-hikyo`
 ## Intentionally unchanged
 
 - Existing checkout and worktree directory names stay in place.
-- Local Git remote configuration stays in place; it is not tracked source.
-- The locked `ew_` bearer-token grammar and `wenv/change-token/v1` HKDF label
-  remain unchanged for verifier, secret-scanner, and derived-key compatibility.
+- The `wenv/change-token/v1` HKDF label remains unchanged for derived-key
+  compatibility; it is immutable cryptographic protocol data, not branding.
 
 ## External cutover
 
-Rename the GitHub repository and Pages deployment to `hikyo` before publishing
-the first rebranded release. Tracked links and release coordinates already
-target `Dunky13/hikyo`, `dunky13.github.io/hikyo`, and
-`ghcr.io/dunky13/hikyo`.
+The GitHub repository is `Dunky13/hikyo`; existing checkouts must update their
+`origin` URL. Move the Pages deployment to `dunky13.github.io/hikyo` before the
+first rebranded release. Tracked links and release coordinates already target
+the renamed repository, Pages path, and `ghcr.io/dunky13/hikyo`.
 
 ## Compatibility
 
 This is a pre-1.0 identity cutover. Operators must rename `WENV_*` environment
 variables to `HIKYO_*` and move client state to the new `hikyo` state directory
 before starting the rebranded binary. Repository-local `.wenv.json` project pins
-must be renamed to `.hikyo.json` at the same time.
+must be renamed to `.hikyo.json` at the same time. Bearer artifacts now use the
+`hik_` prefix; every existing `ew_` session, token, recovery code, session-bound
+CSRF token, OIDC state, and OIDC browser-binding cookie is rejected and must be
+reissued after the cutover. Invalid legacy artifacts remain confidential and are
+still removed by audit redaction.

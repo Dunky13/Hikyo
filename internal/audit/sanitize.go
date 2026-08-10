@@ -21,13 +21,14 @@ const FreeTextBound = 512
 // RedactionMarker replaces any substring matching the hikyo token grammar.
 const RedactionMarker = "[REDACTED:hikyo-token]"
 
-// tokenGrammarRe matches the machine-identity ADR's bearer-token grammar
-// `ew_<version>_<type>_<body><checksum>` — deliberately tolerant on the
-// version and type fields (any future closed-list widening still redacts)
-// and requiring enough base62 body that ordinary prose cannot trip it. The
-// scannability of the grammar is a designed-in property; this filter is its
-// consumer.
-var tokenGrammarRe = regexp.MustCompile(`ew_[0-9A-Za-z]{1,8}_[a-z]{2,8}_[0-9A-Za-z]{16,}`)
+// tokenGrammarRe matches the active `hik_` bearer-token grammar and the legacy
+// `ew_` grammar. Legacy artifacts are rejected by the parser, but remain secret
+// material that must never be copied into a durable audit trail. The matcher is
+// deliberately tolerant on version and type fields (future closed-list widening
+// still redacts) and requires enough base62 body that ordinary prose cannot trip
+// it. The scannability of the grammar is a designed-in property; this filter is
+// its consumer.
+var tokenGrammarRe = regexp.MustCompile(`(?:hik|ew)_[0-9A-Za-z]{1,8}_[a-z]{2,8}_[0-9A-Za-z]{16,}`)
 
 // RedactTokens replaces every token-grammar match in s with the redaction
 // marker. What this cannot catch is stated in the ADR: an arbitrary secret

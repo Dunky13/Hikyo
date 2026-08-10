@@ -13,12 +13,12 @@ import (
 // Bearer artifacts (machine-identity ADR § The bearer token, adopted for
 // human artifacts too).
 //
-//	ew_<version>_<type>_<body><checksum>
+//	hik_<version>_<type>_<body><checksum>
 //
 // The type list that ADR fixes already names the human artifacts this slice
 // mints — `cli` for a CLI session and `bs` for a bootstrap authority — so
 // there is one grammar, one scanner rule, and the audit package's existing
-// `ew_` redaction filter covers these values for free. Minting a second,
+// `hik_` redaction filter covers these values for free. Minting a second,
 // unfiltered grammar for human artifacts would have been strictly worse.
 //
 // Normative, restated because it is the part that is easy to lose: the
@@ -87,7 +87,7 @@ func NewArtifact(t ArtifactType) (value string, verifier []byte, err error) {
 	}
 	body := base62(raw)
 	Zero(raw)
-	value = "ew_" + artifactFormatVersion + "_" + string(t) + "_" + body + checksum(body)
+	value = "hik_" + artifactFormatVersion + "_" + string(t) + "_" + body + checksum(body)
 	return value, ArtifactVerifier(value), nil
 }
 
@@ -119,7 +119,7 @@ func ArtifactVerifier(value string) []byte {
 // inside it.
 func ParseArtifact(value string, want ArtifactType) error {
 	parts := strings.Split(value, "_")
-	if len(parts) != 4 || parts[0] != "ew" {
+	if len(parts) != 4 || parts[0] != "hik" {
 		return ErrMalformedArtifact
 	}
 	if parts[1] != artifactFormatVersion || parts[2] != string(want) {

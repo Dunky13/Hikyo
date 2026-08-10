@@ -270,22 +270,29 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// attacker-influencable field a denial records (user agent, claimed
 		// identifiers), then grep the trails — the marker must be there and
 		// the token must not.
-		token := "ew_1_wl_" + strings.Repeat("Ab3", 15)
-		wired := audit.WithContext(tctx(t), audit.Context{
-			UserAgent: "probe/1.0 " + token,
-			SourceIP:  "203.0.113.7",
-			Origin:    audit.OriginAPI,
-		})
-		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("resolvable probe = %v", err)
+		tokens := []string{
+			"hik_1_wl_" + strings.Repeat("Ab3", 15),
+			"ew_1_wl_" + strings.Repeat("Cd4", 15),
 		}
-		if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("unresolvable probe = %v", err)
+		for _, token := range tokens {
+			wired := audit.WithContext(tctx(t), audit.Context{
+				UserAgent: "probe/1.0 " + token,
+				SourceIP:  "203.0.113.7",
+				Origin:    audit.OriginAPI,
+			})
+			if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: orgA, Project: prjA1, Env: envA1}); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("resolvable probe = %v", err)
+			}
+			if _, err := envs.Get(wired, service.LocalPrincipal(bob), domain.Scope{Org: domain.OrgID("org_" + token), Project: "prj_x", Env: "env_x"}); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("unresolvable probe = %v", err)
+			}
 		}
 		for _, table := range []string{"audit_tenant_events", "audit_instance_events"} {
 			for _, col := range []string{"user_agent", "payload", "source_ip", "object_id", "correlation_id"} {
-				if n := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE "+col+" LIKE '%"+token+"%'"); n != 0 {
-					t.Errorf("%s.%s holds raw token material (%d rows)", table, col, n)
+				for _, token := range tokens {
+					if n := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE "+col+" LIKE '%"+token+"%'"); n != 0 {
+						t.Errorf("%s.%s holds raw token material (%d rows)", table, col, n)
+					}
 				}
 			}
 			if n := queryInt(t, db, "SELECT COUNT(*) FROM "+table+" WHERE user_agent LIKE '%"+audit.RedactionMarker+"%'"); n == 0 {

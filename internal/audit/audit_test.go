@@ -8,11 +8,11 @@ import (
 	"github.com/Dunky13/hikyo/internal/domain"
 )
 
-// --- token-grammar redaction (CI invariant 4: round-trip over the ew_
+// --- token-grammar redaction (CI invariant 4: round-trip over the hik_
 // grammar including embedded-in-noise cases) ---
 
 func TestRedactTokens(t *testing.T) {
-	token := "ew_1_wl_" + strings.Repeat("Ab3", 15) + "x9"
+	token := "hik_1_wl_" + strings.Repeat("Ab3", 15) + "x9"
 	cases := []struct {
 		name string
 		in   string
@@ -22,11 +22,12 @@ func TestRedactTokens(t *testing.T) {
 		{"embedded in user agent", "curl/8.1 (auth: " + token + ") linux", "curl/8.1 (auth: " + RedactionMarker + ") linux"},
 		{"embedded in noise no delimiters", "xx" + token, "xx" + RedactionMarker},
 		{"two tokens", token + " and " + token, RedactionMarker + " and " + RedactionMarker},
-		{"automation type", "ew_1_au_" + strings.Repeat("Z", 40), RedactionMarker},
-		{"bootstrap type", "ew_2_bs_" + strings.Repeat("k", 30), RedactionMarker},
-		{"scim type (amended grammar)", "ew_1_scim_" + strings.Repeat("q", 30), RedactionMarker},
-		{"prose mentioning ew_ is kept", "the ew_ prefix marks tokens", "the ew_ prefix marks tokens"},
-		{"short body is not a token", "ew_1_wl_short", "ew_1_wl_short"},
+		{"automation type", "hik_1_au_" + strings.Repeat("Z", 40), RedactionMarker},
+		{"bootstrap type", "hik_2_bs_" + strings.Repeat("k", 30), RedactionMarker},
+		{"scim type (amended grammar)", "hik_1_scim_" + strings.Repeat("q", 30), RedactionMarker},
+		{"legacy artifact remains secret", "ew_1_wl_" + strings.Repeat("L", 40), RedactionMarker},
+		{"prose mentioning hik_ is kept", "the hik_ prefix marks tokens", "the hik_ prefix marks tokens"},
+		{"short body is not a token", "hik_1_wl_short", "hik_1_wl_short"},
 		{"no match", "ordinary free text", "ordinary free text"},
 	}
 	for _, c := range cases {
@@ -53,7 +54,7 @@ func TestSanitizeFreeText(t *testing.T) {
 	}
 	// Idempotence: the write boundary re-checks by comparing against a
 	// second sanitization pass, so the function must be a fixpoint.
-	inputs := []string{"plain", "tok ew_1_wl_" + strings.Repeat("A", 40), strings.Repeat("x", 2*FreeTextBound), "c\x01c"}
+	inputs := []string{"plain", "tok hik_1_wl_" + strings.Repeat("A", 40), strings.Repeat("x", 2*FreeTextBound), "c\x01c"}
 	for _, in := range inputs {
 		once := SanitizeFreeText(in)
 		if twice := SanitizeFreeText(once); twice != once {
@@ -179,7 +180,7 @@ func TestValidateRefusals(t *testing.T) {
 		{"missing required field", func(e *Event, _ *domain.Scope) { delete(e.Payload, "formula") }, TrailTenant, "required field"},
 		{"kind mismatch", func(e *Event, _ *domain.Scope) { e.Payload["operation"] = 7 }, TrailTenant, "want string"},
 		{"unsanitized free text", func(e *Event, _ *domain.Scope) { e.Payload["claimed_org"] = "org\x00evil" }, TrailTenant, "sanitized"},
-		{"token in free text", func(e *Event, _ *domain.Scope) { e.Payload["claimed_org"] = "ew_1_wl_" + strings.Repeat("A", 40) }, TrailTenant, "sanitized"},
+		{"token in free text", func(e *Event, _ *domain.Scope) { e.Payload["claimed_org"] = "hik_1_wl_" + strings.Repeat("A", 40) }, TrailTenant, "sanitized"},
 		{"unsanitized user agent", func(e *Event, _ *domain.Scope) { e.UserAgent = "agent\x07" }, TrailTenant, "user_agent"},
 	}
 	for _, c := range cases {
