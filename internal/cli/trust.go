@@ -20,7 +20,7 @@ import (
 // Instance trust is separate from, and prior to, context resolution, and the
 // reason is concrete: without it, a malicious repository's pin file plus an
 // ambient CI token is a bearer-token exfiltration. The token ships to an
-// attacker's validly-certificated HTTPS server before Wenv authorization is
+// attacker's validly-certificated HTTPS server before Hikyo authorization is
 // ever evaluated — the certificate chain is real, so TLS raises nothing.
 //
 // An instance therefore enters the store by exactly two acts, neither of
@@ -104,8 +104,8 @@ func (s *TrustStore) Lookup(name string) (TrustEntry, error) {
 		// client made, not an internal fault and not a missing object. The
 		// exit-code matrix pins that so a script can tell the difference.
 		return TrustEntry{}, &Error{Code: ExitRefused, Err: fmt.Errorf(
-			"%w: %q. Establish it interactively with `wenv login <url>` or `wenv context create --instance <url>`, "+
-				"or provision it with --trust-file / WENV_TRUST_BUNDLE through the same protected channel as the credential",
+			"%w: %q. Establish it interactively with `hikyo login <url>` or `hikyo context create --instance <url>`, "+
+				"or provision it with --trust-file / HIKYO_TRUST_BUNDLE through the same protected channel as the credential",
 			ErrUntrusted, name)}
 	}
 	return e, nil
@@ -126,7 +126,7 @@ func (s *TrustStore) Put(e TrustEntry) error {
 					"  recorded: %s (pin %s)\n"+
 					"  offered:  %s (pin %s)\n"+
 					"A changed pin is what an interception looks like. If the change is legitimate, "+
-					"remove the entry deliberately with `wenv context delete --instance %s` and establish it again.",
+					"remove the entry deliberately with `hikyo context delete --instance %s` and establish it again.",
 				e.Name, prior.Origin, shortPin(prior.SPKIPin), e.Origin, shortPin(e.SPKIPin), e.Name)
 		}
 		return nil
@@ -189,7 +189,7 @@ func CanonicalOrigin(raw string) (string, error) {
 
 // SPKIFingerprint is base64(sha256(SubjectPublicKeyInfo)) — the same
 // construction as HPKP and as `openssl … -pubkey | openssl dgst -sha256`, so
-// an operator can compute the expected value without Wenv's help.
+// an operator can compute the expected value without Hikyo's help.
 //
 // The public key, not the certificate: pinning the certificate would break on
 // every renewal, and an operator whose pin breaks quarterly learns to skip

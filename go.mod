@@ -1,4 +1,4 @@
-module github.com/Dunky13/wenv
+module github.com/Dunky13/hikyo
 
 go 1.26.2
 

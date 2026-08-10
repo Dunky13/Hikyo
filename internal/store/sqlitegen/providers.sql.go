@@ -43,7 +43,7 @@ type CreateOIDCProviderParams struct {
 // resolution surface. Provider mutations are still authorized at the chokepoint
 // (OpProviderPut/Delete under instance-config) before these run; the write
 // itself rides the resolution surface, like the session lifecycle.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) CreateOIDCProvider(ctx context.Context, arg CreateOIDCProviderParams) error {
 	_, err := q.db.ExecContext(ctx, createOIDCProvider,
 		arg.ID,
@@ -69,7 +69,7 @@ const deleteOIDCProvider = `-- name: DeleteOIDCProvider :exec
 DELETE FROM oidc_providers WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteOIDCProvider(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteOIDCProvider, id)
 	return err
@@ -82,7 +82,7 @@ SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
 FROM oidc_providers WHERE slug = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetOIDCProviderBySlug(ctx context.Context, slug string) (OidcProvider, error) {
 	row := q.db.QueryRowContext(ctx, getOIDCProviderBySlug, slug)
 	var i OidcProvider
@@ -126,7 +126,7 @@ type GuardOIDCProviderForMintParams struct {
 // serializes behind it (and vice-versa: whichever commits first, the other's
 // guard sees the bumped row_version and fails). The no-op never bumps
 // row_version, so it never spuriously fails an administrator's reconfigure CAS.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GuardOIDCProviderForMint(ctx context.Context, arg GuardOIDCProviderForMintParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, guardOIDCProviderForMint, arg.ID, arg.RowVersion, arg.Issuer)
 	if err != nil {
@@ -142,7 +142,7 @@ SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
 FROM oidc_providers ORDER BY slug
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListOIDCProviders(ctx context.Context) ([]OidcProvider, error) {
 	rows, err := q.db.QueryContext(ctx, listOIDCProviders)
 	if err != nil {
@@ -191,7 +191,7 @@ SELECT id FROM oidc_providers WHERE id = ?
 // database write lock for the whole delete tx, so a concurrent mint guard
 // cannot interleave; this read confirms the row still exists (no-rows =>
 // ErrProviderNotFound) and keeps the delete path identical across engines.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) LockOIDCProviderForDelete(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRowContext(ctx, lockOIDCProviderForDelete, id)
 	var id_2 string
@@ -225,7 +225,7 @@ type UpdateOIDCProviderCASParams struct {
 // The issuer is never in the SET list: it is immutable after create (A3), so a
 // reconfiguration cannot silently move the identity space to a new authority.
 // CAS on row_version so a concurrent reconfigure fails closed.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) UpdateOIDCProviderCAS(ctx context.Context, arg UpdateOIDCProviderCASParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateOIDCProviderCAS,
 		arg.DisplayName,

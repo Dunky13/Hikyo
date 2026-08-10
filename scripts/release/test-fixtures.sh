@@ -7,7 +7,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$script_dir/../lib/release.sh"
 
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-release-fixture.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-release-fixture.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
 sign_blob() {
@@ -61,11 +61,11 @@ expect_chart_archive_reject() {
 	label=$1
 	expected=$2
 	stem=$3
-	chart_name=wenv-0.1.0.tgz
+	chart_name=hikyo-0.1.0.tgz
 	tmp_manifest="$fixture_dir/manifest-$stem.json"
 	negative_metadata="$fixture_dir/$stem-metadata.json"
 
-	tar -czf "$bundle_dir/$chart_name" -C "$fixture_dir/chart" wenv
+	tar -czf "$bundle_dir/$chart_name" -C "$fixture_dir/chart" hikyo
 	sign_blob "$trust_dir/primary-1.key" "$bundle_dir/$chart_name" \
 		"$bundle_dir/$chart_name.sigstore.json"
 	jq --arg sha "$(sha256_file "$bundle_dir/$chart_name")" \
@@ -101,7 +101,7 @@ jq -n \
 	--arg recovery_sha "$recovery_sha" \
 	--arg primary_sha "$primary_sha" \
 	'{
-		schema: "wenv.dev/trust-root/v1",
+		schema: "hikyo.dev/trust-root/v1",
 		recovery: {id: "recovery-1", public_key: "recovery.pub", sha256: $recovery_sha},
 		bootstrap_primary: {id: "primary-1", public_key: "primary-1.pub", sha256: $primary_sha}
 	}' >"$trust_dir/root.json"
@@ -110,7 +110,7 @@ jq -n \
 	--arg recovery_sha "$recovery_sha" \
 	--arg primary_sha "$primary_sha" '
 	{
-		schema: "wenv.dev/trust-metadata/v1",
+		schema: "hikyo.dev/trust-metadata/v1",
 		sequence: 1,
 		highest_release: null,
 		highest_release_sequence: null,
@@ -151,7 +151,7 @@ jq -n \
 	--arg recovery_sha "$recovery_sha" \
 	--arg primary_sha "$primary_sha" \
 	'{
-		schema: "wenv.dev/trust-metadata/v1",
+		schema: "hikyo.dev/trust-metadata/v1",
 		sequence: 2,
 		highest_release: "0.1.0",
 		highest_release_sequence: 1,
@@ -165,28 +165,28 @@ jq -n \
 		releases: [{version: "0.1.0", sequence: 1, manifest_sha256: ("0" * 64)}]
 	}' >"$trust_dir/metadata.json"
 
-printf 'fixture binary\n' >"$bundle_dir/wenv_Linux_arm64.tar.gz"
-printf '{"spdxVersion":"SPDX-2.3"}\n' >"$bundle_dir/wenv-source.spdx.json"
+printf 'fixture binary\n' >"$bundle_dir/hikyo_Linux_arm64.tar.gz"
+printf '{"spdxVersion":"SPDX-2.3"}\n' >"$bundle_dir/hikyo-source.spdx.json"
 printf 'sha256:%064d\n' 1 >"$bundle_dir/image-index.digest"
 printf 'sha256:%064d\n' 2 >"$bundle_dir/chart-index.digest"
 printf '#!/bin/sh\nprintf "fixture installer\\n"\n' >"$bundle_dir/install.sh"
-mkdir -p "$fixture_dir/chart/wenv"
-printf 'name: wenv\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/wenv/Chart.yaml"
-printf 'image:\n  repository: ghcr.io/dunky13/wenv\n  digest: sha256:%064d\n' 1 \
-	>"$fixture_dir/chart/wenv/values.yaml"
-tar -czf "$bundle_dir/wenv-0.1.0.tgz" -C "$fixture_dir/chart" wenv
+mkdir -p "$fixture_dir/chart/hikyo"
+printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
+printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 1 \
+	>"$fixture_dir/chart/hikyo/values.yaml"
+tar -czf "$bundle_dir/hikyo-0.1.0.tgz" -C "$fixture_dir/chart" hikyo
 
-binary_sha=$(sha256_file "$bundle_dir/wenv_Linux_arm64.tar.gz")
-sbom_sha=$(sha256_file "$bundle_dir/wenv-source.spdx.json")
+binary_sha=$(sha256_file "$bundle_dir/hikyo_Linux_arm64.tar.gz")
+sbom_sha=$(sha256_file "$bundle_dir/hikyo-source.spdx.json")
 image_file_sha=$(sha256_file "$bundle_dir/image-index.digest")
 image_digest=$(tr -d '\n' <"$bundle_dir/image-index.digest")
-chart_file_sha=$(sha256_file "$bundle_dir/wenv-0.1.0.tgz")
+chart_file_sha=$(sha256_file "$bundle_dir/hikyo-0.1.0.tgz")
 chart_digest_file_sha=$(sha256_file "$bundle_dir/chart-index.digest")
 chart_digest=$(tr -d '\n' <"$bundle_dir/chart-index.digest")
 installer_sha=$(sha256_file "$bundle_dir/install.sh")
-jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/wenv"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
+jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
 	>"$bundle_dir/image-index.oci-payload.json"
-jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/charts/wenv"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
+jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/charts/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
 	>"$bundle_dir/chart-index.oci-payload.json"
 image_payload_sha=$(sha256_file "$bundle_dir/image-index.oci-payload.json")
 chart_payload_sha=$(sha256_file "$bundle_dir/chart-index.oci-payload.json")
@@ -203,21 +203,21 @@ jq -n \
 	--arg image_payload_sha "$image_payload_sha" \
 	--arg chart_payload_sha "$chart_payload_sha" \
 	'{
-		schema: "wenv.dev/release-manifest/v1",
+		schema: "hikyo.dev/release-manifest/v1",
 		version: "0.1.0",
 		tag: "v0.1.0",
 		source_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		release_sequence: 1,
 		signing_key_id: "primary-1",
 		artifacts: [
-			{name: "wenv_Linux_arm64.tar.gz", kind: "binary", sha256: $binary_sha},
-			{name: "wenv-source.spdx.json", kind: "sbom", sha256: $sbom_sha},
-			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/dunky13/wenv", tag: "0.1.0"},
-			{name: "wenv-0.1.0.tgz", kind: "chart", sha256: $chart_file_sha, chart_version: "0.1.0", app_version: "0.1.0", image_repository: "ghcr.io/dunky13/wenv", image_digest: $image_digest},
-			{name: "chart-index.digest", kind: "chart-digest", sha256: $chart_digest_file_sha, digest: $chart_digest, chart: "ghcr.io/dunky13/charts/wenv"},
+			{name: "hikyo_Linux_arm64.tar.gz", kind: "binary", sha256: $binary_sha},
+			{name: "hikyo-source.spdx.json", kind: "sbom", sha256: $sbom_sha},
+			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/dunky13/hikyo", tag: "0.1.0"},
+			{name: "hikyo-0.1.0.tgz", kind: "chart", sha256: $chart_file_sha, chart_version: "0.1.0", app_version: "0.1.0", image_repository: "ghcr.io/dunky13/hikyo", image_digest: $image_digest},
+			{name: "chart-index.digest", kind: "chart-digest", sha256: $chart_digest_file_sha, digest: $chart_digest, chart: "ghcr.io/dunky13/charts/hikyo"},
 			{name: "install.sh", kind: "installer", sha256: $installer_sha},
-			{name: "image-index.oci-payload.json", kind: "oci-payload", sha256: $image_payload_sha, subject_kind: "image", subject: ("ghcr.io/dunky13/wenv@" + $image_digest), digest: $image_digest},
-			{name: "chart-index.oci-payload.json", kind: "oci-payload", sha256: $chart_payload_sha, subject_kind: "chart", subject: ("ghcr.io/dunky13/charts/wenv@" + $chart_digest), digest: $chart_digest}
+			{name: "image-index.oci-payload.json", kind: "oci-payload", sha256: $image_payload_sha, subject_kind: "image", subject: ("ghcr.io/dunky13/hikyo@" + $image_digest), digest: $image_digest},
+			{name: "chart-index.oci-payload.json", kind: "oci-payload", sha256: $chart_payload_sha, subject_kind: "chart", subject: ("ghcr.io/dunky13/charts/hikyo@" + $chart_digest), digest: $chart_digest}
 		]
 	}' >"$bundle_dir/release-manifest.json"
 
@@ -261,8 +261,8 @@ COSIGN_BIN="$fixture_dir/cosign-published" "$(dirname "$0")/verify-bundle.sh" \
 	--root "$trust_dir/root.json" --metadata "$trust_dir/metadata.json" \
 	--metadata-signature "$trust_dir/metadata.sigstore.json" --bundle "$bundle_dir" \
 	--state "$state" --published --latest >/dev/null
-grep -Fx "ghcr.io/dunky13/wenv@$image_digest" "$fixture_dir/published.log" >/dev/null
-grep -Fx "ghcr.io/dunky13/charts/wenv@$chart_digest" "$fixture_dir/published.log" >/dev/null
+grep -Fx "ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/published.log" >/dev/null
+grep -Fx "ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/published.log" >/dev/null
 [ "$(wc -l <"$fixture_dir/published.log" | tr -d ' ')" -eq 2 ]
 printf 'release fixture: published image and chart subjects verified individually\n'
 
@@ -276,20 +276,20 @@ chmod +x "$fixture_dir/cosign-publish"
 export COSIGN_PUBLISH_LOG="$fixture_dir/publish.log"
 COSIGN_BIN="$fixture_dir/cosign-publish" "$(dirname "$0")/publish-oci-signatures.sh" \
 	"$bundle_dir" "$trust_dir/primary-1.pub" >/dev/null
-grep -Fx "attach ghcr.io/dunky13/wenv@$image_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "verify ghcr.io/dunky13/wenv@$image_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "attach ghcr.io/dunky13/charts/wenv@$chart_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "verify ghcr.io/dunky13/charts/wenv@$chart_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "attach ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "verify ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "attach ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "verify ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
 [ "$(wc -l <"$fixture_dir/publish.log" | tr -d ' ')" -eq 4 ]
 printf 'release fixture: OCI signatures attached and verified for exact subjects\n'
 
 cp -R "$bundle_dir" "$fixture_dir/bundle-v1"
 
-printf 'tampered\n' >>"$bundle_dir/wenv_Linux_arm64.tar.gz"
+printf 'tampered\n' >>"$bundle_dir/hikyo_Linux_arm64.tar.gz"
 expect_reject 'tampered artifact' 'artifact hash mismatch' "$(dirname "$0")/verify-bundle.sh" \
 	--root "$trust_dir/root.json" --metadata "$trust_dir/metadata.json" \
 	--metadata-signature "$trust_dir/metadata.sigstore.json" --bundle "$bundle_dir" --state "$state" --latest
-cp "$fixture_dir/bundle-v1/wenv_Linux_arm64.tar.gz" "$bundle_dir/wenv_Linux_arm64.tar.gz"
+cp "$fixture_dir/bundle-v1/hikyo_Linux_arm64.tar.gz" "$bundle_dir/hikyo_Linux_arm64.tar.gz"
 
 printf 'sha256:%064d\n' 3 >"$bundle_dir/image-index.digest"
 sign_blob "$trust_dir/primary-1.key" "$bundle_dir/image-index.digest" "$bundle_dir/image-index.digest.sigstore.json"
@@ -322,7 +322,7 @@ jq --arg digest "$wrong_payload_digest" \
 	--arg sha "$(sha256_file "$bundle_dir/image-index.oci-payload.json")" '
 	(.artifacts[] | select(.name == "image-index.oci-payload.json")) |= (
 		.sha256 = $sha | .digest = $digest |
-		.subject = ("ghcr.io/dunky13/wenv@" + $digest)
+		.subject = ("ghcr.io/dunky13/hikyo@" + $digest)
 	)' "$bundle_dir/release-manifest.json" >"$fixture_dir/manifest-cross-digest.json"
 mv "$fixture_dir/manifest-cross-digest.json" "$bundle_dir/release-manifest.json"
 sign_blob "$trust_dir/primary-1.key" "$bundle_dir/release-manifest.json" \
@@ -341,28 +341,28 @@ cp "$fixture_dir/bundle-v1/image-index.oci-payload.json.sigstore.json" \
 cp "$fixture_dir/bundle-v1/release-manifest.json" "$bundle_dir/release-manifest.json"
 cp "$fixture_dir/bundle-v1/release-manifest.sigstore.json" "$bundle_dir/release-manifest.sigstore.json"
 
-printf 'name: wenv\nversion: 9.9.9\nappVersion: 0.1.0\n' >"$fixture_dir/chart/wenv/Chart.yaml"
+printf 'name: hikyo\nversion: 9.9.9\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
 expect_chart_archive_reject 'chart version contradictory to signed release version' \
-	'chart version mismatch: wenv-0.1.0.tgz' wrong-chart
+	'chart version mismatch: hikyo-0.1.0.tgz' wrong-chart
 
-printf 'name: wenv\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/wenv/Chart.yaml"
-printf 'image:\n  repository: ghcr.io/dunky13/wenv\n  digest: sha256:%064d\n' 3 \
-	>"$fixture_dir/chart/wenv/values.yaml"
+printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
+printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 3 \
+	>"$fixture_dir/chart/hikyo/values.yaml"
 expect_chart_archive_reject 'chart pins image digest outside signed manifest' \
-	'chart image digest mismatch: wenv-0.1.0.tgz' wrong-chart-image
+	'chart image digest mismatch: hikyo-0.1.0.tgz' wrong-chart-image
 
-printf 'image:\n  repository: ghcr.io/attacker/wenv\n  digest: sha256:%064d\n' 1 \
-	>"$fixture_dir/chart/wenv/values.yaml"
+printf 'image:\n  repository: ghcr.io/attacker/hikyo\n  digest: sha256:%064d\n' 1 \
+	>"$fixture_dir/chart/hikyo/values.yaml"
 expect_chart_archive_reject 'chart pins image repository outside signed manifest' \
-	'chart image repository mismatch: wenv-0.1.0.tgz' wrong-chart-repository
+	'chart image repository mismatch: hikyo-0.1.0.tgz' wrong-chart-repository
 
-jq '.critical.identity["docker-reference"] = "ghcr.io/attacker/charts/wenv"' \
+jq '.critical.identity["docker-reference"] = "ghcr.io/attacker/charts/hikyo"' \
 	"$bundle_dir/chart-index.oci-payload.json" >"$fixture_dir/chart-payload-wrong-identity.json"
 mv "$fixture_dir/chart-payload-wrong-identity.json" "$bundle_dir/chart-index.oci-payload.json"
 sign_blob "$trust_dir/primary-1.key" "$bundle_dir/chart-index.oci-payload.json" \
 	"$bundle_dir/chart-index.oci-payload.json.sigstore.json"
 jq --arg sha "$(sha256_file "$bundle_dir/chart-index.oci-payload.json")" \
-	--arg subject "ghcr.io/attacker/charts/wenv@$chart_digest" \
+	--arg subject "ghcr.io/attacker/charts/hikyo@$chart_digest" \
 	'(.artifacts[] | select(.name == "chart-index.oci-payload.json")) |=
 		(.sha256 = $sha | .subject = $subject)' \
 	"$bundle_dir/release-manifest.json" >"$fixture_dir/manifest-wrong-chart-payload.json"
@@ -381,8 +381,8 @@ restore_bundle_file chart-index.oci-payload.json
 restore_bundle_file chart-index.oci-payload.json.sigstore.json
 restore_bundle_file release-manifest.json
 restore_bundle_file release-manifest.sigstore.json
-printf 'image:\n  repository: ghcr.io/dunky13/wenv\n  digest: sha256:%064d\n' 1 \
-	>"$fixture_dir/chart/wenv/values.yaml"
+printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 1 \
+	>"$fixture_dir/chart/hikyo/values.yaml"
 
 COSIGN_PASSWORD=fixture-pass "$COSIGN_BIN" generate-key-pair --output-key-prefix "$trust_dir/primary-2" >/dev/null
 primary_2_sha=$(sha256_file "$trust_dir/primary-2.pub")
@@ -408,10 +408,10 @@ sign_blob "$trust_dir/recovery.key" "$trust_dir/metadata.json" "$trust_dir/metad
 printf 'release fixture: current release remains installable while successor is pending\n'
 
 cp -R "$fixture_dir/bundle-v1" "$fixture_dir/bundle-v2"
-rm "$fixture_dir/bundle-v2/wenv-0.1.0.tgz" "$fixture_dir/bundle-v2/wenv-0.1.0.tgz.sigstore.json"
-printf 'name: wenv\nversion: 0.2.0\nappVersion: 0.2.0\n' >"$fixture_dir/chart/wenv/Chart.yaml"
-tar -czf "$fixture_dir/bundle-v2/wenv-0.2.0.tgz" -C "$fixture_dir/chart" wenv
-chart_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/wenv-0.2.0.tgz")
+rm "$fixture_dir/bundle-v2/hikyo-0.1.0.tgz" "$fixture_dir/bundle-v2/hikyo-0.1.0.tgz.sigstore.json"
+printf 'name: hikyo\nversion: 0.2.0\nappVersion: 0.2.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
+tar -czf "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz" -C "$fixture_dir/chart" hikyo
+chart_v2_sha=$(sha256_file "$fixture_dir/bundle-v2/hikyo-0.2.0.tgz")
 jq --arg chart_v2_sha "$chart_v2_sha" '
 	.version = "0.2.0" |
 	.tag = "v0.2.0" |
@@ -419,7 +419,7 @@ jq --arg chart_v2_sha "$chart_v2_sha" '
 	.signing_key_id = "primary-2" |
 	(.artifacts[] | select(.kind == "image")).tag = "0.2.0" |
 	(.artifacts[] | select(.kind == "chart")) |= (
-		.name = "wenv-0.2.0.tgz" |
+		.name = "hikyo-0.2.0.tgz" |
 		.sha256 = $chart_v2_sha |
 		.chart_version = "0.2.0" |
 		.app_version = "0.2.0"

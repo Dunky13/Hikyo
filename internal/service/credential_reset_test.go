@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // classifyResetTarget is the org-bounded reachability test at the heart of the

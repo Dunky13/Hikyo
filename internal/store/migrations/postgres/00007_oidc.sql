@@ -7,9 +7,9 @@
 -- authenticated are resolved on the proof-free surface, because the proof is
 -- what that answer produces.
 --
--- wenv:table oidc_providers class=authn chain=-
--- wenv:table external_identities class=authn chain=-
--- wenv:table oidc_transactions class=authn chain=-
+-- hikyo:table oidc_providers class=authn chain=-
+-- hikyo:table external_identities class=authn chain=-
+-- hikyo:table oidc_transactions class=authn chain=-
 
 -- A configured OpenID Provider. The issuer is byte-exact and IMMUTABLE after
 -- create (A3): a PUT that changes it is refused by name, remedy is

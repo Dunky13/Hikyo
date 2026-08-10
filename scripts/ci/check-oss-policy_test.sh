@@ -3,7 +3,7 @@ set -eu
 
 CDPATH=
 repo_root=$(cd -- "$(dirname "$0")/../.." && pwd)
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-oss-policy.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-oss-policy.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
 "$repo_root/scripts/ci/check-oss-policy.sh" "$repo_root" "$repo_root/docs/site/dist"
@@ -63,7 +63,7 @@ cp "$repo_root/docs/site/public/.well-known/security.txt" \
 	"$fixture_dir/docs/site/public/.well-known/security.txt"
 cp "$fixture_dir/docs/site/public/.well-known/security.txt" \
 	"$fixture_dir/site/.well-known/security.txt"
-sed 's#Dunky13/wenv/security/advisories/new#wrong/repository/security/advisories/new#' \
+sed 's#Dunky13/hikyo/security/advisories/new#wrong/repository/security/advisories/new#' \
 	"$fixture_dir/.github/ISSUE_TEMPLATE/config.yml" \
 	>"$fixture_dir/config-wrong.yml"
 mv "$fixture_dir/config-wrong.yml" "$fixture_dir/.github/ISSUE_TEMPLATE/config.yml"

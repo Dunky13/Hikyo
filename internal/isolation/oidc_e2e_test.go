@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/oidctest"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/oidctest"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // The OIDC A1 fixture families (#54, human-auth ADR - The OIDC transaction),
@@ -51,7 +51,7 @@ func configureProvider(t *testing.T, auth *service.Auth, ctx context.Context, ad
 	}
 	t.Cleanup(idp.Close)
 	if auth.ExternalOrigin == "" {
-		auth.ExternalOrigin = "https://wenv.test"
+		auth.ExternalOrigin = "https://hikyo.test"
 	}
 	providers := &service.Providers{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 	in.Issuer = idp.Issuer()
@@ -143,7 +143,7 @@ func isUnauth(err error) bool {
 func oidcAdmin(t *testing.T, db *store.DB) (*service.Auth, domain.PrincipalID, string) {
 	t.Helper()
 	auth := authService(t, db)
-	auth.ExternalOrigin = "https://wenv.test"
+	auth.ExternalOrigin = "https://hikyo.test"
 	boot, err := auth.BootstrapAdmin(t.Context(), "oidc-admin", "OIDC Admin", "terminal")
 	if err != nil {
 		t.Fatal(err)

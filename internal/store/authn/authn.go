@@ -22,9 +22,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/pggen"
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // Resolver answers the two questions authorize() asks, inside the same

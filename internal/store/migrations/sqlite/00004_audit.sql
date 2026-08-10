@@ -22,8 +22,8 @@
 -- (2006-01-02T15:04:05.000000Z) so lexicographic order is time order and
 -- range predicates work on this engine.
 --
--- wenv:table audit_tenant_events class=org chain=org_id
--- wenv:table audit_instance_events class=instance chain=-
+-- hikyo:table audit_tenant_events class=org chain=org_id
+-- hikyo:table audit_instance_events class=instance chain=-
 
 CREATE TABLE audit_tenant_events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,

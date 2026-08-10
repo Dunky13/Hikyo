@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 func TestEmbeddedMigrationVersionsAreUnique(t *testing.T) {

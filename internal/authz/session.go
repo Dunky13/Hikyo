@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/authn"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/authn"
 )
 
 // Session resolution sits HERE, on the transaction's authorizer, because the
@@ -60,7 +60,7 @@ var MFAMandatory = map[domain.Capability]bool{
 // only a password is refused an MFA-mandatory operation and must step up. The
 // gate is consulted in assuranceInadequate AFTER the grant check, so only a
 // capability-holder ever learns a step-up is required; session-less local host
-// authority (bootstrap, break-glass, `wenv admin`) presents no session and is
+// authority (bootstrap, break-glass, `hikyo admin`) presents no session and is
 // exempt. Enrolment and step-up endpoints are themselves never MFA-gated (they
 // are the path out), so a freshly bootstrapped administrator can always reach
 // them.
@@ -96,7 +96,7 @@ func AdequateAssurance(a Assurance) bool {
 //
 // A reauth may only proceed with evidence of rank >= the session's rank. OIDC
 // evidence is capped at rank 1 by construction (oidcFactors never yields
-// "webauthn"): wenv cannot verify the phishing-resistance of a federated
+// "webauthn"): hikyo cannot verify the phishing-resistance of a federated
 // ceremony, so a federated token can never re-authorize a WebAuthn session.
 func AssuranceRank(a Assurance) int {
 	for _, f := range a.Factors {
@@ -120,7 +120,7 @@ func AssuranceRank(a Assurance) int {
 func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now time.Time) (Identity, error) {
 	// The grammar check is local and constant-cost, and a value that fails it
 	// cannot correspond to any row, so short-circuiting here reveals only
-	// that the caller sent something that is not a wenv artifact — a fact
+	// that the caller sent something that is not a hikyo artifact — a fact
 	// they already knew. Both session artifact types are accepted here (A10):
 	// a CLI session ("cli") and a browser session ("br"). The transport decides
 	// which leg a value arrived on (header vs cookie) and enforces the CSRF

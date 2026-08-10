@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
 // Client is the origin-bound HTTP client.
@@ -105,7 +105,7 @@ func NewClient(entry TrustEntry, bearer string) (*Client, error) {
 					req.URL.Scheme+"://"+req.URL.Host)
 			},
 		},
-		UserAgent: "wenv-cli",
+		UserAgent: "hikyo-cli",
 	}, nil
 }
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // The grammar guards are the one piece of non-trivial branching this ticket adds

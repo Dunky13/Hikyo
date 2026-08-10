@@ -17,15 +17,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/keyring"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/keyring"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // authService builds a real Auth against the harness database: a live
@@ -703,12 +703,12 @@ type exportLineForTest struct {
 // boot. (The fsync leg needs a server restart and is unit-tested through
 // the querier seam in internal/store.)
 func TestPostgresDurabilityBootRefusal(t *testing.T) {
-	dsn := os.Getenv("WENV_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("HIKYO_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		if os.Getenv("CI") != "" {
-			t.Fatal("CI run without WENV_TEST_POSTGRES_DSN: the postgres durability leg must not silently skip in CI")
+			t.Fatal("CI run without HIKYO_TEST_POSTGRES_DSN: the postgres durability leg must not silently skip in CI")
 		}
-		t.Skip("WENV_TEST_POSTGRES_DSN not set")
+		t.Skip("HIKYO_TEST_POSTGRES_DSN not set")
 	}
 	derived := derivedDatabase(t, dsn, "_durability")
 	u, err := url.Parse(derived)

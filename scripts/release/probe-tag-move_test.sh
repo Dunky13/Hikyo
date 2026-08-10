@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-tag-probe.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-tag-probe.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
 printf '#!/bin/sh\nprintf "gh: Repository rule violations found for refs/tags/v-ruleset-probe (HTTP 422)\\n" >&2\nexit 1\n' >"$fixture_dir/deny-gh"
@@ -14,16 +14,16 @@ chmod +x "$fixture_dir/deny-gh" "$fixture_dir/allow-gh" "$fixture_dir/error-gh"
 chmod +x "$fixture_dir/git"
 
 sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-PATH="$fixture_dir:$PATH" WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/deny-gh" \
+PATH="$fixture_dir:$PATH" HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/deny-gh" \
 	"$(dirname "$0")/probe-tag-move.sh" owner/repo v-ruleset-probe "$sha" >/dev/null
 
-if PATH="$fixture_dir:$PATH" WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/allow-gh" \
+if PATH="$fixture_dir:$PATH" HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/allow-gh" \
 	"$(dirname "$0")/probe-tag-move.sh" owner/repo v-ruleset-probe "$sha" >/dev/null 2>&1; then
 	printf 'tag probe fixture failed: accepted mutation was treated as success\n' >&2
 	exit 1
 fi
 
-if PATH="$fixture_dir:$PATH" WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/error-gh" \
+if PATH="$fixture_dir:$PATH" HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES GH_BIN="$fixture_dir/error-gh" \
 	"$(dirname "$0")/probe-tag-move.sh" owner/repo v-ruleset-probe "$sha" >/dev/null 2>&1; then
 	printf 'tag probe fixture failed: API failure was treated as ruleset proof\n' >&2
 	exit 1

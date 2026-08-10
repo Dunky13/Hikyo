@@ -15,7 +15,7 @@ const advancePrincipalGeneration = `-- name: AdvancePrincipalGeneration :exec
 UPDATE principals SET session_generation = session_generation + 1 WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) AdvancePrincipalGeneration(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, advancePrincipalGeneration, id)
 	return err
@@ -35,7 +35,7 @@ type AdvanceTOTPStepParams struct {
 
 // Single-use per (account, step): a code is consumed only if its step is
 // strictly beyond the last one, which the CAS enforces atomically.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams) (int64, error) {
 	result, err := q.db.Exec(ctx, advanceTOTPStep,
 		arg.LastStep,
@@ -65,7 +65,7 @@ type ConfirmTOTPParams struct {
 
 // Confirmation is the account-security mutation's write: it promotes the
 // pending seed and consumes the confirming step in one CAS.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64, error) {
 	result, err := q.db.Exec(ctx, confirmTOTP,
 		arg.ConfirmedAt,
@@ -92,7 +92,7 @@ type ConsumeCredentialAuthorityParams struct {
 
 // Single-use consumption: the NULL guard is the atomic claim, so two
 // concurrent presentations cannot both establish a credential.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeCredentialAuthority(ctx context.Context, arg ConsumeCredentialAuthorityParams) (int64, error) {
 	result, err := q.db.Exec(ctx, consumeCredentialAuthority, arg.ConsumedAt, arg.ID)
 	if err != nil {
@@ -113,7 +113,7 @@ type ConsumeOIDCTransactionParams struct {
 
 // Single-use consumption: the NULL guard is the atomic claim, so a callback
 // cannot be replayed and two concurrent callbacks cannot both consume one tx.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeOIDCTransaction(ctx context.Context, arg ConsumeOIDCTransactionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, consumeOIDCTransaction, arg.ConsumedAt, arg.ID)
 	if err != nil {
@@ -135,7 +135,7 @@ type ConsumeOutstandingAuthoritiesForAccountParams struct {
 // Minting an establishment authority for an account consumes every other
 // outstanding one, so a second live reset token cannot linger past the point
 // the operator believes the flow completed.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeOutstandingAuthoritiesForAccount(ctx context.Context, arg ConsumeOutstandingAuthoritiesForAccountParams) error {
 	_, err := q.db.Exec(ctx, consumeOutstandingAuthoritiesForAccount, arg.ConsumedAt, arg.AccountID)
 	return err
@@ -153,7 +153,7 @@ type ConsumeSingleDecisionWindowParams struct {
 
 // Claim a single_decision window exactly once: the NULL guard is the atomic
 // claim, so a second disclosure loses and is refused (B11 double-spend).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeSingleDecisionWindow(ctx context.Context, arg ConsumeSingleDecisionWindowParams) (int64, error) {
 	result, err := q.db.Exec(ctx, consumeSingleDecisionWindow, arg.ConsumedAt, arg.ID)
 	if err != nil {
@@ -166,7 +166,7 @@ const countAccounts = `-- name: CountAccounts :one
 SELECT COUNT(*) FROM accounts
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) CountAccounts(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countAccounts)
 	var count int64
@@ -178,7 +178,7 @@ const deleteExternalIdentity = `-- name: DeleteExternalIdentity :exec
 DELETE FROM external_identities WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteExternalIdentity(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteExternalIdentity, id)
 	return err
@@ -188,7 +188,7 @@ const deletePendingTOTPForAccount = `-- name: DeletePendingTOTPForAccount :exec
 DELETE FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeletePendingTOTPForAccount(ctx context.Context, accountID string) error {
 	_, err := q.db.Exec(ctx, deletePendingTOTPForAccount, accountID)
 	return err
@@ -200,7 +200,7 @@ DELETE FROM reauth_windows WHERE environment_id = $1
 
 // Invalidate every open window on one environment: the first of LowerEffective
 // Window's five ADR items on the effective-window transition (#54 B6).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteReauthWindowsForEnvironment(ctx context.Context, environmentID string) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteReauthWindowsForEnvironment, environmentID)
 	if err != nil {
@@ -213,7 +213,7 @@ const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteSession, id)
 	return err
@@ -225,7 +225,7 @@ DELETE FROM sessions WHERE principal_id = $1
 
 // Every session of the principal dies, atomically and without reaching the
 // client  -  the invalidation that token rotation structurally cannot do.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSessionsForPrincipal(ctx context.Context, principalID string) error {
 	_, err := q.db.Exec(ctx, deleteSessionsForPrincipal, principalID)
 	return err
@@ -238,7 +238,7 @@ DELETE FROM sessions WHERE provider_id = $1
 // The federated-session sweep (A4): every session minted through a provider
 // dies when the provider's issuer/client/assurance policy changes or the
 // provider is disabled or deleted. reauth_windows cascade from the session.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSessionsForProvider(ctx context.Context, providerID pgtype.Text) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSessionsForProvider, providerID)
 	if err != nil {
@@ -251,7 +251,7 @@ const deleteTOTPForAccount = `-- name: DeleteTOTPForAccount :exec
 DELETE FROM totp_credentials WHERE account_id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteTOTPForAccount(ctx context.Context, accountID string) error {
 	_, err := q.db.Exec(ctx, deleteTOTPForAccount, accountID)
 	return err
@@ -270,7 +270,7 @@ type EnvironmentChainByIDRow struct {
 // Resolve an environment's chain from its id alone, for LowerEffectiveWindow's
 // stranded-principal query (#54 B6): the denormalized chain columns make the row
 // self-describing, so the grant-coverage predicate can be built from an env id.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) EnvironmentChainByID(ctx context.Context, id string) (EnvironmentChainByIDRow, error) {
 	row := q.db.QueryRow(ctx, environmentChainByID, id)
 	var i EnvironmentChainByIDRow
@@ -291,7 +291,7 @@ type GetAccountByIDRow struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetAccountByID(ctx context.Context, id string) (GetAccountByIDRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByID, id)
 	var i GetAccountByIDRow
@@ -318,7 +318,7 @@ type GetAccountByPrincipalRow struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetAccountByPrincipal(ctx context.Context, principalID string) (GetAccountByPrincipalRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByPrincipal, principalID)
 	var i GetAccountByPrincipalRow
@@ -345,7 +345,7 @@ type GetAccountByUsernameRow struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetAccountByUsername(ctx context.Context, username string) (GetAccountByUsernameRow, error) {
 	row := q.db.QueryRow(ctx, getAccountByUsername, username)
 	var i GetAccountByUsernameRow
@@ -370,7 +370,7 @@ FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NOT NULL
 // writers join the enumerated resolution surface for the same reason the login
 // writers did: they mutate the artifacts that decide how strongly a caller
 // authenticated, which is resolved rather than authorized.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetConfirmedTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
 	row := q.db.QueryRow(ctx, getConfirmedTOTPForAccount, accountID)
 	var i TotpCredential
@@ -406,7 +406,7 @@ type GetCredentialAuthorityByVerifierRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetCredentialAuthorityByVerifier(ctx context.Context, verifier []byte) (GetCredentialAuthorityByVerifierRow, error) {
 	row := q.db.QueryRow(ctx, getCredentialAuthorityByVerifier, verifier)
 	var i GetCredentialAuthorityByVerifierRow
@@ -433,7 +433,7 @@ SELECT credential_epoch FROM auth_instance_state WHERE id = 1
 // cannot run under a proof, because the proof is what the answer produces.
 // The write paths below are enumerated and pinned; anything else that mutates
 // inside this surface fails the sole-writer analyzer.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetCredentialEpoch(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, getCredentialEpoch)
 	var credential_epoch int64
@@ -459,7 +459,7 @@ type GetEnabledProviderByIssuerParams struct {
 // with request-supplied identifiers, and write the transaction/identity/session
 // rows that decide who a caller is: the resolution surface, proof-free, for the
 // same reason the login writers are.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetEnabledProviderByIssuer(ctx context.Context, arg GetEnabledProviderByIssuerParams) (OidcProvider, error) {
 	row := q.db.QueryRow(ctx, getEnabledProviderByIssuer, arg.Kind, arg.Issuer)
 	var i OidcProvider
@@ -493,7 +493,7 @@ FROM oidc_providers WHERE slug = $1 AND enabled = 1
 
 // Start resolves the provider by slug for an enabled provider only: a login,
 // link or reauth may only begin against a provider that is currently serving.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetEnabledProviderBySlug(ctx context.Context, slug string) (OidcProvider, error) {
 	row := q.db.QueryRow(ctx, getEnabledProviderBySlug, slug)
 	var i OidcProvider
@@ -529,7 +529,7 @@ type GetExternalIdentityParams struct {
 	Subject string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetExternalIdentity(ctx context.Context, arg GetExternalIdentityParams) (ExternalIdentity, error) {
 	row := q.db.QueryRow(ctx, getExternalIdentity, arg.Kind, arg.Issuer, arg.Subject)
 	var i ExternalIdentity
@@ -551,7 +551,7 @@ SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, cre
 FROM external_identities WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetExternalIdentityByID(ctx context.Context, id string) (ExternalIdentity, error) {
 	row := q.db.QueryRow(ctx, getExternalIdentityByID, id)
 	var i ExternalIdentity
@@ -576,7 +576,7 @@ SELECT id, state_verifier, nonce, pkce_verifier, provider_id, issuer, redirect_u
 FROM oidc_transactions WHERE state_verifier = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetOIDCTransactionByState(ctx context.Context, stateVerifier []byte) (OidcTransaction, error) {
 	row := q.db.QueryRow(ctx, getOIDCTransactionByState, stateVerifier)
 	var i OidcTransaction
@@ -609,7 +609,7 @@ SELECT account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
 FROM password_credentials WHERE account_id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPasswordCredential(ctx context.Context, accountID string) (PasswordCredential, error) {
 	row := q.db.QueryRow(ctx, getPasswordCredential, accountID)
 	var i PasswordCredential
@@ -633,7 +633,7 @@ SELECT id, account_id, seed, dek_version, credential_epoch, row_version,
 FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPendingTOTPForAccount(ctx context.Context, accountID string) (TotpCredential, error) {
 	row := q.db.QueryRow(ctx, getPendingTOTPForAccount, accountID)
 	var i TotpCredential
@@ -656,7 +656,7 @@ const getPrincipalGeneration = `-- name: GetPrincipalGeneration :one
 SELECT session_generation FROM principals WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPrincipalGeneration(ctx context.Context, id string) (int64, error) {
 	row := q.db.QueryRow(ctx, getPrincipalGeneration, id)
 	var session_generation int64
@@ -672,7 +672,7 @@ SELECT kind FROM principals WHERE id = $1
 // The denial writer's actor-class lookup (#45, audit-model ADR amendment
 // part 4): the flush transaction resolves the denied principal's kind for
 // the event's actor class. Runs only inside authn.WriteDenial.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPrincipalKind(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRow(ctx, getPrincipalKind, id)
 	var kind string
@@ -689,7 +689,7 @@ FROM oidc_providers WHERE id = $1
 
 // The recorded provider a callback exchanges at (A11): loaded by the id the
 // transaction pinned, so the exchange happens only at that provider.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcProvider, error) {
 	row := q.db.QueryRow(ctx, getProviderForCallback, id)
 	var i OidcProvider
@@ -732,7 +732,7 @@ type GetReauthWindowParams struct {
 // enforces), and claim a single_decision window exactly once via the consumed_at
 // NULL guard. There is no reveal operation to call these yet (#50/#58); they ship
 // as the library those verticals consume, exercised directly by fixtures.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetReauthWindow(ctx context.Context, arg GetReauthWindowParams) (ReauthWindow, error) {
 	row := q.db.QueryRow(ctx, getReauthWindow, arg.SessionID, arg.EnvironmentID)
 	var i ReauthWindow
@@ -758,7 +758,7 @@ SELECT account_id, batch, dek_version, credential_epoch, row_version, generated_
 FROM recovery_codes WHERE account_id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetRecoveryCodes(ctx context.Context, accountID string) (RecoveryCode, error) {
 	row := q.db.QueryRow(ctx, getRecoveryCodes, accountID)
 	var i RecoveryCode
@@ -796,7 +796,7 @@ type GetSessionByIDRow struct {
 	AbsoluteExpiresAt pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByIDRow, error) {
 	row := q.db.QueryRow(ctx, getSessionByID, id)
 	var i GetSessionByIDRow
@@ -841,7 +841,7 @@ type GetSessionByVerifierRow struct {
 	AbsoluteExpiresAt pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSessionByVerifier(ctx context.Context, verifier []byte) (GetSessionByVerifierRow, error) {
 	row := q.db.QueryRow(ctx, getSessionByVerifier, verifier)
 	var i GetSessionByVerifierRow
@@ -876,7 +876,7 @@ type InsertAccountParams struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertAccount(ctx context.Context, arg InsertAccountParams) error {
 	_, err := q.db.Exec(ctx, insertAccount,
 		arg.ID,
@@ -905,7 +905,7 @@ type InsertCredentialAuthorityParams struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertCredentialAuthority(ctx context.Context, arg InsertCredentialAuthorityParams) error {
 	_, err := q.db.Exec(ctx, insertCredentialAuthority,
 		arg.ID,
@@ -937,7 +937,7 @@ type InsertExternalIdentityParams struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertExternalIdentity(ctx context.Context, arg InsertExternalIdentityParams) error {
 	_, err := q.db.Exec(ctx, insertExternalIdentity,
 		arg.ID,
@@ -967,7 +967,7 @@ type InsertGrantParams struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) error {
 	_, err := q.db.Exec(ctx, insertGrant,
 		arg.ID,
@@ -1010,7 +1010,7 @@ type InsertOIDCTransactionParams struct {
 	ExpiresAt              pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertOIDCTransaction(ctx context.Context, arg InsertOIDCTransactionParams) error {
 	_, err := q.db.Exec(ctx, insertOIDCTransaction,
 		arg.ID,
@@ -1052,7 +1052,7 @@ type InsertPasswordCredentialParams struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertPasswordCredential(ctx context.Context, arg InsertPasswordCredentialParams) error {
 	_, err := q.db.Exec(ctx, insertPasswordCredential,
 		arg.AccountID,
@@ -1080,7 +1080,7 @@ type InsertPrincipalParams struct {
 }
 
 // Enumerated writers.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertPrincipal(ctx context.Context, arg InsertPrincipalParams) error {
 	_, err := q.db.Exec(ctx, insertPrincipal, arg.ID, arg.Kind, arg.CreatedAt)
 	return err
@@ -1113,7 +1113,7 @@ type InsertReauthWindowParams struct {
 // the enumerated unit, so at a 0 effective window it opens a single_decision
 // window (B11) consumed by exactly one enumerated decision. Keyed by session,
 // cascading with it.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindowParams) error {
 	_, err := q.db.Exec(ctx, insertReauthWindow,
 		arg.ID,
@@ -1145,7 +1145,7 @@ type InsertRecoveryCodesParams struct {
 	GeneratedAt     pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertRecoveryCodes(ctx context.Context, arg InsertRecoveryCodesParams) error {
 	_, err := q.db.Exec(ctx, insertRecoveryCodes,
 		arg.AccountID,
@@ -1187,7 +1187,7 @@ type InsertSessionParams struct {
 	CsrfVerifier      []byte
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
 	_, err := q.db.Exec(ctx, insertSession,
 		arg.ID,
@@ -1230,7 +1230,7 @@ type InsertTOTPParams struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertTOTP(ctx context.Context, arg InsertTOTPParams) error {
 	_, err := q.db.Exec(ctx, insertTOTP,
 		arg.ID,
@@ -1250,7 +1250,7 @@ SELECT id, account_id, kind, issuer, subject, provider_id, credential_epoch, cre
 FROM external_identities WHERE account_id = $1 ORDER BY created_at
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListExternalIdentitiesForAccount(ctx context.Context, accountID string) ([]ExternalIdentity, error) {
 	rows, err := q.db.Query(ctx, listExternalIdentitiesForAccount, accountID)
 	if err != nil {
@@ -1292,7 +1292,7 @@ type ListGrantsForPrincipalRow struct {
 	EnvID      pgtype.Text
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsForPrincipal(ctx context.Context, principalID string) ([]ListGrantsForPrincipalRow, error) {
 	rows, err := q.db.Query(ctx, listGrantsForPrincipal, principalID)
 	if err != nil {
@@ -1333,7 +1333,7 @@ type ListGrantsForResetTargetRow struct {
 // The target principal's grant set, for the credential-reset org-bounded test
 // (#54 credential-reset, ADR - Recovery): reset reaches only a target whose grants
 // lie entirely within one org and who holds no instance capability.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsForResetTarget(ctx context.Context, principalID string) ([]ListGrantsForResetTargetRow, error) {
 	rows, err := q.db.Query(ctx, listGrantsForResetTarget, principalID)
 	if err != nil {
@@ -1367,7 +1367,7 @@ SELECT id FROM principals WHERE id = $1 FOR UPDATE
 // reset org-bounded test serializes against a concurrent grant landing. sqlite's
 // single writer serializes trivially; postgres takes FOR UPDATE. The grant-lock
 // analyzer pins that this sits inside every grant writer.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) LockPrincipalRow(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRow(ctx, lockPrincipalRow, id)
 	var id_2 string
@@ -1392,7 +1392,7 @@ type RebindSAMLExternalIdentityProviderParams struct {
 // Re-adding the same byte-exact SAML entity creates a new provider row while
 // preserving the human link. The old provider id is a provenance CAS guard:
 // only the identity just verified by that entity may move to the live row.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) RebindSAMLExternalIdentityProvider(ctx context.Context, arg RebindSAMLExternalIdentityProviderParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rebindSAMLExternalIdentityProvider, arg.NewProviderID, arg.ID, arg.ExpectedProviderID)
 	if err != nil {
@@ -1418,7 +1418,7 @@ type ResolveEnvChainRow struct {
 	ID        string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ResolveEnvChain(ctx context.Context, arg ResolveEnvChainParams) (ResolveEnvChainRow, error) {
 	row := q.db.QueryRow(ctx, resolveEnvChain, arg.OrgID, arg.ProjectID, arg.ID)
 	var i ResolveEnvChainRow
@@ -1440,7 +1440,7 @@ SELECT id FROM orgs WHERE id = $1
 // Chain resolution is one query, one round trip, regardless of which level
 // is missing: the denormalized chain columns plus composite ancestry FKs make
 // the addressed row's own chain authoritative, so no per-level walk exists.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ResolveOrgChain(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRow(ctx, resolveOrgChain, id)
 	var id_2 string
@@ -1462,7 +1462,7 @@ type ResolveProjectChainRow struct {
 	ID    string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ResolveProjectChain(ctx context.Context, arg ResolveProjectChainParams) (ResolveProjectChainRow, error) {
 	row := q.db.QueryRow(ctx, resolveProjectChain, arg.OrgID, arg.ID)
 	var i ResolveProjectChainRow
@@ -1483,7 +1483,7 @@ type RotateSessionFactorsParams struct {
 // Step-up rotates the session token and rewrites its factor set; the original
 // authenticated_at and ceremony_id are preserved so absolute-age attribution
 // cannot be reset by repeated step-ups.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) RotateSessionFactors(ctx context.Context, arg RotateSessionFactorsParams) error {
 	_, err := q.db.Exec(ctx, rotateSessionFactors, arg.Verifier, arg.Factors, arg.ID)
 	return err
@@ -1502,7 +1502,7 @@ type SlideReauthWindowParams struct {
 // Slide the idle window clock on a sliding (non single-decision) window. The hard
 // cap is enforced by the service, which passes min(now+window, hard_expires_at);
 // the NULL guard keeps a concurrently-claimed window from sliding.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) SlideReauthWindow(ctx context.Context, arg SlideReauthWindowParams) (int64, error) {
 	result, err := q.db.Exec(ctx, slideReauthWindow, arg.WindowExpiresAt, arg.ID)
 	if err != nil {
@@ -1535,7 +1535,7 @@ type StrandedRevealPrincipalsForEnvironmentParams struct {
 // holding reveal/reveal-history covering environment E (a grant at E, its project,
 // its org, or the instance) who have no enabled WebAuthn authenticator, so a 0
 // effective window fails their disclosure closed until they enrol one.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) StrandedRevealPrincipalsForEnvironment(ctx context.Context, arg StrandedRevealPrincipalsForEnvironmentParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, strandedRevealPrincipalsForEnvironment, arg.Org, arg.Project, arg.Env)
 	if err != nil {
@@ -1566,7 +1566,7 @@ type TouchSessionParams struct {
 	ID            string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.Exec(ctx, touchSession, arg.LastSeenAt, arg.IdleExpiresAt, arg.ID)
 	return err
@@ -1595,7 +1595,7 @@ type UpdatePasswordCredentialCASParams struct {
 // Compare-and-swap on row_version: a resumable, lock-free `reencrypt` racing
 // a password reset would otherwise write the stale verifier back under the
 // new DEK version and silently resurrect a superseded password.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) UpdatePasswordCredentialCAS(ctx context.Context, arg UpdatePasswordCredentialCASParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updatePasswordCredentialCAS,
 		arg.Verifier,
@@ -1632,7 +1632,7 @@ type UpdateRecoveryCodesCASParams struct {
 
 // Regeneration and consumption both rewrite the batch under a CAS, so a
 // concurrent second presentation of the same code loses and fails closed.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) UpdateRecoveryCodesCAS(ctx context.Context, arg UpdateRecoveryCodesCASParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateRecoveryCodesCAS,
 		arg.Batch,

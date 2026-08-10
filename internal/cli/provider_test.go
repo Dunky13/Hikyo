@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/cli"
+	"github.com/Dunky13/hikyo/internal/cli"
 )
 
 func TestInstanceConfigProviderGrammar(t *testing.T) {

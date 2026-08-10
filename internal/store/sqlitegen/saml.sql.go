@@ -22,7 +22,7 @@ type BindSessionToSAMLProviderParams struct {
 
 // Bind provider provenance before the surrounding session-mint transaction
 // commits. The existing OIDC provider column must be empty.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) BindSessionToSAMLProvider(ctx context.Context, arg BindSessionToSAMLProviderParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, bindSessionToSAMLProvider, arg.SamlProviderID, arg.ID)
 	if err != nil {
@@ -41,7 +41,7 @@ type ConsumeSAMLTransactionParams struct {
 	ID         string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeSAMLTransaction(ctx context.Context, arg ConsumeSAMLTransactionParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, consumeSAMLTransaction, arg.ConsumedAt, arg.ID)
 	if err != nil {
@@ -54,7 +54,7 @@ const deleteExpiredSAMLReplay = `-- name: DeleteExpiredSAMLReplay :execrows
 DELETE FROM saml_replay WHERE expires_at <= ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteExpiredSAMLReplay(ctx context.Context, expiresAt string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteExpiredSAMLReplay, expiresAt)
 	if err != nil {
@@ -68,7 +68,7 @@ DELETE FROM saml_sp_keys WHERE id = ? AND state = 'retiring'
 `
 
 // Erasing a retired key deletes both ciphertext and certificate row.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteRetiringSAMLSPKey(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteRetiringSAMLSPKey, id)
 	if err != nil {
@@ -81,7 +81,7 @@ const deleteSAMLProvider = `-- name: DeleteSAMLProvider :exec
 DELETE FROM saml_providers WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSAMLProvider(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteSAMLProvider, id)
 	return err
@@ -91,7 +91,7 @@ const deleteSessionsForSAMLProvider = `-- name: DeleteSessionsForSAMLProvider :e
 DELETE FROM sessions WHERE saml_provider_id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSessionsForSAMLProvider(ctx context.Context, samlProviderID sql.NullString) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteSessionsForSAMLProvider, samlProviderID)
 	if err != nil {
@@ -106,7 +106,7 @@ SELECT id, state, encrypted_private_key, certificate_der, fingerprint,
 FROM saml_sp_keys WHERE state = 'active'
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetActiveSAMLSPKey(ctx context.Context) (SamlSpKey, error) {
 	row := q.db.QueryRowContext(ctx, getActiveSAMLSPKey)
 	var i SamlSpKey
@@ -132,7 +132,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers WHERE slug = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLProviderBySlug(ctx context.Context, slug string) (SamlProvider, error) {
 	row := q.db.QueryRowContext(ctx, getSAMLProviderBySlug, slug)
 	var i SamlProvider
@@ -171,7 +171,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLProviderForCallback(ctx context.Context, id string) (SamlProvider, error) {
 	row := q.db.QueryRowContext(ctx, getSAMLProviderForCallback, id)
 	var i SamlProvider
@@ -211,7 +211,7 @@ FROM saml_transactions WHERE relay_state_verifier = ?
 
 // RelayState is the pre-validation lookup key: it resolves the expected
 // request/provider before the signed response is parsed and validated once.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLTransactionByRelayState(ctx context.Context, relayStateVerifier []byte) (SamlTransaction, error) {
 	row := q.db.QueryRowContext(ctx, getSAMLTransactionByRelayState, relayStateVerifier)
 	var i SamlTransaction
@@ -247,7 +247,7 @@ type GuardSAMLProviderForMintParams struct {
 	EntityID   string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GuardSAMLProviderForMint(ctx context.Context, arg GuardSAMLProviderForMintParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, guardSAMLProviderForMint, arg.ID, arg.RowVersion, arg.EntityID)
 	if err != nil {
@@ -292,7 +292,7 @@ type InsertSAMLProviderParams struct {
 // SAML SP resolution and lifecycle (#72, saml-sp ADR). These rows decide who
 // a caller is and how strongly they authenticated, so they live on the same
 // proof-free, enumerated authn resolution surface as OIDC.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLProvider(ctx context.Context, arg InsertSAMLProviderParams) error {
 	_, err := q.db.ExecContext(ctx, insertSAMLProvider,
 		arg.ID,
@@ -333,7 +333,7 @@ type InsertSAMLReplayParams struct {
 
 // ON CONFLICT is the atomic replay claim: exactly one concurrent presentation
 // inserts, all others observe zero affected rows.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLReplay(ctx context.Context, arg InsertSAMLReplayParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, insertSAMLReplay,
 		arg.Issuer,
@@ -364,7 +364,7 @@ type InsertSAMLSPKeyParams struct {
 	CreatedAt           string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLSPKey(ctx context.Context, arg InsertSAMLSPKeyParams) error {
 	_, err := q.db.ExecContext(ctx, insertSAMLSPKey,
 		arg.ID,
@@ -405,7 +405,7 @@ type InsertSAMLTransactionParams struct {
 	ExpiresAt           string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLTransaction(ctx context.Context, arg InsertSAMLTransactionParams) error {
 	_, err := q.db.ExecContext(ctx, insertSAMLTransaction,
 		arg.ID,
@@ -436,7 +436,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers ORDER BY slug
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListSAMLProviders(ctx context.Context) ([]SamlProvider, error) {
 	rows, err := q.db.QueryContext(ctx, listSAMLProviders)
 	if err != nil {
@@ -488,7 +488,7 @@ SELECT id, state, encrypted_private_key, certificate_der, fingerprint,
 FROM saml_sp_keys ORDER BY created_at, id
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListSAMLSPKeys(ctx context.Context) ([]SamlSpKey, error) {
 	rows, err := q.db.QueryContext(ctx, listSAMLSPKeys)
 	if err != nil {
@@ -527,7 +527,7 @@ SELECT id FROM saml_providers WHERE id = ?
 
 // SQLite write transactions already serialize; this existence read mirrors
 // PostgreSQL's row lock and preserves one cross-engine delete sequence.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) LockSAMLProviderForDelete(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRowContext(ctx, lockSAMLProviderForDelete, id)
 	var id_2 string
@@ -546,7 +546,7 @@ type MarkSAMLSPKeyRetiringCASParams struct {
 	RowVersion int64
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) MarkSAMLSPKeyRetiringCAS(ctx context.Context, arg MarkSAMLSPKeyRetiringCASParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, markSAMLSPKeyRetiringCAS, arg.ID, arg.RowVersion)
 	if err != nil {
@@ -588,7 +588,7 @@ type UpdateSAMLProviderCASParams struct {
 
 // entity_id and slug are immutable. Every policy/trust-anchor change bumps the
 // version so callback minting can detect reconfiguration and fail closed.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) UpdateSAMLProviderCAS(ctx context.Context, arg UpdateSAMLProviderCASParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateSAMLProviderCAS,
 		arg.DisplayName,

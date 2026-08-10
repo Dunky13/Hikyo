@@ -23,7 +23,7 @@ import (
 // Trusting oasdiff's own breaking/non-breaking taxonomy was considered and
 // rejected: it classes some forbidden changes as warning or info, notably
 // removals after a deprecation window this promise does not offer. Severity
-// is oasdiff's opinion; the allowlist is Wenv's policy.
+// is oasdiff's opinion; the allowlist is Hikyo's policy.
 //
 // State of this gate today: NO FREEZE TAG EXISTS, so there is no immutable
 // base to diff against and the gate cannot bind the live contract yet. It is
@@ -117,7 +117,7 @@ func (v Violation) String() string {
 func CheckFreeze(base, revised []byte) ([]Violation, error) {
 	if err := CheckProfile(revised); err != nil {
 		return []Violation{{
-			ID: "wenv-profile", Text: err.Error(), Level: "ERR",
+			ID: "hikyo-profile", Text: err.Error(), Level: "ERR",
 		}}, nil
 	}
 

@@ -1,5 +1,5 @@
 // Package config parses flags and environment strictly and fail-fast
-// (system-architecture ADR § Tooling defaults): unknown WENV_* keys warn,
+// (system-architecture ADR § Tooling defaults): unknown HIKYO_* keys warn,
 // missing prod-critical keys refuse to start, nothing silently conjures a
 // database.
 package config
@@ -41,9 +41,9 @@ type Config struct {
 	ExternalOrigin string
 
 	// Root-key source descriptor — never the key material itself; the crypto
-	// package reads and validates it at boot. Only `wenv server` consults it.
+	// package reads and validates it at boot. Only `hikyo server` consults it.
 	RootKeyFile    string // --root-key-file (also covers systemd LoadCredential paths)
-	RootKeyFromEnv bool   // WENV_ROOT_KEY is set (documented weakest tier)
+	RootKeyFromEnv bool   // HIKYO_ROOT_KEY is set (documented weakest tier)
 
 	// Auth tuning. The Argon2id parameters may be raised for stronger
 	// hardware and never lowered: boot verifies them against the floor the
@@ -57,36 +57,37 @@ type Config struct {
 	AdmissionBudgetMiB int
 }
 
-// knownEnv is the closed set of WENV_* keys this build understands.
+// knownEnv is the closed set of HIKYO_* keys this build understands.
 var knownEnv = map[string]bool{
-	"WENV_DB":                   true,
-	"WENV_LISTEN":               true,
-	"WENV_TRUSTED_PROXY_CIDRS":  true,
-	"WENV_ROOT_KEY":             true,
-	"WENV_ARGON2_MEMORY_KIB":    true,
-	"WENV_ARGON2_TIME":          true,
-	"WENV_ARGON2_PARALLELISM":   true,
-	"WENV_ADMISSION_BUDGET_MIB": true,
+	"HIKYO_DB":                   true,
+	"HIKYO_LISTEN":               true,
+	"HIKYO_EXTERNAL_ORIGIN":      true,
+	"HIKYO_TRUSTED_PROXY_CIDRS":  true,
+	"HIKYO_ROOT_KEY":             true,
+	"HIKYO_ARGON2_MEMORY_KIB":    true,
+	"HIKYO_ARGON2_TIME":          true,
+	"HIKYO_ARGON2_PARALLELISM":   true,
+	"HIKYO_ADMISSION_BUDGET_MIB": true,
 
 	// Client-side keys. They configure no server behaviour, but they are
 	// listed here because the unknown-key warning is a typo detector: a
-	// mistyped WENV_PROJEKT that produced no warning would silently target
+	// mistyped HIKYO_PROJEKT that produced no warning would silently target
 	// the wrong project, which is the class of mistake the explicit-first
 	// context model exists to prevent.
-	"WENV_STATE_DIR":    true,
-	"WENV_TRUST_BUNDLE": true,
-	"WENV_CONTEXT":      true,
-	"WENV_INSTANCE":     true,
-	"WENV_ORG":          true,
-	"WENV_PROJECT":      true,
-	"WENV_ENV":          true,
-	"XDG_STATE_HOME":    true,
+	"HIKYO_STATE_DIR":    true,
+	"HIKYO_TRUST_BUNDLE": true,
+	"HIKYO_CONTEXT":      true,
+	"HIKYO_INSTANCE":     true,
+	"HIKYO_ORG":          true,
+	"HIKYO_PROJECT":      true,
+	"HIKYO_ENV":          true,
+	"XDG_STATE_HOME":     true,
 }
 
-const devSQLitePath = "wenv-dev.db"
+const devSQLitePath = "hikyo-dev.db"
 
 // Load parses configuration for a subcommand. getenv supplies single keys;
-// environ (os.Environ() shape) is scanned for unknown WENV_* keys and may be
+// environ (os.Environ() shape) is scanned for unknown HIKYO_* keys and may be
 // nil. Returned warnings are for the caller to log — Load itself never logs.
 func Load(subcommand string, args []string, getenv func(string) string, environ []string) (*Config, []string, error) {
 	fs := flag.NewFlagSet(subcommand, flag.ContinueOnError)
@@ -94,7 +95,7 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	listen, autoMigrate, rootKeyFile := new(string), new(bool), new(string)
 	*autoMigrate = true
 	if subcommand == "server" {
-		listen = fs.String("listen", "", "listen address (default 127.0.0.1:8080, env WENV_LISTEN)")
+		listen = fs.String("listen", "", "listen address (default 127.0.0.1:8080, env HIKYO_LISTEN)")
 		autoMigrate = fs.Bool("auto-migrate", true, "apply pending migrations at boot")
 		rootKeyFile = fs.String("root-key-file", "", "path to the 64-hex-char root key file (mode 0600)")
 	}
@@ -108,7 +109,7 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	var warnings []string
 	for _, kv := range environ {
 		k, _, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(k, "WENV_") && !knownEnv[k] {
+		if ok && strings.HasPrefix(k, "HIKYO_") && !knownEnv[k] {
 			warnings = append(warnings, fmt.Sprintf("unknown environment key %s ignored", k))
 		}
 	}
@@ -118,57 +119,57 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		AutoMigrate:    *autoMigrate,
 		Listen:         *listen,
 		RootKeyFile:    *rootKeyFile,
-		RootKeyFromEnv: getenv("WENV_ROOT_KEY") != "",
+		RootKeyFromEnv: getenv("HIKYO_ROOT_KEY") != "",
 	}
 	if cfg.RootKeyFile != "" && cfg.RootKeyFromEnv {
-		return nil, nil, fmt.Errorf("both --root-key-file and WENV_ROOT_KEY are set: configure exactly one root-key source")
+		return nil, nil, fmt.Errorf("both --root-key-file and HIKYO_ROOT_KEY are set: configure exactly one root-key source")
 	}
 	if cfg.Listen == "" {
-		cfg.Listen = getenv("WENV_LISTEN")
+		cfg.Listen = getenv("HIKYO_LISTEN")
 	}
 	if cfg.Listen == "" {
 		cfg.Listen = "127.0.0.1:8080"
 	}
 	if cfg.ExternalOrigin == "" {
-		cfg.ExternalOrigin = getenv("WENV_EXTERNAL_ORIGIN")
+		cfg.ExternalOrigin = getenv("HIKYO_EXTERNAL_ORIGIN")
 	}
 	if cfg.ExternalOrigin == "" {
 		cfg.ExternalOrigin = "http://" + cfg.Listen
 	}
 	if subcommand == "server" || subcommand == "admin" {
 		var err error
-		if cfg.Argon2MemoryKiB, err = uintEnv(getenv, "WENV_ARGON2_MEMORY_KIB", 64*1024); err != nil {
+		if cfg.Argon2MemoryKiB, err = uintEnv(getenv, "HIKYO_ARGON2_MEMORY_KIB", 64*1024); err != nil {
 			return nil, nil, err
 		}
-		if cfg.Argon2Time, err = uintEnv(getenv, "WENV_ARGON2_TIME", 3); err != nil {
+		if cfg.Argon2Time, err = uintEnv(getenv, "HIKYO_ARGON2_TIME", 3); err != nil {
 			return nil, nil, err
 		}
-		parallelism, err := uintEnv(getenv, "WENV_ARGON2_PARALLELISM", 2)
+		parallelism, err := uintEnv(getenv, "HIKYO_ARGON2_PARALLELISM", 2)
 		if err != nil {
 			return nil, nil, err
 		}
 		if parallelism > 255 {
-			return nil, nil, fmt.Errorf("WENV_ARGON2_PARALLELISM: %d exceeds the 255 Argon2id allows", parallelism)
+			return nil, nil, fmt.Errorf("HIKYO_ARGON2_PARALLELISM: %d exceeds the 255 Argon2id allows", parallelism)
 		}
 		cfg.Argon2Parallelism = uint8(parallelism)
-		budget, err := uintEnv(getenv, "WENV_ADMISSION_BUDGET_MIB", 272)
+		budget, err := uintEnv(getenv, "HIKYO_ADMISSION_BUDGET_MIB", 272)
 		if err != nil {
 			return nil, nil, err
 		}
 		cfg.AdmissionBudgetMiB = int(budget)
 	}
 	if subcommand == "server" {
-		trustedProxyCIDRs, err := parseTrustedProxyCIDRs(getenv("WENV_TRUSTED_PROXY_CIDRS"))
+		trustedProxyCIDRs, err := parseTrustedProxyCIDRs(getenv("HIKYO_TRUSTED_PROXY_CIDRS"))
 		if err != nil {
 			return nil, nil, err
 		}
 		cfg.TrustedProxyCIDRs = trustedProxyCIDRs
 		if !isLoopbackListen(cfg.Listen) && len(cfg.TrustedProxyCIDRs) == 0 {
-			return nil, nil, fmt.Errorf("non-loopback plaintext listen %q requires WENV_TRUSTED_PROXY_CIDRS", cfg.Listen)
+			return nil, nil, fmt.Errorf("non-loopback plaintext listen %q requires HIKYO_TRUSTED_PROXY_CIDRS", cfg.Listen)
 		}
 	}
 
-	dbURL := getenv("WENV_DB")
+	dbURL := getenv("HIKYO_DB")
 	switch {
 	case dbURL != "":
 		ds, err := parseDatastore(dbURL)
@@ -179,7 +180,7 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 	case cfg.Dev:
 		cfg.Store = Datastore{Engine: EngineSQLite, Path: devSQLitePath}
 	default:
-		return nil, nil, fmt.Errorf("no datastore configured: set WENV_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
+		return nil, nil, fmt.Errorf("no datastore configured: set HIKYO_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
 	}
 	return cfg, warnings, nil
 }
@@ -208,7 +209,7 @@ func parseTrustedProxyCIDRs(raw string) ([]string, error) {
 	for _, part := range parts {
 		cidr := strings.TrimSpace(part)
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			return nil, fmt.Errorf("WENV_TRUSTED_PROXY_CIDRS: invalid CIDR %q", cidr)
+			return nil, fmt.Errorf("HIKYO_TRUSTED_PROXY_CIDRS: invalid CIDR %q", cidr)
 		}
 		cidrs = append(cidrs, cidr)
 	}
@@ -232,7 +233,7 @@ func parseDatastore(raw string) (Datastore, error) {
 	case strings.HasPrefix(raw, "sqlite:"):
 		path := strings.TrimPrefix(raw, "sqlite:")
 		if path == "" {
-			return Datastore{}, fmt.Errorf("WENV_DB sqlite: requires a file path")
+			return Datastore{}, fmt.Errorf("HIKYO_DB sqlite: requires a file path")
 		}
 		return Datastore{Engine: EngineSQLite, Path: path}, nil
 	case strings.HasPrefix(raw, "postgres://"), strings.HasPrefix(raw, "postgresql://"):
@@ -247,7 +248,7 @@ func parseDatastore(raw string) (Datastore, error) {
 		if !hasScheme {
 			scheme = "<none>"
 		}
-		return Datastore{}, fmt.Errorf("WENV_DB: unsupported datastore scheme %q (want sqlite:PATH or postgres://...)", scheme)
+		return Datastore{}, fmt.Errorf("HIKYO_DB: unsupported datastore scheme %q (want sqlite:PATH or postgres://...)", scheme)
 	}
 }
 
@@ -265,22 +266,22 @@ func validatePostgresTLS(dsn string) error {
 		// the underlying cause.
 		var uerr *url.Error
 		if errors.As(err, &uerr) {
-			return fmt.Errorf("WENV_DB: invalid postgres DSN: %w", uerr.Err)
+			return fmt.Errorf("HIKYO_DB: invalid postgres DSN: %w", uerr.Err)
 		}
-		return fmt.Errorf("WENV_DB: invalid postgres DSN")
+		return fmt.Errorf("HIKYO_DB: invalid postgres DSN")
 	}
 	host := u.Hostname()
 	if hostParam := u.Query().Get("host"); hostParam != "" {
 		if host != "" && host != hostParam {
-			return fmt.Errorf("WENV_DB: conflicting hosts %q and ?host=%q", host, hostParam)
+			return fmt.Errorf("HIKYO_DB: conflicting hosts %q and ?host=%q", host, hostParam)
 		}
 		host = hostParam
 	}
 	if host == "" {
-		return fmt.Errorf("WENV_DB: postgres DSN must name its host explicitly (no implicit PGHOST/default resolution)")
+		return fmt.Errorf("HIKYO_DB: postgres DSN must name its host explicitly (no implicit PGHOST/default resolution)")
 	}
 	if strings.Contains(host, ",") {
-		return fmt.Errorf("WENV_DB: multi-host DSNs are not supported")
+		return fmt.Errorf("HIKYO_DB: multi-host DSNs are not supported")
 	}
 	if strings.HasPrefix(host, "/") {
 		return nil // same-host unix socket
@@ -295,5 +296,5 @@ func validatePostgresTLS(dsn string) error {
 	case "verify-full", "verify-ca":
 		return nil
 	}
-	return fmt.Errorf("WENV_DB: remote postgres host %q requires sslmode=verify-full or verify-ca (no plaintext on a non-loopback boundary)", host)
+	return fmt.Errorf("HIKYO_DB: remote postgres host %q requires sslmode=verify-full or verify-ca (no plaintext on a non-loopback boundary)", host)
 }

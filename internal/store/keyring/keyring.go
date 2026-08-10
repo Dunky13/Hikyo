@@ -18,10 +18,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // Store adapts *store.DB to crypto.KeyStore.

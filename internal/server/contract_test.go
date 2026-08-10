@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/server"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // HTTP contract tests (mvp-boundary S1): the wire response is validated
@@ -545,7 +545,7 @@ func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
 	// returns raw options bytes, the handler round-trips them through the
 	// free-form object, and the response satisfies the contract (validated by
 	// call()). The base64url fields the authenticator signs over must survive.
-	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"wenv.example","timeout":60000}}`)
+	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"hikyo.example","timeout":60000}}`)
 	srv := newTestServer(t, stubAuth{
 		passkeyStart: func(context.Context) ([]byte, error) { return opts, nil },
 	}, stubOrgs{})
@@ -568,7 +568,7 @@ func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
 
 // TestBrowserPasskeyLoginTokenOnlyOnCookie is the B2 regression: a passkey login
 // mints a BROWSER session, whose token must reach the caller ONLY on the
-// __Host-wenv HttpOnly cookie — never echoed into the script-readable JSON body
+// __Host-hikyo HttpOnly cookie — never echoed into the script-readable JSON body
 // where injected same-origin script could exfiltrate the bearer.
 func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
 	const token = "ew_1_browser_stub"
@@ -602,15 +602,15 @@ func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
 		t.Errorf("the session token leaked into the response body: %s", payload)
 	}
 
-	// The token is delivered on the __Host-wenv cookie, HttpOnly + Secure.
+	// The token is delivered on the __Host-hikyo cookie, HttpOnly + Secure.
 	var got *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "__Host-wenv" {
+		if c.Name == "__Host-hikyo" {
 			got = c
 		}
 	}
 	if got == nil {
-		t.Fatal("no __Host-wenv session cookie was set")
+		t.Fatal("no __Host-hikyo session cookie was set")
 	}
 	if got.Value != token {
 		t.Errorf("cookie token = %q, want %q", got.Value, token)

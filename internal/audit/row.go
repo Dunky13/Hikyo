@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // TimeFormat is the fixed-width UTC microsecond text form audit timestamps

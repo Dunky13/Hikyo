@@ -88,7 +88,7 @@ BEGIN
     IF NEW.commit_seq IS NOT NULL THEN
         RAISE EXCEPTION 'audit_tenant_events.commit_seq is database-owned';
     END IF;
-    -- 0x57454E56 = "WENV"; 84 names this appender's issue/lock class.
+    -- 0x57454E56 = "HIKYO"; 84 names this appender's issue/lock class.
     PERFORM pg_advisory_xact_lock(1464159830, 84);
     UPDATE audit_tenant_events
     SET commit_seq = nextval('audit_tenant_commit_seq')

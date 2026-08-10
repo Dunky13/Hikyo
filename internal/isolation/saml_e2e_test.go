@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/samltest"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/samltest"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 func configureSAMLProvider(t *testing.T, auth *service.Auth, admin domain.PrincipalID) *samltest.IdP {
@@ -59,8 +59,8 @@ func samlResponseForStart(t *testing.T, idp *samltest.IdP, start service.SAMLSta
 	}
 	encoded, err := idp.SignedResponse(samltest.Response{
 		RequestID: request.ID, ResponseID: responseID, AssertionID: assertionID,
-		ACSURL:     "https://wenv.test/api/v1/auth/saml/saml-idp/acs",
-		SPEntityID: "https://wenv.test/api/v1/auth/saml",
+		ACSURL:     "https://hikyo.test/api/v1/auth/saml/saml-idp/acs",
+		SPEntityID: "https://hikyo.test/api/v1/auth/saml",
 		NameID:     "saml-user", Now: time.Now().UTC(),
 	})
 	if err != nil {
@@ -73,7 +73,7 @@ func runSAMLLoginReplay(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx := t.Context()
 	auth, admin, password := oidcAdmin(t, db)
-	auth.ExternalOrigin = "https://wenv.test"
+	auth.ExternalOrigin = "https://hikyo.test"
 	idp := configureSAMLProvider(t, auth, admin)
 	providers := &service.SAMLProviders{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 	downgrade := service.SAMLProviderInput{
@@ -213,7 +213,7 @@ func runSAMLProviderRecreation(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx := t.Context()
 	auth, admin, password := oidcAdmin(t, db)
-	auth.ExternalOrigin = "https://wenv.test"
+	auth.ExternalOrigin = "https://hikyo.test"
 	idp := configureSAMLProvider(t, auth, admin)
 	providers := &service.SAMLProviders{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 
@@ -278,7 +278,7 @@ func runSAMLSPKeyLifecycle(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx := t.Context()
 	auth, admin, _ := oidcAdmin(t, db)
-	auth.ExternalOrigin = "https://wenv.test"
+	auth.ExternalOrigin = "https://hikyo.test"
 	configureSAMLProvider(t, auth, admin)
 	providers := &service.SAMLProviders{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 	actor := service.LocalPrincipal(admin)

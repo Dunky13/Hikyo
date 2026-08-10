@@ -6,13 +6,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // Factor service (#54, human-auth ADR § Factors, § Account-security mutations).
@@ -45,7 +45,7 @@ const RecoveryBatchSize = 10
 // is no per-instance issuer string in this slice; when instance naming lands it
 // supplies this.
 // ponytail: fixed issuer label; swap for the instance name once one exists.
-const TOTPIssuer = "wenv"
+const TOTPIssuer = "hikyo"
 
 // Structural factor refusals are loud (400), because the caller is
 // authenticated and acting on their OWN account: naming the state helps them

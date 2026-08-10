@@ -8,13 +8,13 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
-	"github.com/Dunky13/wenv/internal/webauthnrp"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/webauthnrp"
 )
 
 // WebAuthn service (#54, human-auth ADR § WebAuthn relying-party policy, §

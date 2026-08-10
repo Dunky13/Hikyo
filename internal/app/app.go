@@ -13,14 +13,14 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/config"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/server"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/keyring"
-	"github.com/Dunky13/wenv/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/config"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/keyring"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
 // ClientVerbs are the fixed not-yet-implemented client-side subcommands from
@@ -49,7 +49,7 @@ func storeConfig(cfg *config.Config) store.Config {
 	}
 }
 
-// RunMigrate is `wenv migrate`: explicit migration application. Loads no
+// RunMigrate is `hikyo migrate`: explicit migration application. Loads no
 // keyring (DDL only).
 func RunMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	sc := storeConfig(cfg)
@@ -74,7 +74,7 @@ type Server struct {
 // devRootKeyName sits beside the dev sqlite database (cwd when no sqlite
 // path exists). Dev bootstrap only; a production start never generates a
 // root key.
-const devRootKeyName = "wenv-dev.rootkey"
+const devRootKeyName = "hikyo-dev.rootkey"
 
 func devRootKeyPath(cfg *config.Config) string {
 	if cfg.Store.Engine == config.EngineSQLite && cfg.Store.Path != "" {
@@ -90,7 +90,7 @@ func devRootKeyPath(cfg *config.Config) string {
 // The dev generation is a recorded deviation from the encryption ADR's
 // refusal 1 ("the server never auto-generates a root key on first run"),
 // forced by the architecture ADR's zero-config `--dev` evaluation mode: an
-// ephemeral key would brick wenv-dev.db on every restart, and refusing would
+// ephemeral key would brick hikyo-dev.db on every restart, and refusing would
 // make --dev not zero-config. The rationale behind refusal 1 (a silent key
 // nobody backed up, discovered at restore) does not bite an evaluation
 // database sitting next to its own key file, and the generation is loud.
@@ -118,8 +118,8 @@ func resolveRootKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 	}
 	var envValue string
 	if cfg.RootKeyFromEnv {
-		envValue = os.Getenv("WENV_ROOT_KEY")
-		log.Warn("root key delivered via WENV_ROOT_KEY: the value stays readable in the process environment for the whole lifetime; prefer --root-key-file or a systemd credential")
+		envValue = os.Getenv("HIKYO_ROOT_KEY")
+		log.Warn("root key delivered via HIKYO_ROOT_KEY: the value stays readable in the process environment for the whole lifetime; prefer --root-key-file or a systemd credential")
 	}
 	return crypto.ReadRootKey(file, envValue)
 }
@@ -128,7 +128,7 @@ func resolveRootKey(cfg *config.Config, log *slog.Logger) ([]byte, error) {
 // key material exists, migrations (auto-apply by default; with auto-apply
 // disabled a pending migration state refuses to serve), datastore open with
 // the boot-enforced pragma policy, keyring load (root key read, master key
-// unwrapped or minted, root key zeroed — `wenv server` is the only mode that
+// unwrapped or minted, root key zeroed — `hikyo server` is the only mode that
 // does this), then the listener. Any error means the process must exit
 // without serving.
 func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, error) {

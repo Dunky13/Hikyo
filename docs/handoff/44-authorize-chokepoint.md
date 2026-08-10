@@ -1,6 +1,6 @@
 # Handoff: #44 authorize chokepoint
 
-Issue: https://github.com/Dunky13/wenv/issues/44 (parent #41). Spec:
+Issue: https://github.com/Dunky13/hikyo/issues/44 (parent #41). Spec:
 `docs/adr/tenant-isolation.md` and `docs/adr/permission-model.md` on
 `wayfinder-docs`.
 
@@ -66,7 +66,7 @@ Proof-carrying authorization, end to end, with a demonstration operation set
   (scope triple, gap-refusing CHECK, composite FKs per scope class; no
   uniqueness over the triple — NULL-scope UNIQUE semantics diverge between
   engines, dedup is #55's grant API). Scope-class directives
-  (`-- wenv:table <t> class=<c> chain=<cols>`) declare every table; the
+  (`-- hikyo:table <t> class=<c> chain=<cols>`) declare every table; the
   derived registry is total or the build fails.
 - `internal/lint` — the analyzers, run as build-failing tests against
   the real repo, each with negative fixtures proving it catches what it
@@ -217,7 +217,7 @@ which is the ADR's own posture, not a gap this ticket introduces.
   formula, storeOps) — a store method without a registered operation, or
   vice versa, fails invariant 6; a new wire entry point fails invariant 1
   until classified.
-- Adding a table: declare `-- wenv:table` in the migration (both engines,
+- Adding a table: declare `-- hikyo:table` in the migration (both engines,
   identical) or the derived registry totality fails; tenant-owned tables
   get chain columns + composite FKs or invariant 10's constraint probes
   won't hold.

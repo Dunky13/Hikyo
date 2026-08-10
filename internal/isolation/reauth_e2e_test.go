@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
-	"github.com/Dunky13/wenv/internal/webauthntest"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/webauthntest"
 )
 
 // TestBreakGlassHasNoNetworkRoute asserts the break-glass reset
-// (`wenv admin reset-credential`) has no HTTP path at all: the ONLY
+// (`hikyo admin reset-credential`) has no HTTP path at all: the ONLY
 // credential-reset route the contract carries is the network account path, and
 // break-glass is host-local (ClassSystem, network-unreachable) by construction.
 func TestBreakGlassHasNoNetworkRoute(t *testing.T) {

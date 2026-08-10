@@ -8,15 +8,15 @@
 -- are resolved on the proof-free surface, because the proof is what that
 -- answer produces.
 --
--- wenv:table totp_credentials class=authn chain=-
--- wenv:table totp_challenges class=authn chain=-
--- wenv:table recovery_codes class=authn chain=-
--- wenv:table reauth_windows class=authn chain=-
+-- hikyo:table totp_credentials class=authn chain=-
+-- hikyo:table totp_challenges class=authn chain=-
+-- hikyo:table recovery_codes class=authn chain=-
+-- hikyo:table reauth_windows class=authn chain=-
 -- credential_authorities_new is the transient rebuild target for
 -- credential_authorities. Postgres could alter the CHECK in place, but the
 -- rebuild is done identically to the sqlite dialect so the analyzer's derived
 -- table registry is the same on both engines.
--- wenv:table credential_authorities_new class=authn chain=-
+-- hikyo:table credential_authorities_new class=authn chain=-
 
 -- Browser sessions carry a synchronizer CSRF token; CLI sessions do not (a
 -- cookie's attributes protect nothing on a non-browser client). The token is a

@@ -19,8 +19,8 @@
 -- forensic total order under concurrency (audit-model ADR, stated).
 -- Gaplessness is promised nowhere.
 --
--- wenv:table audit_tenant_events class=org chain=org_id
--- wenv:table audit_instance_events class=instance chain=-
+-- hikyo:table audit_tenant_events class=org chain=org_id
+-- hikyo:table audit_instance_events class=instance chain=-
 
 CREATE TABLE audit_tenant_events (
     seq BIGSERIAL PRIMARY KEY,

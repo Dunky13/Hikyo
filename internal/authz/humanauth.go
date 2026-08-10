@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/authn"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/authn"
 )
 
 // The in-transaction human-authentication surface.
@@ -58,7 +58,7 @@ func (a *TxAuthorizer) AccountByPrincipal(ctx context.Context, p domain.Principa
 }
 
 // AccountCount answers the bootstrap path's one question. It has no network
-// route: `wenv admin create` runs on the server's own host.
+// route: `hikyo admin create` runs on the server's own host.
 func (a *TxAuthorizer) AccountCount(ctx context.Context) (int64, error) {
 	return a.r.AccountCount(ctx)
 }
@@ -135,7 +135,7 @@ func (a *TxAuthorizer) AdvanceGeneration(ctx context.Context, p domain.Principal
 }
 
 // CreateHumanPrincipal and CreateAccount are the bootstrap path's writes,
-// reachable only from `wenv admin create` on the server's own host — the
+// reachable only from `hikyo admin create` on the server's own host — the
 // closed local-authority exception set's boot/bootstrap member. There is no
 // HTTP route to either, and the classification-totality invariant is what
 // keeps that true.

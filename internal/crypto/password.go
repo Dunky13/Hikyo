@@ -16,7 +16,7 @@ import (
 // point: one place derives key material, one place compares it in constant
 // time, and no auth package grows a second opinion about either.
 //
-// What Wenv owns here is parameter policy and the boot floor. The KDF itself
+// What Hikyo owns here is parameter policy and the boot floor. The KDF itself
 // is x/crypto's; nothing about it is hand-rolled.
 
 // SaltSize is 16 random bytes per verifier, as the ADR fixes.

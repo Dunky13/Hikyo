@@ -1,6 +1,6 @@
 # Handoff: #84 gap-free postgres audit export ordering
 
-Issue: https://github.com/Dunky13/wenv/issues/84 (parent #41; required by #25
+Issue: https://github.com/Dunky13/hikyo/issues/84 (parent #41; required by #25
 before an export route ships).
 
 ## Decision
@@ -72,7 +72,7 @@ Postgres transaction advisory locks are built in and need no server setting,
 so #84 adds no boot-verification requirement beyond the existing `fsync=on`
 and `synchronous_commit=on` checks.
 
-Migration `00011` must remain transactional. The supported `wenv migrate` and
+Migration `00011` must remain transactional. The supported `hikyo migrate` and
 auto-migrate paths use goose's transactional default, so no writer can commit
 between the backfill and trigger installation. Running the statements manually
 or marking this migration `NO TRANSACTION` is unsupported: either can strand a

@@ -9,9 +9,9 @@ import (
 
 	"github.com/pquerna/otp/totp"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // The A1 factor slice end to end on a real datastore (#54, human-auth ADR §

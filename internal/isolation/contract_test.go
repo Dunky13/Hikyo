@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // The contract cross-check.
@@ -88,7 +88,7 @@ func TestContractClassesMatchTheWireRegistry(t *testing.T) {
 			continue // reported by TestContractRoutesMatchTheRouter
 		}
 		if got := classNames[class]; got != op.Class {
-			t.Errorf("%s: contract says x-wenv-class %q, the wire registry says %q — the document describes an authorization posture the code does not have",
+			t.Errorf("%s: contract says x-hikyo-class %q, the wire registry says %q — the document describes an authorization posture the code does not have",
 				id, op.Class, got)
 		}
 	}

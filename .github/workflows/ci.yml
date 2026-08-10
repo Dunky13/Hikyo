@@ -70,13 +70,13 @@ jobs:
           go-version-file: go.mod
       - name: Chart renders and carries release substitution anchors
         run: |
-          grep -Fx "  repository: ghcr.io/dunky13/wenv" chart/wenv/values.yaml
-          grep -Fx "  digest: sha256:RELEASE_IMAGE_DIGEST" chart/wenv/values.yaml
-          helm lint chart/wenv --set database.existingSecret=fixture \
+          grep -Fx "  repository: ghcr.io/dunky13/hikyo" chart/hikyo/values.yaml
+          grep -Fx "  digest: sha256:RELEASE_IMAGE_DIGEST" chart/hikyo/values.yaml
+          helm lint chart/hikyo --set database.existingSecret=fixture \
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
-          helm template fixture chart/wenv --set database.existingSecret=fixture \
+          helm template fixture chart/hikyo --set database.existingSecret=fixture \
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}' >/dev/null
-          ! helm template fixture chart/wenv \
+          ! helm template fixture chart/hikyo \
             --set database.existingSecret=fixture >/dev/null 2>&1
       - name: Release trust and refusal fixtures
         run: ./scripts/release/test-fixtures.sh
@@ -154,13 +154,13 @@ jobs:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
         env:
-          POSTGRES_USER: wenv
-          POSTGRES_PASSWORD: wenv
-          POSTGRES_DB: wenv_test
+          POSTGRES_USER: hikyo
+          POSTGRES_PASSWORD: hikyo
+          POSTGRES_DB: hikyo_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U wenv"
+          --health-cmd "pg_isready -U hikyo"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -191,5 +191,5 @@ jobs:
 
       - name: Test (sqlite + postgres conformance)
         env:
-          WENV_TEST_POSTGRES_DSN: postgres://wenv:wenv@127.0.0.1:5432/wenv_test
+          HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
         run: go test ./...

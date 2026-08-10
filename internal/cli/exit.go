@@ -15,7 +15,7 @@ import (
 )
 
 // The closed exit-code set (api-cli-surface ADR § Output grammar). It is
-// scoped to Wenv's own termination, and it is frozen from the first stable
+// scoped to Hikyo's own termination, and it is frozen from the first stable
 // release: scripts branch on codes, never on parsing error prose.
 const (
 	// ExitOK is success.
@@ -63,10 +63,10 @@ func Report(stderr io.Writer, err error) int {
 	}
 	var e *Error
 	if errors.As(err, &e) {
-		fmt.Fprintln(stderr, "wenv:", e.Err)
+		fmt.Fprintln(stderr, "hikyo:", e.Err)
 		return e.Code
 	}
-	fmt.Fprintln(stderr, "wenv:", err)
+	fmt.Fprintln(stderr, "hikyo:", err)
 	return ExitInternal
 }
 

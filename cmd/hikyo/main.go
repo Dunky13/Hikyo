@@ -1,4 +1,4 @@
-// wenv is the multicall binary: `wenv server` and `wenv migrate` are real;
+// hikyo is the multicall binary: `hikyo server` and `hikyo migrate` are real;
 // client verbs are stubs until their tickets land.
 package main
 
@@ -10,9 +10,9 @@ import (
 	"slices"
 	"syscall"
 
-	"github.com/Dunky13/wenv/internal/app"
-	"github.com/Dunky13/wenv/internal/cli"
-	"github.com/Dunky13/wenv/internal/config"
+	"github.com/Dunky13/hikyo/internal/app"
+	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Dunky13/hikyo/internal/config"
 )
 
 // Set by GoReleaser. Development builds deliberately identify themselves as
@@ -58,10 +58,10 @@ func run() int {
 			Workdir: workdir(),
 		}, os.Args[1:])
 	case slices.Contains(app.ClientVerbs, cmd):
-		fmt.Fprintf(os.Stderr, "wenv %s: not implemented yet\n", cmd)
+		fmt.Fprintf(os.Stderr, "hikyo %s: not implemented yet\n", cmd)
 		return 2
 	default:
-		fmt.Fprintf(os.Stderr, "wenv: unknown command %q\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "hikyo: unknown command %q\n\n", cmd)
 		usage()
 		return 2
 	}
@@ -69,15 +69,15 @@ func run() int {
 
 func versionString() string {
 	if version == "dev" {
-		return "wenv dev"
+		return "hikyo dev"
 	}
-	return fmt.Sprintf("wenv %s (%s, %s)", version, commit, buildDate)
+	return fmt.Sprintf("hikyo %s (%s, %s)", version, commit, buildDate)
 }
 
 func runServer(ctx context.Context, args []string) int {
 	cfg, warnings, err := config.Load("server", args, os.Getenv, os.Environ())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "wenv server:", err)
+		fmt.Fprintln(os.Stderr, "hikyo server:", err)
 		return 1
 	}
 	log := app.Logger(cfg.Dev)
@@ -96,7 +96,7 @@ func runServer(ctx context.Context, args []string) int {
 	return 0
 }
 
-// runAdmin is the local-admin group: `wenv admin create` on the server's own
+// runAdmin is the local-admin group: `hikyo admin create` on the server's own
 // host. It is a client verb of the same binary, not a new multicall mode -
 // the mode set (server/operator/migrate/client) is unchanged.
 func runAdmin(ctx context.Context, args []string) int {
@@ -105,7 +105,7 @@ func runAdmin(ctx context.Context, args []string) int {
 	// environment-only, exactly as it is for the server it runs beside.
 	cfg, warnings, err := config.Load("admin", nil, os.Getenv, os.Environ())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "wenv admin:", err)
+		fmt.Fprintln(os.Stderr, "hikyo admin:", err)
 		return 2
 	}
 	log := app.Logger(cfg.Dev)
@@ -113,7 +113,7 @@ func runAdmin(ctx context.Context, args []string) int {
 		log.Warn(w)
 	}
 	if err := app.RunAdmin(ctx, cfg, log, args, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "wenv admin:", err)
+		fmt.Fprintln(os.Stderr, "hikyo admin:", err)
 		return 1
 	}
 	return 0
@@ -130,7 +130,7 @@ func workdir() string {
 func runMigrate(ctx context.Context, args []string) int {
 	cfg, warnings, err := config.Load("migrate", args, os.Getenv, os.Environ())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "wenv migrate:", err)
+		fmt.Fprintln(os.Stderr, "hikyo migrate:", err)
 		return 1
 	}
 	log := app.Logger(cfg.Dev)
@@ -145,17 +145,17 @@ func runMigrate(ctx context.Context, args []string) int {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `wenv — one binary, several roles
+	fmt.Fprintf(os.Stderr, `hikyo — one binary, several roles
 
 server commands:
-  wenv server [--dev] [--listen ADDR] [--auto-migrate=BOOL]
-  wenv migrate
+  hikyo server [--dev] [--listen ADDR] [--auto-migrate=BOOL]
+  hikyo migrate
 
 version:
-  wenv version
+  hikyo version
 
 local host authority (server host only):
-  wenv admin create --username USER
+  hikyo admin create --username USER
 
 client verbs:
   %v

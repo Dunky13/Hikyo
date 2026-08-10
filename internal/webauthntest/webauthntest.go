@@ -28,7 +28,7 @@ type Device struct {
 // realistic default a platform authenticator produces.
 func New(rpID, origin string) *Device {
 	return &Device{
-		rp: vw.RelyingParty{Name: "wenv", ID: rpID, Origin: origin},
+		rp: vw.RelyingParty{Name: "hikyo", ID: rpID, Origin: origin},
 		opts: vw.AuthenticatorOptions{
 			ClientExtensionResults: map[string]any{"credProps": map[string]any{"rk": true}},
 		},

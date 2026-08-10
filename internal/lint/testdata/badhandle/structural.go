@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // poolHolder is the structural-interface escape: *store.DB satisfies it

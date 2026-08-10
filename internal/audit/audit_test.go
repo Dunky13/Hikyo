@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // --- token-grammar redaction (CI invariant 4: round-trip over the ew_

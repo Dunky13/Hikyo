@@ -11,11 +11,11 @@
 -- table with no directive fails the build. `chain` names the tenant-chain
 -- columns the analyzer requires as top-level conjuncts (`-` = none).
 --
--- wenv:table orgs class=org chain=id
--- wenv:table projects class=project chain=org_id
--- wenv:table environments class=environment chain=org_id,project_id
--- wenv:table principals class=instance chain=-
--- wenv:table grants class=authn chain=-
+-- hikyo:table orgs class=org chain=id
+-- hikyo:table projects class=project chain=org_id
+-- hikyo:table environments class=environment chain=org_id,project_id
+-- hikyo:table principals class=instance chain=-
+-- hikyo:table grants class=authn chain=-
 
 CREATE TABLE projects (
     id TEXT PRIMARY KEY,

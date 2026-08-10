@@ -13,7 +13,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 func runSAMLIdentityBackfill(t *testing.T, cfg store.Config) {
@@ -57,12 +57,12 @@ func TestSAMLIdentityBackfillSQLite(t *testing.T) {
 }
 
 func TestSAMLIdentityBackfillPostgres(t *testing.T) {
-	dsn := os.Getenv("WENV_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("HIKYO_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		if os.Getenv("CI") != "" {
-			t.Fatal("CI run without WENV_TEST_POSTGRES_DSN: the postgres migration leg must not silently skip in CI")
+			t.Fatal("CI run without HIKYO_TEST_POSTGRES_DSN: the postgres migration leg must not silently skip in CI")
 		}
-		t.Skip("WENV_TEST_POSTGRES_DSN not set")
+		t.Skip("HIKYO_TEST_POSTGRES_DSN not set")
 	}
 	parsed, err := url.Parse(dsn)
 	if err != nil {

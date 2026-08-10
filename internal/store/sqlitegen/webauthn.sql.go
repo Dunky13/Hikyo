@@ -26,7 +26,7 @@ type AdvanceWebAuthnSignCountParams struct {
 // Sign-count advance under a row_version CAS (B9): the presented counter is
 // written only if the row has not moved, so two concurrent assertions cannot
 // both advance it and a stale read cannot rewind it.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) AdvanceWebAuthnSignCount(ctx context.Context, arg AdvanceWebAuthnSignCountParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, advanceWebAuthnSignCount,
 		arg.SignCount,
@@ -54,7 +54,7 @@ type ConsumeWebAuthnCeremonyParams struct {
 // Single-use consumption: the NULL guard is the atomic claim. credential_id is
 // stamped here (the passkey that answered), so the ceremony row keeps resolving
 // a minted session to the credential that authored it after consume.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeWebAuthnCeremony(ctx context.Context, arg ConsumeWebAuthnCeremonyParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, consumeWebAuthnCeremony, arg.ConsumedAt, arg.CredentialID, arg.ID)
 	if err != nil {
@@ -73,7 +73,7 @@ DELETE FROM sessions WHERE ceremony_id IN (
 // given credential dies when that credential is found cloned. A session traces
 // to its credential through the ceremony it was minted from (sessions.ceremony_id
 // -> webauthn_ceremonies.credential_id).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSessionsForWebAuthnCredential(ctx context.Context, credentialID sql.NullString) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteSessionsForWebAuthnCredential, credentialID)
 	if err != nil {
@@ -94,7 +94,7 @@ type DeleteWebAuthnCredentialParams struct {
 // De-enrolment under an account_id predicate (defence in depth): even if the
 // service-layer ownership check regresses, the DELETE cannot touch a row another
 // account owns, and zero affected rows is the caller's fail-closed refusal.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteWebAuthnCredential(ctx context.Context, arg DeleteWebAuthnCredentialParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteWebAuthnCredential, arg.ID, arg.AccountID)
 	if err != nil {
@@ -117,7 +117,7 @@ type DisableWebAuthnCredentialParams struct {
 
 // The clone response (B9): a real sign-count regression on a non-backup
 // credential disables it. Re-enable is an account-security mutation.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DisableWebAuthnCredential(ctx context.Context, arg DisableWebAuthnCredentialParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, disableWebAuthnCredential, arg.DisabledAt, arg.ID, arg.RowVersion)
 	if err != nil {
@@ -147,7 +147,7 @@ type GetAccountByWebAuthnUserHandleRow struct {
 // writers are. Every write below is enumerated in lint.ResolutionSurfaceWriters.
 // The discoverable-login resolver: an assertion carries only the opaque user
 // handle, which resolves to exactly one account (partial UNIQUE index).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetAccountByWebAuthnUserHandle(ctx context.Context, webauthnUserHandle []byte) (GetAccountByWebAuthnUserHandleRow, error) {
 	row := q.db.QueryRowContext(ctx, getAccountByWebAuthnUserHandle, webauthnUserHandle)
 	var i GetAccountByWebAuthnUserHandleRow
@@ -168,7 +168,7 @@ SELECT id, challenge_verifier, session_data, account_id, session_id, purpose,
 FROM webauthn_ceremonies WHERE challenge_verifier = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetWebAuthnCeremonyByChallenge(ctx context.Context, challengeVerifier []byte) (WebauthnCeremony, error) {
 	row := q.db.QueryRowContext(ctx, getWebAuthnCeremonyByChallenge, challengeVerifier)
 	var i WebauthnCeremony
@@ -200,7 +200,7 @@ FROM webauthn_ceremonies WHERE id = ?
 // Resolve a ceremony by id for single-decision reauth-window consumption (#54):
 // the window row carries only ceremony_id, so the enumerated-unit binding the
 // ceremony pinned is read here and matched byte-exact against the disclosure unit.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetWebAuthnCeremonyByID(ctx context.Context, id string) (WebauthnCeremony, error) {
 	row := q.db.QueryRowContext(ctx, getWebAuthnCeremonyByID, id)
 	var i WebauthnCeremony
@@ -230,7 +230,7 @@ FROM webauthn_credentials WHERE credential_id = ?
 `
 
 // The assertion resolver: the authenticator-chosen credential id maps to one row.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetWebAuthnCredentialByCredentialID(ctx context.Context, credentialID []byte) (WebauthnCredential, error) {
 	row := q.db.QueryRowContext(ctx, getWebAuthnCredentialByCredentialID, credentialID)
 	var i WebauthnCredential
@@ -262,7 +262,7 @@ SELECT id, account_id, credential_id, public_key, aaguid, sign_count, transports
 FROM webauthn_credentials WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetWebAuthnCredentialByID(ctx context.Context, id string) (WebauthnCredential, error) {
 	row := q.db.QueryRowContext(ctx, getWebAuthnCredentialByID, id)
 	var i WebauthnCredential
@@ -291,7 +291,7 @@ const getWebAuthnUserHandle = `-- name: GetWebAuthnUserHandle :one
 SELECT webauthn_user_handle FROM accounts WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetWebAuthnUserHandle(ctx context.Context, id string) ([]byte, error) {
 	row := q.db.QueryRowContext(ctx, getWebAuthnUserHandle, id)
 	var webauthn_user_handle []byte
@@ -321,7 +321,7 @@ type InsertWebAuthnCeremonyParams struct {
 	CreatedAt         string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertWebAuthnCeremony(ctx context.Context, arg InsertWebAuthnCeremonyParams) error {
 	_, err := q.db.ExecContext(ctx, insertWebAuthnCeremony,
 		arg.ID,
@@ -363,7 +363,7 @@ type InsertWebAuthnCredentialParams struct {
 	CreatedAt       string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertWebAuthnCredential(ctx context.Context, arg InsertWebAuthnCredentialParams) error {
 	_, err := q.db.ExecContext(ctx, insertWebAuthnCredential,
 		arg.ID,
@@ -390,7 +390,7 @@ SELECT id, account_id, credential_id, public_key, aaguid, sign_count, transports
 FROM webauthn_credentials WHERE account_id = ? ORDER BY created_at
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListWebAuthnCredentialsForAccount(ctx context.Context, accountID string) ([]WebauthnCredential, error) {
 	rows, err := q.db.QueryContext(ctx, listWebAuthnCredentialsForAccount, accountID)
 	if err != nil {
@@ -443,7 +443,7 @@ type SetWebAuthnUserHandleParams struct {
 
 // Set the opaque handle once, on first enrolment. The NULL guard keeps a second
 // enrolment from rotating a handle other credentials already use.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) SetWebAuthnUserHandle(ctx context.Context, arg SetWebAuthnUserHandleParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setWebAuthnUserHandle, arg.WebauthnUserHandle, arg.ID)
 	if err != nil {

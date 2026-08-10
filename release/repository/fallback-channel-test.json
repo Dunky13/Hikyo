@@ -1,5 +1,5 @@
 {
-  "schema": "wenv.dev/fallback-channel-test/v1",
+  "schema": "hikyo.dev/fallback-channel-test/v1",
   "address": "security@developwent.io",
   "status": "pending",
   "sent_at": null,

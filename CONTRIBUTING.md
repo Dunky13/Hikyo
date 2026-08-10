@@ -1,4 +1,4 @@
-# Contributing to Wenv
+# Contributing to Hikyo
 
 Open an issue and get maintainer agreement before starting a large change.
 
@@ -13,7 +13,7 @@ git commit -s
 
 The sign-off certifies the [Developer Certificate of Origin 1.1](https://developercertificate.org/).
 CI checks the pull request's commit history; a sign-off added only to a squash
-message does not satisfy the gate. Wenv uses DCO, never a CLA, so contributors
+message does not satisfy the gate. Hikyo uses DCO, never a CLA, so contributors
 retain their copyright.
 
 ## Security-sensitive contributions

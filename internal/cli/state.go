@@ -29,27 +29,27 @@ type State struct {
 	dir string
 }
 
-// NewState resolves the state directory: $WENV_STATE_DIR, else
-// $XDG_STATE_HOME/wenv, else ~/.local/state/wenv (%LocalAppData%\wenv on
+// NewState resolves the state directory: $HIKYO_STATE_DIR, else
+// $XDG_STATE_HOME/hikyo, else ~/.local/state/hikyo (%LocalAppData%\hikyo on
 // Windows).
 func NewState(env Env) (*State, error) {
-	if d := env.Getenv("WENV_STATE_DIR"); d != "" {
+	if d := env.Getenv("HIKYO_STATE_DIR"); d != "" {
 		return &State{dir: d}, nil
 	}
 	if d := env.Getenv("XDG_STATE_HOME"); d != "" {
-		return &State{dir: filepath.Join(d, "wenv")}, nil
+		return &State{dir: filepath.Join(d, "hikyo")}, nil
 	}
 	if runtime.GOOS == "windows" {
 		if d := env.Getenv("LocalAppData"); d != "" {
-			return &State{dir: filepath.Join(d, "wenv")}, nil
+			return &State{dir: filepath.Join(d, "hikyo")}, nil
 		}
 	}
 	home := env.Getenv("HOME")
 	if home == "" {
 		return nil, failf(ExitUsage,
-			"cannot locate a state directory: neither WENV_STATE_DIR, XDG_STATE_HOME nor HOME is set")
+			"cannot locate a state directory: neither HIKYO_STATE_DIR, XDG_STATE_HOME nor HOME is set")
 	}
-	return &State{dir: filepath.Join(home, ".local", "state", "wenv")}, nil
+	return &State{dir: filepath.Join(home, ".local", "state", "hikyo")}, nil
 }
 
 // Dir is the resolved state directory.
@@ -184,7 +184,7 @@ func (s *State) writeJSON(path string, v any) error {
 }
 
 // PinFile is the committable, non-secret project-dir file: the `.nvmrc` of
-// Wenv. It names an instance REFERENCE plus org/project/env — never
+// Hikyo. It names an instance REFERENCE plus org/project/env — never
 // credentials, never an origin. A hostile edit is bounded to retargeting
 // within origins this box already trusts and grants the caller already holds;
 // the credential-exfiltration variant is closed by construction, because a
@@ -198,7 +198,7 @@ type PinFile struct {
 
 // PinFileName is the file the CLI looks for, walking up from the working
 // directory.
-const PinFileName = ".wenv.json"
+const PinFileName = ".hikyo.json"
 
 // FindPinFile walks up from dir looking for a pin file, stopping at the
 // filesystem root.

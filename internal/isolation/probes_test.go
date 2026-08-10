@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // Probe axes (invariant 2): removing either fixture axis fails the

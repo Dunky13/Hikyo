@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // Administrator-issued credential reset (#54, human-auth ADR - Recovery).

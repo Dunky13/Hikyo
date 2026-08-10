@@ -1,4 +1,4 @@
-// Package samlsp owns Wenv's relying-party policy around SAML parsing and
+// Package samlsp owns Hikyo's relying-party policy around SAML parsing and
 // identity material. Cryptographic verification remains the responsibility of
 // the pinned SAML/XML-DSIG libraries; this package makes their policy inputs
 // unambiguous and fail-closed.

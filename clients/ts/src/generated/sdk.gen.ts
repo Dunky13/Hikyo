@@ -761,7 +761,7 @@ export const enrolPasskeyStart = <ThrowOnError extends boolean = false>(options:
  *
  * Validates the opaque attestation response against the live ceremony,
  * stores the credential, and reissues the acting session. A browser
- * session's reissued token is delivered on the `__Host-wenv` cookie.
+ * session's reissued token is delivered on the `__Host-hikyo` cookie.
  *
  */
 export const enrolPasskeyFinish = <ThrowOnError extends boolean = false>(options: Options<EnrolPasskeyFinishData, ThrowOnError>) => (options.client ?? client).post<EnrolPasskeyFinishResponses, EnrolPasskeyFinishErrors, ThrowOnError>({
@@ -793,7 +793,7 @@ export const passkeyLoginStart = <ThrowOnError extends boolean = false>(options?
  *
  * Validates the opaque assertion against the live ceremony and mints a
  * browser session carrying WebAuthn assurance, delivered on the
- * `__Host-wenv` cookie. A signature-count regression disables the cloned
+ * `__Host-hikyo` cookie. A signature-count regression disables the cloned
  * credential (audited) and refuses.
  *
  */
@@ -825,7 +825,7 @@ export const stepUpPasskeyStart = <ThrowOnError extends boolean = false>(options
  * Elevate the acting session by presenting a passkey.
  *
  * Validates the opaque assertion and appends `webauthn` to the acting
- * session's factor set, rotating its token (delivered on the `__Host-wenv`
+ * session's factor set, rotating its token (delivered on the `__Host-hikyo`
  * cookie for a browser session). The original authenticated_at is
  * preserved.
  *
@@ -864,7 +864,7 @@ export const reauthPasskeyStart = <ThrowOnError extends boolean = false>(options
  * Validates the opaque assertion and opens a reauthentication window over
  * the bound environment (single-decision where the effective window is
  * zero). The reauth rotates the acting session; a browser session's
- * rotated token is delivered on the `__Host-wenv` cookie.
+ * rotated token is delivered on the `__Host-hikyo` cookie.
  *
  */
 export const reauthPasskeyFinish = <ThrowOnError extends boolean = false>(options: Options<ReauthPasskeyFinishData, ThrowOnError>) => (options.client ?? client).post<ReauthPasskeyFinishResponses, ReauthPasskeyFinishErrors, ThrowOnError>({
@@ -893,7 +893,7 @@ export const listPasskeys = <ThrowOnError extends boolean = false>(options?: Opt
  * TOTP code (never the credential being removed, B7). Refuses a removal
  * that would drop a passwordless account below the passkey-only floor;
  * reissues the acting session. A browser session's reissued token is
- * delivered on the `__Host-wenv` cookie.
+ * delivered on the `__Host-hikyo` cookie.
  *
  */
 export const removePasskey = <ThrowOnError extends boolean = false>(options: Options<RemovePasskeyData, ThrowOnError>) => (options.client ?? client).delete<RemovePasskeyResponses, RemovePasskeyErrors, ThrowOnError>({

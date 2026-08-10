@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/authn"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/authn"
 )
 
 // TxAuthorizer is the in-transaction face of authorize(). The transaction
@@ -49,7 +49,7 @@ func NewTxAuthorizer(r *authn.Resolver, tok *TxToken) *TxAuthorizer {
 // session assurance is a property of how this session authenticated, and the
 // chokepoint that mints the proof is the one place it cannot diverge from the
 // grant table. A session-less caller (Identity.SessionID == "") is local host
-// authority — bootstrap, break-glass, `wenv admin` — and is exempt, presenting
+// authority — bootstrap, break-glass, `hikyo admin` — and is exempt, presenting
 // no session and therefore no factor.
 func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operation, scope domain.Scope) (Proof, error) {
 	spec, ok := operations[op]

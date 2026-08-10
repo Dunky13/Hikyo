@@ -26,8 +26,8 @@ func TestServerWithoutDatastoreRefuses(t *testing.T) {
 	if err == nil {
 		t.Fatal("production start without explicit datastore config must refuse")
 	}
-	if !strings.Contains(err.Error(), "WENV_DB") {
-		t.Fatalf("error should name WENV_DB, got: %v", err)
+	if !strings.Contains(err.Error(), "HIKYO_DB") {
+		t.Fatalf("error should name HIKYO_DB, got: %v", err)
 	}
 }
 
@@ -48,17 +48,17 @@ func TestDevBootsZeroConfigSQLite(t *testing.T) {
 }
 
 func TestExplicitSQLiteDSN(t *testing.T) {
-	cfg, _, err := Load("server", nil, env("WENV_DB", "sqlite:/data/wenv.db"), nil)
+	cfg, _, err := Load("server", nil, env("HIKYO_DB", "sqlite:/data/hikyo.db"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Store.Engine != EngineSQLite || cfg.Store.Path != "/data/wenv.db" {
+	if cfg.Store.Engine != EngineSQLite || cfg.Store.Path != "/data/hikyo.db" {
 		t.Fatalf("got %+v", cfg.Store)
 	}
 }
 
 func TestSQLiteDSNEmptyPathRefuses(t *testing.T) {
-	_, _, err := Load("server", nil, env("WENV_DB", "sqlite:"), nil)
+	_, _, err := Load("server", nil, env("HIKYO_DB", "sqlite:"), nil)
 	if err == nil {
 		t.Fatal("empty sqlite path must refuse")
 	}
@@ -66,11 +66,11 @@ func TestSQLiteDSNEmptyPathRefuses(t *testing.T) {
 
 func TestPostgresLoopbackAllowed(t *testing.T) {
 	for _, dsn := range []string{
-		"postgres://u:p@localhost:5432/wenv",
-		"postgres://u:p@127.0.0.1/wenv",
-		"postgresql://u:p@[::1]/wenv",
+		"postgres://u:p@localhost:5432/hikyo",
+		"postgres://u:p@127.0.0.1/hikyo",
+		"postgresql://u:p@[::1]/hikyo",
 	} {
-		cfg, _, err := Load("server", nil, env("WENV_DB", dsn), nil)
+		cfg, _, err := Load("server", nil, env("HIKYO_DB", dsn), nil)
 		if err != nil {
 			t.Fatalf("%s: %v", dsn, err)
 		}
@@ -82,11 +82,11 @@ func TestPostgresLoopbackAllowed(t *testing.T) {
 
 func TestPostgresRemotePlaintextRefuses(t *testing.T) {
 	for _, dsn := range []string{
-		"postgres://u:p@db.example.com/wenv",
-		"postgres://u:p@db.example.com/wenv?sslmode=disable",
-		"postgres://u:p@10.0.0.5/wenv?sslmode=prefer",
+		"postgres://u:p@db.example.com/hikyo",
+		"postgres://u:p@db.example.com/hikyo?sslmode=disable",
+		"postgres://u:p@10.0.0.5/hikyo?sslmode=prefer",
 	} {
-		_, _, err := Load("server", nil, env("WENV_DB", dsn), nil)
+		_, _, err := Load("server", nil, env("HIKYO_DB", dsn), nil)
 		if err == nil {
 			t.Fatalf("%s: remote postgres without verified TLS must refuse", dsn)
 		}
@@ -95,10 +95,10 @@ func TestPostgresRemotePlaintextRefuses(t *testing.T) {
 
 func TestPostgresRemoteVerifiedTLSAllowed(t *testing.T) {
 	for _, dsn := range []string{
-		"postgres://u:p@db.example.com/wenv?sslmode=verify-full",
-		"postgres://u:p@db.example.com/wenv?sslmode=verify-ca",
+		"postgres://u:p@db.example.com/hikyo?sslmode=verify-full",
+		"postgres://u:p@db.example.com/hikyo?sslmode=verify-ca",
 	} {
-		if _, _, err := Load("server", nil, env("WENV_DB", dsn), nil); err != nil {
+		if _, _, err := Load("server", nil, env("HIKYO_DB", dsn), nil); err != nil {
 			t.Fatalf("%s: %v", dsn, err)
 		}
 	}
@@ -106,24 +106,24 @@ func TestPostgresRemoteVerifiedTLSAllowed(t *testing.T) {
 
 func TestPostgresHostParamCannotBypassTLSCheck(t *testing.T) {
 	for _, dsn := range []string{
-		"postgres:///wenv?host=remote.example.com",          // libpq-style host param
-		"postgres://u:p@/wenv?host=10.0.0.5&sslmode=prefer", // empty authority + host param
-		"postgres:///wenv", // no host at all (implicit PGHOST)
-		"postgres://u:p@localhost/wenv?host=remote.example.com", // conflicting hosts
-		"postgres:///wenv?host=a,b",                             // multi-host
+		"postgres:///hikyo?host=remote.example.com",              // libpq-style host param
+		"postgres://u:p@/hikyo?host=10.0.0.5&sslmode=prefer",     // empty authority + host param
+		"postgres:///hikyo",                                      // no host at all (implicit PGHOST)
+		"postgres://u:p@localhost/hikyo?host=remote.example.com", // conflicting hosts
+		"postgres:///hikyo?host=a,b",                             // multi-host
 	} {
-		if _, _, err := Load("server", nil, env("WENV_DB", dsn), nil); err == nil {
+		if _, _, err := Load("server", nil, env("HIKYO_DB", dsn), nil); err == nil {
 			t.Errorf("%s: must refuse", dsn)
 		}
 	}
 	// Socket path via host param stays allowed.
-	if _, _, err := Load("server", nil, env("WENV_DB", "postgres:///wenv?host=/var/run/postgresql"), nil); err != nil {
+	if _, _, err := Load("server", nil, env("HIKYO_DB", "postgres:///hikyo?host=/var/run/postgresql"), nil); err != nil {
 		t.Errorf("socket host param: %v", err)
 	}
 }
 
 func TestUnknownEngineRefuses(t *testing.T) {
-	_, _, err := Load("server", nil, env("WENV_DB", "mysql://u@localhost/db"), nil)
+	_, _, err := Load("server", nil, env("HIKYO_DB", "mysql://u@localhost/db"), nil)
 	if err == nil {
 		t.Fatal("unknown datastore scheme must refuse")
 	}
@@ -136,7 +136,7 @@ func TestErrorsNeverEchoCredentials(t *testing.T) {
 		"postgres://user:" + secret + "@db\x7f.bad/db",   // url.Parse failure
 		"postgres://user:" + secret + "@db.example.com/", // TLS refusal
 	} {
-		_, _, err := Load("server", nil, env("WENV_DB", dsn), nil)
+		_, _, err := Load("server", nil, env("HIKYO_DB", dsn), nil)
 		if err == nil {
 			t.Fatalf("%q: expected refusal", dsn)
 		}
@@ -155,19 +155,19 @@ func TestPositionalArgumentsRefused(t *testing.T) {
 	}
 }
 
-func TestUnknownWenvKeysWarn(t *testing.T) {
-	_, warnings, err := Load("server", []string{"--dev"}, env(), environFrom("WENV_TYPO", "x", "WENV_DB", ""))
+func TestUnknownHikyoKeysWarn(t *testing.T) {
+	_, warnings, err := Load("server", []string{"--dev"}, env(), environFrom("HIKYO_TYPO", "x", "HIKYO_DB", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, w := range warnings {
-		if strings.Contains(w, "WENV_TYPO") {
+		if strings.Contains(w, "HIKYO_TYPO") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("unknown WENV_ key must warn, got %v", warnings)
+		t.Fatalf("unknown HIKYO_ key must warn, got %v", warnings)
 	}
 }
 
@@ -189,14 +189,14 @@ func TestAutoMigrateDefaultOnAndDisable(t *testing.T) {
 }
 
 func TestListenPrecedenceFlagOverEnv(t *testing.T) {
-	cfg, _, err := Load("server", []string{"--dev", "--listen", "127.0.0.1:9999"}, env("WENV_LISTEN", "127.0.0.1:8888"), nil)
+	cfg, _, err := Load("server", []string{"--dev", "--listen", "127.0.0.1:9999"}, env("HIKYO_LISTEN", "127.0.0.1:8888"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Listen != "127.0.0.1:9999" {
 		t.Fatalf("listen = %q", cfg.Listen)
 	}
-	cfg, _, err = Load("server", []string{"--dev"}, env("WENV_LISTEN", "127.0.0.1:8888"), nil)
+	cfg, _, err = Load("server", []string{"--dev"}, env("HIKYO_LISTEN", "127.0.0.1:8888"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,13 +207,13 @@ func TestListenPrecedenceFlagOverEnv(t *testing.T) {
 
 func TestNonLoopbackListenRequiresTrustedProxyCIDRs(t *testing.T) {
 	_, _, err := Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"}, env(), nil)
-	if err == nil || !strings.Contains(err.Error(), "WENV_TRUSTED_PROXY_CIDRS") {
+	if err == nil || !strings.Contains(err.Error(), "HIKYO_TRUSTED_PROXY_CIDRS") {
 		t.Fatalf("non-loopback plaintext listen must refuse without trusted proxies, got %v", err)
 	}
 
 	cfg, warnings, err := Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"},
-		env("WENV_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"),
-		environFrom("WENV_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"))
+		env("HIKYO_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"),
+		environFrom("HIKYO_TRUSTED_PROXY_CIDRS", "10.42.0.0/16,fd00:42::/64"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestNonLoopbackListenRequiresTrustedProxyCIDRs(t *testing.T) {
 	}
 
 	_, _, err = Load("server", []string{"--dev", "--listen", "0.0.0.0:8080"},
-		env("WENV_TRUSTED_PROXY_CIDRS", "not-a-cidr"), nil)
+		env("HIKYO_TRUSTED_PROXY_CIDRS", "not-a-cidr"), nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid CIDR") {
 		t.Fatalf("invalid trusted proxy CIDR must refuse, got %v", err)
 	}

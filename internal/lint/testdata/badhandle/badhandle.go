@@ -7,8 +7,8 @@ package badhandle
 import (
 	"context"
 
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
 )
 
 func stealAcrossTenants(ctx context.Context, db *store.DB, org, project, env string) (pggen.Environment, error) {

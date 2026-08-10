@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/config"
-	"github.com/Dunky13/wenv/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/config"
+	"github.com/Dunky13/hikyo/internal/crypto"
 )
 
 func prodConfig(t *testing.T, extraEnv map[string]string) *config.Config {
 	t.Helper()
 	env := map[string]string{
-		"WENV_DB": "sqlite:" + filepath.Join(t.TempDir(), "wenv.db"),
+		"HIKYO_DB": "sqlite:" + filepath.Join(t.TempDir(), "hikyo.db"),
 	}
 	for k, v := range extraEnv {
 		env[k] = v
@@ -41,7 +41,7 @@ func TestProductionBootWithoutRootKeyRefuses(t *testing.T) {
 	}
 }
 
-// Acceptance (#43): `wenv migrate` never loads the keyring — it succeeds
+// Acceptance (#43): `hikyo migrate` never loads the keyring — it succeeds
 // with no root key configured anywhere.
 func TestMigrateNeedsNoRootKey(t *testing.T) {
 	cfg := prodConfig(t, nil)
@@ -60,7 +60,7 @@ func TestBootWithRootKeyFileAndWrongKeyRefused(t *testing.T) {
 	if err := os.WriteFile(keyPath, []byte(crypto.EncodeRootKey(key)+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"WENV_DB": "sqlite:" + filepath.Join(dir, "wenv.db")}
+	env := map[string]string{"HIKYO_DB": "sqlite:" + filepath.Join(dir, "hikyo.db")}
 	cfg, _, err := config.Load("server", []string{"--listen", "127.0.0.1:0", "--root-key-file", keyPath},
 		func(k string) string { return env[k] }, nil)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestDevBootGeneratesAndReusesRootKey(t *testing.T) {
 	if string(first) != string(second) {
 		t.Error("dev root key regenerated on reboot — dev data would be bricked")
 	}
-	if !strings.HasSuffix(keyPath, "wenv-dev.rootkey") {
+	if !strings.HasSuffix(keyPath, "hikyo-dev.rootkey") {
 		t.Errorf("unexpected dev key path %s", keyPath)
 	}
 }

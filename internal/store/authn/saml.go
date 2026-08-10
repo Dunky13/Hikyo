@@ -12,9 +12,9 @@ import (
 	sqlite "modernc.org/sqlite"
 	sqlitelib "modernc.org/sqlite/lib"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/pggen"
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // SAMLProvider is the configured IdP and its pinned trust material. EntityID

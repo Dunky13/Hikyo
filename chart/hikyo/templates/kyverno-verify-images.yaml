@@ -2,14 +2,14 @@
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: {{ include "wenv.fullname" . }}-verify-images
+  name: {{ include "hikyo.fullname" . }}-verify-images
   labels:
-    {{- include "wenv.labels" . | nindent 4 }}
+    {{- include "hikyo.labels" . | nindent 4 }}
 spec:
   validationFailureAction: Enforce
   background: true
   rules:
-    - name: verify-wenv-image
+    - name: verify-hikyo-image
       match:
         any:
           - resources:

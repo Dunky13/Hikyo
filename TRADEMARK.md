@@ -1,16 +1,16 @@
-# Wenv trademark policy
+# Hikyo trademark policy
 
-The Wenv name and marks are owned personally by Marc Went until a legal entity
+The Hikyo name and marks are owned personally by Marc Went until a legal entity
 exists to hold them. This policy prevents confusion about what is official; it
 does not limit the code freedoms granted by the Mozilla Public License 2.0.
 
 No permission is needed for:
 
-- nominative use, such as “works with Wenv” or “fork of Wenv”;
+- nominative use, such as “works with Hikyo” or “fork of Hikyo”;
 - unmodified redistribution using the original project name; or
 - accurate compatibility statements.
 
-Permission is required to offer a hosted or packaged service under the Wenv
+Permission is required to offer a hosted or packaged service under the Hikyo
 name or confusingly similar branding. Forks remain free to thrive under a
 different name.
 

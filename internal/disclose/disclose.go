@@ -144,7 +144,7 @@ func Emit(label, value string, o Options) (Destination, error) {
 }
 
 // Redact renders a value for a log or an error message: never the value.
-func Redact(string) string { return "[REDACTED:wenv-artifact]" }
+func Redact(string) string { return "[REDACTED:hikyo-artifact]" }
 
 // Confirm reads a yes/no answer from the controlling terminal. The prompt and
 // the answer both travel the terminal, so a log-capturing pipe sees neither

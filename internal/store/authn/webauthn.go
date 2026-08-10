@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/store/pggen"
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // WebAuthn storage (#54, human-auth ADR § WebAuthn relying-party policy, §

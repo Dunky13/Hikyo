@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/cli"
+	"github.com/Dunky13/hikyo/internal/cli"
 )
 
 func TestDoctorGrammar(t *testing.T) {
@@ -29,7 +29,7 @@ func TestDoctorGrammar(t *testing.T) {
 func TestHelpListsDoctor(t *testing.T) {
 	var help strings.Builder
 	cli.Usage(&help)
-	if !strings.Contains(help.String(), "wenv doctor") {
+	if !strings.Contains(help.String(), "hikyo doctor") {
 		t.Fatal("help omits doctor")
 	}
 }

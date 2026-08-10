@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
 func runSAMLSPKey(ctx context.Context, ios IO, args []string) error {
@@ -69,13 +69,13 @@ func runSAMLSPKey(ctx context.Context, ios IO, args []string) error {
 		}
 		return renderSAMLSPKey(ios, f, result)
 	default:
-		return failf(ExitInternal, "wenv instance-config saml-sp-key: unhandled verb %q", sub)
+		return failf(ExitInternal, "hikyo instance-config saml-sp-key: unhandled verb %q", sub)
 	}
 }
 
 func spKeyFingerprint(flags commonFlags, sub string) (string, error) {
 	if len(flags.positionals) != 1 {
-		return "", failf(ExitUsage, "usage: wenv instance-config saml-sp-key %s <fingerprint>", sub)
+		return "", failf(ExitUsage, "usage: hikyo instance-config saml-sp-key %s <fingerprint>", sub)
 	}
 	return flags.positionals[0], nil
 }

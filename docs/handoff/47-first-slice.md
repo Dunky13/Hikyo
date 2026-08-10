@@ -1,6 +1,6 @@
 # Handoff: #47 first slice — OpenAPI 3.1 API, CLI skeleton, bootstrap admin, local login
 
-Issue: https://github.com/Dunky13/wenv/issues/47 (parent #41). Specs, all on
+Issue: https://github.com/Dunky13/hikyo/issues/47 (parent #41). Specs, all on
 `wayfinder-docs`: `docs/adr/api-cli-surface.md`, `docs/spec/api-cli-spellings.md`,
 `docs/adr/human-auth.md` (bootstrap + local floor slice), `docs/adr/mvp-boundary.md`
 rows S1/S2/A1, and the operative 2026-08-07 OpenAPI 3.1 amendment banner in
@@ -49,9 +49,9 @@ that reason — `go:embed` cannot reach outside its own directory.
 - **kin-openapi v0.146** for both duties the banner separates: runtime request
   validation in the server, and wire-response validation in the contract
   tests. Both demonstrated against the 3.1 document (see *Toolchain* below).
-- **Wenv extensions**, cross-checked against the Go registries in CI:
-  `x-wenv-class`, `x-wenv-operation`, `x-wenv-formula`, `x-wenv-artifacts`,
-  `x-wenv-min-revision`, and `x-extensible-enum` for open enums.
+- **Hikyo extensions**, cross-checked against the Go registries in CI:
+  `x-hikyo-class`, `x-hikyo-operation`, `x-hikyo-formula`, `x-hikyo-artifacts`,
+  `x-hikyo-min-revision`, and `x-extensible-enum` for open enums.
 - `CheckProfile` enforces the bound 3.1 semantic profile — `nullable`
   prohibited, `jsonSchemaDialect` pinned, top-level `webhooks` prohibited,
   open enums forbidden from also carrying `enum` — with a refusal test per
@@ -121,7 +121,7 @@ transaction exists is the cross-request cache the permission model forbids.
   refused even when stdout is a TTY.
 - Passwords are read from `/dev/tty` with echo off. There is no `--password`
   flag and no stdin fallback.
-- `wenv admin create` mints the first administrator on the server's own host
+- `hikyo admin create` mints the first administrator on the server's own host
   with the `admin` template expanded into one grant row per capability.
 
 ### TypeScript (`clients/ts`)
@@ -193,7 +193,7 @@ Full suite green on sqlite **and** postgres 18 (local container).
    amendment naming the human-auth authority when #54 lands; nothing in #54 is
    blocked by the wording.
 
-2. **`wenv account establish-credential` is a spelling this ticket adds.** The
+2. **`hikyo account establish-credential` is a spelling this ticket adds.** The
    ADR fixes the `account` family as `session`/`factor`/`recovery-codes`. The
    bootstrap path needs a terminal way to consume the authority `admin create`
    mints, and the browser path that would otherwise carry it is #54's. It joins
@@ -249,7 +249,7 @@ Recorded because each was found by a check rather than by reading:
 - **Leaf-only pinning.** The TLS pin check scanned every presented certificate,
   so an attacker could satisfy it by including the legitimate certificate as an
   intermediate under a leaf whose key they held.
-- **`wenv login <url> --local` refused itself.** Go's `flag` stops at the first
+- **`hikyo login <url> --local` refused itself.** Go's `flag` stops at the first
   positional, so the spelling the help advertises was parsed as three
   positionals.
 - **A trust-store refusal exited 1, not 4.**
@@ -333,7 +333,7 @@ blocking items, no new scope. The adversarial loop is complete.
   state directory is not. Bounded work, not done here.
 - **A hostile pin file can still select among ALREADY-TRUSTED instances.**
   Origin binding now covers the case where the operator names a URL
-  explicitly. A `.wenv.json` that names a bare reference can still direct a
+  explicitly. A `.hikyo.json` that names a bare reference can still direct a
   command at a different established instance the box already trusts — which
   is the residual the ADR itself states ("bounded to retargeting within
   origins this box already trusts"), but the reviewer's point that
@@ -350,7 +350,7 @@ blocking items, no new scope. The adversarial loop is complete.
 ## Pickup notes
 
 - Adding an endpoint: describe it in `api/openapi.yaml` with all five
-  `x-wenv-*` extensions, regenerate (`go tool oapi-codegen --config
+  `x-hikyo-*` extensions, regenerate (`go tool oapi-codegen --config
   api/oapi-codegen.yaml api/openapi.yaml`), classify the route in
   `authz.wireRegistry`, and map it in `wireRoutes` (domain) or `wireEvents`
   (authentication). Four invariants fail until all of that is done.

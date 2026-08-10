@@ -58,7 +58,7 @@ func (r Resolved) Require(d Dimension) (string, error) {
 		return v, nil
 	}
 	return "", failf(ExitUsage,
-		"no %s resolved. Looked at, in order: --%s, WENV_%s, the %s pin file, and the named context (--context / WENV_CONTEXT)",
+		"no %s resolved. Looked at, in order: --%s, HIKYO_%s, the %s pin file, and the named context (--context / HIKYO_CONTEXT)",
 		d, d, strings.ToUpper(string(d)), PinFileName)
 }
 
@@ -112,10 +112,10 @@ func Resolve(st *State, env Env, flags Flags, workdir string) (Resolved, error) 
 	set(DimEnv, flags.Env, SourceFlag)
 
 	// 2. Environment.
-	set(DimInstance, env.Getenv("WENV_INSTANCE"), SourceEnv)
-	set(DimOrg, env.Getenv("WENV_ORG"), SourceEnv)
-	set(DimProject, env.Getenv("WENV_PROJECT"), SourceEnv)
-	set(DimEnv, env.Getenv("WENV_ENV"), SourceEnv)
+	set(DimInstance, env.Getenv("HIKYO_INSTANCE"), SourceEnv)
+	set(DimOrg, env.Getenv("HIKYO_ORG"), SourceEnv)
+	set(DimProject, env.Getenv("HIKYO_PROJECT"), SourceEnv)
+	set(DimEnv, env.Getenv("HIKYO_ENV"), SourceEnv)
 
 	// 3. Project-dir pin file.
 	pin, pinPath, err := FindPinFile(workdir)
@@ -134,7 +134,7 @@ func Resolve(st *State, env Env, flags Flags, workdir string) (Resolved, error) 
 	// "current" context to forget.
 	name := flags.Context
 	if name == "" {
-		name = env.Getenv("WENV_CONTEXT")
+		name = env.Getenv("HIKYO_CONTEXT")
 	}
 	if name != "" {
 		all, err := st.Contexts()

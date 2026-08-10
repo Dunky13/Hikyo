@@ -3,10 +3,10 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://dunky13.github.io',
-  base: '/wenv',
+  base: '/hikyo',
   integrations: [
     starlight({
-      title: 'Wenv',
+      title: 'Hikyo',
       description: 'Fully open-source secrets and configuration across environments.',
       favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
@@ -16,11 +16,11 @@ export default defineConfig({
       },
       defaultLocale: 'root',
       editLink: {
-        baseUrl: 'https://github.com/Dunky13/wenv/edit/main/',
+        baseUrl: 'https://github.com/Dunky13/hikyo/edit/main/',
       },
       lastUpdated: true,
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/Dunky13/wenv' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/Dunky13/hikyo' },
       ],
       sidebar: [
         { label: 'Overview', slug: 'index' },

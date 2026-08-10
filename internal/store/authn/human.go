@@ -8,9 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/pggen"
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // Human authentication storage (#47, human-auth ADR).
@@ -347,7 +347,7 @@ func (r *Resolver) CredentialAuthorityByVerifier(ctx context.Context, verifier [
 // ---------------------------------------------------------------------------
 
 // CreatePrincipal and CreateAccount are the bootstrap path's writes. They run
-// on the server's own host under local authority (`wenv admin create`), never
+// on the server's own host under local authority (`hikyo admin create`), never
 // over the network — the closed local-authority exception set's bootstrap
 // member, not a new authority.
 func (r *Resolver) CreatePrincipal(ctx context.Context, id domain.PrincipalID, kind string, at time.Time) error {

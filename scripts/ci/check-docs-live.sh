@@ -51,7 +51,7 @@ require_response_text() {
 }
 
 security_txt=$(fetch "$docs_origin/.well-known/security.txt")
-require_response_text "$security_txt" 'Contact: https://github.com/Dunky13/wenv/security/advisories/new'
+require_response_text "$security_txt" 'Contact: https://github.com/Dunky13/hikyo/security/advisories/new'
 require_response_text "$security_txt" "Contact: mailto:$fallback_email"
 require_response_text "$security_txt" "Canonical: $docs_origin/.well-known/security.txt"
 expires=$(printf '%s\n' "$security_txt" | awk -F ': ' '$1 == "Expires" {print $2}')
@@ -71,7 +71,7 @@ security_page=$(fetch "$docs_origin/security/")
 require_response_text "$security_page" 'The default embargo is 90 days from the report itself.'
 
 support_page=$(fetch "$docs_origin/support/")
-require_response_text "$support_page" 'Wenv supports exactly one version'
+require_response_text "$support_page" 'Hikyo supports exactly one version'
 
 governance_page=$(fetch "$docs_origin/governance/")
 require_response_text "$governance_page" 'may be amended only by reopening its originating ticket'

@@ -18,8 +18,8 @@ import (
 // fail-closed default under the threat model's bounded-payload baseline.
 const FreeTextBound = 512
 
-// RedactionMarker replaces any substring matching the wenv token grammar.
-const RedactionMarker = "[REDACTED:wenv-token]"
+// RedactionMarker replaces any substring matching the hikyo token grammar.
+const RedactionMarker = "[REDACTED:hikyo-token]"
 
 // tokenGrammarRe matches the machine-identity ADR's bearer-token grammar
 // `ew_<version>_<type>_<body><checksum>` — deliberately tolerant on the

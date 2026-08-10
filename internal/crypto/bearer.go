@@ -37,7 +37,7 @@ const (
 	// ArtifactBootstrap is a credential-establishment authority.
 	ArtifactBootstrap ArtifactType = "bs"
 	// ArtifactBrowserSession is a human browser session, carried in the
-	// `__Host-wenv` cookie — a distinct artifact type with its own lifetime
+	// `__Host-hikyo` cookie — a distinct artifact type with its own lifetime
 	// and revocation surface, listed separately from CLI sessions.
 	ArtifactBrowserSession ArtifactType = "br"
 	// ArtifactRecoveryCode is a single-use recovery code. The grammar buys

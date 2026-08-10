@@ -18,7 +18,7 @@ import "log/slog"
 
 // Redacted is the marker every formatting surface of a sensitive type
 // returns.
-const Redacted = "[REDACTED:wenv-key-material]"
+const Redacted = "[REDACTED:hikyo-key-material]"
 
 // redactor is embedded in every sensitive type; method promotion gives the
 // outer type the full surface. The methods take value receivers so both the

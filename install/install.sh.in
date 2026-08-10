@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repository=Dunky13/wenv
+repository=Dunky13/hikyo
 version='@VERSION@'
 root_sha256='@ROOT_SHA256@'
 verifier_sha256='@VERIFIER_SHA256@'
@@ -11,7 +11,7 @@ source_url="https://raw.githubusercontent.com/$repository/v$version"
 current_trust_url="https://raw.githubusercontent.com/$repository/refs/heads/main"
 
 fail() {
-	printf 'wenv install failed: %s\n' "$*" >&2
+	printf 'hikyo install failed: %s\n' "$*" >&2
 	exit 1
 }
 
@@ -45,9 +45,9 @@ case "$(uname -m)" in
 	*) fail "unsupported architecture $(uname -m)" ;;
 esac
 
-install_dir=${WENV_INSTALL_DIR:-/usr/local/bin}
-state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/wenv
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/wenv-install.XXXXXX")
+install_dir=${HIKYO_INSTALL_DIR:-/usr/local/bin}
+state_dir=${XDG_STATE_HOME:-"$HOME/.local/state"}/hikyo
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-install.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 
 download() {
@@ -97,12 +97,12 @@ done
 	--published \
 	--latest
 
-archive="wenv_${version}_${os}_${arch}"
+archive="hikyo_${version}_${os}_${arch}"
 case "$os" in
 	Linux | Darwin) archive="$archive.tar.gz" ;;
 esac
 [ -f "$bundle/$archive" ] || fail "verified archive $archive is absent"
 mkdir -p "$install_dir"
-tar -xzf "$bundle/$archive" -C "$scratch" wenv
-install -m 0755 "$scratch/wenv" "$install_dir/wenv"
-printf 'installed verified wenv %s to %s/wenv\n' "$version" "$install_dir"
+tar -xzf "$bundle/$archive" -C "$scratch" hikyo
+install -m 0755 "$scratch/hikyo" "$install_dir/hikyo"
+printf 'installed verified hikyo %s to %s/hikyo\n' "$version" "$install_dir"

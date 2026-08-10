@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
-	"github.com/Dunky13/wenv/internal/webauthntest"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/webauthntest"
 )
 
 // The WebAuthn / passkey slice end to end on a real datastore (#54, human-auth
@@ -25,8 +25,8 @@ import (
 // go-webauthn validation path.
 
 const (
-	waRPID     = "wenv.test"
-	waOrigin   = "https://wenv.test"
+	waRPID     = "hikyo.test"
+	waOrigin   = "https://hikyo.test"
 	waAdmin    = "wa-admin"
 	waPassword = "correct horse battery staple webauthn"
 )

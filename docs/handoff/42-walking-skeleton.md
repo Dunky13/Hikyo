@@ -1,27 +1,27 @@
 # Handoff: #42 walking skeleton
 
-Issue: https://github.com/Dunky13/wenv/issues/42 (parent #41). Spec:
+Issue: https://github.com/Dunky13/hikyo/issues/42 (parent #41). Spec:
 `docs/adr/system-architecture.md` on `wayfinder-docs` (incl. the 2026-08-07
 amendment banner: Go 1.26 toolchain, OpenAPI 3.1 — the latter is out of this
 ticket's scope).
 
 ## What exists
 
-One Go module (`github.com/Dunky13/wenv`, toolchain go1.26.2), one multicall
+One Go module (`github.com/Dunky13/hikyo`, toolchain go1.26.2), one multicall
 binary:
 
-- `wenv server [--dev] [--listen] [--auto-migrate=BOOL]` — chi router with
+- `hikyo server [--dev] [--listen] [--auto-migrate=BOOL]` — chi router with
   `/healthz` (process alive) and `/readyz` (datastore reachable; migrations
   are current by construction at serve time). `--dev` boots zero-config
-  sqlite (`wenv-dev.db` in cwd); production start without `WENV_DB` refuses.
-- `wenv migrate` — explicit migration application, DDL only.
+  sqlite (`hikyo-dev.db` in cwd); production start without `HIKYO_DB` refuses.
+- `hikyo migrate` — explicit migration application, DDL only.
 - Client verbs (`login run render sync adopt doctor definitions import`) —
   stubs, exit 2.
 
 Layout and the rules it carries:
 
-- `internal/config` — strict fail-fast parsing. `WENV_DB` is `sqlite:PATH`
-  or `postgres://…`; unknown `WENV_*` keys warn; remote postgres without
+- `internal/config` — strict fail-fast parsing. `HIKYO_DB` is `sqlite:PATH`
+  or `postgres://…`; unknown `HIKYO_*` keys warn; remote postgres without
   `sslmode=verify-full|verify-ca` refuses (threat-model TLS boundary).
 - `internal/store` — per-aggregate repository interfaces (`Org` is the
   demonstration aggregate) over sqlc-generated code (`sqlitegen`, `pggen`,
@@ -48,7 +48,7 @@ Layout and the rules it carries:
 - `internal/conformance` — one scenario corpus (roundtrip semantics, list
   order, rollback, unique violation, invalid JSON, not-found, 8-writer
   concurrency) run on sqlite always and on postgres via
-  `WENV_TEST_POSTGRES_DSN`. Unset DSN skips locally but **fails when
+  `HIKYO_TEST_POSTGRES_DSN`. Unset DSN skips locally but **fails when
   `CI=true`** — the postgres leg cannot go vacuously green.
 
 CI (`.github/workflows/ci.yml`): build, vet, sqlc-regen diff gate, full test
@@ -56,9 +56,9 @@ run with a postgres:18 service container. Actions pinned by commit SHA.
 
 ## Verified empirically
 
-- `wenv server --dev` on a clean dir: creates the db, migrates, `/healthz`
+- `hikyo server --dev` on a clean dir: creates the db, migrates, `/healthz`
   and `/readyz` both 200.
-- `wenv server` without `WENV_DB`: refuses, exit 1, names the fix.
+- `hikyo server` without `HIKYO_DB`: refuses, exit 1, names the fix.
 - Fresh db + `--auto-migrate=false`: boot refuses (pending migrations).
 - Conformance green on sqlite and on postgres 18 (local container).
 - `CI=true` without pg DSN: conformance fails loudly, as designed.

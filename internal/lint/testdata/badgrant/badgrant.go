@@ -7,7 +7,7 @@ package badgrant
 import (
 	"context"
 
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // LockedWriter is the correct shape: it takes the principal-row lock before the
