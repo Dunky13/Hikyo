@@ -28,11 +28,7 @@
         "do_not_enforce_on_create": false,
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
-          {"context": "lint"},
-          {"context": "dco"},
-          {"context": "supply-chain-fixtures"},
-          {"context": "docs"},
-          {"context": "test"}
+          {"context": "ci-required"}
         ]
       }
     }

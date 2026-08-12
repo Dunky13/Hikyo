@@ -52,7 +52,7 @@ require_text "$security_channel_workflow" 'Fallback security channel health chec
 
 main_gate="$repo_root/release/repository/main-ci-gate.json"
 require_file "$main_gate"
-require_text "$main_gate" '{"context": "docs"}'
+require_text "$main_gate" '{"context": "ci-required"}'
 
 license_sha=$(sha256sum "$repo_root/LICENSE" | awk '{print $1}')
 [ "$license_sha" = '3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04' ] || {

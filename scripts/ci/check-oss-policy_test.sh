@@ -75,6 +75,19 @@ fi
 
 cp "$repo_root/.github/ISSUE_TEMPLATE/config.yml" \
 	"$fixture_dir/.github/ISSUE_TEMPLATE/config.yml"
+sed 's/ci-required/removed-required-context/' \
+	"$fixture_dir/release/repository/main-ci-gate.json" \
+	>"$fixture_dir/main-ci-gate-missing-aggregate.json"
+mv "$fixture_dir/main-ci-gate-missing-aggregate.json" \
+	"$fixture_dir/release/repository/main-ci-gate.json"
+
+if "$repo_root/scripts/ci/check-oss-policy.sh" "$fixture_dir" "$fixture_dir/site" >/dev/null 2>&1; then
+	printf 'OSS policy fixture failed: missing ci-required context was accepted\n' >&2
+	exit 1
+fi
+
+cp "$repo_root/release/repository/main-ci-gate.json" \
+	"$fixture_dir/release/repository/main-ci-gate.json"
 sed '/issues: write/d' "$fixture_dir/.github/workflows/security-channel.yml" \
 	>"$fixture_dir/security-channel-unprivileged.yml"
 mv "$fixture_dir/security-channel-unprivileged.yml" \

@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  # PR updates supersede the same PR; every main push stays independently
+  # queued so a burst cannot discard the middle commit's CI/cache seed.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -22,6 +28,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore lint Go cache
+        id: lint-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-lint-v1.7.12-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-lint-v1.7.12-${{ runner.os }}-
       - name: Shellcheck (pinned archive)
         env:
           SHELLCHECK_VERSION: v0.11.0
@@ -37,6 +58,12 @@ jobs:
             scripts/lib/*.sh scripts/ci/*.sh scripts/release/*.sh install/install.sh.in
       - name: Actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Save lint Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.lint-go-cache.outputs.cache-primary-key }}
 
   dco:
     if: github.event_name == 'pull_request'
@@ -53,7 +80,7 @@ jobs:
           "${{ github.event.pull_request.base.sha }}"
           "${{ github.event.pull_request.head.sha }}"
 
-  supply-chain-fixtures:
+  supply-chain-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,23 +92,6 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.3
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
-        with:
-          node-version-file: .nvmrc
-      - name: Enable pnpm
-        run: corepack enable
-      # working-directory matters: corepack resolves the packageManager pin
-      # from the CWD's package.json — from the repo root (which has none) it
-      # falls back to its default pnpm and the pinned project refuses it.
-      - name: Build the SPA (the `ui` build tag embeds it)
-        working-directory: web
-        run: |
-          pnpm --dir ../clients/ts install --frozen-lockfile
-          pnpm install --frozen-lockfile
-          pnpm build
       - name: Chart renders and carries release substitution anchors
         run: |
           grep -Fx "  repository: ghcr.io/dunky13/hikyo" chart/hikyo/values.yaml
@@ -100,6 +110,8 @@ jobs:
         run: ./scripts/release/create-manifest_test.sh
       - name: DCO fixture
         run: ./scripts/ci/check-dco_test.sh
+      - name: Required-jobs fixture
+        run: ./scripts/ci/check-required-jobs_test.sh
       - name: Immutable-tag probe fixture
         run: ./scripts/release/probe-tag-move_test.sh
       - name: Release-tag guard fixture
@@ -110,6 +122,44 @@ jobs:
         run: ./scripts/release/release-channel_test.sh
       - name: Pinned installer fixture
         run: ./scripts/release/render-installer_test.sh
+
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore release-snapshot Go cache
+        id: release-snapshot-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-release-snapshot-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-release-snapshot-${{ runner.os }}-
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      # GoReleaser builds with the `ui` tag, so its isolated job must produce
+      # the embedded SPA before compiling all six release targets.
+      - name: Build the SPA (the `ui` build tag embeds it)
+        working-directory: web
+        run: |
+          pnpm --dir ../clients/ts install --frozen-lockfile
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: GoReleaser configuration and snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -118,6 +168,52 @@ jobs:
           args: release --snapshot --clean --skip=publish
       - name: Classify complete snapshot manifest
         run: ./scripts/release/snapshot-manifest_test.sh
+      - name: Save release-snapshot Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.release-snapshot-go-cache.outputs.cache-primary-key }}
+
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore generated-code Go cache
+        id: generated-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-generated-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-generated-${{ runner.os }}-
+      - name: Format
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Generated code is fresh
+        run: |
+          go tool sqlc generate
+          go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
+          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen
+          # git diff misses newly generated untracked files
+          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen)"
+      - name: Save generated-code Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.generated-go-cache.outputs.cache-primary-key }}
 
   # The TypeScript half of the contract chain. It is a separate job because it
   # needs a different toolchain, and because a Go-only change must not be able
@@ -179,6 +275,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore web Go cache
+        id: web-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-web-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-web-${{ runner.os }}-
       - name: Enable pnpm
         run: corepack enable
 
@@ -215,7 +326,9 @@ jobs:
         run: go build -tags ui ./...
 
       - name: Go tests (transport, serving rules, browser session)
-        run: go test -tags ui ./internal/server/... ./internal/webui/...
+        # Restored GOCACHE may contain passing test results. Compile from cache,
+        # but always execute this job's tests against its fresh build.
+        run: go test -count=1 -tags ui ./internal/server/... ./internal/webui/...
 
       - name: Install Chromium
         working-directory: web
@@ -231,6 +344,12 @@ jobs:
           name: playwright-traces
           path: web/test-results/
           retention-days: 7
+      - name: Save web Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.web-go-cache.outputs.cache-primary-key }}
 
   test:
     runs-on: ubuntu-latest
@@ -255,6 +374,25 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod # exact toolchain pinned by go.mod's go directive
+          cache: false
+      - name: Restore shared Go module cache
+        id: go-module-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore test Go cache
+        id: test-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-test-${{ runner.os }}-
+
+      - name: Populate shared Go module cache
+        run: go mod download
 
       - name: Build
         run: go build ./...
@@ -262,18 +400,65 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Format
-        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-
-      - name: Generated code is fresh
-        run: |
-          go tool sqlc generate
-          go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
-          git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen
-          # git diff misses newly generated untracked files
-          test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen)"
-
       - name: Test (sqlite + postgres conformance)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
-        run: go test ./...
+        # Compile from restored GOCACHE, but never replay results: PostgreSQL
+        # conformance must exercise this run's fresh service container.
+        run: go test -count=1 ./...
+      - name: Save test Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.test-go-cache.outputs.cache-primary-key }}
+      # One trusted writer avoids the setup-go race where the first, smallest
+      # job permanently won the shared module key for this dependency graph.
+      - name: Save shared Go module cache
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.go-module-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ steps.go-module-cache.outputs.cache-primary-key }}
+
+  # The permanent required context. Every validation job is named here so a
+  # future job split cannot accidentally weaken branch protection.
+  ci-required:
+    if: always()
+    needs:
+      - client
+      - dco
+      - docs
+      - generated
+      - lint
+      - release-snapshot
+      - supply-chain-checks
+      - test
+      - web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require every validation job
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: ./scripts/ci/check-required-jobs.sh "$GITHUB_EVENT_NAME" "$NEEDS_JSON"
+
+  # Compatibility context for ruleset 20539346. Keep it until ci-required has
+  # reported on main and the live ruleset requires ci-required instead.
+  supply-chain-fixtures:
+    if: always()
+    needs:
+      - ci-required
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Forward permanent required context
+        env:
+          CI_REQUIRED_RESULT: ${{ needs.ci-required.result }}
+        run: test "$CI_REQUIRED_RESULT" = success
