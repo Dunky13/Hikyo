@@ -50,44 +50,35 @@ func Run(ctx context.Context, io IO, args []string) int {
 		return ExitUsage
 	}
 	verb, rest := args[0], args[1:]
-	var err error
-	switch verb {
-	case "login":
-		err = runLogin(ctx, io, rest)
-	case "logout":
-		err = runLogout(ctx, io, rest)
-	case "whoami":
-		err = runWhoami(ctx, io, rest)
-	case "account":
-		err = runAccount(ctx, io, rest)
-	case "context":
-		err = runContext(ctx, io, rest)
-	case "org":
-		err = runOrg(ctx, io, rest)
-	case "project":
-		err = runProject(ctx, io, rest)
-	case "env":
-		err = runEnv(ctx, io, rest)
-	case "folder":
-		err = runFolder(ctx, io, rest)
-	case "key":
-		err = runKey(ctx, io, rest)
-	case "instance-config":
-		err = runInstanceConfig(ctx, io, rest)
-	case "doctor":
-		err = runDoctor(ctx, io, rest)
-	case "access":
-		err = runAccess(ctx, io, rest)
-	case "project-settings":
-		err = runProjectSettings(ctx, io, rest)
-	case "sa":
-		err = runServiceAccount(ctx, io, rest)
-	default:
+	handler, ok := verbHandlers[verb]
+	if !ok {
 		fmt.Fprintf(io.Stderr, "hikyo: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
 		return ExitUsage
 	}
-	return Report(io.Stderr, err)
+	return Report(io.Stderr, handler(ctx, io, rest))
+}
+
+// verbHandlers is the single source of truth for the served verb set: Run
+// dispatches on it and Verbs (exit.go) is derived from its keys, so a verb
+// cannot exist here without main's dispatch gate admitting it.
+var verbHandlers = map[string]func(context.Context, IO, []string) error{
+	"login":            runLogin,
+	"logout":           runLogout,
+	"whoami":           runWhoami,
+	"account":          runAccount,
+	"context":          runContext,
+	"org":              runOrg,
+	"project":          runProject,
+	"env":              runEnv,
+	"folder":           runFolder,
+	"key":              runKey,
+	"values":           runValues,
+	"instance-config":  runInstanceConfig,
+	"doctor":           runDoctor,
+	"access":           runAccess,
+	"project-settings": runProjectSettings,
+	"sa":               runServiceAccount,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -132,7 +123,7 @@ hierarchy:
   hikyo project rename <project> --name <new-name>
   hikyo project delete <project> --confirm <project-name>   irreversible: shreds the key
   hikyo env list|show|create|rename|reorder|delete   --org/--project select the project
-  hikyo env create --name <name>
+  hikyo env create --name <name> [--clone-from <env>]   clone copies that env's values
   hikyo env rename <env> --name <new-name>
   hikyo env reorder <env-id,env-id,...>             the whole ordered set, once each
   hikyo folder list|show|create|rename|delete       --org/--project select the project
@@ -144,6 +135,15 @@ hierarchy:
   hikyo key declare <key> --declaration <json> [--required-in all|none|<ids>]
   hikyo key reclassify <key> --classification secret|config    the ceremony, never update
   hikyo key group list|show|create|rename|delete
+
+values:                                            --env selects the environment
+  hikyo values list [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values get <KEY> [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values set <KEY> (--stdin | --value-file PATH)   never a value on argv
+  hikyo values set <KEY> --clear                    clear to absent
+  hikyo values declare <KEY> --envs <env,env> (--stdin | --value-file PATH)
+  hikyo values diff --left <env> --right <env> [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values copy --from <env> --to <env,env> --keys <KEY,KEY> [--confirm-protected]
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

@@ -19,13 +19,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/keyring"
 	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
@@ -37,6 +40,10 @@ const (
 	nobody = domain.PrincipalID("usr_nobody") // human, no grants at all
 	mchA1  = domain.PrincipalID("mch_a1")     // machine, confined to (org A, project A1) — the cross-project prober
 	reader = domain.PrincipalID("usr_reader") // human, org A, exactly `read` — the least-privilege prober
+	// custodian holds the value model's full authority in org A: read, edit,
+	// publish, reveal, definitions-edit. It exists so a value probe's
+	// "genuinely missing" twin is AUTHORIZED-but-missing.
+	custodian = domain.PrincipalID("usr_custodian")
 )
 
 // Fixture chain.
@@ -109,11 +116,24 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_edit', 'usr_alice', 'edit', 'org_a', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_def', 'usr_alice', 'definitions-edit', 'org_a', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_mp', 'usr_alice', 'manage-projects', 'org_a', NULL, NULL, ` + ts + `)`,
+
 	// bob: the same authority, in org B.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_read', 'usr_bob', 'read', 'org_b', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_edit', 'usr_bob', 'edit', 'org_b', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_def', 'usr_bob', 'definitions-edit', 'org_b', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_mp', 'usr_bob', 'manage-projects', 'org_b', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_pub', 'usr_bob', 'publish', 'org_b', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_rev', 'usr_bob', 'reveal', 'org_b', NULL, NULL, ` + ts + `)`,
+	// custodian: the value model's full authority in org A (#50) — read, edit,
+	// publish, reveal. It is its own principal rather than more grants on
+	// alice because alice is the REVEAL-LESS prober the key catalogue's gate
+	// tests rely on; widening her would make those pass for the wrong reason.
+	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_custodian', 'human', ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_cu_read', 'usr_custodian', 'read', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_cu_edit', 'usr_custodian', 'edit', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_cu_pub', 'usr_custodian', 'publish', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_cu_rev', 'usr_custodian', 'reveal', 'org_a', NULL, NULL, ` + ts + `)`,
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_cu_def', 'usr_custodian', 'definitions-edit', 'org_a', NULL, NULL, ` + ts + `)`,
 	// reader: exactly one capability in org A. Every operation whose formula
 	// is not `read` must deny them — that is what stops a formula being
 	// silently widened to a capability the fixtures happen to hold.
@@ -265,6 +285,8 @@ var fixtureTables = []string{
 	// unauthorized mutation that rolled its write back but left the revision
 	// advanced would be a pinned input moving for nothing.
 	"keys", "key_groups", "key_presence_environments", "project_schema_revisions",
+	// The value model (#50).
+	"value_entries",
 }
 
 // rowCounts is the row-diff half of the no-side-effect assertion.
@@ -331,6 +353,9 @@ func openPostgres(t *testing.T) *store.DB {
 		// presence rows reference both keys and environments, keys reference
 		// key_groups, and the schema-revision row references projects — so all
 		// four drop before the hierarchy they hang from.
+		// value_entries references BOTH keys and environments (#50), so it
+		// drops before either.
+		"value_entries",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
 		// Machine identities (#61, migration 00014): machine_credentials
 		// references service_accounts, which references projects/principals.
@@ -397,7 +422,23 @@ func seededDB(t *testing.T, open func(*testing.T) *store.DB) *store.DB {
 		execRaw(t, db, stmt)
 	}
 	seedOrigins(t, db)
+	seedValues(t, db)
 	return db
+}
+
+// seedValues writes one real value into (project A1, environment A1) through
+// the SERVICE, because a value is a sealed envelope bound to its own row: raw
+// SQL could produce the bytes but not a ciphertext anything could open, and a
+// probe whose source cell cannot be read proves nothing about authorization.
+//
+// It is the one fixture step that cannot be a statement, and it uses the
+// custodian rather than alice for the same reason the custodian exists.
+func seedValues(t *testing.T, db *store.DB) {
+	t.Helper()
+	if _, err := valueSvc(t, db).Set(t.Context(), service.LocalPrincipal(custodian),
+		scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "seeded-value"); err != nil {
+		t.Fatalf("seed value: %v", err)
+	}
 }
 
 // assertUniformNotFound is the shared uniformity helper (invariant 3): the
@@ -424,7 +465,50 @@ func services(db *store.DB) (*service.Orgs, *service.Projects, *service.Environm
 // only so the existing three-value call sites stay untouched.
 func folderSvc(db *store.DB) *service.Folders { return &service.Folders{DB: db} }
 
-func keySvc(db *store.DB) *service.Keys           { return &service.Keys{DB: db} }
+func keySvc(db *store.DB) *service.Keys { return &service.Keys{DB: db} }
+
+// valueSvc is the value surface (#50). The keyring is cached per datastore:
+// the hierarchy is minted ONCE per store under one root, so a second loader
+// with a fresh root is refused — correctly.
+var (
+	probeKeyringMu sync.Mutex
+	probeKeyrings  = map[*store.DB]*crypto.Keyring{}
+)
+
+// cloneSvc is the environment surface with the keyring clone-at-creation
+// needs. It shares valueSvc's cached keyring for the same reason.
+func cloneSvc(t *testing.T, db *store.DB) *service.Environments {
+	t.Helper()
+	return &service.Environments{DB: db, Keyring: probeKeyring(t, db)}
+}
+
+func valueSvc(t *testing.T, db *store.DB) *service.Values {
+	t.Helper()
+	return &service.Values{DB: db, Keyring: probeKeyring(t, db)}
+}
+
+// probeKeyring is the datastore's ONE keyring. The hierarchy is minted once
+// per store under one root, so a second loader presenting a fresh root is
+// refused — correctly — and every consumer in this package (values, clone,
+// the auth service) has to share this one.
+func probeKeyring(t *testing.T, db *store.DB) *crypto.Keyring {
+	t.Helper()
+	probeKeyringMu.Lock()
+	defer probeKeyringMu.Unlock()
+	if kr, ok := probeKeyrings[db]; ok {
+		return kr
+	}
+	root, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeKeyrings[db] = kr
+	return kr
+}
 func keyGroupSvc(db *store.DB) *service.KeyGroups { return &service.KeyGroups{DB: db} }
 
 // Fixture scopes, so a probe reads as "who, addressing what" rather than as a

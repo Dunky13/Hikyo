@@ -1,0 +1,47 @@
+{
+  "items": [
+    {
+      "classification": "config",
+      "equal": false,
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56",
+      "left": {
+        "classification": "config",
+        "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56",
+        "name": "LOG_LEVEL",
+        "revealed": true,
+        "set": true,
+        "value": "debug"
+      },
+      "name": "LOG_LEVEL",
+      "right": {
+        "classification": "config",
+        "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56",
+        "name": "LOG_LEVEL",
+        "revealed": true,
+        "set": true,
+        "value": "info"
+      }
+    },
+    {
+      "classification": "secret",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+      "left": {
+        "classification": "secret",
+        "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+        "name": "DATABASE_URL",
+        "revealed": false,
+        "set": true
+      },
+      "name": "DATABASE_URL",
+      "right": {
+        "classification": "secret",
+        "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+        "name": "DATABASE_URL",
+        "revealed": false,
+        "set": true
+      }
+    }
+  ],
+  "left_environment_id": "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+  "right_environment_id": "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f34"
+}

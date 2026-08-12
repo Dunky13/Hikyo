@@ -248,6 +248,44 @@ const (
 	// the committing transaction ahead of the classification write.
 	EventKeyRevealGateAttempt EventType = "settings.key_reveal_gate_attempt"
 
+	// value.* and disclosure.* — the flat value model (#50). Both categories
+	// are the audit catalogue's own: `value` holds the acts that change what
+	// an environment delivers, `disclosure` holds the acts that move stored
+	// material to a principal or to another environment.
+	//
+	// NO PAYLOAD HERE EVER CARRIES A VALUE, IN ANY FORM — not the plaintext,
+	// not a length, not a hash, not a "changed from" marker. A key name and
+	// its classification are schema and are recorded; everything derived from
+	// the material itself is exactly what the trail must not hold, because the
+	// trail is readable under `audit-read` and `audit-read` is not `reveal`.
+	//
+	// value.set records a cell beginning to deliver material the actor
+	// SUPPLIED (typed, piped, or read from a file they named). Material the
+	// actor did not supply arrives through disclosure.value_copied instead —
+	// the two are different authorization stories (supply needs no `reveal`,
+	// duplication does), so they are different events.
+	EventValueSet EventType = "value.set"
+	// value.cleared records the `set` → `absent` transition. With no
+	// inheritance there is nothing underneath, so this event means delivery of
+	// that key in that environment STOPPED — which is why it is its own event
+	// and not a `value.set` with an empty payload.
+	EventValueCleared EventType = "value.cleared"
+	// disclosure.value_revealed is one event per key per environment whose
+	// current `secret` plaintext was opened under the caller's authority.
+	// `surface` says where: `cell` and `diff` are reads rendered to the
+	// principal, `copy` and `clone` are the source side of a duplication. The
+	// audit ADR lists these as separate disclosure entries; they are one type
+	// with a field because they disclose exactly the same thing, and an
+	// investigator filtering "who read this key" must not have to know four
+	// spellings.
+	EventValueRevealed EventType = "disclosure.value_revealed"
+	// disclosure.value_copied is one event per key per DESTINATION for every
+	// server-side duplication: copy-to, bulk-apply and clone-at-creation. It
+	// records the source environment, because "material this environment's
+	// publisher did not supply" is the fact the re-delivery gate exists to
+	// make auditable.
+	EventValueCopied EventType = "disclosure.value_copied"
+
 	EventKeyGroupCreated EventType = "settings.key_group_created"
 	EventKeyGroupRenamed EventType = "settings.key_group_renamed"
 	EventKeyGroupDeleted EventType = "settings.key_group_deleted"
@@ -872,6 +910,35 @@ var registry = map[EventType]TypeSpec{
 			"gate": {Kind: KindString, Required: true},
 		},
 	},
+	// The flat value model (#50). Tenant trail, security class, success-only:
+	// each records a COMMITTED act, and a refusal is either the uniform
+	// nonexistent response or a rollback.
+	EventValueSet: hierarchyEvent(Schema{
+		"key_id":         {Kind: KindString, Required: true},
+		"name":           {Kind: KindFreeText, Required: true},
+		"classification": {Kind: KindString, Required: true},
+	}),
+	EventValueCleared: hierarchyEvent(Schema{
+		"key_id":         {Kind: KindString, Required: true},
+		"name":           {Kind: KindFreeText, Required: true},
+		"classification": {Kind: KindString, Required: true},
+	}),
+	// cell | diff | copy | clone — where the plaintext went. Never what it was.
+	EventValueRevealed: hierarchyEvent(Schema{
+		"key_id":  {Kind: KindString, Required: true},
+		"name":    {Kind: KindFreeText, Required: true},
+		"surface": {Kind: KindString, Required: true},
+	}),
+	// `operation` is copy | bulk-apply | clone: the same formula authorizes
+	// all three, and the trail still has to say which act it was.
+	EventValueCopied: hierarchyEvent(Schema{
+		"key_id":                {Kind: KindString, Required: true},
+		"name":                  {Kind: KindFreeText, Required: true},
+		"classification":        {Kind: KindString, Required: true},
+		"source_environment_id": {Kind: KindString, Required: true},
+		"operation":             {Kind: KindString, Required: true},
+	}),
+
 	EventKeyGroupCreated: hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
 	EventKeyGroupRenamed: hierarchyEvent(renameSchema("name")),
 	EventKeyGroupDeleted: hierarchyEvent(Schema{

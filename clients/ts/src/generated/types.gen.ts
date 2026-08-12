@@ -365,6 +365,141 @@ export type CreateEnvironmentRequest = {
     name: EntityName;
 };
 
+export type CloneEnvironmentRequest = {
+    name: EntityName;
+    source_environment_id: Id;
+};
+
+export type ClonedEnvironment = {
+    environment: Environment;
+    /**
+     * The key names whose values the clone carried over.
+     */
+    copied: Array<KeyName>;
+    /**
+     * The `secret` key names the source-material gate blocked. They land
+     * `absent` in the new environment - never silently, which is why
+     * they are enumerated here.
+     *
+     */
+    uncopied_secrets: Array<KeyName>;
+};
+
+/**
+ * One `(key, environment)` cell.
+ *
+ * PRESENCE IS THE SINGLE BOOLEAN `set`. That is the whole presence
+ * model: there is no mode, no enum with a third member, and nothing
+ * named `masked` anywhere in this contract - the flat-model ADR deleted
+ * that state with the inheritance it existed to explain. A cell that is
+ * not `set` carries no value from any source.
+ *
+ */
+export type ValueCell = {
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    /**
+     * `true` is the `set` state, `false` is `absent`. Those are the only
+     * two states there are.
+     *
+     */
+    set: boolean;
+    /**
+     * Whether `value` carries plaintext. It exists so a caller can tell
+     * an empty value the operator actually set from a `secret` they are
+     * not authorized to read - two cases that would otherwise both look
+     * like an absent `value` member.
+     *
+     */
+    revealed: boolean;
+    /**
+     * Present only where the reader was authorized to see it: `config`
+     * under `read`, `secret` under `read` AND `reveal`.
+     *
+     */
+    value?: string;
+    updated_at?: Timestamp;
+    /**
+     * The principal whose act produced this occurrence.
+     */
+    updated_by?: string;
+};
+
+export type ValueList = {
+    items: Array<ValueCell>;
+    count: number;
+};
+
+export type SetValueRequest = {
+    /**
+     * The plaintext. It is validated against the key's declaration
+     * before it commits, and stored sealed under the project data key
+     * with associated data binding it to this row alone.
+     *
+     */
+    value: string;
+};
+
+export type DeclareValuesRequest = {
+    key: KeyName;
+    environment_ids: Array<Id>;
+    value: string;
+};
+
+export type CopyValuesRequest = {
+    source_environment_id: Id;
+    /**
+     * The keys to copy, by name. Explicit: an empty list quietly meaning
+     * "everything" is how a mistyped bulk apply becomes an incident, so
+     * it is refused instead. Naming a key twice is refused: it is one
+     * logical cell requested twice.
+     *
+     */
+    keys: Array<KeyName>;
+    destination_environment_ids: Array<Id>;
+    /**
+     * The protected-environment confirmation. A protected destination
+     * refuses the copy without it, naming the environment.
+     *
+     */
+    confirm_protected?: boolean;
+};
+
+export type CopyValuesResult = {
+    copied: Array<{
+        key: KeyName;
+        destination_environment_id: Id;
+    }>;
+};
+
+export type ValueDiff = {
+    left_environment_id: Id;
+    right_environment_id: Id;
+    items: Array<ValueDiffRow>;
+};
+
+export type RevealDiffRequest = {
+    left: Id;
+    right: Id;
+};
+
+export type ValueDiffRow = {
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    left: ValueCell;
+    right: ValueCell;
+    /**
+     * ABSENT where the comparison could not be made without disclosing
+     * something the caller may not see - both sides `set` with at least
+     * one unreadable. Whether two secrets match is itself material, so it
+     * is not answered as `false` either.
+     *
+     */
+    equal?: boolean;
+};
+
 /**
  * An environment carries NO `base` pointer and no defaults layer, here or
  * anywhere: the flat-model ADR deleted both, and every value is explicit
@@ -1345,6 +1480,14 @@ export type GrantCapability = Capability;
  * Key identifier - the immutable id, never the mutable name.
  */
 export type KeyId = Id;
+
+/**
+ * The key's NAME, not its id. Values are addressed the way an operator
+ * holds them - `values set DATABASE_URL` - and the id is server
+ * vocabulary that appears only in responses and audit records.
+ *
+ */
+export type ValueKeyName = KeyName;
 
 /**
  * Key group identifier.
@@ -2594,6 +2737,75 @@ export type CreateEnvironmentResponses = {
 };
 
 export type CreateEnvironmentResponse = CreateEnvironmentResponses[keyof CreateEnvironmentResponses];
+
+export type CloneEnvironmentData = {
+    body: CloneEnvironmentRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/clone';
+};
+
+export type CloneEnvironmentErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CloneEnvironmentError = CloneEnvironmentErrors[keyof CloneEnvironmentErrors];
+
+export type CloneEnvironmentResponses = {
+    /**
+     * The created environment and what the clone carried.
+     */
+    201: ClonedEnvironment;
+};
+
+export type CloneEnvironmentResponse = CloneEnvironmentResponses[keyof CloneEnvironmentResponses];
 
 export type ReorderEnvironmentsData = {
     body: EnvironmentOrderRequest;
@@ -5350,6 +5562,734 @@ export type RenameKeyGroupResponses = {
 };
 
 export type RenameKeyGroupResponse = RenameKeyGroupResponses[keyof RenameKeyGroupResponses];
+
+export type ListValuesData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values';
+};
+
+export type ListValuesErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListValuesError = ListValuesErrors[keyof ListValuesErrors];
+
+export type ListValuesResponses = {
+    /**
+     * The environment's resolved values.
+     */
+    200: ValueList;
+};
+
+export type ListValuesResponse = ListValuesResponses[keyof ListValuesResponses];
+
+export type ClearValueData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        /**
+         * The key's NAME, not its id. Values are addressed the way an operator
+         * holds them - `values set DATABASE_URL` - and the id is server
+         * vocabulary that appears only in responses and audit records.
+         *
+         */
+        key: KeyName;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}';
+};
+
+export type ClearValueErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ClearValueError = ClearValueErrors[keyof ClearValueErrors];
+
+export type ClearValueResponses = {
+    /**
+     * The cell is absent. Clearing an already-absent cell says the same thing.
+     */
+    204: void;
+};
+
+export type ClearValueResponse = ClearValueResponses[keyof ClearValueResponses];
+
+export type GetValueData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        /**
+         * The key's NAME, not its id. Values are addressed the way an operator
+         * holds them - `values set DATABASE_URL` - and the id is server
+         * vocabulary that appears only in responses and audit records.
+         *
+         */
+        key: KeyName;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}';
+};
+
+export type GetValueErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetValueError = GetValueErrors[keyof GetValueErrors];
+
+export type GetValueResponses = {
+    /**
+     * The cell, `set` or `absent`.
+     */
+    200: ValueCell;
+};
+
+export type GetValueResponse = GetValueResponses[keyof GetValueResponses];
+
+export type SetValueData = {
+    body: SetValueRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        /**
+         * The key's NAME, not its id. Values are addressed the way an operator
+         * holds them - `values set DATABASE_URL` - and the id is server
+         * vocabulary that appears only in responses and audit records.
+         *
+         */
+        key: KeyName;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}';
+};
+
+export type SetValueErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetValueError = SetValueErrors[keyof SetValueErrors];
+
+export type SetValueResponses = {
+    /**
+     * The cell as stored. It never echoes the value back.
+     */
+    200: ValueCell;
+};
+
+export type SetValueResponse = SetValueResponses[keyof SetValueResponses];
+
+export type DeclareValuesData = {
+    body: DeclareValuesRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/values/declare';
+};
+
+export type DeclareValuesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeclareValuesError = DeclareValuesErrors[keyof DeclareValuesErrors];
+
+export type DeclareValuesResponses = {
+    /**
+     * The cells as stored, one per environment.
+     */
+    200: ValueList;
+};
+
+export type DeclareValuesResponse = DeclareValuesResponses[keyof DeclareValuesResponses];
+
+export type CopyValuesData = {
+    body: CopyValuesRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/values/copy';
+};
+
+export type CopyValuesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CopyValuesError = CopyValuesErrors[keyof CopyValuesErrors];
+
+export type CopyValuesResponses = {
+    /**
+     * What landed, one entry per (key, destination).
+     */
+    200: CopyValuesResult;
+};
+
+export type CopyValuesResponse = CopyValuesResponses[keyof CopyValuesResponses];
+
+export type DiffValuesData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query: {
+        /**
+         * The left environment.
+         */
+        left: Id;
+        /**
+         * The right environment.
+         */
+        right: Id;
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/values/diff';
+};
+
+export type DiffValuesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DiffValuesError = DiffValuesErrors[keyof DiffValuesErrors];
+
+export type DiffValuesResponses = {
+    /**
+     * One row per declared key.
+     */
+    200: ValueDiff;
+};
+
+export type DiffValuesResponse = DiffValuesResponses[keyof DiffValuesResponses];
+
+export type RevealValuesData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal';
+};
+
+export type RevealValuesErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevealValuesError = RevealValuesErrors[keyof RevealValuesErrors];
+
+export type RevealValuesResponses = {
+    /**
+     * The environment's resolved values, `secret` plaintext included.
+     */
+    200: ValueList;
+};
+
+export type RevealValuesResponse = RevealValuesResponses[keyof RevealValuesResponses];
+
+export type RevealValueData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        /**
+         * The key's NAME, not its id. Values are addressed the way an operator
+         * holds them - `values set DATABASE_URL` - and the id is server
+         * vocabulary that appears only in responses and audit records.
+         *
+         */
+        key: KeyName;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal';
+};
+
+export type RevealValueErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevealValueError = RevealValueErrors[keyof RevealValueErrors];
+
+export type RevealValueResponses = {
+    /**
+     * The cell, plaintext included.
+     */
+    200: ValueCell;
+};
+
+export type RevealValueResponse = RevealValueResponses[keyof RevealValueResponses];
+
+export type RevealValueDiffData = {
+    body: RevealDiffRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/values/diff/reveal';
+};
+
+export type RevealValueDiffErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevealValueDiffError = RevealValueDiffErrors[keyof RevealValueDiffErrors];
+
+export type RevealValueDiffResponses = {
+    /**
+     * One row per declared key, plaintext included.
+     */
+    200: ValueDiff;
+};
+
+export type RevealValueDiffResponse = RevealValueDiffResponses[keyof RevealValueDiffResponses];
 
 export type AuthMethodsData = {
     body?: never;

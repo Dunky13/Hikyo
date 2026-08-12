@@ -1,0 +1,31 @@
+{
+  "count": 3,
+  "items": [
+    {
+      "classification": "secret",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+      "name": "DATABASE_URL",
+      "revealed": false,
+      "set": true,
+      "updated_at": "2026-01-02T03:04:05Z",
+      "updated_by": "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77"
+    },
+    {
+      "classification": "config",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56",
+      "name": "LOG_LEVEL",
+      "revealed": true,
+      "set": true,
+      "updated_at": "2026-01-02T03:04:05Z",
+      "updated_by": "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77",
+      "value": "info"
+    },
+    {
+      "classification": "config",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f57",
+      "name": "FEATURE_FLAG",
+      "revealed": false,
+      "set": false
+    }
+  ]
+}

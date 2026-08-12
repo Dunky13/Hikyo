@@ -92,8 +92,16 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 			// mapping.
 			continue
 		}
-		_, exemptEntry := ex.Wire[entry]
+		_, pinnedExempt := ex.Wire[entry]
 		events := wireEvents[entry]
+		// A route reaching ONLY audited-none operations is silent by the permit
+		// rule; a route reaching any emitting operation is audited. The two are
+		// tracked separately because a route can reach both — #50's copy and
+		// clone reach the audited-none `value.list` (they read `config`
+		// material under it) alongside the operations that emit the copy
+		// events — and treating the audited-none leg as an exemption would
+		// report an audited route as unaudited.
+		silent := true
 		for _, op := range facts.WireRoutes()[entry] {
 			// A route that reaches a registered operation inherits that
 			// operation's audit mapping; declaring it twice is how the two
@@ -104,15 +112,16 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 				t.Errorf("wire entry %s names unregistered operation %q", entry, op)
 			}
 			events = append(events, m.Events...)
-			if m.AuditedNone {
-				exemptEntry = true
+			if !m.AuditedNone {
+				silent = false
 			}
 		}
 		switch {
-		case len(events) > 0 && exemptEntry:
+		case len(events) > 0 && pinnedExempt:
 			t.Errorf("wire entry %s: emits events AND is exemption-pinned — remove the stale fixture entry", entry)
-		case len(events) > 0, exemptEntry:
-			// Audited directly, or a reviewed deviation.
+		case len(events) > 0, pinnedExempt, silent && len(facts.WireRoutes()[entry]) > 0:
+			// Audited directly, silent under the permit rule, or a reviewed
+			// deviation.
 		default:
 			t.Errorf("wire entry %s (class %v): unaudited and not exemption-pinned", entry, class)
 		}

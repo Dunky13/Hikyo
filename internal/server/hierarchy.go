@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Dunky13/hikyo/api"
@@ -41,6 +42,9 @@ type ProjectService interface {
 
 type EnvironmentService interface {
 	Create(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Environment, error)
+	// Clone is create-with-clone-at-creation (#50). It is a separate method
+	// because its RESULT is different: a clone reports what it could not take.
+	Clone(ctx context.Context, actor service.Actor, scope domain.Scope, name, sourceEnvID string) (service.Environment, service.CloneResult, error)
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope) (service.Environment, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.Environment, error)
 	Rename(ctx context.Context, actor service.Actor, scope domain.Scope, name string) (service.Environment, error)
@@ -80,7 +84,18 @@ func (a *API) writeHandlerError(w http.ResponseWriter, r *http.Request, err erro
 		}
 		a.fault(r.Context(), operation, err)
 	}
-	writeError(w, code, "")
+	// A service refusal may carry a caller-safe detail (the clone abort names
+	// the stranded keys; a duplicate-item refusal names the duplicate; the
+	// protected-destination refusal names the caller's own destination id).
+	// errorBody honours it only for bad_request and conflict, so a detail on any
+	// other code is dropped — and detail is only ever set by an explicit
+	// SafeDetail carrier, so a plain refusal on those codes still stays uniform.
+	detail := ""
+	var sd interface{ SafeDetail() string }
+	if errors.As(err, &sd) {
+		detail = sd.SafeDetail()
+	}
+	writeError(w, code, detail)
 }
 
 // ---------------------------------------------------------------------------

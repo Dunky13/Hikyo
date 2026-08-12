@@ -565,6 +565,144 @@ var tenantProbes = []tenantProbe{
 			return err
 		},
 	},
+	// The flat value model (#50). Values are the material the whole product
+	// exists to protect, so every axis gets one: a cross-org human, a
+	// cross-project machine, and the least-privilege reader against each half
+	// of the write formula and the reveal gate.
+	{
+		name: "value_read_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Get(tctx(t), service.LocalPrincipal(bob),
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", false)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Get(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", false)
+			return err
+		},
+	},
+	{
+		name: "value_read_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).List(tctx(t), service.LocalPrincipal(mchA1),
+				scopeEnv(orgA, prjA2, envA2), false)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).List(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), false)
+			return err
+		},
+	},
+	{
+		name: "value_reveal_read_only_principal", axis: axisCapabilityDenial,
+		run: func(t *testing.T, db *store.DB) error {
+			// `read` alone is not `read ∧ reveal`. The refusal is the uniform
+			// nonexistent, so the reader cannot even learn that the gate is
+			// what they lack.
+			_, err := valueSvc(t, db).Get(tctx(t), service.LocalPrincipal(reader),
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", true)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Get(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", true)
+			return err
+		},
+	},
+	{
+		name: "value_set_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(bob),
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned")
+			return err
+		},
+	},
+	{
+		name: "value_set_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(reader),
+				scopeEnv(orgA, prjA1, envA1), "SHARED_KEY", "pwned")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Set(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY", "pwned")
+			return err
+		},
+	},
+	{
+		name: "value_clear_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			return valueSvc(t, db).Clear(tctx(t), service.LocalPrincipal(mchA1),
+				scopeEnv(orgA, prjA2, envA2), "SHARED_KEY")
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			return valueSvc(t, db).Clear(tctx(t), service.LocalPrincipal(custodian),
+				scopeEnv(orgA, prjA1, "env_missing"), "SHARED_KEY")
+		},
+	},
+	{
+		name: "value_copy_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Copy(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1),
+				service.CopyRequest{
+					SourceEnvironmentID:       string(envA1),
+					KeyNames:                  []string{"SHARED_KEY"},
+					DestinationEnvironmentIDs: []string{string(envA2)},
+				})
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Copy(tctx(t), service.LocalPrincipal(custodian), scopeProject(orgA, "prj_missing"),
+				service.CopyRequest{
+					SourceEnvironmentID:       string(envA1),
+					KeyNames:                  []string{"SHARED_KEY"},
+					DestinationEnvironmentIDs: []string{string(envA2)},
+				})
+			return err
+		},
+	},
+	{
+		name: "value_copy_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Copy(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1),
+				service.CopyRequest{
+					SourceEnvironmentID:       string(envA1),
+					KeyNames:                  []string{"SHARED_KEY"},
+					DestinationEnvironmentIDs: []string{string(envA2)},
+				})
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := valueSvc(t, db).Copy(tctx(t), service.LocalPrincipal(custodian), scopeProject(orgA, "prj_missing"),
+				service.CopyRequest{
+					SourceEnvironmentID:       string(envA1),
+					KeyNames:                  []string{"SHARED_KEY"},
+					DestinationEnvironmentIDs: []string{string(envA2)},
+				})
+			return err
+		},
+	},
+	{
+		name: "value_clone_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, err := cloneSvc(t, db).Clone(tctx(t), service.LocalPrincipal(bob),
+				scopeProject(orgA, prjA1), "intruder-clone", string(envA1))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, err := cloneSvc(t, db).Clone(tctx(t), service.LocalPrincipal(custodian),
+				scopeProject(orgA, "prj_missing"), "intruder-clone", string(envA1))
+			return err
+		},
+	},
 	{
 		name: "key_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
 		run: func(t *testing.T, db *store.DB) error {
@@ -715,6 +853,11 @@ func contentSnapshot(t *testing.T, db *store.DB) string {
 		// NULL would make the whole concatenation NULL and hide every row.
 		"SELECT id || '=' || name || ':' || classification || ':' || folder_path || ':' || declaration || ':' || required_mode || ':' || forbidden_mode || ':' || COALESCE(group_id, '') || '|' FROM keys ORDER BY id",
 		"SELECT org_id || '/' || project_id || '=' || revision || '|' FROM project_schema_revisions ORDER BY org_id, project_id",
+		// The value model (#50). The row id is included on purpose: every
+		// write mints a fresh one (the id is AAD-bound and never reused), so a
+		// refused write that committed and then answered ErrNotFound is a diff
+		// even where it replaced a cell with the identical plaintext.
+		"SELECT id || '=' || environment_id || ':' || key_id || ':' || updated_by || '|' FROM value_entries ORDER BY id",
 	} {
 		out.WriteString(queryStrings(t, db, q))
 		out.WriteString(";")

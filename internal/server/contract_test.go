@@ -290,7 +290,7 @@ func newTestServer(t *testing.T, auth server.AuthService, orgs server.OrgService
 		// The hierarchy services default to the uniform nonexistent answer, so a
 		// contract test that does not care about them still exercises the real
 		// router and the real response validation rather than nil-panicking.
-		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
 	}, nil))
 	t.Cleanup(srv.Close)
 	return srv
@@ -701,6 +701,10 @@ func (s stubEnvs) Create(context.Context, service.Actor, domain.Scope, string) (
 	return service.Environment{}, s.outcome()
 }
 
+func (s stubEnvs) Clone(context.Context, service.Actor, domain.Scope, string, string) (service.Environment, service.CloneResult, error) {
+	return service.Environment{}, service.CloneResult{}, s.outcome()
+}
+
 func (s stubEnvs) Get(context.Context, service.Actor, domain.Scope) (service.Environment, error) {
 	return service.Environment{}, s.outcome()
 }
@@ -714,6 +718,39 @@ func (s stubEnvs) Rename(context.Context, service.Actor, domain.Scope, string) (
 }
 
 func (s stubEnvs) Reorder(context.Context, service.Actor, domain.Scope, []string) ([]service.Environment, error) {
+	return nil, s.outcome()
+}
+
+// stubValues is the value surface's uniformity fixture (#50): every method
+// answers the SAME injected outcome, so the transport has no way to tell an
+// absent cell from one the caller may not reach.
+type stubValues struct{ stubHierarchy }
+
+func (s stubValues) Get(context.Context, service.Actor, domain.Scope, string, bool) (service.ValueCell, error) {
+	return service.ValueCell{}, s.outcome()
+}
+
+func (s stubValues) List(context.Context, service.Actor, domain.Scope, bool) ([]service.ValueCell, error) {
+	return nil, s.outcome()
+}
+
+func (s stubValues) Set(context.Context, service.Actor, domain.Scope, string, string) (service.ValueCell, error) {
+	return service.ValueCell{}, s.outcome()
+}
+
+func (s stubValues) Clear(context.Context, service.Actor, domain.Scope, string) error {
+	return s.outcome()
+}
+
+func (s stubValues) Declare(context.Context, service.Actor, domain.Scope, []string, string, string) ([]service.ValueCell, error) {
+	return nil, s.outcome()
+}
+
+func (s stubValues) Copy(context.Context, service.Actor, domain.Scope, service.CopyRequest) (service.CopyResult, error) {
+	return service.CopyResult{}, s.outcome()
+}
+
+func (s stubValues) Diff(context.Context, service.Actor, domain.Scope, string, string, bool) ([]service.DiffRow, error) {
 	return nil, s.outcome()
 }
 
@@ -851,13 +888,13 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
 		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
 		Projects:     stubHierarchy{err: outcome},
-		Environments: stubEnvs{stubHierarchy{err: outcome}},
-		Folders:      stubFolders{stubHierarchy{err: outcome}},
-		Keys:         stubKeys{stubHierarchy{err: outcome}},
-		KeyGroups:    stubKeyGroups{stubHierarchy{err: outcome}},
-		Grants:       stubGrants{stubHierarchy{err: outcome}},
-		Settings:     stubSettings{stubHierarchy{err: outcome}},
-		Version:      "test",
+		Environments: stubEnvs{stubHierarchy{err: outcome}}, Values: stubValues{stubHierarchy{err: outcome}},
+		Folders:   stubFolders{stubHierarchy{err: outcome}},
+		Keys:      stubKeys{stubHierarchy{err: outcome}},
+		KeyGroups: stubKeyGroups{stubHierarchy{err: outcome}},
+		Grants:    stubGrants{stubHierarchy{err: outcome}},
+		Settings:  stubSettings{stubHierarchy{err: outcome}},
+		Version:   "test",
 	}, nil))
 	t.Cleanup(srv.Close)
 	return srv
@@ -1094,7 +1131,7 @@ func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
 				return service.Org{}, fmt.Errorf("step up first: %w", domain.ErrUnauthorized)
 			},
 		},
-		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
+		Projects: stubHierarchy{}, Environments: stubEnvs{}, Values: stubValues{}, Folders: stubFolders{},
 		Version: "test",
 	}, nil))
 	t.Cleanup(srv.Close)
@@ -1110,5 +1147,101 @@ func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
 	}
 	if body.Error.Detail != nil {
 		t.Error("a 403 carries a detail member — only bad_request may")
+	}
+}
+
+// The value-surface transport contracts (#50 review fixes).
+
+const (
+	// testProjectID and testEnvID are declared with the hierarchy fixtures above.
+	testEnvID2     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56"
+	cloneRoutePath = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/environments/clone"
+	copyRoutePath  = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/values/copy"
+)
+
+// newValueServer builds a test server with injectable environment and value
+// surfaces, so a test can drive one handler's exact refusal without a datastore.
+func newValueServer(t *testing.T, envs server.EnvironmentService, values server.ValueService) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{}, Version: "test",
+		Projects: stubHierarchy{}, Environments: envs, Values: values, Folders: stubFolders{},
+	}, nil))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// safeDetailErr stands in for the service's clone-abort error: an ErrInvalid
+// that exposes a caller-safe detail (the stranded key names). It is the shape
+// writeHandlerError extracts via errors.As and errorBody honours for
+// bad_request, which is the contract this test pins.
+type safeDetailErr struct{ detail string }
+
+func (e safeDetailErr) Error() string      { return e.detail }
+func (e safeDetailErr) Unwrap() error      { return domain.ErrInvalid }
+func (e safeDetailErr) SafeDetail() string { return e.detail }
+
+// TestCloneAbortBodyCarriesTheStrandedKeys is the E2E half of the clone-abort
+// fix: a refusal naming the stranded keys must REACH the caller, not be flattened
+// to the bare bad_request message. writeHandlerError lifts the safe detail and
+// errorBody carries it. Detail is honoured only for bad_request and conflict, and
+// only when an explicit SafeDetail carrier supplies it — the uniform-response rule
+// still stands for every plain refusal.
+func TestCloneAbortBodyCarriesTheStrandedKeys(t *testing.T) {
+	const detail = "cloning env_src would leave required secret(s) absent in the new environment: REQUIRED_TOKEN"
+	srv := newValueServer(t, stubEnvs{stubHierarchy{err: safeDetailErr{detail: detail}}}, stubValues{})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+cloneRoutePath, "ew_1_cli_x",
+		map[string]any{"name": "clone-x", "source_environment_id": testEnvID})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+	body := decodeError(t, payload)
+	if body.Error.Detail == nil || !strings.Contains(*body.Error.Detail, "REQUIRED_TOKEN") {
+		t.Fatalf("clone-abort 400 detail = %v, want it to name the stranded key REQUIRED_TOKEN", body.Error.Detail)
+	}
+}
+
+// TestUnconfirmedProtectedDestinationIs409NotFault pins that the protected-
+// destination refusal — a documented post-authorization state refusal — answers
+// 409, never the 500 fault a bare error would produce, AND that its body names
+// the destination environment id. The id is the caller's own request field and
+// the refusal is post-authorization, so it rides the SafeDetail channel errorBody
+// honours for conflict; a PLAIN conflict still carries no detail (asserted by the
+// bare-sentinel case below).
+func TestUnconfirmedProtectedDestinationIs409NotFault(t *testing.T) {
+	refusal := service.ProtectedDestinationRefusal(domain.EnvID(testEnvID2))
+	srv := newValueServer(t, stubEnvs{}, stubValues{stubHierarchy{err: refusal}})
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+copyRoutePath, "ew_1_cli_x",
+		map[string]any{
+			"source_environment_id":       testEnvID,
+			"keys":                        []string{"TOKEN"},
+			"destination_environment_ids": []string{testEnvID2},
+		})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status %d, want 409 — a documented protected-destination refusal, not a 500 fault", resp.StatusCode)
+	}
+	body := decodeError(t, payload)
+	if body.Error.Code != apigen.ErrorCodeConflict {
+		t.Errorf("code %q, want conflict", body.Error.Code)
+	}
+	if body.Error.Detail == nil || !strings.Contains(*body.Error.Detail, testEnvID2) {
+		t.Fatalf("protected-destination 409 detail = %v, want it to name the destination %q", body.Error.Detail, testEnvID2)
+	}
+
+	// A PLAIN conflict — one that wraps domain.ErrConflict with no SafeDetail —
+	// must stay uniform: errorBody keys on an explicit detail carrier, not on the
+	// code, so widening detail to conflict did not leak every conflict body.
+	plain := newValueServer(t, stubEnvs{}, stubValues{stubHierarchy{err: domain.ErrConflict}})
+	resp2, payload2 := call(t, plain, http.MethodPost, api.PathPrefix+copyRoutePath, "ew_1_cli_x",
+		map[string]any{
+			"source_environment_id":       testEnvID,
+			"keys":                        []string{"TOKEN"},
+			"destination_environment_ids": []string{testEnvID2},
+		})
+	if resp2.StatusCode != http.StatusConflict {
+		t.Fatalf("plain-conflict status %d, want 409", resp2.StatusCode)
+	}
+	if d := decodeError(t, payload2).Error.Detail; d != nil {
+		t.Fatalf("plain conflict carried detail %q, want none — uniform response", *d)
 	}
 }

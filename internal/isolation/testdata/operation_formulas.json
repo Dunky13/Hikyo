@@ -694,5 +694,73 @@
     "formula": [
       "instance-config@instance"
     ]
+  },
+  {
+    "operation": "value.clear",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "edit@environment",
+      "publish@environment"
+    ]
+  },
+  {
+    "operation": "value.copy-destination",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "reveal@environment",
+      "publish@environment"
+    ]
+  },
+  {
+    "operation": "value.copy-destination-config",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "publish@environment"
+    ]
+  },
+  {
+    "operation": "value.copy-source",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "reveal@environment"
+    ]
+  },
+  {
+    "operation": "value.list",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "value.read",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "value.reveal",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment",
+      "reveal@environment"
+    ]
+  },
+  {
+    "operation": "value.set",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "edit@environment",
+      "publish@environment"
+    ]
   }
 ]

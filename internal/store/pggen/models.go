@@ -442,6 +442,17 @@ type TotpCredential struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type ValueEntry struct {
+	ID            string
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	KeyID         string
+	Ciphertext    []byte
+	UpdatedAt     pgtype.Timestamptz
+	UpdatedBy     string
+}
+
 type WebauthnCeremony struct {
 	ID                string
 	ChallengeVerifier []byte

@@ -445,6 +445,62 @@ func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
 			}},
 			Count: 1,
 		}},
+		// The flat value model (#50). The pinned document is where "presence is
+		// two-state" stops being prose: `set` is a boolean, `revealed` says
+		// whether `value` is there at all, and there is no third state and no
+		// `masked` member to drop later without noticing.
+		{"value-json.json", apigen.ValueList{
+			Items: []apigen.ValueCell{
+				{
+					KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55", Name: "DATABASE_URL",
+					Classification: "secret", Set: true, Revealed: false,
+					UpdatedAt: &stamp, UpdatedBy: strptr("usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77"),
+				},
+				{
+					KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56", Name: "LOG_LEVEL",
+					Classification: "config", Set: true, Revealed: true, Value: strptr("info"),
+					UpdatedAt: &stamp, UpdatedBy: strptr("usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77"),
+				},
+				{
+					KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f57", Name: "FEATURE_FLAG",
+					Classification: "config", Set: false, Revealed: false,
+				},
+			},
+			Count: 3,
+		}},
+		{"value-diff-json.json", apigen.ValueDiff{
+			LeftEnvironmentId:  "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+			RightEnvironmentId: "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f34",
+			Items: []apigen.ValueDiffRow{
+				{
+					KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56", Name: "LOG_LEVEL",
+					Classification: "config",
+					Left: apigen.ValueCell{
+						KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56", Name: "LOG_LEVEL",
+						Classification: "config", Set: true, Revealed: true, Value: strptr("debug"),
+					},
+					Right: apigen.ValueCell{
+						KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56", Name: "LOG_LEVEL",
+						Classification: "config", Set: true, Revealed: true, Value: strptr("info"),
+					},
+					Equal: boolptr(false),
+				},
+				{
+					// Both sides set, neither readable: `equal` is ABSENT, not
+					// false. Whether two secrets match is itself material.
+					KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55", Name: "DATABASE_URL",
+					Classification: "secret",
+					Left: apigen.ValueCell{
+						KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55", Name: "DATABASE_URL",
+						Classification: "secret", Set: true,
+					},
+					Right: apigen.ValueCell{
+						KeyId: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55", Name: "DATABASE_URL",
+						Classification: "secret", Set: true,
+					},
+				},
+			},
+		}},
 		{"folder-json.json", apigen.FolderList{
 			Items: []apigen.Folder{{
 				Id:        "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44",
@@ -462,3 +518,6 @@ func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
 		golden(t, tc.fixture, out.Bytes())
 	}
 }
+
+func strptr(s string) *string { return &s }
+func boolptr(b bool) *bool    { return &b }

@@ -83,6 +83,14 @@ tags:
       table; a credential is an authenticator for it, and every credential of
       one confers identical authority.
 
+  - name: values
+    description: |
+      The flat value model: a value attaches to a `(key, environment)` and
+      there are no other layers. Presence is two-state - a `set` entry
+      delivers, `absent` delivers nothing, and no fallback source exists. The
+      deleted `masked` state appears nowhere in this contract. Plaintext of a
+      `secret` key flows only through the reveal-gated shapes, each of which
+      emits one audit event per disclosed key.
 paths:
   /api/v1/meta:
     get:
@@ -882,6 +890,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Environment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/clone:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: cloneEnvironment
+      tags: [hierarchy]
+      summary: Create an environment holding a copy of another one's values.
+      description: |
+        Clone-at-creation is ONE act: the environment row, every copied value
+        and the audit records for both commit together or not at all - the
+        atomicity rule admits no partially-valid creation.
+
+        The copy is preflighted. `config` values copy freely (freely meaning
+        without the reveal gate, not without authorization); `secret` values
+        copy only where the source-material gate passes, and a caller who
+        cannot read them is NOT refused the creation - what could not be
+        copied comes back enumerated by name. The one exception is the abort:
+        a `secret` that would be ABSENT in the new environment - the gate
+        blocked it, or the source never held it - and is `required_in` it
+        under a `mode: all` rule ABORTS the creation, naming the keys, because
+        an environment born invalid is exactly what the atomicity rule
+        forbids.
+
+        It is a separate route rather than a flag on `createEnvironment`
+        because its RESPONSE is different: a clone has to report what it could
+        not take.
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.create
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloneEnvironmentRequest"
+      responses:
+        "201":
+          description: The created environment and what the clone carried.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClonedEnvironment"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2317,6 +2383,417 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: listValues
+      tags: [values]
+      summary: The environment's resolved values.
+      description: |
+        One row per DECLARED key, each `set` or `absent`. In the flat model
+        this IS the resolution - a lookup per key with nothing underneath - so
+        an absent row carries no value from any source.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.list
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The environment's resolved values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - $ref: "#/components/parameters/ValueKeyName"
+    get:
+      operationId: getValue
+      tags: [values]
+      summary: Read one value cell.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.read
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The cell, `set` or `absent`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueCell"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: setValue
+      tags: [values]
+      summary: Set one value.
+      description: |
+        The caller SUPPLIES the plaintext, so no reveal is involved on any
+        side: the formula is `edit` AND `publish` on the environment that is
+        about to deliver it. The value is validated against the key's
+        declaration before it commits, because in this slice what commits is
+        what the environment delivers.
+
+        A key that is `forbidden_in` this environment refuses the write, by
+        name. A key that is not declared refuses too - typing a name that does
+        not exist is a key CREATION, an explicit act elsewhere.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.set
+      x-hikyo-formula: [edit@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetValueRequest"
+      responses:
+        "200":
+          description: The cell as stored. It never echoes the value back.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueCell"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: clearValue
+      tags: [values]
+      summary: Clear a value to `absent`.
+      description: |
+        With nothing to inherit from, this is the whole of "remove this value
+        now": there is no layer underneath for it to fall back to. A key
+        `required_in` this environment refuses to be cleared, naming key and
+        environment.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.clear
+      x-hikyo-formula: [edit@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: The cell is absent. Clearing an already-absent cell says the same thing.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/values/declare:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: declareValues
+      tags: [values]
+      summary: Declare one supplied value into several environments.
+      description: |
+        Inheritance's legitimate job was "I do not want to type this four
+        times"; this is the explicit operation that does it. One plaintext the
+        caller supplies, several environments, one transaction - and no
+        relationship between the copies: editing one later changes nothing
+        elsewhere, by design.
+
+        Authorized per DESTINATION. Holding the write formula on two of three
+        environments writes into none of them.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.set
+      x-hikyo-formula: [edit@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeclareValuesRequest"
+      responses:
+        "200":
+          description: The cells as stored, one per environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/values/copy:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: copyValues
+      tags: [values]
+      summary: Copy stored values into other environments (copy-to / bulk-apply).
+      description: |
+        Server-side duplication of STORED material, which the flat model calls
+        authorized duplication and never supply. The locked formula, evaluated
+        per side and per classification:
+
+          secret material: reveal(source) AND reveal(destination) AND publish(destination)
+          config material:   read(source) AND                          publish(destination)
+
+        Every copy is an INDEPENDENT value: the ciphertext is never carried
+        over, the plaintext is re-sealed under the destination row's own
+        associated data, and editing the source later changes nothing
+        downstream.
+
+        A protected destination refuses the copy unless `confirm_protected`
+        says so, by name.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.copy-destination
+      x-hikyo-formula: [reveal@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopyValuesRequest"
+      responses:
+        "200":
+          description: What landed, one entry per (key, destination).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopyValuesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/values/diff:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: diffValues
+      tags: [values]
+      summary: Compare two environments' values.
+      description: |
+        An explicit, authorized, per-invocation comparison - NOT an ambient
+        drift signal: divergence between environments is the point of the flat
+        model, so equality is not a health signal and nothing watches it.
+
+        Oracle rules: write-presence without the reveal gate, plaintext only
+        with it. Where both sides are `set` and at least one is unreadable,
+        `equal` is ABSENT rather than false - whether two secrets match is
+        itself material. Authorized per side, so `read` on one environment
+        says nothing about the other.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.list
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      parameters:
+        - name: left
+          in: query
+          required: true
+          description: The left environment.
+          schema:
+            $ref: "#/components/schemas/ID"
+        - name: right
+          in: query
+          required: true
+          description: The right environment.
+          schema:
+            $ref: "#/components/schemas/ID"
+      responses:
+        "200":
+          description: One row per declared key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueDiff"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: revealValues
+      tags: [values]
+      summary: The environment's values, with `secret` plaintext.
+      description: |
+        The locked disclosure formula for current material: `read(E)` AND
+        `reveal(E)`, with reauthentication and ONE audit event per disclosed
+        key - never one row saying "revealed 40 secrets".
+
+        It is a POST, and a route of its own rather than a flag on the read,
+        for two reasons that are the same reason: disclosure is an ACT (it
+        writes the audit records that make it accountable), and the ADR's rule
+        is one verb per disclosure path, one gate.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.reveal
+      x-hikyo-formula: [read@environment, reveal@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The environment's resolved values, `secret` plaintext included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - $ref: "#/components/parameters/ValueKeyName"
+    post:
+      operationId: revealValue
+      tags: [values]
+      summary: Read one cell with `secret` plaintext.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.reveal
+      x-hikyo-formula: [read@environment, reveal@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The cell, plaintext included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueCell"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/values/diff/reveal:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    post:
+      operationId: revealValueDiff
+      tags: [values]
+      summary: Compare two environments with `secret` plaintext.
+      description: |
+        The gated half of `values diff`. Authorized PER SIDE - `reveal` on
+        staging says nothing about prod - and one disclosure event per key per
+        side.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.reveal
+      x-hikyo-formula: [read@environment, reveal@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevealDiffRequest"
+      responses:
+        "200":
+          description: One row per declared key, plaintext included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueDiff"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -3859,6 +4336,16 @@ components:
       description: Key identifier - the immutable id, never the mutable name.
       schema:
         $ref: "#/components/schemas/ID"
+    ValueKeyName:
+      name: key
+      in: path
+      required: true
+      description: |
+        The key's NAME, not its id. Values are addressed the way an operator
+        holds them - `values set DATABASE_URL` - and the id is server
+        vocabulary that appears only in responses and audit records.
+      schema:
+        $ref: "#/components/schemas/KeyName"
     KeyGroupID:
       name: group
       in: path
@@ -4495,6 +4982,213 @@ components:
       properties:
         name:
           $ref: "#/components/schemas/EntityName"
+
+    CloneEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [name, source_environment_id]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+        source_environment_id:
+          $ref: "#/components/schemas/ID"
+
+    ClonedEnvironment:
+      type: object
+      required: [environment, copied, uncopied_secrets]
+      properties:
+        environment:
+          $ref: "#/components/schemas/Environment"
+        copied:
+          type: array
+          description: The key names whose values the clone carried over.
+          items:
+            $ref: "#/components/schemas/KeyName"
+        uncopied_secrets:
+          type: array
+          description: |
+            The `secret` key names the source-material gate blocked. They land
+            `absent` in the new environment - never silently, which is why
+            they are enumerated here.
+          items:
+            $ref: "#/components/schemas/KeyName"
+
+    ValueCell:
+      type: object
+      description: |
+        One `(key, environment)` cell.
+
+        PRESENCE IS THE SINGLE BOOLEAN `set`. That is the whole presence
+        model: there is no mode, no enum with a third member, and nothing
+        named `masked` anywhere in this contract - the flat-model ADR deleted
+        that state with the inheritance it existed to explain. A cell that is
+        not `set` carries no value from any source.
+      required: [key_id, name, classification, set, revealed]
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        set:
+          type: boolean
+          description: |
+            `true` is the `set` state, `false` is `absent`. Those are the only
+            two states there are.
+        revealed:
+          type: boolean
+          description: |
+            Whether `value` carries plaintext. It exists so a caller can tell
+            an empty value the operator actually set from a `secret` they are
+            not authorized to read - two cases that would otherwise both look
+            like an absent `value` member.
+        value:
+          type: string
+          description: |
+            Present only where the reader was authorized to see it: `config`
+            under `read`, `secret` under `read` AND `reveal`.
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_by:
+          type: string
+          description: The principal whose act produced this occurrence.
+
+    ValueList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValueCell"
+        count:
+          type: integer
+          minimum: 0
+
+    SetValueRequest:
+      type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value:
+          type: string
+          maxLength: 65536
+          description: |
+            The plaintext. It is validated against the key's declaration
+            before it commits, and stored sealed under the project data key
+            with associated data binding it to this row alone.
+
+    DeclareValuesRequest:
+      type: object
+      additionalProperties: false
+      required: [key, environment_ids, value]
+      properties:
+        key:
+          $ref: "#/components/schemas/KeyName"
+        environment_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ID"
+        value:
+          type: string
+          maxLength: 65536
+
+    CopyValuesRequest:
+      type: object
+      additionalProperties: false
+      required: [source_environment_id, keys, destination_environment_ids]
+      properties:
+        source_environment_id:
+          $ref: "#/components/schemas/ID"
+        keys:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          description: |
+            The keys to copy, by name. Explicit: an empty list quietly meaning
+            "everything" is how a mistyped bulk apply becomes an incident, so
+            it is refused instead. Naming a key twice is refused: it is one
+            logical cell requested twice.
+          items:
+            $ref: "#/components/schemas/KeyName"
+        destination_environment_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ID"
+        confirm_protected:
+          type: boolean
+          default: false
+          description: |
+            The protected-environment confirmation. A protected destination
+            refuses the copy without it, naming the environment.
+
+    CopyValuesResult:
+      type: object
+      required: [copied]
+      properties:
+        copied:
+          type: array
+          items:
+            type: object
+            required: [key, destination_environment_id]
+            properties:
+              key:
+                $ref: "#/components/schemas/KeyName"
+              destination_environment_id:
+                $ref: "#/components/schemas/ID"
+
+    ValueDiff:
+      type: object
+      required: [items, left_environment_id, right_environment_id]
+      properties:
+        left_environment_id:
+          $ref: "#/components/schemas/ID"
+        right_environment_id:
+          $ref: "#/components/schemas/ID"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValueDiffRow"
+
+    RevealDiffRequest:
+      type: object
+      additionalProperties: false
+      required: [left, right]
+      properties:
+        left:
+          $ref: "#/components/schemas/ID"
+        right:
+          $ref: "#/components/schemas/ID"
+
+    ValueDiffRow:
+      type: object
+      required: [key_id, name, classification, left, right]
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        left:
+          $ref: "#/components/schemas/ValueCell"
+        right:
+          $ref: "#/components/schemas/ValueCell"
+        equal:
+          type: boolean
+          description: |
+            ABSENT where the comparison could not be made without disclosing
+            something the caller may not see - both sides `set` with at least
+            one unreadable. Whether two secrets match is itself material, so it
+            is not answered as `false` either.
 
     Environment:
       type: object

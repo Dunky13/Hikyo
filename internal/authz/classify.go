@@ -215,11 +215,25 @@ var wireRegistry = map[string]Class{
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                ClassTenant,
-	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        ClassTenant,
-	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      ClassTenant,
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     ClassTenant,
+	// The flat value model (#50). Tenant-class throughout: a value the caller
+	// may not reach answers exactly like one that is not there.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal":       ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal": ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/declare":                                 ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/copy":                                    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/values/diff":                                     ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal":                             ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone":                             ClassTenant,
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":    ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":  ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}": ClassTenant,
 
 	// `hikyo admin create`: the bootstrap member of the closed local-authority
 	// exception set. System class, whose probe contract is network
@@ -261,7 +275,9 @@ var wireRegistry = map[string]Class{
 	"cli:env":     ClassTenant,
 	"cli:folder":  ClassTenant,
 	// `key` reaches the catalogue and the group routes, all tenant-class.
-	"cli:key":             ClassTenant,
+	"cli:key": ClassTenant,
+	// `values` reaches only the tenant-scoped value routes.
+	"cli:values":          ClassTenant,
 	"cli:instance-config": ClassInstance,
 	"cli:doctor":          ClassInstance,
 	// `access` reaches BOTH classes — the org/project/env grant routes are
@@ -531,11 +547,37 @@ var wireRoutes = map[string][]Operation{
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    {OpKeyUpdateDeclaration, OpKeySecretRuleChange},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": {OpKeyReclassify, OpKeyDeclassify},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          {OpKeySetGroup},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                {OpKeyGroupList},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               {OpKeyGroupCreate},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        {OpKeyGroupGet},
-	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      {OpKeyGroupRename},
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     {OpKeyGroupDelete},
+	// The flat value model (#50). Three routes reach TWO operations each,
+	// following the credential-reset precedent: a route that reaches a second
+	// operation at runtime must say so, or the registry describes an
+	// authorization posture the router does not have.
+	//
+	//   - declare authorizes value.set once PER DESTINATION environment;
+	//   - copy authorizes the source leg and each destination leg, and which
+	//     destination operation it reaches depends on the CLASSIFICATION of the
+	//     material moving (see the registry);
+	//   - clone is an environment create that then runs the copy legs.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               {OpValueList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal":       {OpValueReveal},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueRead},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueSet},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":      {OpValueClear},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal": {OpValueReveal},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/declare":                                 {OpValueSet},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/copy": {
+		OpValueList, OpValueCopySource, OpValueCopyDestination, OpValueCopyDestinationConfig,
+	},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/values/diff":         {OpValueList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal": {OpValueReveal},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone": {
+		OpEnvCreate, OpValueList, OpValueCopySource, OpValueCopyDestination, OpValueCopyDestinationConfig,
+	},
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            {OpKeyGroupList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           {OpKeyGroupCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":    {OpKeyGroupGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":  {OpKeyGroupRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}": {OpKeyGroupDelete},
 
 	// OIDC provider administration (#54), instance-config.
 	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},

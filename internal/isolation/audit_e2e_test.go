@@ -25,7 +25,6 @@ import (
 	"github.com/Dunky13/hikyo/internal/schema"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/keyring"
 	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
@@ -35,15 +34,16 @@ import (
 // the floor is what production runs and the flow exercises it a handful of
 // times.
 func authService(t *testing.T, db *store.DB) *service.Auth {
+	return authServiceWithKeyring(t, db)
+}
+
+// authServiceWithKeyring is authService plus access to the keyring it loaded.
+// The keyring hierarchy is minted ONCE per datastore under one root, so a
+// later loader with a fresh root is refused (correctly) — anything in this
+// suite that needs to seal must therefore share this one.
+func authServiceWithKeyring(t *testing.T, db *store.DB) *service.Auth {
 	t.Helper()
-	root, err := crypto.GenerateRootKey()
-	if err != nil {
-		t.Fatal(err)
-	}
-	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	kr := probeKeyring(t, db)
 	limiter, err := admission.New(admission.Config{ArgonMemoryKiB: crypto.PasswordFloor.MemoryKiB})
 	if err != nil {
 		t.Fatal(err)
@@ -647,17 +647,25 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 		t.Fatal("export did not finish after the in-flight event committed")
 	}
 
-	lines := strings.Split(strings.TrimSpace(w.buf.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("exported %d events, want both concurrent commits:\n%s", len(lines), w.buf.String())
+	// The export carries the whole org trail, which the fixture also seeds
+	// into (#50's value fixture writes one value.set). This regression is
+	// about the ORDER of the two concurrent commits, so it asserts on exactly
+	// those two rows rather than on the trail's length — a fixture row
+	// elsewhere in the org is not a gap.
+	var gap []exportLineForTest
+	for _, line := range strings.Split(strings.TrimSpace(w.buf.String()), "\n") {
+		var parsed exportLineForTest
+		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if parsed.ID == "evt_gap_low" || parsed.ID == "evt_gap_high" {
+			gap = append(gap, parsed)
+		}
 	}
-	var first, second exportLineForTest
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatal(err)
+	if len(gap) != 2 {
+		t.Fatalf("exported %d of the 2 concurrent commits:\n%s", len(gap), w.buf.String())
 	}
-	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatal(err)
-	}
+	first, second := gap[0], gap[1]
 	if first.ID != "evt_gap_high" || first.Seq != highSeq {
 		t.Fatalf("first page = %+v, want committed higher seq %d", first, highSeq)
 	}
@@ -672,7 +680,13 @@ func TestPostgresAuditExportCommitOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(interactive) < 2 || interactive[0].Seq != lowSeq || interactive[1].Seq != highSeq {
+	var seqs []int64
+	for _, ev := range interactive {
+		if ev.ID == "evt_gap_low" || ev.ID == "evt_gap_high" {
+			seqs = append(seqs, ev.Seq)
+		}
+	}
+	if len(seqs) != 2 || seqs[0] != lowSeq || seqs[1] != highSeq {
 		t.Fatalf("interactive query honored export-only cursor/order: %+v", interactive)
 	}
 	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE commit_seq IS NULL"); n != 0 {
@@ -854,7 +868,11 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	// — a value-dependent rule change on a `secret` key, and declassification —
 	// are the only path to settings.key_reveal_gate_passed, so a fixture without
 	// it could not prove that type has an emitter.
-	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "reveal"} {
+	// `edit` and `publish` join for the flat value model (#50): a value write
+	// is `edit ∧ publish` on the environment it delivers into, and copy adds
+	// `reveal ∧ publish` on the destination — without all four, value.set,
+	// value.cleared and the two disclosure.* types would have no emitter.
+	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "reveal", "edit", "publish"} {
 		stmts = append(stmts, fmt.Sprintf(
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 			 VALUES ('grt_ha_%d', 'usr_hierarchy_audit', '%s', '%s', NULL, NULL, %s)`,
@@ -895,6 +913,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	if err := folders.Delete(ctx, actor, scope, folder.ID); err != nil {
 		t.Fatal(err)
 	}
+	runValueLifecycle(t, db, actor, scope)
 	runCatalogueLifecycle(t, db, actor, scope)
 	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
 		t.Fatal(err)
@@ -913,6 +932,70 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	if err := orgs.Delete(ctx, service.LocalPrincipal(root), domain.OrgID(throwaway.ID)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// runValueLifecycle drives every value-model act (#50) so each value.* and
+// disclosure.value_* type has a real emitter behind it: a supplied write, a
+// revealed read, a copy into a second environment, and a clear. It cleans up
+// after itself — the keys and both environments go — because the catalogue
+// lifecycle that follows ends with an empty project, and a key holding values
+// refuses to be deleted at all.
+func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope) {
+	t.Helper()
+	ctx := tctx(t)
+	kr := probeKeyring(t, db)
+	keys := &service.Keys{DB: db}
+	envs := &service.Environments{DB: db, Keyring: kr}
+	values := &service.Values{DB: db, Keyring: kr}
+
+	source, err := envs.Create(ctx, actor, scope, "audited-values-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, err := envs.Create(ctx, actor, scope, "audited-values-dest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceScope := scope
+	sourceScope.Env = domain.EnvID(source.ID)
+	destScope := scope
+	destScope.Env = domain.EnvID(dest.ID)
+
+	key, err := keys.Create(ctx, actor, scope, service.KeySpec{
+		Name: "AUDITED_VALUE", Classification: string(schema.Secret),
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+		Presence:    schema.DefaultPresenceRules(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := values.Set(ctx, actor, sourceScope, key.Name, "audited-material"); err != nil {
+		t.Fatal(err)
+	}
+	// A revealing read: one disclosure event for the one `secret` key.
+	if _, err := values.Get(ctx, actor, sourceScope, key.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := values.Copy(ctx, actor, scope, service.CopyRequest{
+		SourceEnvironmentID:       source.ID,
+		KeyNames:                  []string{key.Name},
+		DestinationEnvironmentIDs: []string{dest.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range []domain.Scope{sourceScope, destScope} {
+		if err := values.Clear(ctx, actor, env, key.Name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := keys.Delete(ctx, actor, scope, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range []domain.Scope{sourceScope, destScope} {
+		if err := envs.Delete(ctx, actor, env); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

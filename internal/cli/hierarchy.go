@@ -182,11 +182,15 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	var format, name string
+	var format, name, cloneFrom string
 	st, flags, err := parseCommon("env "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
 		if sub == "create" || sub == "rename" {
 			fs.StringVar(&name, "name", "", "environment name")
+		}
+		if sub == "create" {
+			fs.StringVar(&cloneFrom, "clone-from", "",
+				"create the environment holding a copy of this environment's values")
 		}
 	})
 	if err != nil {
@@ -253,6 +257,25 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		return Render(ios.Stdout, f, Table{Columns: envColumns, Rows: [][]string{envRow(env)}, JSON: env})
 
 	case "create":
+		// Clone-at-creation (#50) is its own route because its RESULT is
+		// different: it reports what it could not take. What it could not take
+		// is printed to stderr by name — the ADR's "never silent" — while
+		// stdout keeps carrying exactly the environment row `create` always
+		// carried, so a script parsing `-o json` is unaffected by the flag.
+		if cloneFrom != "" {
+			var cloned apigen.ClonedEnvironment
+			if err := client.Do(ctx, http.MethodPost, base+"/clone",
+				apigen.CloneEnvironmentRequest{Name: name, SourceEnvironmentId: cloneFrom}, &cloned); err != nil {
+				return err
+			}
+			if len(cloned.UncopiedSecrets) > 0 {
+				fmt.Fprintf(ios.Stderr, "secrets NOT copied (absent in %s): %s\n",
+					cloned.Environment.Id, strings.Join(cloned.UncopiedSecrets, ", "))
+			}
+			return Render(ios.Stdout, f, Table{
+				Columns: envColumns, Rows: [][]string{envRow(cloned.Environment)}, JSON: cloned,
+			})
+		}
 		var env apigen.Environment
 		if err := client.Do(ctx, http.MethodPost, base, apigen.CreateEnvironmentRequest{Name: name}, &env); err != nil {
 			return err

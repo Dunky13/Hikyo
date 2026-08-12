@@ -12,6 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 )
 
 // The closed exit-code set (api-cli-surface ADR § Output grammar). It is
@@ -72,5 +74,6 @@ func Report(stderr io.Writer, err error) int {
 
 // Verbs is the closed set of client verbs this build serves. main dispatches
 // on it, and the classification-totality invariant enumerates it against the
-// wire registry: a verb here without a probe class fails the build.
-var Verbs = []string{"login", "logout", "whoami", "account", "context", "org", "project", "env", "folder", "key", "instance-config", "doctor", "access", "project-settings", "sa"}
+// wire registry: a verb here without a probe class fails the build. Derived
+// from the dispatch table so the two can never disagree.
+var Verbs = slices.Sorted(maps.Keys(verbHandlers))

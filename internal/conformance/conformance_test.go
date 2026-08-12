@@ -181,6 +181,9 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// presence rows reference both keys and environments, keys reference
 		// key_groups, and the schema-revision row references projects — so all
 		// four drop before the hierarchy they hang from.
+		// value_entries references BOTH keys and environments (#50), so it
+		// drops before either.
+		"value_entries",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
 		// Machine identities (#61, migration 00014): machine_credentials
 		// references service_accounts, which references projects/principals.

@@ -242,6 +242,7 @@ type Repos interface {
 	Orgs() OrgRepo
 	Keys() KeyRepo
 	Catalogue() CatalogueRepo
+	Values() ValueRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -255,6 +256,7 @@ type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
 	Catalogue() CatalogueReader
+	Values() ValueReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader
