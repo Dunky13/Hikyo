@@ -73,10 +73,15 @@ jobs:
           node-version-file: .nvmrc
       - name: Enable pnpm
         run: corepack enable
+      # working-directory matters: corepack resolves the packageManager pin
+      # from the CWD's package.json — from the repo root (which has none) it
+      # falls back to its default pnpm and the pinned project refuses it.
       - name: Build the SPA (the `ui` build tag embeds it)
+        working-directory: web
         run: |
-          pnpm --dir web install --frozen-lockfile
-          pnpm --dir web build
+          pnpm --dir ../clients/ts install --frozen-lockfile
+          pnpm install --frozen-lockfile
+          pnpm build
       - name: Chart renders and carries release substitution anchors
         run: |
           grep -Fx "  repository: ghcr.io/dunky13/hikyo" chart/hikyo/values.yaml
@@ -176,6 +181,13 @@ jobs:
           go-version-file: go.mod
       - name: Enable pnpm
         run: corepack enable
+
+      # The SPA consumes clients/ts generated sources through aliases, so the
+      # generated Zod schemas resolve `zod` from clients/ts's own node_modules
+      # — without this install, typecheck and build fail on TS2307.
+      - name: Install client package (generated sources' own deps)
+        working-directory: clients/ts
+        run: pnpm install --frozen-lockfile
 
       - name: Install (frozen lockfile)
         working-directory: web
