@@ -157,6 +157,49 @@ var wireRegistry = map[string]Class{
 	"http:PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder}":  ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/folders/{folder}": ClassTenant,
 
+	// The access surface (#55): grants, role templates, membership inspection
+	// and the two `project-settings` knobs. One entry per addressed depth,
+	// because the formula differs per depth — the instance ones are
+	// instance-class (grant refusal, no tenant object to mimic), every other
+	// one is tenant-class (uniform nonexistent).
+	"http:GET /api/v1/instance/grants":             ClassInstance,
+	"http:POST /api/v1/instance/grants":            ClassInstance,
+	"http:DELETE /api/v1/instance/grants":          ClassInstance,
+	"http:POST /api/v1/instance/grants/template":   ClassInstance,
+	"http:GET /api/v1/orgs/{org}/grants":           ClassTenant,
+	"http:POST /api/v1/orgs/{org}/grants":          ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/grants":        ClassTenant,
+	"http:POST /api/v1/orgs/{org}/grants/template": ClassTenant,
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/grants":                                   ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/grants/template":                            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants":          ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants":        ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         ClassTenant,
+	// The key catalogue (#49). Every route is tenant-class at project depth:
+	// a key is declared once per project, and a key the caller cannot reach
+	// answers byte-identically to one that is not there — including the two
+	// reveal-gated routes, whose refusal must be indistinguishable or the gate
+	// itself becomes the one-bit oracle it exists to close.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys":                      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/keys":                     ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys/{key}":                ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key}":              ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key}":             ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name":           ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     ClassTenant,
+
 	// `hikyo admin create`: the bootstrap member of the closed local-authority
 	// exception set. System class, whose probe contract is network
 	// unreachability — the totality invariant asserts it by finding no HTTP
@@ -192,12 +235,23 @@ var wireRegistry = map[string]Class{
 	// a verb whose class understated its reach would let an instance-scoped
 	// call ride in under a tenant probe contract. `project`, `env` and `folder`
 	// reach tenant routes exclusively.
-	"cli:org":             ClassInstance,
-	"cli:project":         ClassTenant,
-	"cli:env":             ClassTenant,
-	"cli:folder":          ClassTenant,
+	"cli:org":     ClassInstance,
+	"cli:project": ClassTenant,
+	"cli:env":     ClassTenant,
+	"cli:folder":  ClassTenant,
+	// `key` reaches the catalogue and the group routes, all tenant-class.
+	"cli:key":             ClassTenant,
 	"cli:instance-config": ClassInstance,
 	"cli:doctor":          ClassInstance,
+	// `access` reaches BOTH classes — the org/project/env grant routes are
+	// tenant-class, the instance-scope ones are instance-class. It is
+	// classified instance because that is the WEAKER probe contract of the
+	// two: a verb that can reach a grant-refusal route must not ride in under
+	// the uniform-nonexistent contract it does not always satisfy. The
+	// per-route classification above is the authoritative one either way.
+	"cli:access": ClassInstance,
+	// `project-settings` reaches only the two environment-scoped routes.
+	"cli:project-settings": ClassTenant,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
@@ -363,7 +417,12 @@ var wireEvents = map[string][]audit.EventType{
 	// token that reached a log shipper is a different event from one written
 	// to a root-owned file. `hikyo admin reset-credential` (#54 break-glass) is the
 	// same local-authority verb group and emits the reset issuance beside the mint.
-	"cli:admin": {audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued},
+	// `hikyo admin grant` (#55 break-glass) joins the same local-authority verb
+	// group: a recovery grant issued on the host, with no network route.
+	"cli:admin": {
+		audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued,
+		audit.EventBreakGlassGrant,
+	},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
@@ -398,6 +457,48 @@ var wireRoutes = map[string][]Operation{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/folders/{folder}":    {OpFolderGet},
 	"http:PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder}":  {OpFolderRename},
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/folders/{folder}": {OpFolderDelete},
+
+	// The access surface (#55). Each route reaches exactly one operation: the
+	// depth is in the path, so there is no runtime dispatch between formulas.
+	"http:GET /api/v1/instance/grants":             {OpGrantListInstance},
+	"http:POST /api/v1/instance/grants":            {OpGrantCreateInstance},
+	"http:DELETE /api/v1/instance/grants":          {OpGrantRevokeInstance},
+	"http:POST /api/v1/instance/grants/template":   {OpTemplateApplyInstance},
+	"http:GET /api/v1/orgs/{org}/grants":           {OpGrantListOrg},
+	"http:POST /api/v1/orgs/{org}/grants":          {OpGrantCreateOrg},
+	"http:DELETE /api/v1/orgs/{org}/grants":        {OpGrantRevokeOrg},
+	"http:POST /api/v1/orgs/{org}/grants/template": {OpTemplateApplyOrg},
+
+	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      {OpGrantListProject},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     {OpGrantCreateProject},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/grants":                                   {OpGrantRevokeProject},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/grants/template":                            {OpTemplateApplyProject},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants":          {OpGrantCreateEnv},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants":        {OpGrantRevokeEnv},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template": {OpTemplateApplyEnv},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsRead},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsUpdate},
+	// The key catalogue (#49).
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys":            {OpKeyList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/keys":           {OpKeyCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys/{key}":      {OpKeyGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key}":    {OpKeyUpdateMetadata},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key}":   {OpKeyDelete},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name": {OpKeyRename},
+	// These two routes REACH a second operation at runtime - the reveal gate
+	// the schema ADR puts in front of a value-dependent rule change on a
+	// `secret` key, and in front of declassification. Both are listed for the
+	// same reason credential-reset lists its pair: the linkage must record
+	// every operation a route can reach, or the registry describes an
+	// authorization posture the router does not have.
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    {OpKeyUpdateDeclaration, OpKeySecretRuleChange},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": {OpKeyReclassify, OpKeyDeclassify},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          {OpKeySetGroup},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                {OpKeyGroupList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               {OpKeyGroupCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        {OpKeyGroupGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      {OpKeyGroupRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     {OpKeyGroupDelete},
 
 	// OIDC provider administration (#54), instance-config.
 	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},

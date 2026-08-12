@@ -19,8 +19,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store/pggen"
@@ -36,10 +38,88 @@ type Resolver struct {
 
 // NewSQLite binds a Resolver to an open sqlite transaction (or, for
 // read-only authorization, a read-pool connection's transaction).
-func NewSQLite(db sqlitegen.DBTX) *Resolver { return &Resolver{sq: sqlitegen.New(db)} }
+func NewSQLite(db sqlitegen.DBTX) *Resolver {
+	if f := queryObserver.Load(); f != nil {
+		db = observedSQLite{db: db, on: *f}
+	}
+	return &Resolver{sq: sqlitegen.New(db)}
+}
 
 // NewPG binds a Resolver to an open postgres transaction.
-func NewPG(db pggen.DBTX) *Resolver { return &Resolver{pg: pggen.New(db)} }
+func NewPG(db pggen.DBTX) *Resolver {
+	if f := queryObserver.Load(); f != nil {
+		db = observedPG{db: db, on: *f}
+	}
+	return &Resolver{pg: pggen.New(db)}
+}
+
+// The query-observer seam. It exists so the acceptance suite can count the
+// queries a REAL SERVICE CALL issues — not only the ones a direct Authorize
+// issues — without the isolation harness having to rebuild the transaction
+// the service opens for itself.
+//
+// It lives on the resolution surface for two reasons. This is the package the
+// generated queries may be imported into at all (the driver-handle allowlist),
+// and on a REFUSED request the resolution surface is the entire query traffic:
+// authorization runs before any store call, so a request that does not
+// authorize issues nothing else. Counting here therefore counts the whole
+// stack for exactly the legs the timing control is about.
+//
+// Nil in production: the wrapper is installed at Resolver construction, so an
+// unset observer costs one atomic load per transaction, never per query.
+var queryObserver atomic.Pointer[func()]
+
+// SetQueryObserver installs a test-only per-query callback and returns a
+// function that removes it. Not for production code; there is no call site
+// outside tests, and the boundary test pins that.
+func SetQueryObserver(f func()) func() {
+	queryObserver.Store(&f)
+	return func() { queryObserver.Store(nil) }
+}
+
+type observedSQLite struct {
+	db sqlitegen.DBTX
+	on func()
+}
+
+func (o observedSQLite) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	o.on()
+	return o.db.ExecContext(ctx, q, args...)
+}
+
+func (o observedSQLite) PrepareContext(ctx context.Context, q string) (*sql.Stmt, error) {
+	return o.db.PrepareContext(ctx, q)
+}
+
+func (o observedSQLite) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	o.on()
+	return o.db.QueryContext(ctx, q, args...)
+}
+
+func (o observedSQLite) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	o.on()
+	return o.db.QueryRowContext(ctx, q, args...)
+}
+
+type observedPG struct {
+	db pggen.DBTX
+	on func()
+}
+
+func (o observedPG) Exec(ctx context.Context, q string, args ...any) (pgconn.CommandTag, error) {
+	o.on()
+	return o.db.Exec(ctx, q, args...)
+}
+
+func (o observedPG) Query(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
+	o.on()
+	return o.db.Query(ctx, q, args...)
+}
+
+func (o observedPG) QueryRow(ctx context.Context, q string, args ...any) pgx.Row {
+	o.on()
+	return o.db.QueryRow(ctx, q, args...)
+}
 
 // ResolveChain resolves the addressed chain in a single query, one round
 // trip, one code path regardless of which level is missing (tenant-isolation

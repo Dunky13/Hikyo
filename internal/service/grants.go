@@ -1,0 +1,1045 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
+)
+
+// The grant surface (#55, permission-model ADR).
+//
+// A grant is a triple (principal, capability, scope) and that is the only
+// thing stored, evaluated and revoked. Everything else here is a refusal rule
+// applied BEFORE the write: the closed atom set, the deepest-level rule, the
+// normative machine allowlists, the project-scope grantor's held-capability
+// bound, the lockout invariant, and dedup — which is this API's job because
+// the table deliberately carries no uniqueness over the triple (NULL-scope
+// UNIQUE semantics diverge between engines).
+//
+// Nothing here is consulted by authorize(). Origins, templates and classes are
+// bookkeeping and refusals; authority is the bare triple.
+
+// Refusals. Each is its own sentinel so the transport can map it and a test
+// can assert WHICH rule fired — "the grant was refused" is not an assertion.
+//
+// Each also WRAPS a domain sentinel, so the transport's uniform writer has a
+// code for it. Left bare they all rendered `internal`, which tells a script the
+// server broke when it had in fact answered correctly — the same defect #48
+// found when `conflict` and `limit_exceeded` fell through the CLI's status
+// mapping. Every refusal here is decided AFTER authorization succeeded, so it
+// may have its own code without disclosing anything a caller could not already
+// read: shape errors are `invalid`, state refusals are `conflict`, and a triple
+// that is not held is `not found`.
+var (
+	// ErrNoSuchCapability refuses a capability outside the ADR's closed set.
+	ErrNoSuchCapability = fmt.Errorf("%w: service: no such capability", domain.ErrInvalid)
+	// ErrCapabilityScope refuses an atom granted deeper than its own level —
+	// `manage-projects` on one environment is not a narrower grant, it is a
+	// grant that can never be evaluated.
+	ErrCapabilityScope = fmt.Errorf("%w: service: this capability cannot be granted at this scope", domain.ErrInvalid)
+	// ErrGrantorLacksCapability is the project-scope bound: `manage-members`
+	// held at PROJECT scope may grant only capabilities the grantor currently
+	// holds at or above the target scope. A stolen project-admin account is
+	// therefore not automatic full compromise of that project's secrets.
+	ErrGrantorLacksCapability = fmt.Errorf("%w: service: a project-scope member manager may grant only capabilities it holds", domain.ErrConflict)
+	// ErrMachineCapability is the normative machine allowlist refusing. It is
+	// a refusal by the API, not a convention.
+	ErrMachineCapability = fmt.Errorf("%w: service: this capability is not on the principal class's allowlist", domain.ErrConflict)
+	// ErrMachineScope refuses a machine grant that is SHALLOWER than its
+	// class admits — a workload outside an explicit (project, environment),
+	// or automation above project depth. The allowlist bounds which
+	// capability; this bounds where, which is the other half of the same ADR
+	// sentence and the half that makes `read` at org scope not a workload
+	// grant at all.
+	ErrMachineScope = fmt.Errorf("%w: service: this principal class may not hold a grant at this scope depth", domain.ErrConflict)
+	// ErrMachineProject refuses a machine grant in a project other than the
+	// one the principal's existing grants already sit in. The ADR bounds
+	// automation to "one project's scope"; the first grant fixes which.
+	ErrMachineProject = fmt.Errorf("%w: service: this machine principal is already bound to a different project", domain.ErrConflict)
+	// ErrSystemCreatedOnly refuses a grant the system creates with its own
+	// binding — `scim-provision` rides its SCIM binding (#73), never this API.
+	ErrSystemCreatedOnly = fmt.Errorf("%w: service: this capability is system-created with its binding, never granted through this API", domain.ErrConflict)
+	// ErrLastMemberManager is the lockout invariant: removing the last
+	// `manage-members` holder at org or instance scope is refused, because an
+	// unadministrable org is a support incident with no in-product recovery.
+	ErrLastMemberManager = fmt.Errorf("%w: service: this is the last manage-members holder at this scope", domain.ErrConflict)
+	// ErrNoSuchGrant refuses a revoke of a triple that is not held.
+	ErrNoSuchGrant = fmt.Errorf("%w: service: no such grant", domain.ErrNotFound)
+	// ErrUnknownPrincipal refuses a grant to a principal that does not exist.
+	ErrUnknownPrincipal = fmt.Errorf("%w: service: no such principal", domain.ErrInvalid)
+)
+
+// Grants owns the grant surface. Every method opens one transaction,
+// authorizes inside it, and performs the whole mutation — grant row, origin,
+// session-generation advance and audit — before it commits. There is no
+// authorization cache to invalidate, and this ticket keeps it that way.
+type Grants struct {
+	DB  *store.DB
+	Now func() time.Time
+}
+
+func (s *Grants) now() time.Time {
+	if s.Now == nil {
+		return time.Now().UTC()
+	}
+	return s.Now().UTC()
+}
+
+// GrantSpec names one grant: who gets what, where.
+type GrantSpec struct {
+	Target     domain.PrincipalID
+	Capability domain.Capability
+	// Scope is where the grant applies. The zero Scope is instance scope.
+	Scope domain.Scope
+}
+
+// GrantResult reports what a create actually did, so the caller can render
+// "granted" versus "already held, now also held by you" without a second read.
+type GrantResult struct {
+	GrantID string
+	// Created is false when an existing row was deduplicated and this call
+	// only attached an origin to it.
+	Created bool
+	// OriginAdded is false when the caller's own origin already held the row —
+	// a genuinely idempotent repeat.
+	OriginAdded bool
+}
+
+// grantOps maps an addressed scope depth to the (create, revoke, list,
+// template) operation quartet. Keeping the four registry rows per depth in one
+// table is what stops a caller reaching a depth through the wrong formula.
+type grantOps struct {
+	create, revoke, list, template authz.Operation
+}
+
+var grantOpsByLevel = map[domain.Level]grantOps{
+	domain.LevelNone: {
+		authz.OpGrantCreateInstance, authz.OpGrantRevokeInstance,
+		authz.OpGrantListInstance, authz.OpTemplateApplyInstance,
+	},
+	domain.LevelOrg: {
+		authz.OpGrantCreateOrg, authz.OpGrantRevokeOrg,
+		authz.OpGrantListOrg, authz.OpTemplateApplyOrg,
+	},
+	domain.LevelProject: {
+		authz.OpGrantCreateProject, authz.OpGrantRevokeProject,
+		authz.OpGrantListProject, authz.OpTemplateApplyProject,
+	},
+	// There is no grant.list-env: the membership surface is read per org (or
+	// at instance scope) and filtered client-side, because "who can reach this
+	// environment" must include the org- and project-scoped grants that reach
+	// it, which an env-only query would silently omit.
+	domain.LevelEnv: {
+		create: authz.OpGrantCreateEnv, revoke: authz.OpGrantRevokeEnv,
+		template: authz.OpTemplateApplyEnv,
+	},
+}
+
+func opsFor(scope domain.Scope) (grantOps, domain.Level, error) {
+	level, err := scope.Level()
+	if err != nil {
+		return grantOps{}, 0, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+	}
+	return grantOpsByLevel[level], level, nil
+}
+
+// Create grants one capability at one scope, deduplicating against the
+// grantee's existing rows.
+func (s *Grants) Create(ctx context.Context, actor Actor, spec GrantSpec) (GrantResult, error) {
+	var out GrantResult
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		ops, level, err := opsFor(spec.Scope)
+		if err != nil {
+			return err
+		}
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, ops.create, spec.Scope)
+		if err != nil {
+			return err
+		}
+		res, ev, err := s.grantOne(ctx, az, caller.Principal, spec, level, "")
+		if err != nil {
+			return err
+		}
+		out = res
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, ev)
+	})
+	return out, err
+}
+
+// grantEventInput is one grant-lifecycle event before it is written, so the
+// create path and the template path build it once and the trail cannot drift
+// between them.
+type grantEventInput struct {
+	typ     audit.EventType
+	object  audit.Object
+	payload audit.Payload
+}
+
+// insertGrantEvent writes a grant-lifecycle event into the trail its scope
+// owns: tenant for org/project/env grants, instance for instance-scope ones.
+func insertGrantEvent(ctx context.Context, r store.Repos, p authz.Proof, actor domain.PrincipalID, level domain.Level, evs ...grantEventInput) error {
+	for _, in := range evs {
+		// The zero event is "nothing happened" (F5): a grant writer that
+		// changed no state hands one back rather than inventing a transition.
+		if in.typ == "" {
+			continue
+		}
+		e, err := domainEvent(ctx, in.typ, actor, in.object, in.payload)
+		if err != nil {
+			return err
+		}
+		if level == domain.LevelNone {
+			if err := r.Audit().InsertInstance(ctx, p, e); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := r.Audit().InsertTenant(ctx, p, e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// grantOne is the whole create path minus transport and audit writing: every
+// refusal rule, the dedup, the origin attach and the session kill. The
+// template path calls it once per expanded capability, so a template can never
+// take a shortcut past a rule an individual grant must satisfy.
+func (s *Grants) grantOne(
+	ctx context.Context, az *authz.TxAuthorizer, grantor domain.PrincipalID,
+	spec GrantSpec, level domain.Level, template domain.Template,
+) (GrantResult, grantEventInput, error) {
+	var zero GrantResult
+	now := s.now()
+
+	if err := checkGrantable(spec.Capability, level); err != nil {
+		return zero, grantEventInput{}, err
+	}
+
+	class, err := lockAndClassify(ctx, az, spec.Target, spec.Capability, spec.Scope)
+	if err != nil {
+		return zero, grantEventInput{}, err
+	}
+
+	// The grant-authority rule. `manage-members` held at ORG or INSTANCE
+	// scope may grant capabilities the grantor does not hold — the escalation
+	// path the threat model accepts and the one that keeps a fresh
+	// installation bootstrappable. Held only at PROJECT scope, it may grant
+	// only what the grantor currently holds at or above the target scope.
+	grantorGrants, err := az.GrantRowsForPrincipal(ctx, grantor)
+	if err != nil {
+		return zero, grantEventInput{}, err
+	}
+	unheld := !holds(grantorGrants, spec.Capability, spec.Scope)
+	if unheld && !mayGrantUnheld(grantorGrants, spec.Scope) {
+		return zero, grantEventInput{}, ErrGrantorLacksCapability
+	}
+
+	origin := authz.Origin{Kind: domain.OriginManual, Subject: string(grantor)}
+	out, err := writeGrantRow(ctx, az, spec, origin, now)
+	if err != nil {
+		return zero, grantEventInput{}, err
+	}
+
+	// F5: the lifecycle event must match the state transition. A repeat that
+	// created no row and attached no origin changed nothing — emitting
+	// `grant.modified` for it would put a modification in the trail that never
+	// happened, and an investigator counting modifications would count polls.
+	if !out.Created && !out.OriginAdded {
+		return out, grantEventInput{}, nil
+	}
+	typ := audit.EventGrantModified
+	if out.Created {
+		typ = audit.EventGrantCreated
+	}
+	payload := audit.Payload{
+		"target_principal": string(spec.Target),
+		"capability":       string(spec.Capability),
+		"scope":            renderScope(spec.Scope),
+		"origin_kind":      string(origin.Kind),
+		"self_grant":       spec.Target == grantor,
+		"unheld":           unheld,
+		"target_class":     string(class),
+	}
+	if template != "" {
+		payload["template"] = string(template)
+	}
+	return out, grantEventInput{
+		typ: typ, object: audit.Object{Type: "grant", ID: out.GrantID}, payload: payload,
+	}, nil
+}
+
+// hasOrigin reports whether this exact origin already holds the row, reading
+// the grant's own origin list.
+//
+// It propagates the read error rather than answering false, because the two
+// are not the same statement: "no such origin" makes the caller attach one,
+// and doing that after a FAILED read turns a transient database error into a
+// UNIQUE violation on an origin that was already there, with the real cause
+// gone. A read that did not happen is not evidence of absence.
+func hasOrigin(ctx context.Context, az *authz.TxAuthorizer, grantID string, o authz.Origin) (bool, error) {
+	origins, err := az.GrantOriginsFor(ctx, grantID)
+	if err != nil {
+		return false, err
+	}
+	for _, held := range origins {
+		if held == o {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// lockAndClassify is the first half every grant writer shares: take the
+// target's row lock BEFORE any read-then-write, resolve the class the
+// normative allowlists key on, and apply them.
+//
+// The lock precedes the dedup read because the schema deliberately carries no
+// uniqueness over the triple — two concurrent creates would otherwise both
+// read no row and both insert. Resolving the class also proves the principal
+// exists: granting to a principal that is not there writes a row nothing can
+// ever evaluate.
+func lockAndClassify(ctx context.Context, az *authz.TxAuthorizer, target domain.PrincipalID, capability domain.Capability, scope domain.Scope) (domain.PrincipalClass, error) {
+	if err := az.LockTargetPrincipal(ctx, target); err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", ErrUnknownPrincipal
+		}
+		return "", err
+	}
+	class, err := az.PrincipalClass(ctx, target)
+	if errors.Is(err, domain.ErrNotFound) {
+		return "", ErrUnknownPrincipal
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := checkPrincipalClass(class, capability); err != nil {
+		return "", err
+	}
+	if class == domain.ClassHuman {
+		return class, nil
+	}
+	if err := checkMachineScope(class, scope); err != nil {
+		return "", err
+	}
+	// One project, fixed by the first grant. Read under the row lock taken
+	// above, so two concurrent first grants cannot pick two projects.
+	rows, err := az.GrantRowsForPrincipal(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	if err := checkMachineProject(rows, scope); err != nil {
+		return "", err
+	}
+	return class, nil
+}
+
+// checkMachineScope enforces the ADR's scope bound per machine class: a
+// workload grant must address an explicit (project, environment), automation
+// must sit at project depth or below. A grant shallower than the class admits
+// reaches more than the credential was ever meant to.
+func checkMachineScope(class domain.PrincipalClass, scope domain.Scope) error {
+	level, err := scope.Level()
+	if err != nil {
+		return err
+	}
+	deepest, ok := domain.MachineScopeDepth(class)
+	if !ok {
+		return fmt.Errorf("%w: class %q has no scope rule", ErrMachineScope, class)
+	}
+	if level < deepest {
+		return fmt.Errorf("%w: class %q requires a grant at depth %d or deeper, got %d",
+			ErrMachineScope, class, deepest, level)
+	}
+	return nil
+}
+
+// checkMachineProject holds the "one project" boundary the ADR draws around a
+// machine credential: the first grant fixes the project, every later one must
+// match it.
+//
+// This is the enforceable half of the rule TODAY. The machine-identities
+// ticket (#17) introduces the credential binding that names the project
+// authoritatively; until it lands there is no binding to check against, so the
+// principal's own existing grants are the record of which project it belongs
+// to. #17 replaces this with the binding, and the rule gets stricter, never
+// looser.
+func checkMachineProject(rows []authz.GrantRow, scope domain.Scope) error {
+	for _, row := range rows {
+		bound := row.Grant.Scope
+		if bound.Project == "" {
+			continue // an instance/org-scope row cannot exist for a machine; ignore rather than trust
+		}
+		if bound.Org != scope.Org || bound.Project != scope.Project {
+			return fmt.Errorf("%w: bound to %s/%s, asked for %s/%s",
+				ErrMachineProject, bound.Org, bound.Project, scope.Org, scope.Project)
+		}
+	}
+	return nil
+}
+
+// writeGrantRow is the second half every grant writer shares: dedup against
+// the target's existing rows, create the row if it is new, attach the origin
+// if this one does not already hold it, and kill the target's sessions when
+// authority actually changed.
+//
+// It is shared by the ordinary grant path and by break-glass, which differ in
+// exactly two things — the origin kind and where the audit event goes. Keeping
+// them one body is not tidiness: the divergence is what let a swallowed read
+// error live in one caller and not the other.
+func writeGrantRow(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec, origin authz.Origin, now time.Time) (GrantResult, error) {
+	var out GrantResult
+	rows, err := az.GrantRowsForPrincipal(ctx, spec.Target)
+	if err != nil {
+		return GrantResult{}, err
+	}
+	existing := findGrant(rows, spec.Capability, spec.Scope)
+	out.Created = existing == nil
+	if existing != nil {
+		out.GrantID = existing.ID
+	} else {
+		grantID, err := newID("grt")
+		if err != nil {
+			return GrantResult{}, err
+		}
+		if err := az.CreateGrant(ctx, grantID, spec.Target,
+			domain.Grant{Capability: spec.Capability, Scope: spec.Scope}, now); err != nil {
+			return GrantResult{}, err
+		}
+		out.GrantID = grantID
+	}
+
+	// Attaching an origin that already holds the row is a genuine no-op, not
+	// an error: the same administrator granting the same thing twice changed
+	// nothing, and the trail should say so rather than invent a modification.
+	attach := true
+	if existing != nil {
+		held, err := hasOrigin(ctx, az, out.GrantID, origin)
+		if err != nil {
+			return GrantResult{}, err
+		}
+		attach = !held
+	}
+	if attach {
+		originID, err := newID("gor")
+		if err != nil {
+			return GrantResult{}, err
+		}
+		if err := az.AddGrantOrigin(ctx, originID, out.GrantID, spec.Target, origin, now); err != nil {
+			return GrantResult{}, err
+		}
+		out.OriginAdded = true
+	}
+
+	// Every EFFECTIVE authority change kills the grantee's sessions in the
+	// same transaction (human-auth ADR: grant addition/widening/revocation
+	// each invalidate sessions).
+	//
+	// A new row is such a change: the capability becomes held. A second
+	// origin joining a row that ALREADY holds the capability is not — the
+	// grantee's authority is identical before and after, so killing their
+	// sessions would be a denial of service triggered by somebody else's
+	// bookkeeping. The trail still records it as `grant.modified`, which is
+	// what it is. (Symmetric with revoke, where the advance is gated on the
+	// row actually dying.)
+	if out.Created {
+		if err := az.AdvanceGeneration(ctx, spec.Target); err != nil {
+			return GrantResult{}, err
+		}
+		if err := az.RevokeAllSessionsFor(ctx, spec.Target); err != nil {
+			return GrantResult{}, err
+		}
+	}
+	return out, nil
+}
+
+// Revoke releases the calling surface's origins from one grant, and deletes
+// the row when the last origin is gone — with the session-generation advance
+// and the session-row deletion, in the same transaction. There is no
+// authorization cache, so an in-flight authorization dies with the row.
+func (s *Grants) Revoke(ctx context.Context, actor Actor, spec GrantSpec) error {
+	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		ops, level, err := opsFor(spec.Scope)
+		if err != nil {
+			return err
+		}
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, ops.revoke, spec.Scope)
+		if err != nil {
+			return err
+		}
+
+		// Lock first, read second — the whole revoke is a read-then-write over
+		// the target's grant rows.
+		if err := az.LockTargetPrincipal(ctx, spec.Target); err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return ErrNoSuchGrant
+			}
+			return err
+		}
+		rows, err := az.GrantRowsForPrincipal(ctx, spec.Target)
+		if err != nil {
+			return err
+		}
+		existing := findGrant(rows, spec.Capability, spec.Scope)
+		if existing == nil {
+			return ErrNoSuchGrant
+		}
+
+		// The lockout invariant, evaluated BEFORE the release: removing the
+		// last `manage-members` holder at org scope, or at instance scope, is
+		// refused. The census locks every current holder's principal row in a
+		// deterministic order first, so two concurrent revokes of the last two
+		// holders cannot each count the other as remaining.
+		if err := s.checkLockout(ctx, az, spec); err != nil {
+			return err
+		}
+
+		origins, err := az.GrantOriginsFor(ctx, existing.ID)
+		if err != nil {
+			return err
+		}
+		var releasedKinds []string
+		for _, o := range origins {
+			// Only origins this surface owns are released here. A `scim` or
+			// `structural` origin is released by the binding that holds it
+			// (#73); a human revoke does not reach past it, and the row
+			// survives as a modification rather than a revocation.
+			if !domain.IsMintableOrigin(o.Kind) {
+				continue
+			}
+			ok, err := az.ReleaseGrantOrigin(ctx, existing.ID, spec.Target, o)
+			if err != nil {
+				return err
+			}
+			if ok && !slices.Contains(releasedKinds, string(o.Kind)) {
+				releasedKinds = append(releasedKinds, string(o.Kind))
+			}
+		}
+		if len(releasedKinds) == 0 {
+			return ErrNoSuchGrant
+		}
+		slices.Sort(releasedKinds)
+		remaining, err := az.GrantOriginCount(ctx, existing.ID)
+		if err != nil {
+			return err
+		}
+		if remaining == 0 {
+			if _, err := az.DeleteGrantRow(ctx, existing.ID, spec.Target); err != nil {
+				return err
+			}
+		}
+
+		// Revocation is immediate: the generation advance and the session-row
+		// deletion commit with the grant change, so an open session dies with
+		// the capability rather than at token expiry.
+		//
+		// Only when EFFECTIVE POLICY changed (F5). Releasing one origin from a
+		// row another origin still holds takes nothing away — the principal
+		// still holds the capability — and killing their sessions for a
+		// bookkeeping change would be a denial of service dressed as security.
+		if remaining == 0 {
+			if err := az.AdvanceGeneration(ctx, spec.Target); err != nil {
+				return err
+			}
+			if err := az.RevokeAllSessionsFor(ctx, spec.Target); err != nil {
+				return err
+			}
+		}
+
+		// F5: releasing this surface's origins while another kind still holds
+		// the row is a MODIFICATION — the row lives and the capability is
+		// still held. Only the release that deleted the row is a revocation.
+		// The registry's own comment said so; the emitter did not.
+		typ := audit.EventGrantRevoked
+		if remaining > 0 {
+			typ = audit.EventGrantModified
+		}
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, grantEventInput{
+			typ:     typ,
+			object:  audit.Object{Type: "grant", ID: existing.ID},
+			payload: revokePayload(spec, caller.Principal, releasedKinds, remaining, typ),
+		})
+	})
+}
+
+// checkLockout refuses a revocation that would leave an org — or the whole
+// instance — with no `manage-members` holder.
+func (s *Grants) checkLockout(ctx context.Context, az *authz.TxAuthorizer, spec GrantSpec) error {
+	if spec.Capability != domain.CapManageMembers {
+		return nil
+	}
+	level, err := spec.Scope.Level()
+	if err != nil {
+		return err
+	}
+	// Project-scope `manage-members` is not the invariant's subject: an org
+	// with no project-scope member manager is still administrable from the
+	// org, which is where the ADR draws the line.
+	if level != domain.LevelNone && level != domain.LevelOrg {
+		return nil
+	}
+	holders, err := az.ManageMembersHolders(ctx, string(spec.Scope.Org))
+	if err != nil {
+		return err
+	}
+	// Lock every holder's row in a deterministic order BEFORE counting, so
+	// two concurrent revocations of the last two holders serialize instead of
+	// each seeing the other as the remaining one. Sorted order is what makes
+	// the pairwise lock acquisition deadlock-free.
+	sort.Slice(holders, func(i, j int) bool { return holders[i] < holders[j] })
+	for _, h := range holders {
+		if err := az.LockTargetPrincipal(ctx, h); errors.Is(err, domain.ErrNotFound) {
+			continue // the holder's principal row went away; the re-read below is authoritative
+		} else if err != nil {
+			return err
+		}
+	}
+	// Re-read UNDER the locks. Counting from the pre-lock list is the bug the
+	// locks were taken to prevent: two revocations of the last two holders
+	// would each see the other as remaining. Every grant writer takes the
+	// target's row lock, so nothing that can change this census is still in
+	// flight once the locks are held.
+	holders, err = az.ManageMembersHolders(ctx, string(spec.Scope.Org))
+	if err != nil {
+		return err
+	}
+
+	// Count the holders that REMAIN AFTER this revocation, which is not the
+	// same as "every holder except the target". A principal can hold
+	// `manage-members` at more than one scope — org-scoped and instance-scoped
+	// at once — and revoking one of those grants leaves the other covering the
+	// scope. Excluding the principal wholesale refused a revocation that left
+	// the org perfectly administrable, by the same person.
+	var targetRows []authz.GrantRow
+	remaining := 0
+	for _, h := range holders {
+		if h != spec.Target {
+			remaining++
+			continue
+		}
+		if targetRows == nil {
+			targetRows, err = az.GrantRowsForPrincipal(ctx, spec.Target)
+			if err != nil {
+				return err
+			}
+		}
+		if retainsMemberManagement(targetRows, spec.Scope) {
+			remaining++
+		}
+	}
+	if remaining == 0 {
+		return ErrLastMemberManager
+	}
+	return nil
+}
+
+// retainsMemberManagement reports whether the target still manages members at
+// `scope` once the grant AT that exact scope is gone: another `manage-members`
+// grant of theirs, at a different scope, that still covers it.
+//
+// Project-scope grants are skipped for the same reason the invariant itself
+// skips them — an org with no project-scope member manager is still
+// administrable from the org, so one cannot stand in for the org's last
+// holder either.
+func retainsMemberManagement(rows []authz.GrantRow, scope domain.Scope) bool {
+	for _, row := range rows {
+		if row.Grant.Capability != domain.CapManageMembers {
+			continue
+		}
+		if row.Grant.Scope == scope {
+			continue // the grant being revoked
+		}
+		if row.Grant.Scope.Project != "" {
+			continue
+		}
+		if scopeCovers(row.Grant.Scope, scope) {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyTemplate expands a role template into independent grants at grant
+// time. Nothing stores "Alice is a maintainer"; what is stored is the
+// capabilities the template created, each on its own line and revocable on
+// its own.
+func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain.Template, target domain.PrincipalID, scope domain.Scope) ([]GrantResult, error) {
+	var out []GrantResult
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		ops, level, err := opsFor(scope)
+		if err != nil {
+			return err
+		}
+		caps, err := domain.ExpandTemplate(template, level)
+		if err != nil {
+			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+		}
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, ops.template, scope)
+		if err != nil {
+			return err
+		}
+
+		events := make([]grantEventInput, 0, len(caps)+1)
+		results := make([]GrantResult, 0, len(caps))
+		created, joined, unchanged := 0, 0, 0
+		names := make([]string, 0, len(caps))
+		for _, capability := range caps {
+			res, ev, err := s.grantOne(ctx, az, caller.Principal, GrantSpec{
+				Target: target, Capability: capability, Scope: scope,
+			}, level, template)
+			if err != nil {
+				return err
+			}
+			results = append(results, res)
+			events = append(events, ev)
+			names = append(names, string(capability))
+			switch {
+			case res.Created:
+				created++
+			case res.OriginAdded:
+				joined++
+			default:
+				unchanged++
+			}
+		}
+		out = results
+
+		// The template event records ONE administrator performing ONE act;
+		// the per-capability rows above record what it produced. Without the
+		// first the trail can say ten capabilities appeared but not why.
+		summary := grantEventInput{
+			typ:    audit.EventGrantTemplateApplied,
+			object: audit.Object{Type: "principal", ID: string(target)},
+			payload: audit.Payload{
+				"template":         string(template),
+				"target_principal": string(target),
+				"scope":            renderScope(scope),
+				"capability_count": len(caps),
+				"grants_created":   created,
+				"grants_deduped":   joined + unchanged,
+				"grants_joined":    joined,
+				"grants_unchanged": unchanged,
+				"self_grant":       target == caller.Principal,
+				"capabilities":     strings.Join(names, ","),
+			},
+		}
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...)
+	})
+	return out, err
+}
+
+// Membership is one capability line on the membership surface: a principal,
+// a capability, the scope it was granted at, and the origins holding it.
+type Membership struct {
+	GrantID    string
+	Principal  domain.PrincipalID
+	Capability domain.Capability
+	Scope      domain.Scope
+	Origins    []authz.Origin
+	CreatedAt  time.Time
+}
+
+// List returns the membership surface for the addressed scope: every grant
+// line inside the org (or at instance scope), narrowed to the addressed
+// project when one is addressed.
+//
+// Grants ABOVE the addressed scope are deliberately absent even though they
+// reach it by inheritance. Showing an instance operator on an org's member
+// list would invite revoking them from a page that has no authority to.
+func (s *Grants) List(ctx context.Context, actor Actor, scope domain.Scope) ([]Membership, error) {
+	var out []Membership
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		ops, level, err := opsFor(scope)
+		if err != nil {
+			return err
+		}
+		if ops.list == "" {
+			return fmt.Errorf("%w: the membership surface is listed at org, project or instance scope", domain.ErrInvalid)
+		}
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, ops.list, scope)
+		if err != nil {
+			return err
+		}
+		// One query per addressed depth. The project listing is NOT the org
+		// listing filtered afterwards: a project member manager authorizes for
+		// one project, and reading the org's rows to throw most away makes the
+		// work scale with sibling-project membership — observable, and it
+		// materializes administrative data the caller was never authorized to
+		// see.
+		var lines []authz.GrantLine
+		switch level {
+		case domain.LevelNone:
+			lines, err = az.GrantLinesAtInstance(ctx)
+		case domain.LevelProject:
+			lines, err = az.GrantLinesInProject(ctx, string(scope.Org), string(scope.Project))
+		default:
+			lines, err = az.GrantLinesInOrg(ctx, string(scope.Org))
+		}
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			out = append(out, Membership{
+				GrantID: line.ID, Principal: line.Principal,
+				Capability: line.Grant.Capability, Scope: line.Grant.Scope,
+				Origins: line.Origins, CreatedAt: line.CreatedAt,
+			})
+		}
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, grantEventInput{
+			typ:    audit.EventGrantMembershipRead,
+			object: audit.Object{Type: "scope", ID: renderScope(scope)},
+			payload: audit.Payload{
+				"scope": renderScope(scope), "row_count": len(out),
+			},
+		})
+	})
+	return out, err
+}
+
+// ---------------------------------------------------------------------------
+// Refusal rules
+// ---------------------------------------------------------------------------
+
+// checkGrantable enforces the closed atom set and the deepest-level rule.
+func checkGrantable(capability domain.Capability, at domain.Level) error {
+	deepest, ok := domain.DeepestLevel(capability)
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrNoSuchCapability, capability)
+	}
+	if at > deepest {
+		return fmt.Errorf("%w: %q", ErrCapabilityScope, capability)
+	}
+	return nil
+}
+
+// checkPrincipalClass applies the NORMATIVE machine allowlists. A human holds
+// anything in the closed set except the machine-only atoms; a machine holds
+// only what its class's list admits, which is what makes "no machine principal
+// may hold manage-members, manage-projects, project-settings or any instance
+// capability" a refusal rather than a convention.
+func checkPrincipalClass(class domain.PrincipalClass, capability domain.Capability) error {
+	if capability == domain.CapSCIMProvision {
+		// Machine-only AND system-created: the provisioning connection's own
+		// grant is written with its SCIM binding (#73) and retired with it.
+		return fmt.Errorf("%w: %q", ErrSystemCreatedOnly, capability)
+	}
+	if class == domain.ClassHuman {
+		return nil
+	}
+	if !domain.MachineMayHold(class, capability) {
+		return fmt.Errorf("%w: class %q may not hold %q", ErrMachineCapability, class, capability)
+	}
+	return nil
+}
+
+// mayGrantUnheld reports whether the grantor's `manage-members` sits at org or
+// instance scope FOR THE TARGET SCOPE — the only place the ADR permits handing
+// out a capability the grantor does not hold.
+func mayGrantUnheld(grantorGrants []authz.GrantRow, target domain.Scope) bool {
+	for _, g := range grantorGrants {
+		if g.Grant.Capability != domain.CapManageMembers {
+			continue
+		}
+		// Instance scope (empty org) or an org-scope grant covering the
+		// target org. A project-scope `manage-members` is deliberately not
+		// enough, which is the whole point of the rule.
+		if g.Grant.Scope.Org == "" {
+			return true
+		}
+		if g.Grant.Scope.Project == "" && g.Grant.Scope.Org == target.Org {
+			return true
+		}
+	}
+	return false
+}
+
+// holds reports whether the grantor currently holds the capability at or above
+// the target scope — the project-scope grantor's bound.
+func holds(grantorGrants []authz.GrantRow, capability domain.Capability, target domain.Scope) bool {
+	for _, g := range grantorGrants {
+		if g.Grant.Capability == capability && scopeCovers(g.Grant.Scope, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// findGrant returns the row holding an exact triple, or nil. Exactness is the
+// point: a `read` at org scope does NOT dedup a `read` at env scope, because
+// they are different rows with different blast radii and revoking one must not
+// take the other with it.
+func findGrant(rows []authz.GrantRow, capability domain.Capability, scope domain.Scope) *authz.GrantRow {
+	for i := range rows {
+		if rows[i].Grant.Capability == capability && rows[i].Grant.Scope == scope {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// scopeCovers mirrors the chokepoint's own ancestor-or-equal rule. It is
+// duplicated here deliberately: the chokepoint's copy answers "may this
+// operation proceed" and must never grow a caller-facing exception, while this
+// one answers "does the grantor hold enough to hand this out" — a policy
+// question the chokepoint has no business knowing about.
+func scopeCovers(g, target domain.Scope) bool {
+	if g.Org == "" {
+		return true
+	}
+	if g.Org != target.Org {
+		return false
+	}
+	if g.Project == "" {
+		return true
+	}
+	if g.Project != target.Project {
+		return false
+	}
+	if g.Env == "" {
+		return true
+	}
+	return g.Env == target.Env
+}
+
+// renderScope is the audit and CLI rendering of a scope: `instance`, or the
+// chain joined by `/`. It is not parsed back anywhere — the wire carries the
+// ids separately.
+func renderScope(s domain.Scope) string {
+	parts := make([]string, 0, 3)
+	for _, part := range []string{string(s.Org), string(s.Project), string(s.Env)} {
+		if part == "" {
+			break
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "instance"
+	}
+	return strings.Join(parts, "/")
+}
+
+// ---------------------------------------------------------------------------
+// Break-glass
+// ---------------------------------------------------------------------------
+
+// BreakGlassGrant issues a recovery grant under LOCAL HOST AUTHORITY —
+// `hikyo admin grant`, on the server's own host, root key already loaded by the
+// caller. It reaches no chokepoint operation and is, in the ADR's own words,
+// "the only authorization path in the system not evaluated against a grant".
+// There is deliberately no network route; the classification-totality
+// invariant is what keeps that true.
+//
+// It adds no attacker capability: host access plus the root key already means
+// full control-plane compromise per the threat model. What it adds is a way
+// out of the lockout invariant's one irrecoverable state — an instance with no
+// `manage-members` holder — without an API that could be reached remotely.
+//
+// The origin is `break-glass`, NOT `manual`. That is a reading of the ADR, not
+// a convenience: `manual(granted_by)` names a granting principal whose own
+// authority was evaluated, and this path has no granting principal at all.
+// Recording it as manual would put a principal's name on an act no principal
+// performed, and would make the row indistinguishable from an ordinary grant
+// on the membership surface — which is exactly the thing an auditor is looking
+// for after an incident.
+func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResult, error) {
+	var out GrantResult
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		level, err := spec.Scope.Level()
+		if err != nil {
+			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
+		}
+		// The closed atom set and the deepest-level rule still bind: local
+		// authority is not permission to write a row nothing can evaluate.
+		if err := checkGrantable(spec.Capability, level); err != nil {
+			return err
+		}
+		// The machine allowlists are normative for every writer, including
+		// this one: break-glass exists to restore human administration, not to
+		// hand a CI runner an instance capability by the back door.
+		if _, err := lockAndClassify(ctx, az, spec.Target, spec.Capability, spec.Scope); err != nil {
+			return err
+		}
+		out, err = writeGrantRow(ctx, az, spec,
+			authz.Origin{Kind: domain.OriginBreakGlass, Subject: breakGlassSubject}, s.now())
+		if err != nil {
+			return err
+		}
+
+		// The durable recovery record. It rides RecordAuthEvent (the
+		// resolution surface's proof-free writer) for the same reason the
+		// break-glass credential reset does: there is no proof to bind it to,
+		// and it commits in the same transaction as the grant, so durability
+		// holds.
+		e, err := newAuditEvent(ctx, audit.EventBreakGlassGrant, "",
+			audit.Object{Type: "grant", ID: out.GrantID}, audit.OutcomeSuccess, "",
+			audit.Payload{
+				"target_principal": string(spec.Target),
+				"capability":       string(spec.Capability),
+				"scope":            renderScope(spec.Scope),
+				"authority":        "local-host",
+				"grant_created":    out.Created,
+			})
+		if err != nil {
+			return err
+		}
+		return az.RecordAuthEvent(ctx, e)
+	})
+	return out, err
+}
+
+// breakGlassSubject is the `subject` a break-glass origin carries. It is a
+// constant rather than a principal because there is no granting principal: the
+// authority is the host.
+const breakGlassSubject = "local-host-authority"
+
+// revokePayload builds the release event's payload. The two lifecycle types
+// carry different schemas — `grant.revoked` adds the surviving-origin count
+// and the session outcome, `grant.modified` shares the plain grant shape — so
+// the payload is built where the type is decided rather than assembled once
+// and hoped to fit both.
+func revokePayload(spec GrantSpec, actor domain.PrincipalID, releasedKinds []string, remaining int64, typ audit.EventType) audit.Payload {
+	p := audit.Payload{
+		"target_principal": string(spec.Target),
+		"capability":       string(spec.Capability),
+		"scope":            renderScope(spec.Scope),
+		// The kinds ACTUALLY released, not an assumption. A revoke releases
+		// every origin this surface owns, break-glass included, and hardcoding
+		// `manual` would erase from the trail the very distinction the
+		// break-glass origin exists to make.
+		"origin_kind":  strings.Join(releasedKinds, ","),
+		"self_grant":   spec.Target == actor,
+		"unheld":       false,
+		"target_class": "",
+	}
+	if typ == audit.EventGrantRevoked {
+		p["origins_remaining"] = int(remaining)
+		p["sessions_revoked"] = true
+	}
+	return p
+}

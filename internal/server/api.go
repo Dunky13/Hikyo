@@ -115,6 +115,10 @@ type API struct {
 	Projects      ProjectService
 	Environments  EnvironmentService
 	Folders       FolderService
+	Keys          KeyService
+	KeyGroups     KeyGroupService
+	Grants        GrantService
+	Settings      SettingsService
 	Providers     ProviderService
 	SAMLProviders SAMLProviderService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive

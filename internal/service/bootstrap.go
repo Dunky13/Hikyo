@@ -27,30 +27,37 @@ import (
 // classification-totality invariant is what keeps that true: `cli:admin` is
 // classified ClassSystem, whose probe contract is network unreachability.
 
-// AdminTemplate is the `admin` role template as this slice can express it.
+// BootstrapTemplate is the role template the first administrator is seeded
+// with: `operator`, at instance scope, expanded from the ADR's own closed
+// table rather than from a bespoke list beside it.
 //
-// Two things the permission ADR insists on and this honours: the template
-// expands AT GRANT TIME into separate, individually revocable rows — `reveal`
-// and `reveal-history` are visible grants, never an implicit bundle — and the
-// expansion is data, so revoking one capability does not require
-// understanding what "admin" meant when it was applied.
+// This reconciles two clauses of the permission ADR that pull apart at
+// bootstrap, and the reconciliation is stated rather than assumed:
 //
-// Scope is instance-wide because a fresh instance has no org for an
-// org-scoped template to attach to; the first administrator's job is to
-// create the first org. The full template catalogue, with org-scoped
-// application and the dedup/revocation surface, is #55's.
-var AdminTemplate = []domain.Capability{
-	domain.CapInstanceConfig,
-	domain.CapManageMembers,
-	domain.CapCredentialReset,
-	domain.CapManageProjects,
-	domain.CapDefinitionsEdit,
-	domain.CapRead,
-	domain.CapEdit,
-	domain.CapReveal,
-	domain.CapRevealHistory,
-	domain.CapAuditRead,
-}
+//   - Propagations → #16 says the first administrator MUST be bootstrapped
+//     "via the `admin` template (so reveal/reveal-history are seeded as
+//     separate visible grants)".
+//   - The template table makes `admin` applicable at org/project scope ONLY,
+//     and § Administrative power says instance scope inherits downward, so an
+//     instance operator "can reach any org's data through an explicit audited
+//     grant, NEVER BY BUNDLE" — while `operator` is defined as the operator
+//     set plus `manage-members`, with no disclosure at all.
+//
+// At bootstrap there is no org for an org-scoped template to attach to, so the
+// two cannot both be satisfied literally at the same moment. The reading taken
+// here: bootstrap seeds `operator` at instance scope — separate visible
+// grants, no disclosure, no tenant data reachable by bundle — and the
+// `admin`-template clause is satisfied where it can be, at ORG scope, when the
+// first administrator creates the first org and applies `admin` to themselves
+// through their instance `manage-members` (the ADR's own unheld-granting
+// power, audited like any other grant). `reveal` and `reveal-history` arrive
+// there, as the separate seeded rows the clause asks for.
+//
+// The previous bespoke list is gone. It seeded `read`, `reveal` and
+// `reveal-history` AT INSTANCE SCOPE, which is precisely the bundle the ADR
+// forbids: the first administrator held secret access over every org that
+// would ever exist, before any of them did.
+const BootstrapTemplate = domain.TemplateOperator
 
 // ErrInstanceAlreadyBootstrapped refuses a second first-administrator. It is
 // loud: silently minting another instance-wide admin because a command was
@@ -135,14 +142,32 @@ func (s *Auth) BootstrapAdmin(ctx context.Context, username, displayName, delive
 		}); err != nil {
 			return err
 		}
+		caps, err := domain.ExpandTemplate(BootstrapTemplate, domain.LevelNone)
+		if err != nil {
+			return err
+		}
 		// One row per capability: the expansion is the point.
-		for _, capability := range AdminTemplate {
+		for _, capability := range caps {
 			grantID, err := newID("grt")
 			if err != nil {
 				return err
 			}
 			if err := az.CreateGrant(ctx, grantID, domain.PrincipalID(principalID),
 				domain.Grant{Capability: capability}, now); err != nil {
+				return err
+			}
+			// Every grant row carries at least one origin (#55, scim
+			// amendment (a)) — a row no origin holds is a row nothing can
+			// ever release. Bootstrap has no granting principal, so the fill
+			// is the self-grant the amendment's own wording implies for
+			// pre-existing rows: manual(granted_by), visible as such on the
+			// membership line rather than invented as somebody else's act.
+			originID, err := newID("gor")
+			if err != nil {
+				return err
+			}
+			if err := az.AddGrantOrigin(ctx, originID, grantID, domain.PrincipalID(principalID),
+				authz.Origin{Kind: domain.OriginManual, Subject: principalID}, now); err != nil {
 				return err
 			}
 		}

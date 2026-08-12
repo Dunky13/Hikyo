@@ -85,13 +85,15 @@ type CredentialAuthority struct {
 }
 
 type Environment struct {
-	ID           string
-	OrgID        string
-	ProjectID    string
-	Name         string
-	Note         string
-	CreatedAt    string
-	DisplayOrder int64
+	ID                  string
+	OrgID               string
+	ProjectID           string
+	Name                string
+	Note                string
+	CreatedAt           string
+	DisplayOrder        int64
+	Protected           int64
+	ReauthWindowSeconds sql.NullInt64
 }
 
 type ExternalIdentity struct {
@@ -123,9 +125,50 @@ type Grant struct {
 	CreatedAt   string
 }
 
+type GrantOrigin struct {
+	ID        string
+	GrantID   string
+	Kind      string
+	Subject   string
+	CreatedAt string
+}
+
+type Key struct {
+	ID              string
+	OrgID           string
+	ProjectID       string
+	Name            string
+	FolderPath      string
+	Classification  string
+	Description     string
+	Deprecated      int64
+	DeprecationNote string
+	Declaration     string
+	RequiredMode    string
+	ForbiddenMode   string
+	GroupID         sql.NullString
+	CreatedAt       string
+}
+
 type KeyGeneration struct {
 	Scope      string
 	Generation int64
+}
+
+type KeyGroup struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	CreatedAt string
+}
+
+type KeyPresenceEnvironment struct {
+	OrgID         string
+	ProjectID     string
+	KeyID         string
+	EnvironmentID string
+	Rule          string
 }
 
 type MasterKey struct {
@@ -201,6 +244,7 @@ type Principal struct {
 	Kind              string
 	CreatedAt         string
 	SessionGeneration int64
+	Class             sql.NullString
 }
 
 type Project struct {
@@ -208,6 +252,12 @@ type Project struct {
 	OrgID     string
 	Name      string
 	CreatedAt string
+}
+
+type ProjectSchemaRevision struct {
+	OrgID     string
+	ProjectID string
+	Revision  int64
 }
 
 type ReauthWindow struct {

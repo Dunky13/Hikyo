@@ -462,6 +462,21 @@ func TestCredentialResetNetworkPostgres(t *testing.T) {
 	runCredentialResetNetwork(t, seededDB(t, openPostgres))
 }
 
+// grantInstanceCapability seeds a capability the bootstrap template no longer
+// bundles. Since #55 the first administrator is seeded with `operator`
+// (operator set + manage-members, no tenant data by bundle), so anything else
+// — `credential-reset` here — arrives as an EXPLICIT AUDITED GRANT, which is
+// exactly the ADR's "never by bundle". It goes through the real grant surface
+// under local authority, so the fixture exercises the path it documents.
+func grantInstanceCapability(t *testing.T, db *store.DB, target domain.PrincipalID, c domain.Capability) {
+	t.Helper()
+	if _, err := (&service.Grants{DB: db}).Create(t.Context(), service.LocalPrincipal(target), service.GrantSpec{
+		Target: target, Capability: c,
+	}); err != nil {
+		t.Fatalf("seed %s at instance scope: %v", c, err)
+	}
+}
+
 // runCredentialResetNetwork (ADR - Recovery): a stepped-up credential-reset
 // holder resets an org-bounded target over the network, minting a session-less
 // authority that establishes only a password; the target then logs in with it. An
@@ -470,7 +485,8 @@ func TestCredentialResetNetworkPostgres(t *testing.T) {
 // principal-row lock every grant writer also takes (B14, analyzer-enforced), so a
 // concurrent grant landing serializes against the reset.
 func runCredentialResetNetwork(t *testing.T, db *store.DB) {
-	auth, _, password := bootstrapFactorAdmin(t, db)
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	grantInstanceCapability(t, db, boot.PrincipalID, domain.CapCredentialReset)
 	base := time.Now().UTC()
 	clk := base
 	auth.Now = func() time.Time { return clk }
@@ -563,7 +579,8 @@ func TestCredentialResetMFAMandatoryPostgres(t *testing.T) {
 // the credential-reset operation: uniform on the wire (mapped to 401), detailed
 // in the trail.
 func runCredentialResetMFAMandatory(t *testing.T, db *store.DB) {
-	auth, _, password := bootstrapFactorAdmin(t, db)
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	grantInstanceCapability(t, db, boot.PrincipalID, domain.CapCredentialReset)
 	ctx := t.Context()
 
 	// An org-bounded target within org_a.
@@ -571,7 +588,7 @@ func runCredentialResetMFAMandatory(t *testing.T, db *store.DB) {
 	execRaw(t, db, "INSERT INTO accounts (id, principal_id, username, display_name, created_at) VALUES ('acc_t2', 'usr_t2', 'target2', 'Target Two', "+tsMicro+")")
 	execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_t2_rev', 'usr_t2', 'reveal', 'org_a', NULL, NULL, "+ts+")")
 
-	// The admin holds credential-reset (admin template) but logs in with the
+	// The admin holds credential-reset (granted explicitly above) but logs in with the
 	// password alone — a single-factor session that the MFA-mandatory rule refuses.
 	login, err := auth.LocalLogin(ctx, "factor-admin", password)
 	if err != nil {

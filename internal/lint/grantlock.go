@@ -31,8 +31,11 @@ import (
 // (fail-closed): a grant writer with no resolvable lock at all is a build
 // failure, never a silent pass.
 
-// grantTable is the table whose writers must hold the principal-row lock.
-const grantTable = "grants"
+// grantTables are the tables whose writers must hold the principal-row lock.
+// `grant_origins` joins `grants` (#55): releasing the last origin deletes the
+// grant row, so an origin write is a grant write with one more step, and the
+// same serialization obligation binds it.
+var grantTables = map[string]bool{"grants": true, "grant_origins": true}
 
 // lockName is the lock taken before a grant write.
 const lockName = "LockPrincipalRow"
@@ -63,7 +66,7 @@ func GrantWriters(repoRoot string) (map[string]bool, error) {
 		}
 		for _, q := range queries {
 			table, kind, ok := statementTarget(strings.ToUpper(normalizeSpace(q.SQL)))
-			if !ok || !strings.EqualFold(table, grantTable) {
+			if !ok || !grantTables[strings.ToLower(table)] {
 				continue
 			}
 			switch kind {

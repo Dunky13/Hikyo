@@ -146,13 +146,6 @@ func TestInvariantAuditRegistryClosure(t *testing.T) {
 	// row): a registered-but-unemittable type is dead catalogue.
 	emitted := map[audit.EventType]bool{
 		audit.EventGrantDenied: true,
-		// auth.effective_window_lowered is emitted by the LowerEffectiveWindow
-		// library (#54 B6), which has no operation row and no wire entry: it is
-		// the ceremony #55's project-settings knob calls, shipped here ahead of
-		// its caller. Like the denial event above, a non-operation emitter that
-		// the completeness model cannot see through an operation/wire row. #55
-		// binds it to the settings-mutation wire entry when that lands.
-		audit.EventAuthEffectiveWindowLowered: true,
 	}
 	for _, m := range facts.AuditMappings() {
 		for _, et := range m.Events {

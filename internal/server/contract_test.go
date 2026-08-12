@@ -683,6 +683,72 @@ func (s stubEnvs) Reorder(context.Context, service.Actor, domain.Scope, []string
 	return nil, s.outcome()
 }
 
+// stubKeys and stubKeyGroups are the key catalogue's uniformity fixtures
+// (#49). Every method answers the SAME injected outcome, which is what makes
+// the uniformity test meaningful: the transport is given no way to tell a
+// missing key from one the caller may not reach — including on the two
+// reveal-gated routes, where a distinguishable refusal would be the one-bit
+// oracle the gate exists to close.
+type stubKeys struct{ stubHierarchy }
+
+func (s stubKeys) Create(context.Context, service.Actor, domain.Scope, service.KeySpec) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) Get(context.Context, service.Actor, domain.Scope, string) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) List(context.Context, service.Actor, domain.Scope) ([]service.Key, int64, error) {
+	return nil, 0, s.outcome()
+}
+
+func (s stubKeys) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) UpdateMetadata(context.Context, service.Actor, domain.Scope, string, service.KeyMetadataUpdate) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) UpdateDeclaration(context.Context, service.Actor, domain.Scope, string, service.KeyDeclarationUpdate) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) Reclassify(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) SetGroup(context.Context, service.Actor, domain.Scope, string, string) (service.Key, error) {
+	return service.Key{}, s.outcome()
+}
+
+func (s stubKeys) Delete(context.Context, service.Actor, domain.Scope, string) error {
+	return s.outcome()
+}
+
+type stubKeyGroups struct{ stubHierarchy }
+
+func (s stubKeyGroups) Create(context.Context, service.Actor, domain.Scope, string) (service.KeyGroupView, error) {
+	return service.KeyGroupView{}, s.outcome()
+}
+
+func (s stubKeyGroups) Get(context.Context, service.Actor, domain.Scope, string) (service.KeyGroupView, error) {
+	return service.KeyGroupView{}, s.outcome()
+}
+
+func (s stubKeyGroups) List(context.Context, service.Actor, domain.Scope) ([]service.KeyGroupView, error) {
+	return nil, s.outcome()
+}
+
+func (s stubKeyGroups) Rename(context.Context, service.Actor, domain.Scope, string, string) (service.KeyGroupView, error) {
+	return service.KeyGroupView{}, s.outcome()
+}
+
+func (s stubKeyGroups) Delete(context.Context, service.Actor, domain.Scope, string) error {
+	return s.outcome()
+}
+
 type stubFolders struct{ stubHierarchy }
 
 func (s stubFolders) Create(context.Context, service.Actor, domain.Scope, string) (service.Folder, error) {
@@ -706,10 +772,45 @@ func (s stubFolders) Delete(context.Context, service.Actor, domain.Scope, string
 }
 
 const (
-	testProjectID = "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44"
-	testEnvID     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55"
-	testFolderID  = "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66"
+	testProjectID  = "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f44"
+	testEnvID      = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55"
+	testFolderID   = "fld_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66"
+	testKeyID      = "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f77"
+	testKeyGroupID = "kgr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f88"
+	// The grant target for the access-surface uniformity routes (#55).
+	testPrincipalID = "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f99"
 )
+
+// stubGrants and stubSettings are the access surface's uniformity fixtures
+// (#55). Like the hierarchy stubs they answer one outcome for everything, so
+// the uniformity tests differ ONLY in which sentinel the service returned.
+type stubGrants struct{ stubHierarchy }
+
+func (s stubGrants) Create(context.Context, service.Actor, service.GrantSpec) (service.GrantResult, error) {
+	return service.GrantResult{}, s.outcome()
+}
+
+func (s stubGrants) Revoke(context.Context, service.Actor, service.GrantSpec) error {
+	return s.outcome()
+}
+
+func (s stubGrants) List(context.Context, service.Actor, domain.Scope) ([]service.Membership, error) {
+	return nil, s.outcome()
+}
+
+func (s stubGrants) ApplyTemplate(context.Context, service.Actor, domain.Template, domain.PrincipalID, domain.Scope) ([]service.GrantResult, error) {
+	return nil, s.outcome()
+}
+
+type stubSettings struct{ stubHierarchy }
+
+func (s stubSettings) GetEnvironment(context.Context, service.Actor, domain.Scope) (service.EnvironmentSettings, error) {
+	return service.EnvironmentSettings{}, s.outcome()
+}
+
+func (s stubSettings) SetEnvironment(context.Context, service.Actor, domain.Scope, service.EnvironmentSettings) (service.EnvironmentSettings, error) {
+	return service.EnvironmentSettings{}, s.outcome()
+}
 
 func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 	t.Helper()
@@ -718,6 +819,10 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 		Projects:     stubHierarchy{err: outcome},
 		Environments: stubEnvs{stubHierarchy{err: outcome}},
 		Folders:      stubFolders{stubHierarchy{err: outcome}},
+		Keys:         stubKeys{stubHierarchy{err: outcome}},
+		KeyGroups:    stubKeyGroups{stubHierarchy{err: outcome}},
+		Grants:       stubGrants{stubHierarchy{err: outcome}},
+		Settings:     stubSettings{stubHierarchy{err: outcome}},
 		Version:      "test",
 	}))
 	t.Cleanup(srv.Close)
@@ -734,6 +839,8 @@ func hierarchyRoutes() []struct {
 	base := api.PathPrefix + "/orgs/" + testOrgID
 	project := base + "/projects/" + testProjectID
 	rename := apigen.RenameRequest{Name: "renamed"}
+	grantBody := apigen.CreateGrantRequest{Principal: testPrincipalID, Capability: "read"}
+	templateBody := apigen.ApplyTemplateRequest{Principal: testPrincipalID, Template: apigen.Viewer}
 	return []struct {
 		method string
 		path   string
@@ -758,6 +865,88 @@ func hierarchyRoutes() []struct {
 		{http.MethodGet, project + "/folders/" + testFolderID, nil},
 		{http.MethodPatch, project + "/folders/" + testFolderID, apigen.RenameFolderRequest{Path: "g"}},
 		{http.MethodDelete, project + "/folders/" + testFolderID, nil},
+
+		// The access surface (#55). Handoff 44 passed the byte-shape
+		// obligation to the response layer "when routes land"; these are the
+		// grant routes landing, so they join the same assertion rather than
+		// getting a weaker one of their own. The list routes are here for the
+		// count half: a refused listing must be the uniform 404, never a 200
+		// carrying `count: 0`, which would confirm the scope exists.
+		{http.MethodGet, base + "/grants", nil},
+		{http.MethodPost, base + "/grants", grantBody},
+		{http.MethodDelete, base + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, base + "/grants/template", templateBody},
+		{http.MethodGet, project + "/grants", nil},
+		{http.MethodPost, project + "/grants", grantBody},
+		{http.MethodDelete, project + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, project + "/grants/template", templateBody},
+		{http.MethodPost, project + "/environments/" + testEnvID + "/grants", grantBody},
+		{http.MethodDelete, project + "/environments/" + testEnvID + "/grants?principal=" + testPrincipalID + "&capability=read", nil},
+		{http.MethodPost, project + "/environments/" + testEnvID + "/grants/template", templateBody},
+		{http.MethodGet, project + "/environments/" + testEnvID + "/settings", nil},
+		{http.MethodPut, project + "/environments/" + testEnvID + "/settings", apigen.EnvironmentSettings{Protected: true}},
+		// The key catalogue (#49). The declaration and classification routes
+		// are in this list deliberately: they are the reveal-gated ones, and
+		// their refusal MUST be byte-identical to a missing key.
+		{http.MethodGet, project + "/keys", nil},
+		{http.MethodPost, project + "/keys", apigen.CreateKeyRequest{
+			Name: "K", Classification: "config",
+			Declaration: apigen.KeyDeclaration{Rule: &apigen.KeyRule{Type: "string"}},
+		}},
+		{http.MethodGet, project + "/keys/" + testKeyID, nil},
+		{http.MethodPatch, project + "/keys/" + testKeyID, apigen.UpdateKeyMetadataRequest{}},
+		{http.MethodDelete, project + "/keys/" + testKeyID, nil},
+		{http.MethodPut, project + "/keys/" + testKeyID + "/name", apigen.RenameKeyRequest{Name: "K2"}},
+		{http.MethodPut, project + "/keys/" + testKeyID + "/declaration", apigen.UpdateKeyDeclarationRequest{
+			Declaration: apigen.KeyDeclaration{Rule: &apigen.KeyRule{Type: "string"}},
+			Presence: apigen.KeyPresenceRules{
+				RequiredIn: apigen.KeyPresence{Mode: "none"}, ForbiddenIn: apigen.KeyPresence{Mode: "none"},
+			},
+		}},
+		{http.MethodPut, project + "/keys/" + testKeyID + "/classification", apigen.ReclassifyKeyRequest{Classification: "config"}},
+		{http.MethodPut, project + "/keys/" + testKeyID + "/group", apigen.SetKeyGroupRequest{GroupId: ""}},
+		{http.MethodGet, project + "/key-groups", nil},
+		{http.MethodPost, project + "/key-groups", apigen.CreateKeyGroupRequest{Name: "g"}},
+		{http.MethodGet, project + "/key-groups/" + testKeyGroupID, nil},
+		{http.MethodPatch, project + "/key-groups/" + testKeyGroupID, apigen.RenameKeyGroupRequest{Name: "g2"}},
+		{http.MethodDelete, project + "/key-groups/" + testKeyGroupID, nil},
+	}
+}
+
+// TestOrdinaryUpdateRefusesAClassificationChange is mvp-boundary C1's
+// "classification changes only via the reclassification ceremony", asserted at
+// the transport where the refusal lives. The field exists in the contract ONLY
+// so the refusal can name the ceremony; a body carrying it is refused whatever
+// its value, and refusing the FIELD rather than the CHANGE costs no read and
+// cannot become a way to probe the current classification.
+func TestOrdinaryUpdateRefusesAClassificationChange(t *testing.T) {
+	// The stub answers the uniform nonexistent for everything it is asked, so
+	// the two outcomes below are distinguishable ONLY by where the request
+	// stopped: 400 means the transport refused the field, 404 means it reached
+	// the service.
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
+		Keys: stubKeys{}, Version: "test",
+	}))
+	t.Cleanup(srv.Close)
+	path := api.PathPrefix + "/orgs/" + testOrgID + "/projects/" + testProjectID + "/keys/" + testKeyID
+	for _, classification := range []apigen.KeyClassification{"secret", "config"} {
+		resp, payload := call(t, srv, http.MethodPatch, path, "ew_1_cli_x",
+			apigen.UpdateKeyMetadataRequest{Classification: &classification})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("classification %q in an ordinary update answered %d, want 400", classification, resp.StatusCode)
+		}
+		if code := decodeError(t, payload).Error.Code; code != apigen.ErrorCodeBadRequest {
+			t.Fatalf("code %q, want bad_request", code)
+		}
+	}
+	// The same request without the field reaches the service, whose stub
+	// answers the uniform nonexistent — a different outcome from the refusal
+	// above, which is what proves the refusal is the transport's and not an
+	// accident of the fixture.
+	resp, _ := call(t, srv, http.MethodPatch, path, "ew_1_cli_x", apigen.UpdateKeyMetadataRequest{})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a metadata update without a classification answered %d, want the service's 404", resp.StatusCode)
 	}
 }
 
@@ -783,6 +972,33 @@ func TestUniformNonexistentAtEveryLevel(t *testing.T) {
 		body := decodeError(t, bodyA)
 		if body.Error.Detail != nil {
 			t.Errorf("%s %s: a 404 carries a detail member", route.method, route.path)
+		}
+	}
+}
+
+// TestRefusedListingLeaksNoCount is the "counts" half of unauthorized ≡
+// nonexistent for bulk reads (mvp-boundary A2). Byte-equality above already
+// proves the two servers agree; this asserts the stronger property directly,
+// because the failure it guards against is a plausible one: answering a
+// refused membership listing with 200 and `{"items":[],"count":0}` would be a
+// perfectly reasonable-looking handler that confirms the scope exists and that
+// the caller may enumerate it.
+func TestRefusedListingLeaksNoCount(t *testing.T) {
+	refused := hierarchyServer(t, fmt.Errorf("refused at the chokepoint: %w", domain.ErrNotFound))
+	base := api.PathPrefix + "/orgs/" + testOrgID
+	for _, path := range []string{
+		base + "/grants",
+		base + "/projects/" + testProjectID + "/grants",
+		base + "/projects",
+		base + "/projects/" + testProjectID + "/environments",
+	} {
+		resp, body := call(t, refused, http.MethodGet, path, "ew_1_cli_x", nil)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: status %d, want 404", path, resp.StatusCode)
+			continue
+		}
+		if bytes.Contains(body, []byte(`"count"`)) || bytes.Contains(body, []byte(`"items"`)) {
+			t.Errorf("GET %s: a refused listing carried a count or an items member: %s", path, body)
 		}
 	}
 }

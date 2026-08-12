@@ -195,14 +195,40 @@ func (s *Auth) LowerEffectiveWindow(ctx context.Context, az *authz.TxAuthorizer,
 // window (A2). LowerEffectiveWindow's newValue is this same per-environment
 // quantity: one function, so the writer and the readers cannot diverge.
 //
-// No per-environment override storage exists yet — it is #55's project-settings
-// knob — so today this returns the instance default s.ReauthWindow, which itself
-// defaults to 0 (fail-closed: a 0 window has no TOTP/OIDC path, only WebAuthn).
-// #55 replaces this body with a locked per-environment read inside the passed
-// transaction; the ctx/az/environmentID are already threaded so that read is
-// consistent with the window the caller is about to open under the same lock.
-func (s *Auth) effectiveReauthWindow(_ context.Context, _ *authz.TxAuthorizer, _ string) (time.Duration, error) {
-	return s.ReauthWindow, nil
+// #55 supplied the per-environment storage: the environment's own window when
+// it has one, the protected cap when it is protected, and the instance default
+// s.ReauthWindow otherwise. The read happens inside the caller's own
+// transaction, so it is consistent with the window the caller is about to
+// open, and it shares `effectiveWindow` with the project-settings writer —
+// one rule, so a protected environment cannot answer differently to the two.
+//
+// An environment that does not resolve fails CLOSED at 0 rather than falling
+// back to the instance default: a window opener addressing an environment that
+// is not there must not be handed the most permissive answer in the system.
+func (s *Auth) effectiveReauthWindow(ctx context.Context, az *authz.TxAuthorizer, environmentID string) (time.Duration, error) {
+	instanceDefault := s.ReauthWindow
+	if environmentID == "" {
+		return instanceDefault, nil
+	}
+	st, err := az.EnvironmentReauthSettings(ctx, environmentID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return effectiveWindow(st.Protected, st.HasWindow, st.Window, instanceDefault), nil
+}
+
+// hardCap is the absolute age bound on a reauthentication window. An unset
+// (zero) configuration is not "no bound" and is not "the idle window" — with
+// both at zero a 0-window WebAuthn ceremony mints a window that is already
+// expired, which is #54's disposition item 1. The default is a real bound.
+func (s *Auth) hardCap() time.Duration {
+	if s.ReauthHardCap > 0 {
+		return s.ReauthHardCap
+	}
+	return DefaultReauthHardCap
 }
 
 // ReauthTOTP opens a reauthentication window over one environment by presenting
@@ -316,10 +342,7 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		if effWin <= 0 {
 			return ErrReauthWindowClosed
 		}
-		hardCap := s.ReauthHardCap
-		if hardCap <= 0 {
-			hardCap = effWin
-		}
+		hardCap := s.hardCap()
 		hardExpires := now.Add(hardCap)
 		windowExpires := now.Add(effWin)
 		if windowExpires.After(hardExpires) {

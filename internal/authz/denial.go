@@ -37,6 +37,36 @@ type Denial struct {
 	Event audit.Event
 }
 
+// AttributeDenials names the OBJECT every denial captured from here on
+// addresses, so a refusal's envelope carries what it was about.
+//
+// It exists for the schema model's per-key audit obligation on the reveal
+// gates ("every attempt is audited ... per key and per principal"): the
+// grant.denied PAYLOAD is a closed schema shared by every operation and must
+// not grow a key field, but the envelope's object type/id is exactly the place
+// an acted-on object belongs, and it already round-trips to both audit tables.
+//
+// It attributes, it never authorizes: the object id is caller-supplied
+// vocabulary that decides nothing, and the formula is evaluated as before.
+func (a *TxAuthorizer) AttributeDenials(obj audit.Object) { a.object = obj }
+
+// CaptureAudit enrols an event in the same DURABLE SETTLEMENT the denial
+// writer uses: the transaction package rolls the attempt back and then flushes
+// every captured record in its own small transaction, before the outcome
+// returns to the caller.
+//
+// It exists for the schema model's "every attempt is audited" obligation on the
+// reveal gates. A gate attempt has to be recorded whether it was allowed,
+// denied or rate-limited — and the denied and limited cases roll their
+// transaction back, so an in-transaction insert would vanish exactly when it
+// matters. This is the one path in the system that survives a rollback, and
+// widening its use is a deliberate, reviewed act rather than a convenience:
+// callers must carry no instance data in the payload, because these rows are
+// written outside the operation's own authorization scope.
+func (a *TxAuthorizer) CaptureAudit(trail audit.Trail, scope domain.Scope, e audit.Event) {
+	a.denials = append(a.denials, Denial{Trail: trail, Scope: scope, Event: e})
+}
+
 // PendingDenials hands the attempt's captured denials to the transaction
 // package. The authorizer lives exactly one attempt, so there is no reset.
 func (a *TxAuthorizer) PendingDenials() []Denial { return a.denials }
@@ -103,6 +133,7 @@ func (a *TxAuthorizer) captureDenial(ctx context.Context, principal domain.Princ
 			// Actor class is resolved at flush (principals.kind), inside the
 			// flush transaction.
 			Actor:     audit.Actor{ID: string(principal)},
+			Object:    a.object,
 			Outcome:   audit.OutcomeDenied,
 			SourceIP:  wire.SourceIP,
 			UserAgent: wire.UserAgent,

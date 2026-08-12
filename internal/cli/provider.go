@@ -122,10 +122,10 @@ func runProviderCreate(ctx context.Context, ios IO, args []string) error {
 		if err != nil {
 			return err
 		}
-		input.MetadataSource = apigen.File
+		input.MetadataSource = apigen.SamlMetadataSourceFile
 		input.MetadataDocument = &document
 	} else {
-		input.MetadataSource = apigen.Url
+		input.MetadataSource = apigen.SamlMetadataSourceUrl
 		input.MetadataUrl = &metadataURL
 	}
 

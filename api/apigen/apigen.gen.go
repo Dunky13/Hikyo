@@ -53,6 +53,33 @@ func (e ErrorCode) Valid() bool {
 	}
 }
 
+// Defines values for GrantOriginKind.
+const (
+	BreakGlass       GrantOriginKind = "break-glass"
+	LockoutRetention GrantOriginKind = "lockout-retention"
+	Manual           GrantOriginKind = "manual"
+	Scim             GrantOriginKind = "scim"
+	Structural       GrantOriginKind = "structural"
+)
+
+// Valid indicates whether the value is a known member of the GrantOriginKind enum.
+func (e GrantOriginKind) Valid() bool {
+	switch e {
+	case BreakGlass:
+		return true
+	case LockoutRetention:
+		return true
+	case Manual:
+		return true
+	case Scim:
+		return true
+	case Structural:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IdentityProviderKind.
 const (
 	IdentityProviderKindOidc IdentityProviderKind = "oidc"
@@ -65,6 +92,75 @@ func (e IdentityProviderKind) Valid() bool {
 	case IdentityProviderKindOidc:
 		return true
 	case IdentityProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyClassification.
+const (
+	Config KeyClassification = "config"
+	Secret KeyClassification = "secret"
+)
+
+// Valid indicates whether the value is a known member of the KeyClassification enum.
+func (e KeyClassification) Valid() bool {
+	switch e {
+	case Config:
+		return true
+	case Secret:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyPresenceMode.
+const (
+	All      KeyPresenceMode = "all"
+	Explicit KeyPresenceMode = "explicit"
+	None     KeyPresenceMode = "none"
+)
+
+// Valid indicates whether the value is a known member of the KeyPresenceMode enum.
+func (e KeyPresenceMode) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Explicit:
+		return true
+	case None:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyRuleType.
+const (
+	KeyRuleTypeBoolean KeyRuleType = "boolean"
+	KeyRuleTypeEnum    KeyRuleType = "enum"
+	KeyRuleTypeInteger KeyRuleType = "integer"
+	KeyRuleTypeJson    KeyRuleType = "json"
+	KeyRuleTypeString  KeyRuleType = "string"
+	KeyRuleTypeUrl     KeyRuleType = "url"
+)
+
+// Valid indicates whether the value is a known member of the KeyRuleType enum.
+func (e KeyRuleType) Valid() bool {
+	switch e {
+	case KeyRuleTypeBoolean:
+		return true
+	case KeyRuleTypeEnum:
+		return true
+	case KeyRuleTypeInteger:
+		return true
+	case KeyRuleTypeJson:
+		return true
+	case KeyRuleTypeString:
+		return true
+	case KeyRuleTypeUrl:
 		return true
 	default:
 		return false
@@ -110,18 +206,54 @@ func (e PrincipalKind) Valid() bool {
 	}
 }
 
+// Defines values for RoleTemplate.
+const (
+	Admin      RoleTemplate = "admin"
+	Editor     RoleTemplate = "editor"
+	Historian  RoleTemplate = "historian"
+	Maintainer RoleTemplate = "maintainer"
+	Operator   RoleTemplate = "operator"
+	Publisher  RoleTemplate = "publisher"
+	Revealer   RoleTemplate = "revealer"
+	Viewer     RoleTemplate = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the RoleTemplate enum.
+func (e RoleTemplate) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case Editor:
+		return true
+	case Historian:
+		return true
+	case Maintainer:
+		return true
+	case Operator:
+		return true
+	case Publisher:
+		return true
+	case Revealer:
+		return true
+	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SamlMetadataSource.
 const (
-	File SamlMetadataSource = "file"
-	Url  SamlMetadataSource = "url"
+	SamlMetadataSourceFile SamlMetadataSource = "file"
+	SamlMetadataSourceUrl  SamlMetadataSource = "url"
 )
 
 // Valid indicates whether the value is a known member of the SamlMetadataSource enum.
 func (e SamlMetadataSource) Valid() bool {
 	switch e {
-	case File:
+	case SamlMetadataSourceFile:
 		return true
-	case Url:
+	case SamlMetadataSourceUrl:
 		return true
 	default:
 		return false
@@ -224,6 +356,15 @@ func (e SamlStartRequestPurpose) Valid() bool {
 	}
 }
 
+// ApplyTemplateRequest defines model for ApplyTemplateRequest.
+type ApplyTemplateRequest struct {
+	// Principal A prefixed UUIDv7, e.g. `org_0198…`.
+	Principal ID `json:"principal"`
+
+	// Template The closed v1 role template set.
+	Template RoleTemplate `json:"template"`
+}
+
 // Assurance How **this session** authenticated — not what the account owns.
 // Authorization of an MFA-mandatory capability consults this record at
 // the same chokepoint as `authorize()`, in the same transaction,
@@ -263,6 +404,12 @@ type AuthMethods struct {
 	Providers         []AuthMethodProvider `json:"providers"`
 }
 
+// Capability One atom from the permission ADR's CLOSED capability set. The server
+// refuses anything outside it rather than storing a row nothing can ever
+// evaluate, so this is a bounded string rather than an enum only to keep
+// the contract additive as later tickets register their atoms.
+type Capability = string
+
 // CreateEnvironmentRequest defines model for CreateEnvironmentRequest.
 type CreateEnvironmentRequest struct {
 	// Name A display name for an organisation, project or environment. Identity is
@@ -294,6 +441,61 @@ type CreateFolderRequest struct {
 	// bytes — the same bound entity names carry. A 129-character ASCII segment
 	// satisfies this schema and is refused with `bad_request`.
 	Path FolderPath `json:"path"`
+}
+
+// CreateGrantRequest defines model for CreateGrantRequest.
+type CreateGrantRequest struct {
+	// Capability One atom from the permission ADR's CLOSED capability set. The server
+	// refuses anything outside it rather than storing a row nothing can ever
+	// evaluate, so this is a bounded string rather than an enum only to keep
+	// the contract additive as later tickets register their atoms.
+	Capability Capability `json:"capability"`
+
+	// Principal A prefixed UUIDv7, e.g. `org_0198…`.
+	Principal ID `json:"principal"`
+}
+
+// CreateKeyGroupRequest defines model for CreateKeyGroupRequest.
+type CreateKeyGroupRequest struct {
+	Name string `json:"name"`
+}
+
+// CreateKeyRequest defines model for CreateKeyRequest.
+type CreateKeyRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration     KeyDeclaration `json:"declaration"`
+	Deprecated      *bool          `json:"deprecated,omitempty"`
+	DeprecationNote *string        `json:"deprecation_note,omitempty"`
+	Description     *string        `json:"description,omitempty"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath *KeyFolderPath `json:"folder_path,omitempty"`
+	GroupId    *string        `json:"group_id,omitempty"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence *KeyPresenceRules `json:"presence,omitempty"`
 }
 
 // CreateOrgRequest defines model for CreateOrgRequest.
@@ -391,6 +593,17 @@ type EnvironmentOrderRequest struct {
 	EnvironmentIds []ID `json:"environment_ids"`
 }
 
+// EnvironmentSettings defines model for EnvironmentSettings.
+type EnvironmentSettings struct {
+	Protected bool `json:"protected"`
+
+	// ReauthWindowSeconds The environment's own reauthentication window. Null or absent means
+	// it inherits the instance default - which is NOT the same statement
+	// as 0, and 0 is a legal value meaning every disclosure
+	// reauthenticates.
+	ReauthWindowSeconds *int `json:"reauth_window_seconds,omitempty"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
@@ -485,6 +698,94 @@ type FolderList struct {
 // satisfies this schema and is refused with `bad_request`.
 type FolderPath = string
 
+// Grant defines model for Grant.
+type Grant struct {
+	// Capability One atom from the permission ADR's CLOSED capability set. The server
+	// refuses anything outside it rather than storing a row nothing can ever
+	// evaluate, so this is a bounded string rather than an enum only to keep
+	// the contract additive as later tickets register their atoms.
+	Capability Capability `json:"capability"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Origins The origin chips for this capability line.
+	Origins []GrantOrigin `json:"origins"`
+
+	// PrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	PrincipalId ID `json:"principal_id"`
+
+	// Scope The scope the grant was made at. All three absent is instance scope.
+	// Grants inherit downward, so a grant at a scope applies to everything
+	// beneath it.
+	Scope GrantScope `json:"scope"`
+}
+
+// GrantList defines model for GrantList.
+type GrantList struct {
+	// Count Total rows matching, which for an unpaged list equals `items` length.
+	Count int     `json:"count"`
+	Items []Grant `json:"items"`
+}
+
+// GrantOrigin One origin holding a grant row alive. A row exists while at least one
+// origin holds it and is revoked, with the session-generation advance,
+// when its last origin is released. Origins are never consulted by
+// authorization: authority is the bare (principal, capability, scope)
+// triple.
+type GrantOrigin struct {
+	Kind GrantOriginKind `json:"kind"`
+
+	// Subject The origin's holder identity, discriminated by kind: the granting
+	// principal for `manual`, the fixed local-host marker for
+	// `break-glass`, the binding id for `scim`/`structural`.
+	Subject string `json:"subject"`
+}
+
+// GrantOriginKind defines model for GrantOrigin.Kind.
+type GrantOriginKind string
+
+// GrantResult defines model for GrantResult.
+type GrantResult struct {
+	// Capability One atom from the permission ADR's CLOSED capability set. The server
+	// refuses anything outside it rather than storing a row nothing can ever
+	// evaluate, so this is a bounded string rather than an enum only to keep
+	// the contract additive as later tickets register their atoms.
+	Capability Capability `json:"capability"`
+
+	// Created False when an existing row was deduplicated and this call only attached an origin.
+	Created bool `json:"created"`
+
+	// GrantId A prefixed UUIDv7, e.g. `org_0198…`.
+	GrantId ID `json:"grant_id"`
+
+	// OriginAdded False when the caller's own origin already held the row - a genuinely idempotent repeat.
+	OriginAdded bool `json:"origin_added"`
+}
+
+// GrantResultList defines model for GrantResultList.
+type GrantResultList struct {
+	Count int           `json:"count"`
+	Items []GrantResult `json:"items"`
+}
+
+// GrantScope The scope the grant was made at. All three absent is instance scope.
+// Grants inherit downward, so a grant at a scope applies to everything
+// beneath it.
+type GrantScope struct {
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId *ID `json:"environment_id,omitempty"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId *ID `json:"org_id,omitempty"`
+
+	// ProjectId A prefixed UUIDv7, e.g. `org_0198…`.
+	ProjectId *ID `json:"project_id,omitempty"`
+}
+
 // ID A prefixed UUIDv7, e.g. `org_0198…`.
 type ID = string
 
@@ -506,6 +807,213 @@ type IdentityProviderKind string
 type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
 }
+
+// Key defines model for Key.
+type Key struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration     KeyDeclaration `json:"declaration"`
+	Deprecated      bool           `json:"deprecated"`
+	DeprecationNote string         `json:"deprecation_note"`
+	Description     string         `json:"description"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath KeyFolderPath `json:"folder_path"`
+
+	// GroupId The key's group, or empty when it belongs to none.
+	GroupId string `json:"group_id"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId ID `json:"org_id"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence KeyPresenceRules `json:"presence"`
+
+	// ProjectId A prefixed UUIDv7, e.g. `org_0198…`.
+	ProjectId ID `json:"project_id"`
+}
+
+// KeyClassification Classification IS the sensitivity boundary. A matrix row is uniformly
+// secret or config; it changes only through the reclassification
+// ceremony. Closed, deliberately: a third value would be a third
+// disclosure regime.
+type KeyClassification string
+
+// KeyDeclaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+// meanings for one word inside one product is a trap. Alternatives may
+// not nest.
+type KeyDeclaration struct {
+	AnyOf *[]KeyRule `json:"any_of,omitempty"`
+
+	// Rule One primitive type declaration with its constraints. Each constraint
+	// belongs to exactly one type, and a constraint declared on the wrong
+	// type is REFUSED rather than ignored: a silently ignored `pattern` on an
+	// integer key is the "appears to enforce something and does not" failure
+	// the schema model rejects everywhere. This document carries shape; the
+	// service is the authority on every rule below.
+	Rule *KeyRule `json:"rule,omitempty"`
+}
+
+// KeyFolderPath The key's namespace within the project. Organizational only: a plain
+// slash-separated path, empty for the catalogue root. It is a PATH, not a
+// folder reference - no folder row need exist for it.
+type KeyFolderPath = string
+
+// KeyGroup defines model for KeyGroup.
+type KeyGroup struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Inert A group with fewer than two members couples nothing. It is flagged
+	// rather than deleted behind the operator's back - they are usually
+	// mid-way through building it.
+	Inert bool `json:"inert"`
+
+	// Members The member key names, sorted.
+	Members []KeyName `json:"members"`
+	Name    string    `json:"name"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId ID `json:"org_id"`
+
+	// ProjectId A prefixed UUIDv7, e.g. `org_0198…`.
+	ProjectId ID `json:"project_id"`
+}
+
+// KeyGroupList defines model for KeyGroupList.
+type KeyGroupList struct {
+	Count int        `json:"count"`
+	Items []KeyGroup `json:"items"`
+}
+
+// KeyList defines model for KeyList.
+type KeyList struct {
+	// Count Total rows matching, which for an unpaged list equals `items` length.
+	Count int   `json:"count"`
+	Items []Key `json:"items"`
+
+	// SchemaRevision The project's monotonic key-catalogue revision, which IS its schema
+	// revision. It advances on every semantic declaration change and on
+	// nothing else.
+	SchemaRevision int64 `json:"schema_revision"`
+}
+
+// KeyName The canonical key grammar: uppercase ASCII, digits and underscore, no
+// leading digit. It is the environment-variable-safe grammar every
+// delivery surface assumes - an execve environment block, a Kubernetes
+// Secret data key, an adapter effective name - so it is a delivery
+// constraint, not a style preference. `maxLength` counts code points
+// here and bytes in the service; the grammar is ASCII, so they agree.
+type KeyName = string
+
+// KeyPresence A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+// and covers environments created later, so expanding it into the ids
+// existing at declaration time would silently exempt a new environment
+// from a rule the operator wrote as "always". `none` is the default.
+type KeyPresence struct {
+	// EnvironmentIds `explicit` only; empty or absent for `all` and `none`.
+	EnvironmentIds *[]ID           `json:"environment_ids,omitempty"`
+	Mode           KeyPresenceMode `json:"mode"`
+}
+
+// KeyPresenceMode defines model for KeyPresence.Mode.
+type KeyPresenceMode string
+
+// KeyPresenceRules Presence is the ONLY thing that varies per environment; every other
+// constraint is project-wide. `required` is a predicate about presence
+// only - it means "resolves to set" and says nothing about content.
+type KeyPresenceRules struct {
+	// ForbiddenIn A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+	// and covers environments created later, so expanding it into the ids
+	// existing at declaration time would silently exempt a new environment
+	// from a rule the operator wrote as "always". `none` is the default.
+	ForbiddenIn KeyPresence `json:"forbidden_in"`
+
+	// RequiredIn A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+	// and covers environments created later, so expanding it into the ids
+	// existing at declaration time would silently exempt a new environment
+	// from a rule the operator wrote as "always". `none` is the default.
+	RequiredIn KeyPresence `json:"required_in"`
+}
+
+// KeyRule One primitive type declaration with its constraints. Each constraint
+// belongs to exactly one type, and a constraint declared on the wrong
+// type is REFUSED rather than ignored: a silently ignored `pattern` on an
+// integer key is the "appears to enforce something and does not" failure
+// the schema model rejects everywhere. This document carries shape; the
+// service is the authority on every rule below.
+type KeyRule struct {
+	// AllowEmpty `string` only; defaults to false.
+	AllowEmpty *bool `json:"allow_empty,omitempty"`
+
+	// JsonSchema `json` only: a JSON Schema 2020-12 document, carried as a STRING so
+	// the bytes the profile checks are the bytes the client sent. A
+	// re-encoded object would lose duplicate-key detection (Go's decoder
+	// is last-wins) and number precision, and duplicate object keys are a
+	// rejection here, not last-wins. The accepted subset is a pinned,
+	// profiled, budgeted allowlist enforced by the service.
+	JsonSchema *string `json:"json_schema,omitempty"`
+
+	// Max `integer` only.
+	Max *int64 `json:"max,omitempty"`
+
+	// MaxLength `string` only.
+	MaxLength *int `json:"max_length,omitempty"`
+
+	// Members `enum` only. Members must be non-empty and distinct after the
+	// write-time trim.
+	Members *[]string `json:"members,omitempty"`
+
+	// Min `integer` only.
+	Min *int64 `json:"min,omitempty"`
+
+	// MinLength `string` only.
+	MinLength *int `json:"min_length,omitempty"`
+
+	// Pattern `string` only. RE2, and ANCHORED TO THE WHOLE VALUE - implicitly
+	// `\A(?:...)\z`, never a substring search. Backreferences and
+	// lookaround do not exist in RE2 and are refused at declaration.
+	Pattern *string `json:"pattern,omitempty"`
+
+	// Schemes `url` only: the allowed scheme list.
+	Schemes *[]string   `json:"schemes,omitempty"`
+	Type    KeyRuleType `json:"type"`
+}
+
+// KeyRuleType defines model for KeyRule.Type.
+type KeyRuleType string
 
 // LocalLoginRequest defines model for LocalLoginRequest.
 type LocalLoginRequest struct {
@@ -683,6 +1191,15 @@ type ProjectList struct {
 // unknown value rather than reject the response.
 type ProtocolCapability = string
 
+// ReclassifyKeyRequest defines model for ReclassifyKeyRequest.
+type ReclassifyKeyRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+}
+
 // RecoveryBeginRequest defines model for RecoveryBeginRequest.
 type RecoveryBeginRequest struct {
 	Code     string `json:"code"`
@@ -728,6 +1245,22 @@ type RenameFolderRequest struct {
 	Path FolderPath `json:"path"`
 }
 
+// RenameKeyGroupRequest defines model for RenameKeyGroupRequest.
+type RenameKeyGroupRequest struct {
+	Name string `json:"name"`
+}
+
+// RenameKeyRequest defines model for RenameKeyRequest.
+type RenameKeyRequest struct {
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+}
+
 // RenameRequest defines model for RenameRequest.
 type RenameRequest struct {
 	// Name A display name for an organisation, project or environment. Identity is
@@ -746,6 +1279,9 @@ type RenameRequest struct {
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
 }
+
+// RoleTemplate The closed v1 role template set.
+type RoleTemplate string
 
 // SamlACSRequest defines model for SamlACSRequest.
 type SamlACSRequest struct {
@@ -963,6 +1499,12 @@ type Session struct {
 // actually used.
 type SessionArtifact = string
 
+// SetKeyGroupRequest defines model for SetKeyGroupRequest.
+type SetKeyGroupRequest struct {
+	// GroupId The group to join, or empty to leave every group.
+	GroupId string `json:"group_id"`
+}
+
 // Timestamp RFC 3339 UTC, microsecond precision.
 type Timestamp = time.Time
 
@@ -990,6 +1532,38 @@ type TotpEnrolStartResult struct {
 type TotpProofRequest struct {
 	// Password The account-security proof for removing the factor.
 	Password string `json:"password"`
+}
+
+// UpdateKeyDeclarationRequest defines model for UpdateKeyDeclarationRequest.
+type UpdateKeyDeclarationRequest struct {
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration KeyDeclaration `json:"declaration"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence KeyPresenceRules `json:"presence"`
+}
+
+// UpdateKeyMetadataRequest defines model for UpdateKeyMetadataRequest.
+type UpdateKeyMetadataRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification  *KeyClassification `json:"classification,omitempty"`
+	Deprecated      *bool              `json:"deprecated,omitempty"`
+	DeprecationNote *string            `json:"deprecation_note,omitempty"`
+	Description     *string            `json:"description,omitempty"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath *KeyFolderPath `json:"folder_path,omitempty"`
 }
 
 // WebauthnCredentialProofRequest The account-security proof for removing a credential — the pre-existing
@@ -1055,8 +1629,23 @@ type EnvironmentID = ID
 // FolderID A prefixed UUIDv7, e.g. `org_0198…`.
 type FolderID = ID
 
+// GrantCapability One atom from the permission ADR's CLOSED capability set. The server
+// refuses anything outside it rather than storing a row nothing can ever
+// evaluate, so this is a bounded string rather than an enum only to keep
+// the contract additive as later tickets register their atoms.
+type GrantCapability = Capability
+
+// GrantPrincipal A prefixed UUIDv7, e.g. `org_0198…`.
+type GrantPrincipal = ID
+
 // IdentityID A prefixed UUIDv7, e.g. `org_0198…`.
 type IdentityID = ID
+
+// KeyGroupID A prefixed UUIDv7, e.g. `org_0198…`.
+type KeyGroupID = ID
+
+// KeyID A prefixed UUIDv7, e.g. `org_0198…`.
+type KeyID = ID
 
 // OrgID A prefixed UUIDv7, e.g. `org_0198…`.
 type OrgID = ID
@@ -1103,6 +1692,42 @@ type OidcCallbackParams struct {
 	State *string `form:"state,omitempty" json:"state,omitempty"`
 	Iss   *string `form:"iss,omitempty" json:"iss,omitempty"`
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
+}
+
+// RevokeInstanceGrantParams defines parameters for RevokeInstanceGrant.
+type RevokeInstanceGrantParams struct {
+	// Principal The principal whose grant is being revoked.
+	Principal GrantPrincipal `form:"principal" json:"principal"`
+
+	// Capability The capability atom being revoked.
+	Capability GrantCapability `form:"capability" json:"capability"`
+}
+
+// RevokeOrgGrantParams defines parameters for RevokeOrgGrant.
+type RevokeOrgGrantParams struct {
+	// Principal The principal whose grant is being revoked.
+	Principal GrantPrincipal `form:"principal" json:"principal"`
+
+	// Capability The capability atom being revoked.
+	Capability GrantCapability `form:"capability" json:"capability"`
+}
+
+// RevokeEnvGrantParams defines parameters for RevokeEnvGrant.
+type RevokeEnvGrantParams struct {
+	// Principal The principal whose grant is being revoked.
+	Principal GrantPrincipal `form:"principal" json:"principal"`
+
+	// Capability The capability atom being revoked.
+	Capability GrantCapability `form:"capability" json:"capability"`
+}
+
+// RevokeProjectGrantParams defines parameters for RevokeProjectGrant.
+type RevokeProjectGrantParams struct {
+	// Principal The principal whose grant is being revoked.
+	Principal GrantPrincipal `form:"principal" json:"principal"`
+
+	// Capability The capability atom being revoked.
+	Capability GrantCapability `form:"capability" json:"capability"`
 }
 
 // EstablishCredentialJSONRequestBody defines body for EstablishCredential for application/json ContentType.
@@ -1165,6 +1790,12 @@ type ReauthPasskeyStartJSONRequestBody = WebauthnReauthStartRequest
 // StepUpPasskeyFinishJSONRequestBody defines body for StepUpPasskeyFinish for application/json ContentType.
 type StepUpPasskeyFinishJSONRequestBody = WebauthnResponse
 
+// CreateInstanceGrantJSONRequestBody defines body for CreateInstanceGrant for application/json ContentType.
+type CreateInstanceGrantJSONRequestBody = CreateGrantRequest
+
+// ApplyInstanceTemplateJSONRequestBody defines body for ApplyInstanceTemplate for application/json ContentType.
+type ApplyInstanceTemplateJSONRequestBody = ApplyTemplateRequest
+
 // PutOidcProviderJSONRequestBody defines body for PutOidcProvider for application/json ContentType.
 type PutOidcProviderJSONRequestBody = OidcProviderInput
 
@@ -1183,6 +1814,12 @@ type CreateOrgJSONRequestBody = CreateOrgRequest
 // RenameOrgJSONRequestBody defines body for RenameOrg for application/json ContentType.
 type RenameOrgJSONRequestBody = RenameRequest
 
+// CreateOrgGrantJSONRequestBody defines body for CreateOrgGrant for application/json ContentType.
+type CreateOrgGrantJSONRequestBody = CreateGrantRequest
+
+// ApplyOrgTemplateJSONRequestBody defines body for ApplyOrgTemplate for application/json ContentType.
+type ApplyOrgTemplateJSONRequestBody = ApplyTemplateRequest
+
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
 
@@ -1198,11 +1835,50 @@ type ReorderEnvironmentsJSONRequestBody = EnvironmentOrderRequest
 // RenameEnvironmentJSONRequestBody defines body for RenameEnvironment for application/json ContentType.
 type RenameEnvironmentJSONRequestBody = RenameRequest
 
+// CreateEnvGrantJSONRequestBody defines body for CreateEnvGrant for application/json ContentType.
+type CreateEnvGrantJSONRequestBody = CreateGrantRequest
+
+// ApplyEnvTemplateJSONRequestBody defines body for ApplyEnvTemplate for application/json ContentType.
+type ApplyEnvTemplateJSONRequestBody = ApplyTemplateRequest
+
+// SetEnvironmentSettingsJSONRequestBody defines body for SetEnvironmentSettings for application/json ContentType.
+type SetEnvironmentSettingsJSONRequestBody = EnvironmentSettings
+
 // CreateFolderJSONRequestBody defines body for CreateFolder for application/json ContentType.
 type CreateFolderJSONRequestBody = CreateFolderRequest
 
 // RenameFolderJSONRequestBody defines body for RenameFolder for application/json ContentType.
 type RenameFolderJSONRequestBody = RenameFolderRequest
+
+// CreateProjectGrantJSONRequestBody defines body for CreateProjectGrant for application/json ContentType.
+type CreateProjectGrantJSONRequestBody = CreateGrantRequest
+
+// ApplyProjectTemplateJSONRequestBody defines body for ApplyProjectTemplate for application/json ContentType.
+type ApplyProjectTemplateJSONRequestBody = ApplyTemplateRequest
+
+// CreateKeyGroupJSONRequestBody defines body for CreateKeyGroup for application/json ContentType.
+type CreateKeyGroupJSONRequestBody = CreateKeyGroupRequest
+
+// RenameKeyGroupJSONRequestBody defines body for RenameKeyGroup for application/json ContentType.
+type RenameKeyGroupJSONRequestBody = RenameKeyGroupRequest
+
+// CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
+type CreateKeyJSONRequestBody = CreateKeyRequest
+
+// UpdateKeyMetadataJSONRequestBody defines body for UpdateKeyMetadata for application/json ContentType.
+type UpdateKeyMetadataJSONRequestBody = UpdateKeyMetadataRequest
+
+// ReclassifyKeyJSONRequestBody defines body for ReclassifyKey for application/json ContentType.
+type ReclassifyKeyJSONRequestBody = ReclassifyKeyRequest
+
+// UpdateKeyDeclarationJSONRequestBody defines body for UpdateKeyDeclaration for application/json ContentType.
+type UpdateKeyDeclarationJSONRequestBody = UpdateKeyDeclarationRequest
+
+// SetKeyGroupJSONRequestBody defines body for SetKeyGroup for application/json ContentType.
+type SetKeyGroupJSONRequestBody = SetKeyGroupRequest
+
+// RenameKeyJSONRequestBody defines body for RenameKey for application/json ContentType.
+type RenameKeyJSONRequestBody = RenameKeyRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1296,6 +1972,18 @@ type ServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(w http.ResponseWriter, r *http.Request)
+	// RevokeInstanceGrant Revoke one capability at instance scope.
+	// (DELETE /api/v1/instance/grants)
+	RevokeInstanceGrant(w http.ResponseWriter, r *http.Request, params RevokeInstanceGrantParams)
+	// ListInstanceGrants List the instance-scope membership surface.
+	// (GET /api/v1/instance/grants)
+	ListInstanceGrants(w http.ResponseWriter, r *http.Request)
+	// CreateInstanceGrant Grant one capability at instance scope.
+	// (POST /api/v1/instance/grants)
+	CreateInstanceGrant(w http.ResponseWriter, r *http.Request)
+	// ApplyInstanceTemplate Apply a role template at instance scope.
+	// (POST /api/v1/instance/grants/template)
+	ApplyInstanceTemplate(w http.ResponseWriter, r *http.Request)
 	// ListOidcProviders List configured OIDC providers.
 	// (GET /api/v1/instance/oidc-providers)
 	ListOidcProviders(w http.ResponseWriter, r *http.Request)
@@ -1356,6 +2044,18 @@ type ServerInterface interface {
 	// RenameOrg Rename an organisation.
 	// (PATCH /api/v1/orgs/{org})
 	RenameOrg(w http.ResponseWriter, r *http.Request, org OrgID)
+	// RevokeOrgGrant Revoke one capability at organisation scope.
+	// (DELETE /api/v1/orgs/{org}/grants)
+	RevokeOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID, params RevokeOrgGrantParams)
+	// ListOrgGrants List the organisation's membership surface.
+	// (GET /api/v1/orgs/{org}/grants)
+	ListOrgGrants(w http.ResponseWriter, r *http.Request, org OrgID)
+	// CreateOrgGrant Grant one capability at organisation scope.
+	// (POST /api/v1/orgs/{org}/grants)
+	CreateOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID)
+	// ApplyOrgTemplate Apply a role template at organisation scope.
+	// (POST /api/v1/orgs/{org}/grants/template)
+	ApplyOrgTemplate(w http.ResponseWriter, r *http.Request, org OrgID)
 	// ListProjects List the organisation's projects.
 	// (GET /api/v1/orgs/{org}/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request, org OrgID)
@@ -1389,6 +2089,21 @@ type ServerInterface interface {
 	// RenameEnvironment Rename an environment.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment})
 	RenameEnvironment(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// RevokeEnvGrant Revoke one capability on one environment.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+	RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams)
+	// CreateEnvGrant Grant one capability on one environment.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+	CreateEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ApplyEnvTemplate Apply a role template on one environment.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
+	ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+	GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// SetEnvironmentSettings Set an environment's protection state and reauthentication window.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+	SetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// ListFolders List the project's folders.
 	// (GET /api/v1/orgs/{org}/projects/{project}/folders)
 	ListFolders(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -1404,6 +2119,60 @@ type ServerInterface interface {
 	// RenameFolder Move a folder to a new path.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder})
 	RenameFolder(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, folder FolderID)
+	// RevokeProjectGrant Revoke one capability at project scope.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/grants)
+	RevokeProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params RevokeProjectGrantParams)
+	// ListProjectGrants List the project's membership surface.
+	// (GET /api/v1/orgs/{org}/projects/{project}/grants)
+	ListProjectGrants(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateProjectGrant Grant one capability at project scope.
+	// (POST /api/v1/orgs/{org}/projects/{project}/grants)
+	CreateProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// ApplyProjectTemplate Apply a role template at project scope.
+	// (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
+	ApplyProjectTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// ListKeyGroups List the project's key groups.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+	ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateKeyGroup Declare a key group.
+	// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+	CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteKeyGroup Delete a key group.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// GetKeyGroup Read one key group.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// RenameKeyGroup Rename a key group.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// ListKeys List the project's key catalogue.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+	ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateKey Declare a key.
+	// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+	CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteKey Delete a key.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// GetKey Read one key declaration.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// UpdateKeyMetadata Update a key's non-semantic metadata.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// ReclassifyKey The reclassification ceremony.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+	ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+	UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// SetKeyGroup Set or clear a key's group membership.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+	SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// RenameKey Rename a key.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -1590,6 +2359,30 @@ func (_ Unimplemented) Whoami(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RevokeInstanceGrant Revoke one capability at instance scope.
+// (DELETE /api/v1/instance/grants)
+func (_ Unimplemented) RevokeInstanceGrant(w http.ResponseWriter, r *http.Request, params RevokeInstanceGrantParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListInstanceGrants List the instance-scope membership surface.
+// (GET /api/v1/instance/grants)
+func (_ Unimplemented) ListInstanceGrants(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateInstanceGrant Grant one capability at instance scope.
+// (POST /api/v1/instance/grants)
+func (_ Unimplemented) CreateInstanceGrant(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyInstanceTemplate Apply a role template at instance scope.
+// (POST /api/v1/instance/grants/template)
+func (_ Unimplemented) ApplyInstanceTemplate(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListOidcProviders List configured OIDC providers.
 // (GET /api/v1/instance/oidc-providers)
 func (_ Unimplemented) ListOidcProviders(w http.ResponseWriter, r *http.Request) {
@@ -1710,6 +2503,30 @@ func (_ Unimplemented) RenameOrg(w http.ResponseWriter, r *http.Request, org Org
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RevokeOrgGrant Revoke one capability at organisation scope.
+// (DELETE /api/v1/orgs/{org}/grants)
+func (_ Unimplemented) RevokeOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID, params RevokeOrgGrantParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListOrgGrants List the organisation's membership surface.
+// (GET /api/v1/orgs/{org}/grants)
+func (_ Unimplemented) ListOrgGrants(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateOrgGrant Grant one capability at organisation scope.
+// (POST /api/v1/orgs/{org}/grants)
+func (_ Unimplemented) CreateOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyOrgTemplate Apply a role template at organisation scope.
+// (POST /api/v1/orgs/{org}/grants/template)
+func (_ Unimplemented) ApplyOrgTemplate(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListProjects List the organisation's projects.
 // (GET /api/v1/orgs/{org}/projects)
 func (_ Unimplemented) ListProjects(w http.ResponseWriter, r *http.Request, org OrgID) {
@@ -1776,6 +2593,36 @@ func (_ Unimplemented) RenameEnvironment(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RevokeEnvGrant Revoke one capability on one environment.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+func (_ Unimplemented) RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateEnvGrant Grant one capability on one environment.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+func (_ Unimplemented) CreateEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyEnvTemplate Apply a role template on one environment.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
+func (_ Unimplemented) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+func (_ Unimplemented) GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetEnvironmentSettings Set an environment's protection state and reauthentication window.
+// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+func (_ Unimplemented) SetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListFolders List the project's folders.
 // (GET /api/v1/orgs/{org}/projects/{project}/folders)
 func (_ Unimplemented) ListFolders(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
@@ -1803,6 +2650,114 @@ func (_ Unimplemented) GetFolder(w http.ResponseWriter, r *http.Request, org Org
 // RenameFolder Move a folder to a new path.
 // (PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder})
 func (_ Unimplemented) RenameFolder(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, folder FolderID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeProjectGrant Revoke one capability at project scope.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/grants)
+func (_ Unimplemented) RevokeProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params RevokeProjectGrantParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListProjectGrants List the project's membership surface.
+// (GET /api/v1/orgs/{org}/projects/{project}/grants)
+func (_ Unimplemented) ListProjectGrants(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateProjectGrant Grant one capability at project scope.
+// (POST /api/v1/orgs/{org}/projects/{project}/grants)
+func (_ Unimplemented) CreateProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyProjectTemplate Apply a role template at project scope.
+// (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
+func (_ Unimplemented) ApplyProjectTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKeyGroups List the project's key groups.
+// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+func (_ Unimplemented) ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateKeyGroup Declare a key group.
+// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+func (_ Unimplemented) CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteKeyGroup Delete a key group.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKeyGroup Read one key group.
+// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RenameKeyGroup Rename a key group.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKeys List the project's key catalogue.
+// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+func (_ Unimplemented) ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateKey Declare a key.
+// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+func (_ Unimplemented) CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteKey Delete a key.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKey Read one key declaration.
+// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateKeyMetadata Update a key's non-semantic metadata.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReclassifyKey The reclassification ceremony.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+func (_ Unimplemented) ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+func (_ Unimplemented) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetKeyGroup Set or clear a key's group membership.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+func (_ Unimplemented) SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RenameKey Rename a key.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2386,6 +3341,94 @@ func (siw *ServerInterfaceWrapper) Whoami(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeInstanceGrant operation middleware
+func (siw *ServerInterfaceWrapper) RevokeInstanceGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeInstanceGrantParams
+
+	// ------------- Required query parameter "principal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "principal", r.URL.Query(), &params.Principal, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "principal"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "principal", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "capability" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "capability", r.URL.Query(), &params.Capability, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "capability"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "capability", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeInstanceGrant(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListInstanceGrants operation middleware
+func (siw *ServerInterfaceWrapper) ListInstanceGrants(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInstanceGrants(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInstanceGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateInstanceGrant(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInstanceGrant(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyInstanceTemplate operation middleware
+func (siw *ServerInterfaceWrapper) ApplyInstanceTemplate(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyInstanceTemplate(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListOidcProviders operation middleware
 func (siw *ServerInterfaceWrapper) ListOidcProviders(w http.ResponseWriter, r *http.Request) {
 
@@ -2822,6 +3865,139 @@ func (siw *ServerInterfaceWrapper) RenameOrg(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeOrgGrant operation middleware
+func (siw *ServerInterfaceWrapper) RevokeOrgGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeOrgGrantParams
+
+	// ------------- Required query parameter "principal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "principal", r.URL.Query(), &params.Principal, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "principal"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "principal", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "capability" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "capability", r.URL.Query(), &params.Capability, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "capability"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "capability", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeOrgGrant(w, r, org, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrgGrants operation middleware
+func (siw *ServerInterfaceWrapper) ListOrgGrants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrgGrants(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrgGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrgGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrgGrant(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyOrgTemplate operation middleware
+func (siw *ServerInterfaceWrapper) ApplyOrgTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyOrgTemplate(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProjects operation middleware
 func (siw *ServerInterfaceWrapper) ListProjects(w http.ResponseWriter, r *http.Request) {
 
@@ -3216,6 +4392,255 @@ func (siw *ServerInterfaceWrapper) RenameEnvironment(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeEnvGrant operation middleware
+func (siw *ServerInterfaceWrapper) RevokeEnvGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeEnvGrantParams
+
+	// ------------- Required query parameter "principal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "principal", r.URL.Query(), &params.Principal, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "principal"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "principal", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "capability" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "capability", r.URL.Query(), &params.Capability, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "capability"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "capability", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeEnvGrant(w, r, org, project, environment, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateEnvGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateEnvGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateEnvGrant(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyEnvTemplate operation middleware
+func (siw *ServerInterfaceWrapper) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyEnvTemplate(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetEnvironmentSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetEnvironmentSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEnvironmentSettings(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetEnvironmentSettings operation middleware
+func (siw *ServerInterfaceWrapper) SetEnvironmentSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetEnvironmentSettings(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListFolders operation middleware
 func (siw *ServerInterfaceWrapper) ListFolders(w http.ResponseWriter, r *http.Request) {
 
@@ -3409,6 +4834,755 @@ func (siw *ServerInterfaceWrapper) RenameFolder(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameFolder(w, r, org, project, folder)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeProjectGrant operation middleware
+func (siw *ServerInterfaceWrapper) RevokeProjectGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RevokeProjectGrantParams
+
+	// ------------- Required query parameter "principal" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "principal", r.URL.Query(), &params.Principal, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "principal"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "principal", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "capability" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "capability", r.URL.Query(), &params.Capability, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "capability"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "capability", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeProjectGrant(w, r, org, project, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProjectGrants operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectGrants(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProjectGrants(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateProjectGrant operation middleware
+func (siw *ServerInterfaceWrapper) CreateProjectGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateProjectGrant(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyProjectTemplate operation middleware
+func (siw *ServerInterfaceWrapper) ApplyProjectTemplate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyProjectTemplate(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKeyGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListKeyGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeyGroups(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) CreateKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKeyGroup(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) GetKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) RenameKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeys(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKey(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteKey operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKey operation middleware
+func (siw *ServerInterfaceWrapper) GetKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateKeyMetadata operation middleware
+func (siw *ServerInterfaceWrapper) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateKeyMetadata(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReclassifyKey operation middleware
+func (siw *ServerInterfaceWrapper) ReclassifyKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReclassifyKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateKeyDeclaration operation middleware
+func (siw *ServerInterfaceWrapper) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateKeyDeclaration(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) SetKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetKeyGroup(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameKey operation middleware
+func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameKey(w, r, org, project, key)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3626,6 +5800,99 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/folders/{folder}", wrapper.RenameFolder)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/grants", wrapper.RevokeInstanceGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/grants", wrapper.ListInstanceGrants)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/grants", wrapper.CreateInstanceGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/grants/template", wrapper.ApplyInstanceTemplate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/grants", wrapper.RevokeOrgGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/grants", wrapper.ListOrgGrants)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/grants", wrapper.CreateOrgGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/grants/template", wrapper.ApplyOrgTemplate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/grants", wrapper.RevokeProjectGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/grants", wrapper.ListProjectGrants)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/grants", wrapper.CreateProjectGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/grants/template", wrapper.ApplyProjectTemplate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants", wrapper.RevokeEnvGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants", wrapper.CreateEnvGrant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template", wrapper.ApplyEnvTemplate)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings", wrapper.GetEnvironmentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings", wrapper.SetEnvironmentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.ListKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.CreateKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.DeleteKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.GetKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.UpdateKeyMetadata)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/name", wrapper.RenameKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration", wrapper.UpdateKeyDeclaration)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/classification", wrapper.ReclassifyKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/group", wrapper.SetKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups", wrapper.ListKeyGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups", wrapper.CreateKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.DeleteKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.GetKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.RenameKeyGroup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/methods", wrapper.AuthMethods)
@@ -5991,6 +8258,371 @@ func (response Whoami500JSONResponse) VisitWhoamiResponse(w http.ResponseWriter)
 	return err
 }
 
+type RevokeInstanceGrantRequestObject struct {
+	Params RevokeInstanceGrantParams
+}
+
+type RevokeInstanceGrantResponseObject interface {
+	VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error
+}
+
+type RevokeInstanceGrant204Response struct {
+}
+
+func (response RevokeInstanceGrant204Response) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeInstanceGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RevokeInstanceGrant400JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeInstanceGrant401JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeInstanceGrant403JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceGrant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeInstanceGrant409JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeInstanceGrant429JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeInstanceGrant500JSONResponse) VisitRevokeInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceGrantsRequestObject struct {
+}
+
+type ListInstanceGrantsResponseObject interface {
+	VisitListInstanceGrantsResponse(w http.ResponseWriter) error
+}
+
+type ListInstanceGrants200JSONResponse GrantList
+
+func (response ListInstanceGrants200JSONResponse) VisitListInstanceGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceGrants401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListInstanceGrants401JSONResponse) VisitListInstanceGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceGrants403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListInstanceGrants403JSONResponse) VisitListInstanceGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceGrants429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListInstanceGrants429JSONResponse) VisitListInstanceGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceGrants500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListInstanceGrants500JSONResponse) VisitListInstanceGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrantRequestObject struct {
+	Body *CreateInstanceGrantJSONRequestBody
+}
+
+type CreateInstanceGrantResponseObject interface {
+	VisitCreateInstanceGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateInstanceGrant200JSONResponse GrantResult
+
+func (response CreateInstanceGrant200JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateInstanceGrant400JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateInstanceGrant401JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateInstanceGrant403JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateInstanceGrant429JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInstanceGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateInstanceGrant500JSONResponse) VisitCreateInstanceGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplateRequestObject struct {
+	Body *ApplyInstanceTemplateJSONRequestBody
+}
+
+type ApplyInstanceTemplateResponseObject interface {
+	VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error
+}
+
+type ApplyInstanceTemplate200JSONResponse GrantResultList
+
+func (response ApplyInstanceTemplate200JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplate400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyInstanceTemplate400JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplate401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyInstanceTemplate401JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplate403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyInstanceTemplate403JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplate429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApplyInstanceTemplate429JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyInstanceTemplate500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApplyInstanceTemplate500JSONResponse) VisitApplyInstanceTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListOidcProvidersRequestObject struct {
 }
 
@@ -7882,6 +10514,431 @@ func (response RenameOrg500JSONResponse) VisitRenameOrgResponse(w http.ResponseW
 	return err
 }
 
+type RevokeOrgGrantRequestObject struct {
+	Org    OrgID `json:"org"`
+	Params RevokeOrgGrantParams
+}
+
+type RevokeOrgGrantResponseObject interface {
+	VisitRevokeOrgGrantResponse(w http.ResponseWriter) error
+}
+
+type RevokeOrgGrant204Response struct {
+}
+
+func (response RevokeOrgGrant204Response) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeOrgGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RevokeOrgGrant400JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeOrgGrant401JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeOrgGrant403JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeOrgGrant404JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeOrgGrant409JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeOrgGrant429JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeOrgGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeOrgGrant500JSONResponse) VisitRevokeOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrantsRequestObject struct {
+	Org OrgID `json:"org"`
+}
+
+type ListOrgGrantsResponseObject interface {
+	VisitListOrgGrantsResponse(w http.ResponseWriter) error
+}
+
+type ListOrgGrants200JSONResponse GrantList
+
+func (response ListOrgGrants200JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrants401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListOrgGrants401JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrants403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListOrgGrants403JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrants404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrgGrants404JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrants429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListOrgGrants429JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrgGrants500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListOrgGrants500JSONResponse) VisitListOrgGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrantRequestObject struct {
+	Org  OrgID `json:"org"`
+	Body *CreateOrgGrantJSONRequestBody
+}
+
+type CreateOrgGrantResponseObject interface {
+	VisitCreateOrgGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateOrgGrant200JSONResponse GrantResult
+
+func (response CreateOrgGrant200JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateOrgGrant400JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateOrgGrant401JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateOrgGrant403JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateOrgGrant404JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateOrgGrant429JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrgGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateOrgGrant500JSONResponse) VisitCreateOrgGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplateRequestObject struct {
+	Org  OrgID `json:"org"`
+	Body *ApplyOrgTemplateJSONRequestBody
+}
+
+type ApplyOrgTemplateResponseObject interface {
+	VisitApplyOrgTemplateResponse(w http.ResponseWriter) error
+}
+
+type ApplyOrgTemplate200JSONResponse GrantResultList
+
+func (response ApplyOrgTemplate200JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyOrgTemplate400JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyOrgTemplate401JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyOrgTemplate403JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyOrgTemplate404JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApplyOrgTemplate429JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyOrgTemplate500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApplyOrgTemplate500JSONResponse) VisitApplyOrgTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListProjectsRequestObject struct {
 	Org OrgID `json:"org"`
 }
@@ -8910,6 +11967,521 @@ func (response RenameEnvironment500JSONResponse) VisitRenameEnvironmentResponse(
 	return err
 }
 
+type RevokeEnvGrantRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Params      RevokeEnvGrantParams
+}
+
+type RevokeEnvGrantResponseObject interface {
+	VisitRevokeEnvGrantResponse(w http.ResponseWriter) error
+}
+
+type RevokeEnvGrant204Response struct {
+}
+
+func (response RevokeEnvGrant204Response) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeEnvGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RevokeEnvGrant400JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeEnvGrant401JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeEnvGrant403JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeEnvGrant404JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeEnvGrant409JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeEnvGrant429JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeEnvGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeEnvGrant500JSONResponse) VisitRevokeEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrantRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *CreateEnvGrantJSONRequestBody
+}
+
+type CreateEnvGrantResponseObject interface {
+	VisitCreateEnvGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateEnvGrant200JSONResponse GrantResult
+
+func (response CreateEnvGrant200JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateEnvGrant400JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateEnvGrant401JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateEnvGrant403JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateEnvGrant404JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateEnvGrant429JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateEnvGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateEnvGrant500JSONResponse) VisitCreateEnvGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplateRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *ApplyEnvTemplateJSONRequestBody
+}
+
+type ApplyEnvTemplateResponseObject interface {
+	VisitApplyEnvTemplateResponse(w http.ResponseWriter) error
+}
+
+type ApplyEnvTemplate200JSONResponse GrantResultList
+
+func (response ApplyEnvTemplate200JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyEnvTemplate400JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyEnvTemplate401JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyEnvTemplate403JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyEnvTemplate404JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApplyEnvTemplate429JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyEnvTemplate500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApplyEnvTemplate500JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSettingsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type GetEnvironmentSettingsResponseObject interface {
+	VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error
+}
+
+type GetEnvironmentSettings200JSONResponse EnvironmentSettings
+
+func (response GetEnvironmentSettings200JSONResponse) VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetEnvironmentSettings401JSONResponse) VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetEnvironmentSettings404JSONResponse) VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSettings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetEnvironmentSettings429JSONResponse) VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSettings500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetEnvironmentSettings500JSONResponse) VisitGetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettingsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *SetEnvironmentSettingsJSONRequestBody
+}
+
+type SetEnvironmentSettingsResponseObject interface {
+	VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error
+}
+
+type SetEnvironmentSettings200JSONResponse EnvironmentSettings
+
+func (response SetEnvironmentSettings200JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettings400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetEnvironmentSettings400JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetEnvironmentSettings401JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetEnvironmentSettings404JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetEnvironmentSettings429JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetEnvironmentSettings500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetEnvironmentSettings500JSONResponse) VisitSetEnvironmentSettingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListFoldersRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
@@ -9365,6 +12937,1813 @@ func (response RenameFolder500JSONResponse) VisitRenameFolderResponse(w http.Res
 	return err
 }
 
+type RevokeProjectGrantRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Params  RevokeProjectGrantParams
+}
+
+type RevokeProjectGrantResponseObject interface {
+	VisitRevokeProjectGrantResponse(w http.ResponseWriter) error
+}
+
+type RevokeProjectGrant204Response struct {
+}
+
+func (response RevokeProjectGrant204Response) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeProjectGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RevokeProjectGrant400JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeProjectGrant401JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeProjectGrant403JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeProjectGrant404JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeProjectGrant409JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeProjectGrant429JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeProjectGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeProjectGrant500JSONResponse) VisitRevokeProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrantsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListProjectGrantsResponseObject interface {
+	VisitListProjectGrantsResponse(w http.ResponseWriter) error
+}
+
+type ListProjectGrants200JSONResponse GrantList
+
+func (response ListProjectGrants200JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrants401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListProjectGrants401JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrants403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListProjectGrants403JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrants404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListProjectGrants404JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrants429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListProjectGrants429JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListProjectGrants500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListProjectGrants500JSONResponse) VisitListProjectGrantsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrantRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateProjectGrantJSONRequestBody
+}
+
+type CreateProjectGrantResponseObject interface {
+	VisitCreateProjectGrantResponse(w http.ResponseWriter) error
+}
+
+type CreateProjectGrant200JSONResponse GrantResult
+
+func (response CreateProjectGrant200JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateProjectGrant400JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateProjectGrant401JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateProjectGrant403JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateProjectGrant404JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateProjectGrant429JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateProjectGrant500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateProjectGrant500JSONResponse) VisitCreateProjectGrantResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplateRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *ApplyProjectTemplateJSONRequestBody
+}
+
+type ApplyProjectTemplateResponseObject interface {
+	VisitApplyProjectTemplateResponse(w http.ResponseWriter) error
+}
+
+type ApplyProjectTemplate200JSONResponse GrantResultList
+
+func (response ApplyProjectTemplate200JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyProjectTemplate400JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApplyProjectTemplate401JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyProjectTemplate403JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApplyProjectTemplate404JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApplyProjectTemplate429JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyProjectTemplate500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApplyProjectTemplate500JSONResponse) VisitApplyProjectTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroupsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListKeyGroupsResponseObject interface {
+	VisitListKeyGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListKeyGroups200JSONResponse KeyGroupList
+
+func (response ListKeyGroups200JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListKeyGroups401JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListKeyGroups404JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListKeyGroups429JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListKeyGroups500JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroupRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateKeyGroupJSONRequestBody
+}
+
+type CreateKeyGroupResponseObject interface {
+	VisitCreateKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type CreateKeyGroup201JSONResponse KeyGroup
+
+func (response CreateKeyGroup201JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateKeyGroup400JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateKeyGroup401JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateKeyGroup404JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateKeyGroup409JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateKeyGroup429JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateKeyGroup500JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+}
+
+type DeleteKeyGroupResponseObject interface {
+	VisitDeleteKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type DeleteKeyGroup204Response struct {
+}
+
+func (response DeleteKeyGroup204Response) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteKeyGroup401JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteKeyGroup404JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteKeyGroup409JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteKeyGroup429JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteKeyGroup500JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+}
+
+type GetKeyGroupResponseObject interface {
+	VisitGetKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type GetKeyGroup200JSONResponse KeyGroup
+
+func (response GetKeyGroup200JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetKeyGroup401JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetKeyGroup404JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetKeyGroup429JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetKeyGroup500JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+	Body    *RenameKeyGroupJSONRequestBody
+}
+
+type RenameKeyGroupResponseObject interface {
+	VisitRenameKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type RenameKeyGroup200JSONResponse KeyGroup
+
+func (response RenameKeyGroup200JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameKeyGroup400JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameKeyGroup401JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameKeyGroup404JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameKeyGroup409JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RenameKeyGroup429JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response RenameKeyGroup500JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeysRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListKeysResponseObject interface {
+	VisitListKeysResponse(w http.ResponseWriter) error
+}
+
+type ListKeys200JSONResponse KeyList
+
+func (response ListKeys200JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListKeys401JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListKeys404JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListKeys429JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListKeys500JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateKeyJSONRequestBody
+}
+
+type CreateKeyResponseObject interface {
+	VisitCreateKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateKey201JSONResponse Key
+
+func (response CreateKey201JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateKey400JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateKey401JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateKey404JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateKey409JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateKey429JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateKey500JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+}
+
+type DeleteKeyResponseObject interface {
+	VisitDeleteKeyResponse(w http.ResponseWriter) error
+}
+
+type DeleteKey204Response struct {
+}
+
+func (response DeleteKey204Response) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteKey401JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteKey404JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteKey409JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteKey429JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteKey500JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+}
+
+type GetKeyResponseObject interface {
+	VisitGetKeyResponse(w http.ResponseWriter) error
+}
+
+type GetKey200JSONResponse Key
+
+func (response GetKey200JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetKey401JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetKey404JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetKey429JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetKey500JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadataRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *UpdateKeyMetadataJSONRequestBody
+}
+
+type UpdateKeyMetadataResponseObject interface {
+	VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error
+}
+
+type UpdateKeyMetadata200JSONResponse Key
+
+func (response UpdateKeyMetadata200JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateKeyMetadata400JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateKeyMetadata401JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateKeyMetadata404JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateKeyMetadata409JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateKeyMetadata429JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateKeyMetadata500JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *ReclassifyKeyJSONRequestBody
+}
+
+type ReclassifyKeyResponseObject interface {
+	VisitReclassifyKeyResponse(w http.ResponseWriter) error
+}
+
+type ReclassifyKey200JSONResponse Key
+
+func (response ReclassifyKey200JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReclassifyKey400JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReclassifyKey401JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReclassifyKey404JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReclassifyKey409JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReclassifyKey429JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReclassifyKey500JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclarationRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *UpdateKeyDeclarationJSONRequestBody
+}
+
+type UpdateKeyDeclarationResponseObject interface {
+	VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error
+}
+
+type UpdateKeyDeclaration200JSONResponse Key
+
+func (response UpdateKeyDeclaration200JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateKeyDeclaration400JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateKeyDeclaration401JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateKeyDeclaration404JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateKeyDeclaration409JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateKeyDeclaration429JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateKeyDeclaration500JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroupRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *SetKeyGroupJSONRequestBody
+}
+
+type SetKeyGroupResponseObject interface {
+	VisitSetKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type SetKeyGroup200JSONResponse Key
+
+func (response SetKeyGroup200JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetKeyGroup400JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetKeyGroup401JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetKeyGroup404JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response SetKeyGroup409JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetKeyGroup429JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetKeyGroup500JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *RenameKeyJSONRequestBody
+}
+
+type RenameKeyResponseObject interface {
+	VisitRenameKeyResponse(w http.ResponseWriter) error
+}
+
+type RenameKey200JSONResponse Key
+
+func (response RenameKey200JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameKey400JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameKey401JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameKey404JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameKey409JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RenameKey429JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
@@ -9457,6 +14836,18 @@ type StrictServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(ctx context.Context, request WhoamiRequestObject) (WhoamiResponseObject, error)
+	// RevokeInstanceGrant Revoke one capability at instance scope.
+	// (DELETE /api/v1/instance/grants)
+	RevokeInstanceGrant(ctx context.Context, request RevokeInstanceGrantRequestObject) (RevokeInstanceGrantResponseObject, error)
+	// ListInstanceGrants List the instance-scope membership surface.
+	// (GET /api/v1/instance/grants)
+	ListInstanceGrants(ctx context.Context, request ListInstanceGrantsRequestObject) (ListInstanceGrantsResponseObject, error)
+	// CreateInstanceGrant Grant one capability at instance scope.
+	// (POST /api/v1/instance/grants)
+	CreateInstanceGrant(ctx context.Context, request CreateInstanceGrantRequestObject) (CreateInstanceGrantResponseObject, error)
+	// ApplyInstanceTemplate Apply a role template at instance scope.
+	// (POST /api/v1/instance/grants/template)
+	ApplyInstanceTemplate(ctx context.Context, request ApplyInstanceTemplateRequestObject) (ApplyInstanceTemplateResponseObject, error)
 	// ListOidcProviders List configured OIDC providers.
 	// (GET /api/v1/instance/oidc-providers)
 	ListOidcProviders(ctx context.Context, request ListOidcProvidersRequestObject) (ListOidcProvidersResponseObject, error)
@@ -9517,6 +14908,18 @@ type StrictServerInterface interface {
 	// RenameOrg Rename an organisation.
 	// (PATCH /api/v1/orgs/{org})
 	RenameOrg(ctx context.Context, request RenameOrgRequestObject) (RenameOrgResponseObject, error)
+	// RevokeOrgGrant Revoke one capability at organisation scope.
+	// (DELETE /api/v1/orgs/{org}/grants)
+	RevokeOrgGrant(ctx context.Context, request RevokeOrgGrantRequestObject) (RevokeOrgGrantResponseObject, error)
+	// ListOrgGrants List the organisation's membership surface.
+	// (GET /api/v1/orgs/{org}/grants)
+	ListOrgGrants(ctx context.Context, request ListOrgGrantsRequestObject) (ListOrgGrantsResponseObject, error)
+	// CreateOrgGrant Grant one capability at organisation scope.
+	// (POST /api/v1/orgs/{org}/grants)
+	CreateOrgGrant(ctx context.Context, request CreateOrgGrantRequestObject) (CreateOrgGrantResponseObject, error)
+	// ApplyOrgTemplate Apply a role template at organisation scope.
+	// (POST /api/v1/orgs/{org}/grants/template)
+	ApplyOrgTemplate(ctx context.Context, request ApplyOrgTemplateRequestObject) (ApplyOrgTemplateResponseObject, error)
 	// ListProjects List the organisation's projects.
 	// (GET /api/v1/orgs/{org}/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
@@ -9550,6 +14953,21 @@ type StrictServerInterface interface {
 	// RenameEnvironment Rename an environment.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment})
 	RenameEnvironment(ctx context.Context, request RenameEnvironmentRequestObject) (RenameEnvironmentResponseObject, error)
+	// RevokeEnvGrant Revoke one capability on one environment.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+	RevokeEnvGrant(ctx context.Context, request RevokeEnvGrantRequestObject) (RevokeEnvGrantResponseObject, error)
+	// CreateEnvGrant Grant one capability on one environment.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
+	CreateEnvGrant(ctx context.Context, request CreateEnvGrantRequestObject) (CreateEnvGrantResponseObject, error)
+	// ApplyEnvTemplate Apply a role template on one environment.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
+	ApplyEnvTemplate(ctx context.Context, request ApplyEnvTemplateRequestObject) (ApplyEnvTemplateResponseObject, error)
+	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+	GetEnvironmentSettings(ctx context.Context, request GetEnvironmentSettingsRequestObject) (GetEnvironmentSettingsResponseObject, error)
+	// SetEnvironmentSettings Set an environment's protection state and reauthentication window.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
+	SetEnvironmentSettings(ctx context.Context, request SetEnvironmentSettingsRequestObject) (SetEnvironmentSettingsResponseObject, error)
 	// ListFolders List the project's folders.
 	// (GET /api/v1/orgs/{org}/projects/{project}/folders)
 	ListFolders(ctx context.Context, request ListFoldersRequestObject) (ListFoldersResponseObject, error)
@@ -9565,6 +14983,60 @@ type StrictServerInterface interface {
 	// RenameFolder Move a folder to a new path.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder})
 	RenameFolder(ctx context.Context, request RenameFolderRequestObject) (RenameFolderResponseObject, error)
+	// RevokeProjectGrant Revoke one capability at project scope.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/grants)
+	RevokeProjectGrant(ctx context.Context, request RevokeProjectGrantRequestObject) (RevokeProjectGrantResponseObject, error)
+	// ListProjectGrants List the project's membership surface.
+	// (GET /api/v1/orgs/{org}/projects/{project}/grants)
+	ListProjectGrants(ctx context.Context, request ListProjectGrantsRequestObject) (ListProjectGrantsResponseObject, error)
+	// CreateProjectGrant Grant one capability at project scope.
+	// (POST /api/v1/orgs/{org}/projects/{project}/grants)
+	CreateProjectGrant(ctx context.Context, request CreateProjectGrantRequestObject) (CreateProjectGrantResponseObject, error)
+	// ApplyProjectTemplate Apply a role template at project scope.
+	// (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
+	ApplyProjectTemplate(ctx context.Context, request ApplyProjectTemplateRequestObject) (ApplyProjectTemplateResponseObject, error)
+	// ListKeyGroups List the project's key groups.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+	ListKeyGroups(ctx context.Context, request ListKeyGroupsRequestObject) (ListKeyGroupsResponseObject, error)
+	// CreateKeyGroup Declare a key group.
+	// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+	CreateKeyGroup(ctx context.Context, request CreateKeyGroupRequestObject) (CreateKeyGroupResponseObject, error)
+	// DeleteKeyGroup Delete a key group.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	DeleteKeyGroup(ctx context.Context, request DeleteKeyGroupRequestObject) (DeleteKeyGroupResponseObject, error)
+	// GetKeyGroup Read one key group.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	GetKeyGroup(ctx context.Context, request GetKeyGroupRequestObject) (GetKeyGroupResponseObject, error)
+	// RenameKeyGroup Rename a key group.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	RenameKeyGroup(ctx context.Context, request RenameKeyGroupRequestObject) (RenameKeyGroupResponseObject, error)
+	// ListKeys List the project's key catalogue.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
+	// CreateKey Declare a key.
+	// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+	CreateKey(ctx context.Context, request CreateKeyRequestObject) (CreateKeyResponseObject, error)
+	// DeleteKey Delete a key.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	DeleteKey(ctx context.Context, request DeleteKeyRequestObject) (DeleteKeyResponseObject, error)
+	// GetKey Read one key declaration.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	GetKey(ctx context.Context, request GetKeyRequestObject) (GetKeyResponseObject, error)
+	// UpdateKeyMetadata Update a key's non-semantic metadata.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	UpdateKeyMetadata(ctx context.Context, request UpdateKeyMetadataRequestObject) (UpdateKeyMetadataResponseObject, error)
+	// ReclassifyKey The reclassification ceremony.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+	ReclassifyKey(ctx context.Context, request ReclassifyKeyRequestObject) (ReclassifyKeyResponseObject, error)
+	// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+	UpdateKeyDeclaration(ctx context.Context, request UpdateKeyDeclarationRequestObject) (UpdateKeyDeclarationResponseObject, error)
+	// SetKeyGroup Set or clear a key's group membership.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+	SetKeyGroup(ctx context.Context, request SetKeyGroupRequestObject) (SetKeyGroupResponseObject, error)
+	// RenameKey Rename a key.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -10487,6 +15959,118 @@ func (sh *strictHandler) Whoami(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// RevokeInstanceGrant operation middleware
+func (sh *strictHandler) RevokeInstanceGrant(w http.ResponseWriter, r *http.Request, params RevokeInstanceGrantParams) {
+	var request RevokeInstanceGrantRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInstanceGrant(ctx, request.(RevokeInstanceGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInstanceGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeInstanceGrantResponseObject); ok {
+		if err := validResponse.VisitRevokeInstanceGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInstanceGrants operation middleware
+func (sh *strictHandler) ListInstanceGrants(w http.ResponseWriter, r *http.Request) {
+	var request ListInstanceGrantsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInstanceGrants(ctx, request.(ListInstanceGrantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInstanceGrants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInstanceGrantsResponseObject); ok {
+		if err := validResponse.VisitListInstanceGrantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateInstanceGrant operation middleware
+func (sh *strictHandler) CreateInstanceGrant(w http.ResponseWriter, r *http.Request) {
+	var request CreateInstanceGrantRequestObject
+
+	var body CreateInstanceGrantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInstanceGrant(ctx, request.(CreateInstanceGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInstanceGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInstanceGrantResponseObject); ok {
+		if err := validResponse.VisitCreateInstanceGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyInstanceTemplate operation middleware
+func (sh *strictHandler) ApplyInstanceTemplate(w http.ResponseWriter, r *http.Request) {
+	var request ApplyInstanceTemplateRequestObject
+
+	var body ApplyInstanceTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyInstanceTemplate(ctx, request.(ApplyInstanceTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyInstanceTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyInstanceTemplateResponseObject); ok {
+		if err := validResponse.VisitApplyInstanceTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListOidcProviders operation middleware
 func (sh *strictHandler) ListOidcProviders(w http.ResponseWriter, r *http.Request) {
 	var request ListOidcProvidersRequestObject
@@ -11035,6 +16619,125 @@ func (sh *strictHandler) RenameOrg(w http.ResponseWriter, r *http.Request, org O
 	}
 }
 
+// RevokeOrgGrant operation middleware
+func (sh *strictHandler) RevokeOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID, params RevokeOrgGrantParams) {
+	var request RevokeOrgGrantRequestObject
+
+	request.Org = org
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeOrgGrant(ctx, request.(RevokeOrgGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeOrgGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeOrgGrantResponseObject); ok {
+		if err := validResponse.VisitRevokeOrgGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrgGrants operation middleware
+func (sh *strictHandler) ListOrgGrants(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request ListOrgGrantsRequestObject
+
+	request.Org = org
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrgGrants(ctx, request.(ListOrgGrantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrgGrants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrgGrantsResponseObject); ok {
+		if err := validResponse.VisitListOrgGrantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrgGrant operation middleware
+func (sh *strictHandler) CreateOrgGrant(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request CreateOrgGrantRequestObject
+
+	request.Org = org
+
+	var body CreateOrgGrantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrgGrant(ctx, request.(CreateOrgGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrgGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrgGrantResponseObject); ok {
+		if err := validResponse.VisitCreateOrgGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyOrgTemplate operation middleware
+func (sh *strictHandler) ApplyOrgTemplate(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request ApplyOrgTemplateRequestObject
+
+	request.Org = org
+
+	var body ApplyOrgTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyOrgTemplate(ctx, request.(ApplyOrgTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyOrgTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyOrgTemplateResponseObject); ok {
+		if err := validResponse.VisitApplyOrgTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListProjects operation middleware
 func (sh *strictHandler) ListProjects(w http.ResponseWriter, r *http.Request, org OrgID) {
 	var request ListProjectsRequestObject
@@ -11368,6 +17071,168 @@ func (sh *strictHandler) RenameEnvironment(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// RevokeEnvGrant operation middleware
+func (sh *strictHandler) RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams) {
+	var request RevokeEnvGrantRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeEnvGrant(ctx, request.(RevokeEnvGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeEnvGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeEnvGrantResponseObject); ok {
+		if err := validResponse.VisitRevokeEnvGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateEnvGrant operation middleware
+func (sh *strictHandler) CreateEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request CreateEnvGrantRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body CreateEnvGrantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateEnvGrant(ctx, request.(CreateEnvGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateEnvGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateEnvGrantResponseObject); ok {
+		if err := validResponse.VisitCreateEnvGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyEnvTemplate operation middleware
+func (sh *strictHandler) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ApplyEnvTemplateRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body ApplyEnvTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyEnvTemplate(ctx, request.(ApplyEnvTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyEnvTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyEnvTemplateResponseObject); ok {
+		if err := validResponse.VisitApplyEnvTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetEnvironmentSettings operation middleware
+func (sh *strictHandler) GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request GetEnvironmentSettingsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEnvironmentSettings(ctx, request.(GetEnvironmentSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEnvironmentSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetEnvironmentSettingsResponseObject); ok {
+		if err := validResponse.VisitGetEnvironmentSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetEnvironmentSettings operation middleware
+func (sh *strictHandler) SetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request SetEnvironmentSettingsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body SetEnvironmentSettingsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetEnvironmentSettings(ctx, request.(SetEnvironmentSettingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetEnvironmentSettings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetEnvironmentSettingsResponseObject); ok {
+		if err := validResponse.VisitSetEnvironmentSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListFolders operation middleware
 func (sh *strictHandler) ListFolders(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	var request ListFoldersRequestObject
@@ -11513,6 +17378,573 @@ func (sh *strictHandler) RenameFolder(w http.ResponseWriter, r *http.Request, or
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameFolderResponseObject); ok {
 		if err := validResponse.VisitRenameFolderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeProjectGrant operation middleware
+func (sh *strictHandler) RevokeProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, params RevokeProjectGrantParams) {
+	var request RevokeProjectGrantRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeProjectGrant(ctx, request.(RevokeProjectGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeProjectGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeProjectGrantResponseObject); ok {
+		if err := validResponse.VisitRevokeProjectGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListProjectGrants operation middleware
+func (sh *strictHandler) ListProjectGrants(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListProjectGrantsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListProjectGrants(ctx, request.(ListProjectGrantsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListProjectGrants")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListProjectGrantsResponseObject); ok {
+		if err := validResponse.VisitListProjectGrantsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateProjectGrant operation middleware
+func (sh *strictHandler) CreateProjectGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateProjectGrantRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateProjectGrantJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateProjectGrant(ctx, request.(CreateProjectGrantRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateProjectGrant")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateProjectGrantResponseObject); ok {
+		if err := validResponse.VisitCreateProjectGrantResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyProjectTemplate operation middleware
+func (sh *strictHandler) ApplyProjectTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ApplyProjectTemplateRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body ApplyProjectTemplateJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyProjectTemplate(ctx, request.(ApplyProjectTemplateRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyProjectTemplate")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyProjectTemplateResponseObject); ok {
+		if err := validResponse.VisitApplyProjectTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeyGroups operation middleware
+func (sh *strictHandler) ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListKeyGroupsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeyGroups(ctx, request.(ListKeyGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeyGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeyGroupsResponseObject); ok {
+		if err := validResponse.VisitListKeyGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKeyGroup operation middleware
+func (sh *strictHandler) CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKeyGroup(ctx, request.(CreateKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyGroupResponseObject); ok {
+		if err := validResponse.VisitCreateKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteKeyGroup operation middleware
+func (sh *strictHandler) DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request DeleteKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteKeyGroup(ctx, request.(DeleteKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteKeyGroupResponseObject); ok {
+		if err := validResponse.VisitDeleteKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetKeyGroup operation middleware
+func (sh *strictHandler) GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request GetKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetKeyGroup(ctx, request.(GetKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetKeyGroupResponseObject); ok {
+		if err := validResponse.VisitGetKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameKeyGroup operation middleware
+func (sh *strictHandler) RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request RenameKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	var body RenameKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameKeyGroup(ctx, request.(RenameKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameKeyGroupResponseObject); ok {
+		if err := validResponse.VisitRenameKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeys operation middleware
+func (sh *strictHandler) ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListKeysRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeysResponseObject); ok {
+		if err := validResponse.VisitListKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKey operation middleware
+func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKey(ctx, request.(CreateKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyResponseObject); ok {
+		if err := validResponse.VisitCreateKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteKey operation middleware
+func (sh *strictHandler) DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request DeleteKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteKey(ctx, request.(DeleteKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteKeyResponseObject); ok {
+		if err := validResponse.VisitDeleteKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetKey operation middleware
+func (sh *strictHandler) GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request GetKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetKey(ctx, request.(GetKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetKeyResponseObject); ok {
+		if err := validResponse.VisitGetKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateKeyMetadata operation middleware
+func (sh *strictHandler) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request UpdateKeyMetadataRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body UpdateKeyMetadataJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateKeyMetadata(ctx, request.(UpdateKeyMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateKeyMetadata")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateKeyMetadataResponseObject); ok {
+		if err := validResponse.VisitUpdateKeyMetadataResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReclassifyKey operation middleware
+func (sh *strictHandler) ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request ReclassifyKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body ReclassifyKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReclassifyKey(ctx, request.(ReclassifyKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReclassifyKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReclassifyKeyResponseObject); ok {
+		if err := validResponse.VisitReclassifyKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateKeyDeclaration operation middleware
+func (sh *strictHandler) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request UpdateKeyDeclarationRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body UpdateKeyDeclarationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateKeyDeclaration(ctx, request.(UpdateKeyDeclarationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateKeyDeclaration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateKeyDeclarationResponseObject); ok {
+		if err := validResponse.VisitUpdateKeyDeclarationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetKeyGroup operation middleware
+func (sh *strictHandler) SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request SetKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body SetKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetKeyGroup(ctx, request.(SetKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetKeyGroupResponseObject); ok {
+		if err := validResponse.VisitSetKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameKey operation middleware
+func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request RenameKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body RenameKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameKey(ctx, request.(RenameKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameKeyResponseObject); ok {
+		if err := validResponse.VisitRenameKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

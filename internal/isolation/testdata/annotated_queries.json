@@ -73,6 +73,12 @@
   },
   {
     "engine": "postgres",
+    "name": "CountGrantOrigins",
+    "annotation": "authn-resolution",
+    "hash": "c0b35a1d2aaefea234d06693e608f33023aea3a7424e9fe9da8275b0bfc62d25"
+  },
+  {
+    "engine": "postgres",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
     "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
@@ -100,6 +106,18 @@
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "ce3fc198e5d22eee48a2e571cd645cb564b86549cf38ce4a1a63650060063338"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteGrantOrigin",
+    "annotation": "authn-resolution",
+    "hash": "2a41082b6cd069260ed8b6877be2ca1aa8bb4c03f89e89447254838f5a61c411"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteGrantRow",
+    "annotation": "authn-resolution",
+    "hash": "550e9321bc7a97de34df7d4a972e14e9c2e05ad8b9b56935891009fbb2f24a35"
   },
   {
     "engine": "postgres",
@@ -184,6 +202,12 @@
     "name": "EnvironmentChainByID",
     "annotation": "authn-resolution",
     "hash": "5c31ff638d985b5d9cbd5d55b38ac851ef1f7321b1efa72cb54943996340059f"
+  },
+  {
+    "engine": "postgres",
+    "name": "EnvironmentReauthSettings",
+    "annotation": "authn-resolution",
+    "hash": "52d9b293ee26afd4fa84c0efcc1038d9ae373c0fcdd1b3d85bcc424285ee4708"
   },
   {
     "engine": "postgres",
@@ -280,6 +304,12 @@
     "name": "GetPendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "3b4cde94f9b090861f71ec55cc1a8d4539f7118ade43720eeefe42cf4cfa35d3"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetPrincipalClass",
+    "annotation": "authn-resolution",
+    "hash": "1d764102ff96096306e322195be1cddb81143f7a5db40f3a9ec21059df0216c2"
   },
   {
     "engine": "postgres",
@@ -409,6 +439,12 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertGrantOrigin",
+    "annotation": "authn-resolution",
+    "hash": "2f08b8fae2c231983cd82a25028027e2e494cc7913f965c3a9ad63cfd438939f"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertOIDCTransaction",
     "annotation": "authn-resolution",
     "hash": "80f2b0425effa0afd7d4f0cc4b38a0e1a9d6e8d0797e677af9af6f680b355069"
@@ -493,6 +529,18 @@
   },
   {
     "engine": "postgres",
+    "name": "ListGrantOriginsForGrant",
+    "annotation": "authn-resolution",
+    "hash": "a0f716110dc6023bde69b0940562d62b4dfd349ceabe7435b2c37928beb9aa52"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListGrantRowsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "71e1cacc7ace789b67fece7952f6418a2adb152804dcbc9f4162f9d8f7a749b8"
+  },
+  {
+    "engine": "postgres",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
@@ -502,6 +550,36 @@
     "name": "ListGrantsForResetTarget",
     "annotation": "authn-resolution",
     "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListGrantsWithOriginsAtInstance",
+    "annotation": "authn-resolution",
+    "hash": "baa0b16fa012ca8186d28b7d31015efc47c5de50d0e1bce0430ad1d16792a571"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListGrantsWithOriginsForOrg",
+    "annotation": "authn-resolution",
+    "hash": "05444dfb2cfaebb39546ee75f2e5c1810bfc1b476852bf0c28ab975fa7024504"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListGrantsWithOriginsForProject",
+    "annotation": "authn-resolution",
+    "hash": "85b576ea03efbb9e9f2ab9f05a018075477673f9adab162148901b6b7a3d6d28"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListManageMembersHoldersAtInstance",
+    "annotation": "authn-resolution",
+    "hash": "ed641b91fe06b17ad7b9b04977b1e84c98e4d7d62469fb571ede8e7b667b000b"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListManageMembersHoldersForOrg",
+    "annotation": "authn-resolution",
+    "hash": "858424944348acd7307ec457417f199a54495b09264bf01d55c8e780d572b31c"
   },
   {
     "engine": "postgres",
@@ -709,6 +787,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "CountGrantOrigins",
+    "annotation": "authn-resolution",
+    "hash": "8cdfcb0b0673b9d4c0e9cfb497752f42e8894170e2a4b0d58a56d55214c1f7e9"
+  },
+  {
+    "engine": "sqlite",
     "name": "CountOrgs",
     "annotation": "instance-scoped",
     "hash": "146ab1c208714c20693b266ce984012ce516734b5242ee4b55571b549cba5e31"
@@ -736,6 +820,18 @@
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "574453c51e84c4da03caec855e0349be62c896361ff20697f106e03907d4e8e2"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteGrantOrigin",
+    "annotation": "authn-resolution",
+    "hash": "1f953f3e0eb628578abfaed991003d923b5444542865bf4e843fed3d94d7f80a"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteGrantRow",
+    "annotation": "authn-resolution",
+    "hash": "72ee55880b66af8d2ef955fe9ca1223c9f9679d9d2aed782bc6521ab4de4e9ea"
   },
   {
     "engine": "sqlite",
@@ -820,6 +916,12 @@
     "name": "EnvironmentChainByID",
     "annotation": "authn-resolution",
     "hash": "170bedbeb14b3270711ccc705b4b2ad4ceadef181b4f97025d8a6bea844654e2"
+  },
+  {
+    "engine": "sqlite",
+    "name": "EnvironmentReauthSettings",
+    "annotation": "authn-resolution",
+    "hash": "914bd8facd766da904d2a6e3c7fa2504a73bedd09a03d158c458155b4a1fecd2"
   },
   {
     "engine": "sqlite",
@@ -916,6 +1018,12 @@
     "name": "GetPendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "717001fe5fe0f074ccd4fc8c8809ddb3cdaa48f393db4353205de1d6ab6cb8a4"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetPrincipalClass",
+    "annotation": "authn-resolution",
+    "hash": "eb78f70a3bd2f70c8a0c98fd40224b7c1971c734a0d991c4a7d572ada1a5ed5c"
   },
   {
     "engine": "sqlite",
@@ -1045,6 +1153,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertGrantOrigin",
+    "annotation": "authn-resolution",
+    "hash": "2359ffc25b54cdf4af56069aa89b8bda0779dc7ee711eda707fcb09718d65e4c"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertOIDCTransaction",
     "annotation": "authn-resolution",
     "hash": "a79a932c6d5bd46c48572ea6ba1ddc493a79a751fd08366d144eebf986346dac"
@@ -1129,6 +1243,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListGrantOriginsForGrant",
+    "annotation": "authn-resolution",
+    "hash": "dee82ca27e85e95bb31cc66f601699accb07bb7fe12d4fc3f5e58351f75d4124"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListGrantRowsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "105b2cf763752fd26186c680bbb427bc809439e574f1f93a220e7dbf42eb8135"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
@@ -1138,6 +1264,36 @@
     "name": "ListGrantsForResetTarget",
     "annotation": "authn-resolution",
     "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListGrantsWithOriginsAtInstance",
+    "annotation": "authn-resolution",
+    "hash": "baa0b16fa012ca8186d28b7d31015efc47c5de50d0e1bce0430ad1d16792a571"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListGrantsWithOriginsForOrg",
+    "annotation": "authn-resolution",
+    "hash": "d22f7f5a91e0ca274d8236499ac1ed3e0e5e6563330594c37d616584b47a4582"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListGrantsWithOriginsForProject",
+    "annotation": "authn-resolution",
+    "hash": "f2b94d3c873361e972fa622d78e1ba9daddcd10c61a42605e6bb8bbc0518f7a1"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListManageMembersHoldersAtInstance",
+    "annotation": "authn-resolution",
+    "hash": "ed641b91fe06b17ad7b9b04977b1e84c98e4d7d62469fb571ede8e7b667b000b"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListManageMembersHoldersForOrg",
+    "annotation": "authn-resolution",
+    "hash": "1a43479248158d5a7b82af089452658e2045d62b411447af1e598ca78cd9a0e6"
   },
   {
     "engine": "sqlite",

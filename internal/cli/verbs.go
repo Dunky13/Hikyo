@@ -70,10 +70,16 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runEnv(ctx, io, rest)
 	case "folder":
 		err = runFolder(ctx, io, rest)
+	case "key":
+		err = runKey(ctx, io, rest)
 	case "instance-config":
 		err = runInstanceConfig(ctx, io, rest)
 	case "doctor":
 		err = runDoctor(ctx, io, rest)
+	case "access":
+		err = runAccess(ctx, io, rest)
+	case "project-settings":
+		err = runProjectSettings(ctx, io, rest)
 	default:
 		fmt.Fprintf(io.Stderr, "hikyo: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
@@ -130,6 +136,12 @@ hierarchy:
   hikyo folder list|show|create|rename|delete       --org/--project select the project
   hikyo folder create --path <path>
   hikyo folder rename <folder> --path <new-path>
+  hikyo key list|show|create|rename|declare|reclassify|update|set-group|delete
+  hikyo key create --name <NAME> --classification secret|config --declaration <json>
+  hikyo key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
+  hikyo key declare <key> --declaration <json> [--required-in all|none|<ids>]
+  hikyo key reclassify <key> --classification secret|config    the ceremony, never update
+  hikyo key group list|show|create|rename|delete
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \
@@ -138,6 +150,16 @@ instance configuration:
   hikyo instance-config provider refresh-metadata <name>
   hikyo instance-config saml-sp-key list|rotate
   hikyo instance-config saml-sp-key retire|compromise-retire <fingerprint>
+
+access:
+  hikyo access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
+  hikyo access grant add --principal <id> --capability <atom>
+  hikyo access grant remove --principal <id> --capability <atom>
+  hikyo access grant template --principal <id> --template <name>
+  hikyo access member list [--org O] [--project P] [-o table|json]
+  hikyo access member remove --principal <id>
+  hikyo project-settings get --env E [-o table|json]
+  hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context

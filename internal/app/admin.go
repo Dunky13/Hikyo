@@ -11,6 +11,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/config"
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/disclose"
+	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
 	"github.com/Dunky13/hikyo/internal/store/keyring"
@@ -41,6 +42,8 @@ func AdminUsage(w io.Writer) {
                     [--output-file PATH | --dangerously-print]
   hikyo admin reset-credential --principal ID
                     [--output-file PATH | --dangerously-print]
+  hikyo admin grant --principal ID --capability CAP
+                    [--org ID [--project ID [--env ID]]]
 
 create mints the first administrator and a single-use credential-establishment
 authority. reset-credential is the break-glass recovery path: it mints the same
@@ -49,6 +52,15 @@ network reset can reach, advances that principal's session generation and revoke
 its sessions. Both create no session and carry no assurance: the holder sets a
 password with the authority, then logs in like anyone else. The authority is
 never re-displayed - if it lapses, mint a new one here on the host.
+
+grant is the break-glass recovery grant: it creates one (principal, capability,
+scope) grant under local host authority, naming its target and capability
+explicitly, and writes a durable recovery audit record. It is the only
+authorization path in the system not evaluated against a grant, and the way out
+of the one state the lockout invariant cannot recover from - an instance with no
+manage-members holder. It has no network route, and the origin it writes is
+break-glass, not manual, so the row is distinguishable on the membership surface
+from an ordinary grant.
 
 Delivery follows the print triad. The value goes to the controlling terminal,
 or to a file this command creates itself (0600, in a directory you own), or
@@ -63,16 +75,18 @@ the root key, so 'kubectl logs' would hand a remote reader the authority.
 func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		AdminUsage(stderr)
-		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID")
+		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 	switch args[0] {
 	case "create":
 		return runAdminCreate(ctx, cfg, log, args, stderr)
 	case "reset-credential":
 		return runAdminReset(ctx, cfg, log, args, stderr)
+	case "grant":
+		return runAdminGrant(ctx, cfg, log, args, stderr)
 	default:
 		AdminUsage(stderr)
-		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID")
+		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 }
 
@@ -243,4 +257,80 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 		"reset credential for %q (account %s); authority delivered to the %s and expires %s\n",
 		result.TargetUser, result.TargetAccount, dest, result.ExpiresAt.Format("2006-01-02 15:04 MST"))
 	return nil
+}
+
+// runAdminGrant is the break-glass recovery grant: `hikyo admin grant
+// --principal ID --capability CAP [--org ... --project ... --env ...]`.
+//
+// It is the ONLY authorization path in the system not evaluated against a
+// grant (permission ADR § Evaluation 6), and it exists for exactly one state
+// the lockout invariant cannot recover from in-product: an instance, or an
+// org, whose last `manage-members` holder is gone. Host access plus the root
+// key already means full control-plane compromise per the threat model, so
+// this adds no attacker capability — what it adds is a way back in that is
+// structurally unreachable from the network.
+func runAdminGrant(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
+	fs := flag.NewFlagSet("admin grant", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	principal := fs.String("principal", "", "the target principal id")
+	capability := fs.String("capability", "", "the capability atom to grant")
+	org := fs.String("org", "", "org id (omit for an instance-scope grant)")
+	project := fs.String("project", "", "project id (requires --org)")
+	env := fs.String("env", "", "environment id (requires --project)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	// Both are required and neither is inferable: the ADR requires this path
+	// to name its target principal and capability EXPLICITLY, so there is no
+	// default target and no default capability here by design.
+	if *principal == "" || *capability == "" {
+		return errors.New("--principal and --capability are both required: a break-glass grant names its target and capability explicitly")
+	}
+	scope := domain.Scope{
+		Org:     domain.OrgID(*org),
+		Project: domain.ProjectID(*project),
+		Env:     domain.EnvID(*env),
+	}
+	if _, err := scope.Level(); err != nil {
+		return errors.New("--org, --project and --env form a chain: name each level above the one you address")
+	}
+
+	auth, closeDB, err := adminAuth(ctx, cfg, log)
+	if err != nil {
+		return err
+	}
+	defer closeDB()
+
+	grants := &service.Grants{DB: auth.DB}
+	res, err := grants.BreakGlassGrant(ctx, service.GrantSpec{
+		Target:     domain.PrincipalID(*principal),
+		Capability: domain.Capability(*capability),
+		Scope:      scope,
+	})
+	if err != nil {
+		return err
+	}
+	// The grant id, not the capability value: there is nothing secret here, and
+	// the operator needs the id to revoke it again through the ordinary surface.
+	verb := "joined"
+	if res.Created {
+		verb = "created"
+	}
+	fmt.Fprintf(stderr, "break-glass grant %s: %s (%s at %s) for %s\n",
+		verb, res.GrantID, *capability, scopeLabel(scope), *principal)
+	return nil
+}
+
+// scopeLabel renders a scope for the operator's confirmation line.
+func scopeLabel(s domain.Scope) string {
+	switch {
+	case s.Env != "":
+		return string(s.Org) + "/" + string(s.Project) + "/" + string(s.Env)
+	case s.Project != "":
+		return string(s.Org) + "/" + string(s.Project)
+	case s.Org != "":
+		return string(s.Org)
+	default:
+		return "instance"
+	}
 }

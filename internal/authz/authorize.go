@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store/authn"
 )
@@ -19,6 +20,10 @@ type TxAuthorizer struct {
 	tok        *TxToken
 	denials    []Denial
 	captureErr error // a denial that could not even be captured — fail-closed at settle
+	// object attributes captured denials to the object they addressed; see
+	// AttributeDenials. Empty means the envelope carries no object, which is
+	// every path that has not asked for one.
+	object audit.Object
 }
 
 // NewTxAuthorizer binds authorize() to one transaction attempt. Called by

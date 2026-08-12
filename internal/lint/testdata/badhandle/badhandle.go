@@ -11,7 +11,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/store/pggen"
 )
 
-func stealAcrossTenants(ctx context.Context, db *store.DB, org, project, env string) (pggen.Environment, error) {
+func stealAcrossTenants(ctx context.Context, db *store.DB, org, project, env string) (pggen.GetEnvironmentRow, error) {
 	q := pggen.New(db.PG())
 	return q.GetEnvironment(ctx, pggen.GetEnvironmentParams{
 		ChainOrgID:     org,

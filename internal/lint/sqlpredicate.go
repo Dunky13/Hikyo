@@ -28,7 +28,7 @@ import (
 //	-- hikyo:instance-scoped    cross-tenant by definition (operator surface)
 //	-- hikyo:authn-resolution   the authorization package's bootstrap reads
 type TableRule struct {
-	Class string   // org | project | environment | folder | instance | authn | system
+	Class string   // org | project | environment | folder | key | instance | authn | system
 	Chain []string // chain columns required as top-level conjuncts ("-" = none)
 }
 
@@ -86,7 +86,7 @@ func ParseScopeDirectives(dir string) (map[string]TableRule, error) {
 				rule.Chain = strings.Split(chain, ",")
 			}
 			switch class {
-			case "org", "project", "environment", "folder", "instance", "authn", "system":
+			case "org", "project", "environment", "folder", "key", "instance", "authn", "system":
 			default:
 				return fmt.Errorf("%s: table %q has unknown scope class %q", path, table, class)
 			}

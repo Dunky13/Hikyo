@@ -4,7 +4,10 @@
 // this module so every layer can depend on it without cycles.
 package domain
 
-import "errors"
+import (
+	"errors"
+	"sort"
+)
 
 // Tenant identifiers. Distinct types so the proof-signature analyzer can ban
 // them from store-method signatures: a caller-supplied tenant id must never
@@ -18,31 +21,116 @@ type (
 // PrincipalID identifies a principal (human or machine) in the grant table.
 type PrincipalID string
 
-// Capability is one atom from the permission ADR's closed set. This package
-// declares only the atoms the demonstration operations use; the full lattice
-// lands with the permission ticket (#55) and stays the permission ADR's.
+// Capability is one atom from the permission ADR's CLOSED set. The whole set
+// is declared below (#55); Capabilities() is the closed enumeration the grant
+// API validates against, so a capability string that is not an atom is
+// refused rather than stored as an unreachable row.
 type Capability string
 
 const (
-	CapRead            Capability = "read"
-	CapEdit            Capability = "edit"
-	CapDefinitionsEdit Capability = "definitions-edit"
-	CapManageProjects  Capability = "manage-projects"
-	CapInstanceConfig  Capability = "instance-config"
+	// Environment atoms.
+	CapRead          Capability = "read"
+	CapReveal        Capability = "reveal"
+	CapRevealHistory Capability = "reveal-history"
+	CapEdit          Capability = "edit"
+	CapPublish       Capability = "publish"
+	CapPin           Capability = "pin"
+
+	// Project atoms.
+	CapDefinitionsEdit  Capability = "definitions-edit"
+	CapProjectSettings  Capability = "project-settings"
+	CapManageIdentities Capability = "manage-identities"
+	CapManageAdapters   Capability = "manage-adapters"
+
+	// Org / project.
+	CapManageMembers Capability = "manage-members"
+	// Org.
+	CapManageProjects Capability = "manage-projects"
+
+	// The instance operator set (encryption ADR #14).
+	CapBackupExport     Capability = "backup-export"
+	CapRestore          Capability = "restore"
+	CapRotateRootKey    Capability = "rotate-root-key"
+	CapRotateMasterKey  Capability = "rotate-master-key"
+	CapRotateDEK        Capability = "rotate-dek"
+	CapReencrypt        Capability = "reencrypt"
+	CapInstanceConfig   Capability = "instance-config"
+	CapInstanceDirector Capability = "instance-directory"
+
+	// CapSCIMProvision is the scim-provisioning amendment (c): org scope,
+	// machine-only, never grantable to a human, system-created with the
+	// provisioning binding and refused through the grant API (#73 mints it).
+	CapSCIMProvision Capability = "scim-provision"
+
 	// CapAuditRead is the audit-model ADR's amendment part 1: reading the
 	// trail is surveillance power over colleagues — its own capability, an
 	// ordinary additive downward-inheriting grant, never bundled into
 	// manage-members.
 	CapAuditRead Capability = "audit-read"
 
-	// The MFA-mandatory atoms (human-auth ADR § Assurance). Declared here
-	// with the rest of the closed set so the assurance rule can name them;
-	// the operations that carry them arrive with #50/#55.
-	CapReveal          Capability = "reveal"
-	CapRevealHistory   Capability = "reveal-history"
-	CapManageMembers   Capability = "manage-members"
+	// CapCredentialReset is the human-auth ADR's administrator-issued reset
+	// authority (#54), valid at org and instance scope.
 	CapCredentialReset Capability = "credential-reset"
 )
+
+// capabilityLevels is the closed atom table: each atom mapped to the DEEPEST
+// scope level it may be granted at. A grant is legal at that level or any
+// level above it (grants inherit downward, so granting `read` at org scope is
+// granting it on every environment beneath). An atom whose deepest level is
+// LevelNone is instance-only.
+var capabilityLevels = map[Capability]Level{
+	CapRead:          LevelEnv,
+	CapReveal:        LevelEnv,
+	CapRevealHistory: LevelEnv,
+	CapEdit:          LevelEnv,
+	CapPublish:       LevelEnv,
+	CapPin:           LevelEnv,
+
+	CapDefinitionsEdit:  LevelProject,
+	CapProjectSettings:  LevelProject,
+	CapManageIdentities: LevelProject,
+	CapManageAdapters:   LevelProject,
+
+	CapManageMembers: LevelProject,
+
+	CapManageProjects:  LevelOrg,
+	CapAuditRead:       LevelEnv,
+	CapCredentialReset: LevelOrg,
+	CapSCIMProvision:   LevelOrg,
+
+	CapBackupExport:     LevelNone,
+	CapRestore:          LevelNone,
+	CapRotateRootKey:    LevelNone,
+	CapRotateMasterKey:  LevelNone,
+	CapRotateDEK:        LevelNone,
+	CapReencrypt:        LevelNone,
+	CapInstanceConfig:   LevelNone,
+	CapInstanceDirector: LevelNone,
+}
+
+// Capabilities returns the closed atom set, sorted, for enumeration surfaces
+// and the registry-completeness tests.
+func Capabilities() []Capability {
+	out := make([]Capability, 0, len(capabilityLevels))
+	for c := range capabilityLevels {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// IsCapability reports whether c is in the closed set.
+func IsCapability(c Capability) bool { _, ok := capabilityLevels[c]; return ok }
+
+// DeepestLevel returns the deepest scope level an atom may be granted at.
+func DeepestLevel(c Capability) (Level, bool) { l, ok := capabilityLevels[c]; return l, ok }
+
+// OperatorSet is the encryption ADR's instance operator set, in the order the
+// `operator` template seeds it.
+var OperatorSet = []Capability{
+	CapBackupExport, CapRestore, CapRotateRootKey, CapRotateMasterKey,
+	CapRotateDEK, CapReencrypt, CapInstanceConfig,
+}
 
 // Scope addresses a node in the tenant chain as the request names it:
 // org, org+project, or org+project+env. The zero value addresses nothing.

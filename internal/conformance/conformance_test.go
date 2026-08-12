@@ -80,6 +80,13 @@ var corpus = []scenario{
 	{"environment_cap_refused", scenarioEnvironmentCap},
 	{"order_after_deletion", scenarioOrderAfterDeletion},
 	{"non_empty_parent_delete_refused", scenarioDeleteRefusesChildren},
+	// The key catalogue (#49, mvp-boundary C3 + the key half of C1).
+	{"key_catalogue_crud", scenarioKeyCatalogueCRUD},
+	{"declaration_fixtures_per_type", scenarioDeclarationFixtures},
+	{"declaration_rejections_by_name", scenarioDeclarationRejections},
+	{"secret_rule_change_needs_reveal", scenarioSecretRuleChangeNeedsReveal},
+	{"presence_rules_and_environment_cascade", scenarioPresenceRules},
+	{"key_groups_declaration_side", scenarioKeyGroups},
 	{"concurrent_writes_all_succeed", scenarioConcurrent},
 }
 
@@ -161,15 +168,23 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
 		// so they drop first — a stale one fails the next re-migration's CREATE.
 		"webauthn_ceremonies", "webauthn_credentials",
+		"saml_transactions", "saml_replay", "saml_sp_keys",
 		"oidc_transactions", "external_identities",
 		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
 		"credential_authorities", "password_credentials", "sessions",
 		// oidc_providers is a PARENT of sessions (sessions.provider_id
 		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
-		"oidc_providers", "accounts",
+		"saml_providers", "oidc_providers", "accounts",
 		"auth_instance_state",
-		"grants", "folders", "environments", "projects", "principals",
+		// The key catalogue (#49) sits between projects and environments:
+		// presence rows reference both keys and environments, keys reference
+		// key_groups, and the schema-revision row references projects — so all
+		// four drop before the hierarchy they hang from.
+		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
+		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
+		// goes first of the pair.
+		"grant_origins", "grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
 		"orgs", "goose_db_version",

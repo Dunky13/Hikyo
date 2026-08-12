@@ -181,11 +181,27 @@ type EnvironmentReader interface {
 	// purpose, so a count would hand the next create a position another row
 	// already holds.
 	NextOrder(ctx context.Context, p authz.Proof) (int64, error)
+	// Settings reads the environment's protection state and its own
+	// reauthentication window (#55). The proof addresses the environment.
+	Settings(ctx context.Context, p authz.Proof) (EnvironmentSettings, error)
+}
+
+// EnvironmentSettings is the per-environment half of `project-settings`.
+// HasWindow false means the environment inherits the instance default: a
+// stored copy of that default would freeze it at creation time.
+type EnvironmentSettings struct {
+	Protected bool
+	HasWindow bool
+	Window    time.Duration
 }
 
 // EnvironmentRepo is the full environments aggregate.
 type EnvironmentRepo interface {
 	EnvironmentReader
+	// SetSettings writes the protection state and window together: marking
+	// an environment protected CAPS its window, so the two are one fact and
+	// must not be writable apart.
+	SetSettings(ctx context.Context, p authz.Proof, s EnvironmentSettings) error
 	Create(ctx context.Context, p authz.Proof, env NewEnvironment) error
 	// UpdateNote mutates the non-chain note column of the environment
 	// addressed by the proof's chain. Chain columns are immutable —
@@ -217,9 +233,15 @@ type FolderRepo interface {
 }
 
 // Repos bundles the full repositories bound to one write transaction.
+//
+// Keys() is the KEYRING (#43, wrapped crypto material); Catalogue() is the KEY
+// CATALOGUE (#49, the project's schema). The two are unrelated senses of the
+// word and the accessors keep them apart, so no caller can reach one meaning
+// to while holding the other.
 type Repos interface {
 	Orgs() OrgRepo
 	Keys() KeyRepo
+	Catalogue() CatalogueRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -232,6 +254,7 @@ type Repos interface {
 type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
+	Catalogue() CatalogueReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader

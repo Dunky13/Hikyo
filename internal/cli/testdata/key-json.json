@@ -1,0 +1,35 @@
+{
+  "count": 1,
+  "items": [
+    {
+      "classification": "secret",
+      "created_at": "2026-01-02T03:04:05Z",
+      "declaration": {
+        "rule": {
+          "schemes": [
+            "postgres"
+          ],
+          "type": "url"
+        }
+      },
+      "deprecated": false,
+      "deprecation_note": "",
+      "description": "primary datastore",
+      "folder_path": "services/api",
+      "group_id": "kgr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66",
+      "id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+      "name": "DATABASE_URL",
+      "org_id": "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+      "presence": {
+        "forbidden_in": {
+          "mode": "none"
+        },
+        "required_in": {
+          "mode": "all"
+        }
+      },
+      "project_id": "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22"
+    }
+  ],
+  "schema_revision": 7
+}

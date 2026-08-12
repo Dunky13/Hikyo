@@ -779,10 +779,7 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		if e != nil {
 			return e
 		}
-		hardCap := s.ReauthHardCap
-		if hardCap <= 0 {
-			hardCap = effWin
-		}
+		hardCap := s.hardCap()
 		hardExpires := now.Add(hardCap)
 		windowExpires := now.Add(effWin)
 		if windowExpires.After(hardExpires) {
