@@ -775,7 +775,7 @@ func (q *Queries) GetRecoveryCodes(ctx context.Context, accountID string) (Recov
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
 FROM sessions WHERE id = ?
 `
 
@@ -793,6 +793,7 @@ type GetSessionByIDRow struct {
 	LastSeenAt        string
 	IdleExpiresAt     string
 	AbsoluteExpiresAt string
+	CsrfVerifier      []byte
 }
 
 // hikyo:authn-resolution
@@ -813,6 +814,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByID
 		&i.LastSeenAt,
 		&i.IdleExpiresAt,
 		&i.AbsoluteExpiresAt,
+		&i.CsrfVerifier,
 	)
 	return i, err
 }
@@ -820,7 +822,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByID
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
 FROM sessions WHERE verifier = ?
 `
 
@@ -838,6 +840,7 @@ type GetSessionByVerifierRow struct {
 	LastSeenAt        string
 	IdleExpiresAt     string
 	AbsoluteExpiresAt string
+	CsrfVerifier      []byte
 }
 
 // hikyo:authn-resolution
@@ -858,6 +861,7 @@ func (q *Queries) GetSessionByVerifier(ctx context.Context, verifier []byte) (Ge
 		&i.LastSeenAt,
 		&i.IdleExpiresAt,
 		&i.AbsoluteExpiresAt,
+		&i.CsrfVerifier,
 	)
 	return i, err
 }

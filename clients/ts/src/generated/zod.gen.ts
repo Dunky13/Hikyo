@@ -64,7 +64,8 @@ export const zEstablishCredentialRequest = z.object({
 
 export const zLocalLoginRequest = z.object({
     username: z.string().min(1).max(256),
-    password: z.string().min(1).max(1024)
+    password: z.string().min(1).max(1024),
+    artifact: z.optional(z.enum(['cli', 'browser']))
 });
 
 export const zTotpEnrolStartRequest = z.object({

@@ -57,57 +57,6 @@ func webauthnOptions(raw []byte) (apigen.WebauthnOptions, error) {
 	return m, nil
 }
 
-// browserSessionCookieFor builds the __Host-hikyo session cookie for a minted or
-// rotated browser session (identical attributes to the OIDC callback's).
-func browserSessionCookieFor(token string) *http.Cookie {
-	return &http.Cookie{
-		Name: browserSessionCookie, Value: token,
-		Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
-	}
-}
-
-// webauthnSessionResponse writes a LoginResult body and, for a browser session,
-// the reissued token on the __Host-hikyo cookie. One type satisfies every
-// LoginResult-returning finish operation's response interface.
-type webauthnSessionResponse struct {
-	body   apigen.LoginResult
-	cookie *http.Cookie
-}
-
-func (r webauthnSessionResponse) write(w http.ResponseWriter) error {
-	if r.cookie != nil {
-		http.SetCookie(w, r.cookie)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	return json.NewEncoder(w).Encode(r.body)
-}
-
-func (r webauthnSessionResponse) VisitEnrolPasskeyFinishResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r webauthnSessionResponse) VisitPasskeyLoginFinishResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r webauthnSessionResponse) VisitStepUpPasskeyFinishResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-func (r webauthnSessionResponse) VisitRemovePasskeyResponse(w http.ResponseWriter) error {
-	return r.write(w)
-}
-
-// sessionResponse builds the finish response, attaching the browser cookie only
-// when the reissued session is a browser artifact — a CLI-bearer caller must
-// not receive a browser cookie holding a cli-kind token, or its next request
-// would carry both legs and trip the A10 dual-presentation refusal.
-func sessionResponse(result service.LoginResult) webauthnSessionResponse {
-	resp := webauthnSessionResponse{body: loginResultOf(result)}
-	if result.Artifact == service.ArtifactBrowser && result.SessionToken != "" {
-		resp.cookie = browserSessionCookieFor(result.SessionToken)
-	}
-	return resp
-}
-
 // finishBody recovers the opaque authenticator response bytes from the wire
 // object. A nil body cannot reach here past contract validation (the request
 // body is required), but it is checked so a change to that contract fails loud.
@@ -312,17 +261,12 @@ func (a *API) ReauthPasskeyStart(ctx context.Context, req apigen.ReauthPasskeySt
 // reauthPasskeyResponse carries the window body and, for a session that arrived
 // on the cookie, the rotated token back onto that same cookie.
 type reauthPasskeyResponse struct {
-	body   apigen.WebauthnReauthResult
-	cookie *http.Cookie
+	body    apigen.WebauthnReauthResult
+	cookies []*http.Cookie
 }
 
 func (r reauthPasskeyResponse) VisitReauthPasskeyFinishResponse(w http.ResponseWriter) error {
-	if r.cookie != nil {
-		http.SetCookie(w, r.cookie)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	return json.NewEncoder(w).Encode(r.body)
+	return writeJSONWithCookies(w, r.cookies, http.StatusOK, r.body)
 }
 
 func (a *API) ReauthPasskeyFinish(ctx context.Context, req apigen.ReauthPasskeyFinishRequestObject) (apigen.ReauthPasskeyFinishResponseObject, error) {
@@ -358,7 +302,7 @@ func (a *API) ReauthPasskeyFinish(ctx context.Context, req apigen.ReauthPasskeyF
 	if result.SessionToken != "" {
 		if r := requestFrom(ctx); r != nil {
 			if _, cerr := r.Cookie(browserSessionCookie); cerr == nil {
-				resp.cookie = browserSessionCookieFor(result.SessionToken)
+				resp.cookies = browserCookiesFor(result.SessionToken, result.CSRFToken)
 			}
 		}
 	}

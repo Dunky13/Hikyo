@@ -560,7 +560,7 @@ func (s *Auth) completeSAMLLink(ctx context.Context, az *authz.TxAuthorizer, pro
 	}); err != nil {
 		return LoginResult{}, err
 	}
-	result, err := s.reissueSession(ctx, az, account, "password", MethodLocalPassword, initiating.Artifact, now)
+	result, err := s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(initiating.Artifact), now)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -639,7 +639,7 @@ func (s *Auth) completeSAMLReauth(ctx context.Context, az *authz.TxAuthorizer, p
 	if err != nil {
 		return LoginResult{}, err
 	}
-	value, verifier, err := s.newSessionArtifact(initiating.Artifact)
+	value, verifier, err := s.newSessionArtifact(Artifact(initiating.Artifact))
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -679,7 +679,7 @@ func (s *Auth) completeSAMLReauth(ctx context.Context, az *authz.TxAuthorizer, p
 		return LoginResult{}, err
 	}
 	return LoginResult{
-		SessionToken: value, SessionID: initiating.SessionID, Artifact: initiating.Artifact,
+		SessionToken: value, SessionID: initiating.SessionID, Artifact: Artifact(initiating.Artifact),
 		CreatedAt: initiating.CreatedAt, IdleExpires: initiating.IdleExpiresAt,
 		AbsExpires: initiating.AbsoluteExpiresAt, Principal: initiating.Principal,
 	}, nil
@@ -714,7 +714,7 @@ func (s *Auth) mintSAMLSession(ctx context.Context, az *authz.TxAuthorizer, acco
 	wire := audit.FromContext(ctx)
 	session := authz.NewSession{
 		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser, SessionGeneration: generation, CredentialEpoch: epoch,
+		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
 		AuthMethod: samlMethod(transaction.EntityID), Factors: string(factorsJSON),
 		AuthenticatedAt: claims.Authn.Instant, CeremonyID: transaction.ID, CreatedAt: now,
 		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
@@ -739,7 +739,7 @@ func (s *Auth) mintSAMLSession(ctx context.Context, az *authz.TxAuthorizer, acco
 	}
 	event, err := newAuditEvent(ctx, audit.EventAuthSessionCreated, account.PrincipalID,
 		audit.Object{Type: "session", ID: sessionID}, audit.OutcomeSuccess, "",
-		audit.Payload{"session_id": sessionID, "artifact": ArtifactBrowser, "method": samlMethod(transaction.EntityID), "assurance": assuranceLabel})
+		audit.Payload{"session_id": sessionID, "artifact": ArtifactBrowser.String(), "method": samlMethod(transaction.EntityID), "assurance": assuranceLabel})
 	if err != nil {
 		return LoginResult{}, err
 	}

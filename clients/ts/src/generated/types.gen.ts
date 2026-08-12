@@ -91,6 +91,18 @@ export type EstablishCredentialRequest = {
 export type LocalLoginRequest = {
     username: string;
     password: string;
+    /**
+     * Which session artifact to mint. Omitted or `cli` mints a CLI
+     * session whose token is returned in the body. `browser` mints a
+     * browser session delivered ONLY on the `__Host-wenv` cookie, with
+     * its synchronizer token on the `__Host-wenv-csrf` cookie; the body
+     * then carries no token at all. The two artifacts have distinct
+     * lifetimes, distinct CSRF contracts and distinct revocation
+     * surfaces, so the caller states which one it is asking for rather
+     * than the server guessing from a header.
+     *
+     */
+    artifact?: 'cli' | 'browser';
 };
 
 export type LoginResult = {

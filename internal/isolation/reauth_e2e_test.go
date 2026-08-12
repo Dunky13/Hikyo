@@ -366,7 +366,7 @@ func runReauthTOTPZeroWindow(t *testing.T, db *store.DB) {
 	auth.Now = func() time.Time { return clk }
 	ctx := t.Context()
 
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func runCredentialResetNetwork(t *testing.T, db *store.DB) {
 	ctx := t.Context()
 
 	// Step the admin up to multi-factor: credential-reset is MFA-mandatory.
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func runCredentialResetNetwork(t *testing.T, db *store.DB) {
 	if err := auth.EstablishCredential(ctx, res.Authority, targetPassword); err != nil {
 		t.Fatalf("establish with the reset authority: %v", err)
 	}
-	if _, err := auth.LocalLogin(ctx, "target", targetPassword); err != nil {
+	if _, err := auth.LocalLogin(ctx, "target", targetPassword, service.ArtifactCLI); err != nil {
 		t.Fatalf("the target cannot log in with the established credential: %v", err)
 	}
 	if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type = 'auth.credential_reset_issued' AND payload LIKE '%usr_target%'"); n != 1 {
@@ -559,7 +559,7 @@ func runCredentialResetNetwork(t *testing.T, db *store.DB) {
 	if err := auth.EstablishCredential(ctx, bg.Authority, opPassword); err != nil {
 		t.Fatalf("establish with the break-glass authority: %v", err)
 	}
-	if _, err := auth.LocalLogin(ctx, "op", opPassword); err != nil {
+	if _, err := auth.LocalLogin(ctx, "op", opPassword, service.ArtifactCLI); err != nil {
 		t.Fatalf("the operator cannot log in after break-glass: %v", err)
 	}
 }
@@ -590,7 +590,7 @@ func runCredentialResetMFAMandatory(t *testing.T, db *store.DB) {
 
 	// The admin holds credential-reset (granted explicitly above) but logs in with the
 	// password alone — a single-factor session that the MFA-mandatory rule refuses.
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

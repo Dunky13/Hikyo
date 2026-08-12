@@ -21,6 +21,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/store"
 	"github.com/Dunky13/hikyo/internal/store/keyring"
 	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/webui"
 )
 
 // ClientVerbs are the fixed not-yet-implemented client-side subcommands from
@@ -224,7 +225,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		db:      db,
 		keyring: kr,
 		ln:      ln,
-		handler: server.New(&service.System{DB: db, Store: sc}, api),
+		handler: server.New(&service.System{DB: db, Store: sc}, api, webui.Assets()),
 		log:     log,
 	}, nil
 }

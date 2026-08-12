@@ -26,10 +26,11 @@ import (
 
 // AuthService is the human-authentication surface this transport needs.
 type AuthService interface {
-	LocalLogin(ctx context.Context, username, password string) (service.LoginResult, error)
+	LocalLogin(ctx context.Context, username, password string, artifact service.Artifact) (service.LoginResult, error)
 	EstablishCredential(ctx context.Context, authority, password string) error
 	Identity(ctx context.Context, presented string) (service.Identity, error)
 	Logout(ctx context.Context, presented string) error
+	VerifyBrowserCSRF(ctx context.Context, presented, csrfToken string) error
 	SlideIdleClock(ctx context.Context, presented string) error
 	EnrolTOTPStart(ctx context.Context, presented, password string) (string, error)
 	EnrolTOTPConfirm(ctx context.Context, presented, code string) (service.LoginResult, error)
@@ -184,26 +185,15 @@ func (a *API) GetMeta(ctx context.Context, _ apigen.GetMetaRequestObject) (apige
 // ---------------------------------------------------------------------------
 
 func (a *API) LocalLogin(ctx context.Context, req apigen.LocalLoginRequestObject) (apigen.LocalLoginResponseObject, error) {
-	result, err := a.Auth.LocalLogin(ctx, req.Body.Username, req.Body.Password)
+	artifact := service.ArtifactCLI
+	if req.Body.Artifact != nil {
+		artifact = service.Artifact(*req.Body.Artifact)
+	}
+	result, err := a.Auth.LocalLogin(ctx, req.Body.Username, req.Body.Password, artifact)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.LocalLogin200JSONResponse{
-		SessionToken: optional(result.SessionToken),
-		Session: apigen.Session{
-			Id:                result.SessionID,
-			Artifact:          result.Artifact,
-			CreatedAt:         result.CreatedAt,
-			IdleExpiresAt:     result.IdleExpires,
-			AbsoluteExpiresAt: result.AbsExpires,
-			Assurance:         assuranceOf(result.Assurance),
-		},
-		Principal: apigen.Principal{
-			Id:          string(result.Principal),
-			Kind:        apigen.Human,
-			DisplayName: optional(result.DisplayName),
-		},
-	}, nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCredentialRequestObject) (apigen.EstablishCredentialResponseObject, error) {
@@ -230,7 +220,7 @@ func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.
 	return apigen.Whoami200JSONResponse{
 		Session: apigen.Session{
 			Id:                id.SessionID,
-			Artifact:          id.Artifact,
+			Artifact:          id.Artifact.String(),
 			CreatedAt:         id.CreatedAt,
 			IdleExpiresAt:     id.IdleExpiresAt,
 			AbsoluteExpiresAt: id.AbsoluteExpiresAt,
@@ -240,9 +230,24 @@ func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.
 	}, nil
 }
 
+// logoutResponse clears the browser cookies alongside the 204. The row is
+// already gone — that is what revokes — but leaving the cookies would make
+// every subsequent request present a value that can only be refused, and the
+// SPA would look logged in until it asked.
+type logoutResponse struct{ cookies []*http.Cookie }
+
+func (r logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+	return writeJSONWithCookies(w, r.cookies, http.StatusNoContent, nil)
+}
+
 func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.LogoutResponseObject, error) {
 	if err := a.Auth.Logout(ctx, bearer(ctx)); err != nil {
 		return nil, err
+	}
+	if r := requestFrom(ctx); r != nil {
+		if c, cerr := r.Cookie(browserSessionCookie); cerr == nil && c.Value != "" {
+			return logoutResponse{cookies: expiredBrowserCookies()}, nil
+		}
 	}
 	return apigen.Logout204Response{}, nil
 }
@@ -290,7 +295,7 @@ func (a *API) EnrolTotpConfirm(ctx context.Context, req apigen.EnrolTotpConfirmR
 		}
 		return nil, err
 	}
-	return apigen.EnrolTotpConfirm200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject) (apigen.StepUpTotpResponseObject, error) {
@@ -303,7 +308,7 @@ func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject
 		}
 		return nil, err
 	}
-	return apigen.StepUpTotp200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject) (apigen.RemoveTotpResponseObject, error) {
@@ -316,7 +321,7 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 		}
 		return nil, err
 	}
-	return apigen.RemoveTotp200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.RegenerateRecoveryCodesRequestObject) (apigen.RegenerateRecoveryCodesResponseObject, error) {
@@ -329,10 +334,14 @@ func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.Regenerate
 		}
 		return nil, err
 	}
-	return apigen.RegenerateRecoveryCodes200JSONResponse{
+	resp := recoveryCodesResponse{body: apigen.RecoveryCodesResult{
 		RecoveryCodes: codes,
 		Login:         loginResultOf(result),
-	}, nil
+	}}
+	if result.Artifact == service.ArtifactBrowser && result.SessionToken != "" {
+		resp.cookies = browserCookiesFor(result.SessionToken, result.CSRFToken)
+	}
+	return resp, nil
 }
 
 func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequestObject) (apigen.BeginRecoveryResponseObject, error) {
@@ -366,7 +375,7 @@ func loginResultOf(r service.LoginResult) apigen.LoginResult {
 		SessionToken: token,
 		Session: apigen.Session{
 			Id:                r.SessionID,
-			Artifact:          r.Artifact,
+			Artifact:          r.Artifact.String(),
 			CreatedAt:         r.CreatedAt,
 			IdleExpiresAt:     r.IdleExpires,
 			AbsoluteExpiresAt: r.AbsExpires,
@@ -440,6 +449,7 @@ func (a *API) Middleware() []func(http.Handler) http.Handler {
 		a.wireContext,
 		a.stashRequest,
 		a.extractBearer,
+		a.requireCSRF,
 		a.validateAgainstContract,
 	}
 }

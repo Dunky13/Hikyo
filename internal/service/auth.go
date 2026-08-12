@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,11 +55,54 @@ const (
 	BootstrapLifetime = 24 * time.Hour
 )
 
-// Session artifact kinds, matching the wire enum.
+// Artifact is a session artifact kind: the closed set of client classes this
+// instance mints sessions for. It is a type rather than a bare string because
+// it threads through login, minting and the audit trail, and each of those is
+// a place a typo would otherwise become a silently different session class —
+// a browser session with the CLI's lifetime, say, or a cookie leg with no CSRF
+// contract.
+type Artifact string
+
 const (
-	ArtifactCLI     = "cli"
-	ArtifactBrowser = "browser"
+	// ArtifactCLI is a terminal session: a replayable bearer token, no cookie
+	// channel, and therefore no CSRF contract.
+	ArtifactCLI Artifact = "cli"
+	// ArtifactBrowser is a cookie session: HttpOnly token, shorter clocks, and
+	// a synchronizer token the client must echo.
+	ArtifactBrowser Artifact = "browser"
 )
+
+// Valid reports whether a names a kind this instance mints. The wire enum is
+// closed, so anything else is a caller error rather than a future value.
+func (a Artifact) Valid() bool { return a == ArtifactCLI || a == ArtifactBrowser }
+
+func (a Artifact) String() string { return string(a) }
+
+// idle is the clock this artifact slides on. Sliding a browser session by the
+// CLI window would silently hand a cookie session the CLI's far longer life,
+// which is the opposite of what two artifact kinds are for.
+func (a Artifact) idle() time.Duration {
+	if a == ArtifactBrowser {
+		return BrowserSessionIdle
+	}
+	return CLISessionIdle
+}
+
+// absolute is the lifetime activity never extends.
+func (a Artifact) absolute() time.Duration {
+	if a == ArtifactBrowser {
+		return BrowserSessionAbsolute
+	}
+	return CLISessionAbsolute
+}
+
+// bearerKind is the token grammar this artifact's value carries.
+func (a Artifact) bearerKind() crypto.ArtifactType {
+	if a == ArtifactBrowser {
+		return crypto.ArtifactBrowserSession
+	}
+	return crypto.ArtifactCLISession
+}
 
 // Authentication methods, matching the wire enum.
 const (
@@ -151,7 +195,7 @@ type Assurance struct {
 type Identity struct {
 	Principal         domain.PrincipalID
 	SessionID         string
-	Artifact          string
+	Artifact          Artifact
 	Assurance         Assurance
 	CreatedAt         time.Time
 	IdleExpiresAt     time.Time
@@ -160,7 +204,7 @@ type Identity struct {
 
 func identityOf(i authz.Identity) Identity {
 	return Identity{
-		Principal: i.Principal, SessionID: i.SessionID, Artifact: i.Artifact,
+		Principal: i.Principal, SessionID: i.SessionID, Artifact: Artifact(i.Artifact),
 		Assurance: Assurance{
 			Method: i.Assurance.Method, Factors: i.Assurance.Factors,
 			AuthenticatedAt: i.Assurance.AuthenticatedAt, CeremonyID: i.Assurance.CeremonyID,
@@ -174,7 +218,7 @@ func identityOf(i authz.Identity) Identity {
 type LoginResult struct {
 	SessionToken string
 	SessionID    string
-	Artifact     string
+	Artifact     Artifact
 	CreatedAt    time.Time
 	IdleExpires  time.Time
 	AbsExpires   time.Time
@@ -188,14 +232,28 @@ type LoginResult struct {
 }
 
 // LocalLogin is the local floor: password verification against an
-// envelope-encrypted Argon2id verifier, minting a CLI session artifact.
+// envelope-encrypted Argon2id verifier, minting the session artifact the
+// caller asked for — a CLI session, or the browser session #56's login page
+// establishes.
 //
 // The shape is dictated by the enumeration rule. An unknown account traverses
 // the same admission budget, the same per-account backoff bucket and a
 // bounded dummy-verifier derivation, so neither the response nor the timing
 // distinguishes it from a wrong password on a real account. Every refusal
 // answers domain.ErrUnauthenticated.
-func (s *Auth) LocalLogin(ctx context.Context, username, password string) (LoginResult, error) {
+func (s *Auth) LocalLogin(ctx context.Context, username, password string, artifact Artifact) (LoginResult, error) {
+	// The caller states which artifact it wants; the server never infers it
+	// from a header. An unrecognised value is a caller error, refused before
+	// any credential work happens rather than silently downgraded to CLI — a
+	// browser that got a CLI session would receive its token in the body,
+	// which is exactly the disclosure the browser artifact exists to prevent.
+	if artifact == "" {
+		artifact = ArtifactCLI
+	}
+	if !artifact.Valid() {
+		return LoginResult{}, fmt.Errorf("%w: unknown session artifact %q", domain.ErrInvalid, artifact)
+	}
+
 	// The per-account delay is evaluated BEFORE the semaphore, not after.
 	// Sleeping while holding an expensive-work slot would let an attacker put
 	// a handful of identifiers into backoff and then occupy every slot doing
@@ -212,7 +270,7 @@ func (s *Auth) LocalLogin(ctx context.Context, username, password string) (Login
 	}
 	defer release()
 
-	out, err := s.attemptLogin(ctx, username, password)
+	out, err := s.attemptLogin(ctx, username, password, artifact)
 	switch {
 	case err == nil:
 		s.Admission.RecordSuccess(username)
@@ -245,7 +303,7 @@ func (s *Auth) LocalLogin(ctx context.Context, username, password string) (Login
 // change between the read and the write. The write phase therefore re-reads
 // the row and refuses if its version counter or the instance epoch moved,
 // so a password changed mid-login cannot be used to mint a session.
-func (s *Auth) attemptLogin(ctx context.Context, username, password string) (LoginResult, error) {
+func (s *Auth) attemptLogin(ctx context.Context, username, password string, artifact Artifact) (LoginResult, error) {
 	// Phase 1 — read. A read transaction, so it does not queue behind the
 	// single writer.
 	var (
@@ -356,7 +414,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 		refused = nil
 		now := s.now()
 		if cause != "" {
-			if ferr := s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, cause); ferr != nil {
+			if ferr := s.failLogin(ctx, az, now, accountIDOf(resolved, account), resolved, artifact, cause); ferr != nil {
 				return ferr // audit not durable: roll back and fail loud
 			}
 			refused = domain.ErrUnauthenticated
@@ -367,7 +425,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 		current, err := az.PasswordCredentialFor(ctx, account.ID)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
-				if ferr := s.failLogin(ctx, az, now, account.ID, true, "credential-removed"); ferr != nil {
+				if ferr := s.failLogin(ctx, az, now, account.ID, true, artifact, "credential-removed"); ferr != nil {
 					return ferr
 				}
 				refused = domain.ErrUnauthenticated
@@ -380,7 +438,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 			return err
 		}
 		if current.RowVersion != cred.RowVersion || current.CredentialEpoch != liveEpoch {
-			if ferr := s.failLogin(ctx, az, now, account.ID, true, "credential-changed"); ferr != nil {
+			if ferr := s.failLogin(ctx, az, now, account.ID, true, artifact, "credential-changed"); ferr != nil {
 				return ferr
 			}
 			refused = domain.ErrUnauthenticated
@@ -391,7 +449,7 @@ func (s *Auth) attemptLogin(ctx context.Context, username, password string) (Log
 				return err
 			}
 		}
-		result, err = s.mintSession(ctx, az, account, now)
+		result, err = s.mintSession(ctx, az, account, artifact, now)
 		return err
 	})
 	if err != nil {
@@ -442,10 +500,22 @@ func accountIDOf(resolved bool, a authz.Account) string {
 // record says single-factor password, truthfully: no factor exists in this
 // slice, and recording something stronger would be a lie the chokepoint later
 // acts on.
-func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, now time.Time) (LoginResult, error) {
-	value, verifier, err := crypto.NewArtifact(crypto.ArtifactCLISession)
+func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, artifact Artifact, now time.Time) (LoginResult, error) {
+	value, verifier, err := crypto.NewArtifact(artifact.bearerKind())
 	if err != nil {
 		return LoginResult{}, err
+	}
+	// A browser session authenticates on a cookie the browser attaches by
+	// itself, so it needs a second value the browser will NOT attach by
+	// itself. A CLI session has no cookie channel and therefore no CSRF
+	// contract; minting a token it can never be asked for would be noise.
+	var csrfValue string
+	var csrfVerifier []byte
+	if artifact == ArtifactBrowser {
+		csrfValue, csrfVerifier, err = crypto.NewArtifact(crypto.ArtifactCSRF)
+		if err != nil {
+			return LoginResult{}, err
+		}
 	}
 	id, err := newID("ses")
 	if err != nil {
@@ -466,11 +536,12 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 	wire := audit.FromContext(ctx)
 	sess := authz.NewSession{
 		ID: id, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactCLI, SessionGeneration: generation, CredentialEpoch: epoch,
+		Artifact: artifact.String(), SessionGeneration: generation, CredentialEpoch: epoch,
 		AuthMethod: MethodLocalPassword, Factors: string(factors),
 		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(CLISessionIdle), AbsoluteExpiresAt: now.Add(CLISessionAbsolute),
+		IdleExpiresAt: now.Add(artifact.idle()), AbsoluteExpiresAt: now.Add(artifact.absolute()),
 		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
+		CSRFVerifier: csrfVerifier,
 	}
 	if err := az.MintSession(ctx, sess); err != nil {
 		return LoginResult{}, err
@@ -481,11 +552,11 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 		payload audit.Payload
 	}{
 		{audit.EventAuthLogin, audit.Payload{
-			"method": MethodLocalPassword, "artifact": ArtifactCLI,
+			"method": MethodLocalPassword, "artifact": artifact.String(),
 			"subject_resolved": true, "account_id": account.ID, "assurance": "single-factor",
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": id, "artifact": ArtifactCLI,
+			"session_id": id, "artifact": artifact.String(),
 			"method": MethodLocalPassword, "assurance": "single-factor",
 		}},
 	} {
@@ -500,7 +571,7 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 	}
 
 	return LoginResult{
-		SessionToken: value, SessionID: id, Artifact: ArtifactCLI,
+		SessionToken: value, SessionID: id, Artifact: artifact, CSRFToken: csrfValue,
 		CreatedAt: now, IdleExpires: sess.IdleExpiresAt, AbsExpires: sess.AbsoluteExpiresAt,
 		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
 		Assurance: Assurance{
@@ -517,9 +588,9 @@ func (s *Auth) mintSession(ctx context.Context, az *authz.TxAuthorizer, account 
 // fail-closed forbids. The cause is recorded by CLASS, never returned to the
 // caller — the trail is audit-read gated and may hold the truth, the response
 // may not.
-func (s *Auth) failLogin(ctx context.Context, az *authz.TxAuthorizer, now time.Time, accountID string, resolved bool, cause string) error {
+func (s *Auth) failLogin(ctx context.Context, az *authz.TxAuthorizer, now time.Time, accountID string, resolved bool, artifact Artifact, cause string) error {
 	payload := audit.Payload{
-		"method": MethodLocalPassword, "artifact": ArtifactCLI,
+		"method": MethodLocalPassword, "artifact": artifact.String(),
 		"subject_resolved": resolved, "cause": cause,
 	}
 	if accountID != "" {
@@ -829,6 +900,47 @@ func (s *Auth) Identity(ctx context.Context, presented string) (Identity, error)
 	return out, err
 }
 
+// ErrCSRFMismatch is a LIVE browser session that did not present its own
+// synchronizer token. It is deliberately distinct from
+// domain.ErrUnauthenticated: the transport treats a session that resolves to
+// nothing as "no cookie leg" and lets the request through to be judged on its
+// own merits, and treats this as the refusal the CSRF gate exists for. On the
+// wire both are the same uniform 401.
+var ErrCSRFMismatch = errors.New("service: the presented synchronizer token is not this session's")
+
+// VerifyBrowserCSRF checks a presented synchronizer token against the session
+// row's verifier.
+//
+// It is a transport duty, not an authorization one — #54 A10 fixes the CSRF
+// REQUIREMENT in transport, and the check belongs with it — but the verifier
+// lives on the session row, so the read happens here.
+//
+// Two outcomes, and the difference is load-bearing:
+//
+//   - domain.ErrUnauthenticated — the presented cookie resolves to no live
+//     session. There is nothing to protect: a dead artifact authorizes
+//     nothing, and refusing here would make a browser holding an expired
+//     cookie unable to log in again, since a login POST carries that cookie.
+//   - ErrCSRFMismatch — the session is live and the token is not its own.
+//     This is the refusal the gate exists for.
+//
+// A CLI session reaching here is a mismatch, not a pass: it can only happen if
+// a `cli` token was planted in the browser cookie, and a session with no CSRF
+// verifier can satisfy no CSRF contract.
+func (s *Auth) VerifyBrowserCSRF(ctx context.Context, presented, csrfToken string) error {
+	return tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		id, err := az.Authenticate(ctx, presented, s.now())
+		if err != nil {
+			return err
+		}
+		if csrfToken == "" || len(id.CSRFVerifier) == 0 ||
+			subtle.ConstantTimeCompare(id.CSRFVerifier, crypto.ArtifactVerifier(csrfToken)) != 1 {
+			return ErrCSRFMismatch
+		}
+		return nil
+	})
+}
+
 // Logout revokes the presented session. A session that no longer resolves
 // answers the uniform unauthenticated refusal: there is nothing to revoke and
 // nothing to report.
@@ -896,6 +1008,6 @@ func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 		if err != nil {
 			return err
 		}
-		return az.SlideSession(ctx, id.SessionID, now, now.Add(CLISessionIdle))
+		return az.SlideSession(ctx, id.SessionID, now, now.Add(Artifact(id.Artifact).idle()))
 	})
 }

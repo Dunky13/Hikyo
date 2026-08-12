@@ -352,12 +352,12 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 			{"e2e-admin", "wrong password entirely"},
 			{"no-such-account", password},
 		} {
-			if _, err := auth.LocalLogin(ctx, bad.user, bad.pass); !errors.Is(err, domain.ErrUnauthenticated) {
+			if _, err := auth.LocalLogin(ctx, bad.user, bad.pass, service.ArtifactCLI); !errors.Is(err, domain.ErrUnauthenticated) {
 				t.Fatalf("login(%q): err = %v, want ErrUnauthenticated", bad.user, err)
 			}
 		}
 
-		session, err := auth.LocalLogin(ctx, "e2e-admin", password)
+		session, err := auth.LocalLogin(ctx, "e2e-admin", password, service.ArtifactCLI)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -406,7 +406,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 
 		// Crossing the per-account backoff threshold is its own event.
 		for range 6 {
-			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong")
+			_, _ = auth.LocalLogin(ctx, "e2e-admin", "still wrong", service.ArtifactCLI)
 		}
 
 		// Credential reset (#54): break-glass on the host reaches any target,

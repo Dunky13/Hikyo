@@ -336,7 +336,7 @@ func (s *Auth) OIDCCallback(ctx context.Context, slug, code, stateValue, issPara
 	case purposeLogin:
 		return s.completeLogin(ctx, prov, txn, claims)
 	case purposeLink:
-		return s.completeLink(ctx, prov, txn, claims)
+		return s.completeLink(ctx, prov, txn, claims, presented)
 	case purposeReauth:
 		return s.completeReauth(ctx, prov, txn, claims, presented)
 	default:
@@ -598,7 +598,7 @@ func (s *Auth) jitProvision(ctx context.Context, az *authz.TxAuthorizer, prov au
 // account-security mutation: the proof ceremony was consumed with the
 // transaction (A6), so here the mutation reissues the acting session from that
 // proof, deleting every prior session.
-func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims) (OIDCCallbackResult, error) {
+func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn authz.OIDCTransaction, claims oidcrp.Claims, presented string) (OIDCCallbackResult, error) {
 	var (
 		result  LoginResult
 		refused error
@@ -638,7 +638,20 @@ func (s *Auth) completeLink(ctx context.Context, prov authz.OIDCProvider, txn au
 		}); e != nil {
 			return e
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
+		// Re-authenticate the acting session inside the write tx, for the same
+		// two reasons its siblings do: a session revoked between the binding
+		// check and here must not link an identity and reissue itself, and the
+		// replacement must be the SAME artifact kind — a browser that linked an
+		// identity and got a `cli` token back would be logged out on the spot,
+		// with a long-lived credential handed to script.
+		live, e := az.Authenticate(ctx, presented, now)
+		if e != nil {
+			return e
+		}
+		if live.Principal != account.PrincipalID {
+			return domain.ErrUnauthenticated
+		}
+		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if e != nil {
 			return e
 		}
@@ -768,7 +781,7 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 		if e != nil {
 			return e
 		}
-		value, verifier, e := s.newSessionArtifact(id.Artifact)
+		value, verifier, e := s.newSessionArtifact(Artifact(id.Artifact))
 		if e != nil {
 			return e
 		}
@@ -812,7 +825,7 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 			}
 		}
 		result = LoginResult{
-			SessionToken: value, SessionID: id.SessionID, Artifact: id.Artifact,
+			SessionToken: value, SessionID: id.SessionID, Artifact: Artifact(id.Artifact),
 			CreatedAt: id.CreatedAt, IdleExpires: id.IdleExpiresAt, AbsExpires: id.AbsoluteExpiresAt,
 			Principal: id.Principal,
 		}
@@ -829,7 +842,7 @@ func (s *Auth) completeReauth(ctx context.Context, prov authz.OIDCProvider, txn 
 
 // newSessionArtifact mints a fresh value+verifier of the same artifact type as
 // the session being rotated.
-func (s *Auth) newSessionArtifact(artifact string) (string, []byte, error) {
+func (s *Auth) newSessionArtifact(artifact Artifact) (string, []byte, error) {
 	if artifact == ArtifactBrowser {
 		return crypto.NewArtifact(crypto.ArtifactBrowserSession)
 	}
@@ -874,7 +887,7 @@ func (s *Auth) mintOIDCSession(ctx context.Context, az *authz.TxAuthorizer, acco
 	wire := audit.FromContext(ctx)
 	sess := authz.NewSession{
 		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser, SessionGeneration: generation, CredentialEpoch: epoch,
+		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
 		AuthMethod: oidcMethod(issuer), Factors: string(factors),
 		AuthenticatedAt: now, CreatedAt: now,
 		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
@@ -894,7 +907,7 @@ func (s *Auth) mintOIDCSession(ctx context.Context, az *authz.TxAuthorizer, acco
 			"amr": joinAMR(claims.AMR), "provider_row_version": int(prov.RowVersion),
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": sessionID, "artifact": ArtifactBrowser,
+			"session_id": sessionID, "artifact": ArtifactBrowser.String(),
 			"method": oidcMethod(issuer), "assurance": assuranceLabel,
 		}},
 	} {
@@ -1105,7 +1118,7 @@ func (s *Auth) UnlinkIdentity(ctx context.Context, presented, identityID, proof 
 		if e := az.RemoveExternalIdentity(ctx, identityID); e != nil {
 			return e
 		}
-		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
+		result, e = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if e != nil {
 			return e
 		}

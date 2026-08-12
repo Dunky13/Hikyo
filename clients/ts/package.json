@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.10.0",
   "description": "Generated TypeScript client and Zod schemas for the Hikyo API. Generated from ../../api/openapi.yaml - never edited by hand.",
   "scripts": {
     "generate": "openapi-ts",

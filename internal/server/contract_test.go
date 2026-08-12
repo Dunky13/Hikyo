@@ -34,19 +34,31 @@ import (
 // internal/isolation; what these prove is the TRANSPORT's contract, which is
 // a different claim and needs a different fixture.
 type stubAuth struct {
-	login         func(ctx context.Context, u, p string) (service.LoginResult, error)
+	login         func(ctx context.Context, u, p string, artifact service.Artifact) (service.LoginResult, error)
 	identity      func(ctx context.Context, presented string) (service.Identity, error)
 	logout        func(ctx context.Context, presented string) error
 	estab         func(ctx context.Context, authority, password string) error
+	verifyCSRF    func(ctx context.Context, presented, csrfToken string) error
+	reissue       func() (service.LoginResult, error)
 	passkeyStart  func(ctx context.Context) ([]byte, error)
 	passkeyFinish func(ctx context.Context, response []byte) (service.LoginResult, error)
 }
 
-func (s stubAuth) LocalLogin(ctx context.Context, u, p string) (service.LoginResult, error) {
+func (s stubAuth) LocalLogin(ctx context.Context, u, p string, artifact service.Artifact) (service.LoginResult, error) {
 	if s.login == nil {
 		return service.LoginResult{}, domain.ErrUnauthenticated
 	}
-	return s.login(ctx, u, p)
+	return s.login(ctx, u, p, artifact)
+}
+
+// VerifyBrowserCSRF defaults to accepting: most fixtures are about the
+// transport's decision to DEMAND the token, not about the row it is checked
+// against. The fixture that cares supplies its own.
+func (s stubAuth) VerifyBrowserCSRF(ctx context.Context, presented, csrfToken string) error {
+	if s.verifyCSRF == nil {
+		return nil
+	}
+	return s.verifyCSRF(ctx, presented, csrfToken)
 }
 
 func (s stubAuth) EstablishCredential(ctx context.Context, a, p string) error {
@@ -79,20 +91,31 @@ func (s stubAuth) EnrolTOTPStart(context.Context, string, string) (string, error
 	return "", domain.ErrUnauthenticated
 }
 
+// reissue is the shared stub for every account-security mutation: each of them
+// reissues or rotates the acting session, and the transport's obligation is
+// identical for all of them, so one hook drives them all.
+func (s stubAuth) reissued() (service.LoginResult, error) {
+	if s.reissue == nil {
+		return service.LoginResult{}, domain.ErrUnauthenticated
+	}
+	return s.reissue()
+}
+
 func (s stubAuth) EnrolTOTPConfirm(context.Context, string, string) (service.LoginResult, error) {
-	return service.LoginResult{}, domain.ErrUnauthenticated
+	return s.reissued()
 }
 
 func (s stubAuth) StepUpTOTP(context.Context, string, string) (service.LoginResult, error) {
-	return service.LoginResult{}, domain.ErrUnauthenticated
+	return s.reissued()
 }
 
 func (s stubAuth) RemoveTOTP(context.Context, string, string) (service.LoginResult, error) {
-	return service.LoginResult{}, domain.ErrUnauthenticated
+	return s.reissued()
 }
 
 func (s stubAuth) GenerateRecoveryCodes(context.Context, string, string) ([]string, service.LoginResult, error) {
-	return nil, service.LoginResult{}, domain.ErrUnauthenticated
+	result, err := s.reissued()
+	return []string{"hik_1_rc_one", "hik_1_rc_two"}, result, err
 }
 
 func (s stubAuth) ConsumeRecoveryCode(context.Context, string, string) (service.RecoveryResult, error) {
@@ -116,7 +139,7 @@ func (s stubAuth) ListIdentities(context.Context, string) ([]service.ExternalIde
 }
 
 func (s stubAuth) UnlinkIdentity(context.Context, string, string, string) (service.LoginResult, error) {
-	return service.LoginResult{}, domain.ErrUnauthenticated
+	return s.reissued()
 }
 
 // WebAuthn (#54): the transport contract for the opaque-JSON bridging is
@@ -257,7 +280,7 @@ func newTestServer(t *testing.T, auth server.AuthService, orgs server.OrgService
 		// contract test that does not care about them still exercises the real
 		// router and the real response validation rather than nil-panicking.
 		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
-	}))
+	}, nil))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -440,7 +463,7 @@ func TestUnknownRequestMembersAreRefused(t *testing.T) {
 
 func TestSuccessfulLoginMatchesTheContract(t *testing.T) {
 	srv := newTestServer(t, stubAuth{
-		login: func(context.Context, string, string) (service.LoginResult, error) {
+		login: func(context.Context, string, string, service.Artifact) (service.LoginResult, error) {
 			return service.LoginResult{
 				SessionToken: "hik_1_cli_stub", SessionID: liveIdentity.SessionID,
 				Artifact: "cli", CreatedAt: liveIdentity.CreatedAt,
@@ -501,7 +524,7 @@ func TestNullableMetadataRoundTripsAbsentNullAndValue(t *testing.T) {
 
 func TestOverloadIsUniformAndCarriesRetryAfter(t *testing.T) {
 	srv := newTestServer(t, stubAuth{
-		login: func(context.Context, string, string) (service.LoginResult, error) {
+		login: func(context.Context, string, string, service.Artifact) (service.LoginResult, error) {
 			return service.LoginResult{}, admission.ErrOverloaded
 		},
 	}, stubOrgs{})
@@ -824,7 +847,7 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 		Grants:       stubGrants{stubHierarchy{err: outcome}},
 		Settings:     stubSettings{stubHierarchy{err: outcome}},
 		Version:      "test",
-	}))
+	}, nil))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -927,11 +950,11 @@ func TestOrdinaryUpdateRefusesAClassificationChange(t *testing.T) {
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
 		Auth: stubAuth{identity: liveIdentityFn}, Orgs: stubOrgs{}, Providers: stubProviders{},
 		Keys: stubKeys{}, Version: "test",
-	}))
+	}, nil))
 	t.Cleanup(srv.Close)
 	path := api.PathPrefix + "/orgs/" + testOrgID + "/projects/" + testProjectID + "/keys/" + testKeyID
 	for _, classification := range []apigen.KeyClassification{"secret", "config"} {
-		resp, payload := call(t, srv, http.MethodPatch, path, "ew_1_cli_x",
+		resp, payload := call(t, srv, http.MethodPatch, path, "hik_1_cli_x",
 			apigen.UpdateKeyMetadataRequest{Classification: &classification})
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("classification %q in an ordinary update answered %d, want 400", classification, resp.StatusCode)
@@ -944,7 +967,7 @@ func TestOrdinaryUpdateRefusesAClassificationChange(t *testing.T) {
 	// answers the uniform nonexistent — a different outcome from the refusal
 	// above, which is what proves the refusal is the transport's and not an
 	// accident of the fixture.
-	resp, _ := call(t, srv, http.MethodPatch, path, "ew_1_cli_x", apigen.UpdateKeyMetadataRequest{})
+	resp, _ := call(t, srv, http.MethodPatch, path, "hik_1_cli_x", apigen.UpdateKeyMetadataRequest{})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("a metadata update without a classification answered %d, want the service's 404", resp.StatusCode)
 	}
@@ -992,7 +1015,7 @@ func TestRefusedListingLeaksNoCount(t *testing.T) {
 		base + "/projects",
 		base + "/projects/" + testProjectID + "/environments",
 	} {
-		resp, body := call(t, refused, http.MethodGet, path, "ew_1_cli_x", nil)
+		resp, body := call(t, refused, http.MethodGet, path, "hik_1_cli_x", nil)
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s: status %d, want 404", path, resp.StatusCode)
 			continue
@@ -1062,7 +1085,7 @@ func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
 		},
 		Projects: stubHierarchy{}, Environments: stubEnvs{}, Folders: stubFolders{},
 		Version: "test",
-	}))
+	}, nil))
 	t.Cleanup(srv.Close)
 
 	resp, payload := call(t, srv, http.MethodPatch, api.PathPrefix+"/orgs/"+testOrgID,

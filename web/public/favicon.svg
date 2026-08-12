@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Hikyo">
+  <rect width="32" height="32" rx="6" fill="oklch(0.19 0.012 220)" />
+  <path d="M6 11 L10.5 21 L14 14 L17.5 21 L22 11" fill="none" stroke="oklch(0.82 0.09 195)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="26" cy="11" r="2" fill="oklch(0.82 0.09 195)" />
+</svg>

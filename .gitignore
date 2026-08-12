@@ -45,3 +45,15 @@ hikyo-dev.db*
 
 # Signing private keys are always offline; public roots are committed explicitly.
 release/trust/*.key
+.implement-context/
+
+# Frontend (#56): pnpm deps, the Vite build the `ui` tag embeds, and
+# Playwright's own output. The build output is deliberately NOT committed —
+# a minified bundle is unreviewable, and a stale one would ship silently.
+web/node_modules/
+web/test-results/
+web/playwright-report/
+web/.playwright/
+web/e2e/.auth/
+web/e2e/.runs/
+internal/webui/dist/

@@ -167,6 +167,24 @@ func (e KeyRuleType) Valid() bool {
 	}
 }
 
+// Defines values for LocalLoginRequestArtifact.
+const (
+	Browser LocalLoginRequestArtifact = "browser"
+	Cli     LocalLoginRequestArtifact = "cli"
+)
+
+// Valid indicates whether the value is a known member of the LocalLoginRequestArtifact enum.
+func (e LocalLoginRequestArtifact) Valid() bool {
+	switch e {
+	case Browser:
+		return true
+	case Cli:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OidcStartRequestPurpose.
 const (
 	OidcStartRequestPurposeLink   OidcStartRequestPurpose = "link"
@@ -1017,9 +1035,28 @@ type KeyRuleType string
 
 // LocalLoginRequest defines model for LocalLoginRequest.
 type LocalLoginRequest struct {
-	Password string `json:"password"`
-	Username string `json:"username"`
+	// Artifact Which session artifact to mint. Omitted or `cli` mints a CLI
+	// session whose token is returned in the body. `browser` mints a
+	// browser session delivered ONLY on the `__Host-wenv` cookie, with
+	// its synchronizer token on the `__Host-wenv-csrf` cookie; the body
+	// then carries no token at all. The two artifacts have distinct
+	// lifetimes, distinct CSRF contracts and distinct revocation
+	// surfaces, so the caller states which one it is asking for rather
+	// than the server guessing from a header.
+	Artifact *LocalLoginRequestArtifact `json:"artifact,omitempty"`
+	Password string                     `json:"password"`
+	Username string                     `json:"username"`
 }
+
+// LocalLoginRequestArtifact Which session artifact to mint. Omitted or `cli` mints a CLI
+// session whose token is returned in the body. `browser` mints a
+// browser session delivered ONLY on the `__Host-wenv` cookie, with
+// its synchronizer token on the `__Host-wenv-csrf` cookie; the body
+// then carries no token at all. The two artifacts have distinct
+// lifetimes, distinct CSRF contracts and distinct revocation
+// surfaces, so the caller states which one it is asking for rather
+// than the server guessing from a header.
+type LocalLoginRequestArtifact string
 
 // LoginResult defines model for LoginResult.
 type LoginResult struct {
@@ -1897,7 +1934,7 @@ type ServerInterface interface {
 	// UnlinkIdentity Unlink an external identity.
 	// (DELETE /api/v1/auth/identities/{id})
 	UnlinkIdentity(w http.ResponseWriter, r *http.Request, id IdentityID)
-	// LocalLogin Terminal-native local login; mints a CLI session artifact.
+	// LocalLogin Local password login; mints a CLI or browser session artifact.
 	// (POST /api/v1/auth/local/login)
 	LocalLogin(w http.ResponseWriter, r *http.Request)
 	// Logout Revoke the presented session.
@@ -2209,7 +2246,7 @@ func (_ Unimplemented) UnlinkIdentity(w http.ResponseWriter, r *http.Request, id
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// LocalLogin Terminal-native local login; mints a CLI session artifact.
+// LocalLogin Local password login; mints a CLI or browser session artifact.
 // (POST /api/v1/auth/local/login)
 func (_ Unimplemented) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -14761,7 +14798,7 @@ type StrictServerInterface interface {
 	// UnlinkIdentity Unlink an external identity.
 	// (DELETE /api/v1/auth/identities/{id})
 	UnlinkIdentity(ctx context.Context, request UnlinkIdentityRequestObject) (UnlinkIdentityResponseObject, error)
-	// LocalLogin Terminal-native local login; mints a CLI session artifact.
+	// LocalLogin Local password login; mints a CLI or browser session artifact.
 	// (POST /api/v1/auth/local/login)
 	LocalLogin(ctx context.Context, request LocalLoginRequestObject) (LocalLoginResponseObject, error)
 	// Logout Revoke the presented session.

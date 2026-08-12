@@ -305,7 +305,7 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 
 	// Phase 3 - consume the step, rotate the acting session (every reauth rotates)
 	// and open the window over the environment.
-	value, verifier, err := s.newSessionArtifact(acting.Artifact)
+	value, verifier, err := s.newSessionArtifact(Artifact(acting.Artifact))
 	if err != nil {
 		return ReauthResult{}, err
 	}

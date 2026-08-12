@@ -94,6 +94,10 @@ type SessionRow struct {
 	LastSeenAt        time.Time
 	IdleExpiresAt     time.Time
 	AbsoluteExpiresAt time.Time
+	// CSRFVerifier is the fast-hash verifier of this session's synchronizer
+	// token, nil for a CLI session. The transport compares the presented
+	// header against it on every state-changing cookie request (#56).
+	CSRFVerifier []byte
 }
 
 // NewSession is the insert carrier for a freshly minted session.
@@ -285,6 +289,7 @@ func (r *Resolver) SessionByVerifier(ctx context.Context, verifier []byte) (Sess
 		AuthenticatedAt: row.AuthenticatedAt.Time, CeremonyID: row.CeremonyID.String,
 		CreatedAt: row.CreatedAt.Time, LastSeenAt: row.LastSeenAt.Time,
 		IdleExpiresAt: row.IdleExpiresAt.Time, AbsoluteExpiresAt: row.AbsoluteExpiresAt.Time,
+		CSRFVerifier: row.CsrfVerifier,
 	}, nil
 }
 
@@ -311,6 +316,7 @@ func (r *Resolver) SessionByID(ctx context.Context, id string) (SessionRow, erro
 		AuthenticatedAt: row.AuthenticatedAt.Time, CeremonyID: row.CeremonyID.String,
 		CreatedAt: row.CreatedAt.Time, LastSeenAt: row.LastSeenAt.Time,
 		IdleExpiresAt: row.IdleExpiresAt.Time, AbsoluteExpiresAt: row.AbsoluteExpiresAt.Time,
+		CSRFVerifier: row.CsrfVerifier,
 	}, nil
 }
 
@@ -581,18 +587,20 @@ func pgAccount(id, principalID, username, displayName string, createdAt time.Tim
 func sqliteSession(row sqlitegen.GetSessionByVerifierRow) (SessionRow, error) {
 	return sqliteSessionFields(row.ID, row.PrincipalID, row.Artifact, row.SessionGeneration,
 		row.CredentialEpoch, row.AuthMethod, row.Factors, row.AuthenticatedAt,
-		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt)
+		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt,
+		row.CsrfVerifier)
 }
 
 func sqliteSessionByID(row sqlitegen.GetSessionByIDRow) (SessionRow, error) {
 	return sqliteSessionFields(row.ID, row.PrincipalID, row.Artifact, row.SessionGeneration,
 		row.CredentialEpoch, row.AuthMethod, row.Factors, row.AuthenticatedAt,
-		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt)
+		row.CeremonyID, row.CreatedAt, row.LastSeenAt, row.IdleExpiresAt, row.AbsoluteExpiresAt,
+		row.CsrfVerifier)
 }
 
 func sqliteSessionFields(id, principalID, artifact string, sessionGeneration, credentialEpoch int64,
 	authMethod, factors, authenticatedAt string, ceremonyID sql.NullString,
-	createdAt, lastSeenAt, idleExpiresAt, absoluteExpiresAt string,
+	createdAt, lastSeenAt, idleExpiresAt, absoluteExpiresAt string, csrfVerifier []byte,
 ) (SessionRow, error) {
 	var (
 		out SessionRow
@@ -602,6 +610,7 @@ func sqliteSessionFields(id, principalID, artifact string, sessionGeneration, cr
 		ID: id, PrincipalID: domain.PrincipalID(principalID), Artifact: artifact,
 		SessionGeneration: sessionGeneration, CredentialEpoch: credentialEpoch,
 		AuthMethod: authMethod, Factors: factors, CeremonyID: ceremonyID.String,
+		CSRFVerifier: csrfVerifier,
 	}
 	for _, f := range []struct {
 		src string

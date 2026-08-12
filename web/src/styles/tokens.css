@@ -1,0 +1,88 @@
+/*
+ * The design tokens, verbatim from the root DESIGN.md.
+ *
+ * These are asserted, not decorative: the Playwright pinned assertion set
+ * (e2e/fixtures/tokens.ts) reads these custom properties off :root and
+ * compares COMPONENT computed styles against them, so an ad-hoc radius or a
+ * hard-coded hex in a component fails the flow that touches it.
+ *
+ * Dark is the default and needs no JavaScript to be the default: the values
+ * below ARE the dark values, and light is a `prefers-color-scheme` override
+ * plus an explicit `[data-theme]` opt-out. There is therefore no theme flash
+ * to guard against, which is what lets the CSP forbid inline script.
+ */
+
+:root {
+  color-scheme: dark light;
+
+  /* Colour — OKLCH throughout, tinted neutrals plus one teal accent. */
+  --bg: oklch(0.19 0.012 220);
+  --bg-raise: oklch(0.23 0.014 220);
+  --line: oklch(0.34 0.016 220);
+  --tx: oklch(0.93 0.008 200);
+  --tx-dim: oklch(0.76 0.01 210);
+  --accent: oklch(0.82 0.09 195);
+  --on-accent: oklch(0.2 0.02 220);
+  --danger: oklch(0.72 0.13 25);
+  --changed: oklch(0.78 0.07 250);
+
+  /* Shape — radius carries a role (DESIGN.md, app-chrome iteration 8). */
+  --radius-container: 6px;
+  --radius-control: 4px;
+  --radius-badge: 3px;
+  /* Reserved for exactly three things: identity circles, count badges, and
+     the matrix cell-state vocabulary. Nothing else is a pill. */
+  --radius-pill: 999px;
+
+  /* Type */
+  --font-ui: 'Archivo Variable', 'Archivo', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Density — matrix rows ~36px desktop, ~44px touch targets on mobile. */
+  --row: 36px;
+  --touch: 44px;
+  --rail: 56px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 180ms;
+}
+
+/* Light is fully supported and switchable; `prefers-color-scheme` decides
+   only when the human has made no explicit choice. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --bg: oklch(0.965 0.008 200);
+    --bg-raise: oklch(0.995 0.004 200);
+    --line: oklch(0.84 0.012 210);
+    --tx: oklch(0.25 0.03 225);
+    --tx-dim: oklch(0.44 0.02 220);
+    --accent: oklch(0.45 0.085 210);
+    --on-accent: oklch(0.99 0.005 200);
+    --danger: oklch(0.48 0.14 30);
+    --changed: oklch(0.45 0.08 250);
+  }
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: oklch(0.965 0.008 200);
+  --bg-raise: oklch(0.995 0.004 200);
+  --line: oklch(0.84 0.012 210);
+  --tx: oklch(0.25 0.03 225);
+  --tx-dim: oklch(0.44 0.02 220);
+  --accent: oklch(0.45 0.085 210);
+  --on-accent: oklch(0.99 0.005 200);
+  --danger: oklch(0.48 0.14 30);
+  --changed: oklch(0.45 0.08 250);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}

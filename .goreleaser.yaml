@@ -12,6 +12,12 @@ builds:
       - GOFLAGS=-mod=readonly
     flags:
       - -trimpath
+      # The `ui` tag embeds internal/webui/dist, which `pnpm --dir web build`
+      # must have produced first. Released binaries serve the SPA; a build
+      # without the tag would silently ship an API-only server, so the tag is
+      # here rather than optional, and the pipelines that invoke GoReleaser
+      # (release.yml, ci.yml's snapshot) build the frontend ahead of it.
+      - -tags=ui
     goos:
       - linux
       - darwin

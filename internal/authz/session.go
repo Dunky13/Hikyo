@@ -40,6 +40,11 @@ type Identity struct {
 	LastSeenAt        time.Time
 	IdleExpiresAt     time.Time
 	AbsoluteExpiresAt time.Time
+	// CSRFVerifier is the browser session's synchronizer-token verifier, nil
+	// for a CLI session. Carrying the VERIFIER (a hash) rather than the token
+	// out of the transaction is safe and lets the transport enforce the CSRF
+	// contract it owns (#54 A10, #56).
+	CSRFVerifier []byte
 }
 
 // MFAMandatory is the closed set of capabilities the human-auth ADR makes
@@ -219,6 +224,7 @@ func (a *TxAuthorizer) authenticateResolvedSession(ctx context.Context, row auth
 		LastSeenAt:        row.LastSeenAt,
 		IdleExpiresAt:     row.IdleExpiresAt,
 		AbsoluteExpiresAt: row.AbsoluteExpiresAt,
+		CSRFVerifier:      row.CSRFVerifier,
 	}, nil
 }
 

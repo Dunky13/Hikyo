@@ -102,7 +102,7 @@ func newAccessWireEnv(t *testing.T, db *store.DB) accessWireEnv {
 		Grants:       &service.Grants{DB: db},
 		Settings:     &service.ProjectSettings{DB: db, Auth: auth},
 		Version:      "wire",
-	}))
+	}, nil))
 	t.Cleanup(srv.Close)
 	return accessWireEnv{
 		srv: srv, token: token, db: db, admin: boot.principal,
@@ -129,7 +129,7 @@ func bootstrapWebAuthnAdminBoot(t *testing.T, db *store.DB) (*service.Auth, boot
 	if err := auth.EstablishCredential(ctx, boot.Authority, password); err != nil {
 		t.Fatal(err)
 	}
-	login, err := auth.LocalLogin(ctx, waAdmin, password)
+	login, err := auth.LocalLogin(ctx, waAdmin, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

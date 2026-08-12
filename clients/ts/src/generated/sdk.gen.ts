@@ -61,7 +61,7 @@ export const establishCredential = <ThrowOnError extends boolean = false>(option
 });
 
 /**
- * Terminal-native local login; mints a CLI session artifact.
+ * Local password login; mints a CLI or browser session artifact.
  *
  * The local floor (human-auth ADR § Lockout and the local floor), which
  * an installation may never remove. Verifies an Argon2id password
@@ -70,14 +70,20 @@ export const establishCredential = <ThrowOnError extends boolean = false>(option
  * pre-authentication path distinguishes an existing account from a
  * missing one.
  *
- * Mints a **CLI session** — a distinct artifact type with its own
- * storage, lifetime, audit identity and revocation surface. The value is
- * returned in the response body and is a replayable bearer credential;
- * it is never re-retrievable.
+ * Mints the artifact the request asks for. Both are distinct types with
+ * their own storage, lifetime, audit identity and revocation surface,
+ * and neither value is ever re-retrievable:
  *
- * Browser sessions are a different artifact minted through the browser
- * login page, which this slice does not serve — see `/api/v1/meta` for
- * which protocol flows an instance actually offers.
+ * - **CLI session** (default): a replayable bearer credential returned
+ * in the response body, presented on `Authorization: Bearer`.
+ * - **Browser session**: delivered ONLY on the `__Host-wenv` HttpOnly
+ * cookie, never in the body, so injected same-origin script cannot
+ * read it. Its synchronizer token rides the `__Host-wenv-csrf`
+ * companion cookie and must be echoed on the `X-Wenv-CSRF` header for
+ * every state-changing cookie-authenticated request.
+ *
+ * See `/api/v1/meta` for which protocol flows an instance actually
+ * offers.
  *
  */
 export const localLogin = <ThrowOnError extends boolean = false>(options: Options<LocalLoginData, ThrowOnError>) => (options.client ?? client).post<LocalLoginResponses, LocalLoginErrors, ThrowOnError>({

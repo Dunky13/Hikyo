@@ -94,7 +94,7 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		// reveal guard reads cannot come from two configurations.
 		Settings: &service.ProjectSettings{DB: db, Auth: auth},
 		Version:  "e2e",
-	})))
+	}, nil)))
 	t.Cleanup(httpSrv.Close)
 
 	// Fresh install: the first administrator is minted on the host, never
@@ -377,7 +377,7 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 				default:
 				}
 				// Wrong password: burns a full derivation every time.
-				_, _ = auth.LocalLogin(t.Context(), "lockcheck", "not the password at all")
+				_, _ = auth.LocalLogin(t.Context(), "lockcheck", "not the password at all", service.ArtifactCLI)
 			}
 		}()
 	}

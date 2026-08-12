@@ -152,7 +152,7 @@ paths:
     post:
       operationId: localLogin
       tags: [auth]
-      summary: Terminal-native local login; mints a CLI session artifact.
+      summary: Local password login; mints a CLI or browser session artifact.
       description: |
         The local floor (human-auth ADR § Lockout and the local floor), which
         an installation may never remove. Verifies an Argon2id password
@@ -161,14 +161,20 @@ paths:
         pre-authentication path distinguishes an existing account from a
         missing one.
 
-        Mints a **CLI session** — a distinct artifact type with its own
-        storage, lifetime, audit identity and revocation surface. The value is
-        returned in the response body and is a replayable bearer credential;
-        it is never re-retrievable.
+        Mints the artifact the request asks for. Both are distinct types with
+        their own storage, lifetime, audit identity and revocation surface,
+        and neither value is ever re-retrievable:
 
-        Browser sessions are a different artifact minted through the browser
-        login page, which this slice does not serve — see `/api/v1/meta` for
-        which protocol flows an instance actually offers.
+        - **CLI session** (default): a replayable bearer credential returned
+          in the response body, presented on `Authorization: Bearer`.
+        - **Browser session**: delivered ONLY on the `__Host-wenv` HttpOnly
+          cookie, never in the body, so injected same-origin script cannot
+          read it. Its synchronizer token rides the `__Host-wenv-csrf`
+          companion cookie and must be echoed on the `X-Wenv-CSRF` header for
+          every state-changing cookie-authenticated request.
+
+        See `/api/v1/meta` for which protocol flows an instance actually
+        offers.
       security: []
       x-hikyo-class: unauthenticated
       x-hikyo-artifacts: [none]
@@ -3761,6 +3767,19 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+        artifact:
+          type: string
+          enum: [cli, browser]
+          default: cli
+          description: |
+            Which session artifact to mint. Omitted or `cli` mints a CLI
+            session whose token is returned in the body. `browser` mints a
+            browser session delivered ONLY on the `__Host-wenv` cookie, with
+            its synchronizer token on the `__Host-wenv-csrf` cookie; the body
+            then carries no token at all. The two artifacts have distinct
+            lifetimes, distinct CSRF contracts and distinct revocation
+            surfaces, so the caller states which one it is asking for rather
+            than the server guessing from a header.
 
     LoginResult:
       type: object

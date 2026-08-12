@@ -68,6 +68,15 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Build the SPA (the `ui` build tag embeds it)
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
       - name: Chart renders and carries release substitution anchors
         run: |
           grep -Fx "  repository: ghcr.io/dunky13/hikyo" chart/hikyo/values.yaml
@@ -147,6 +156,69 @@ jobs:
           node-version-file: .nvmrc
       - name: Typecheck, build, and assert O4-O6 policy content
         run: ./scripts/ci/verify-docs.sh
+
+  # The SPA and its flow suite (#56). One job, because the ordering is the
+  # point: the frontend must be BUILT before Go can embed it, the Go tests must
+  # pass before a browser is worth starting, and the flow registry's closure
+  # check runs first of all — a locked surface without a flow should fail in
+  # seconds, not after a full browser suite has passed.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install (frozen lockfile)
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: web
+        run: pnpm run typecheck
+
+      # Unit tests include the flow registry's closure check and its own
+      # negative fixtures — a check that cannot fail is not a check.
+      - name: Unit tests and flow-registry closure
+        working-directory: web
+        run: pnpm run test
+
+      - name: Build the SPA
+        working-directory: web
+        run: pnpm run build
+
+      # The embed only compiles with the `ui` tag, and only after the build
+      # above. This is the step that proves the tagged binary is buildable at
+      # all; the untagged build and the full Go suite live in the `test` job
+      # and stay green without ever running pnpm.
+      - name: Build the binary with the embedded UI
+        run: go build -tags ui ./...
+
+      - name: Go tests (transport, serving rules, browser session)
+        run: go test -tags ui ./internal/server/... ./internal/webui/...
+
+      - name: Install Chromium
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Flow suite (desktop + mobile)
+        working-directory: web
+        run: pnpm run e2e
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
 
   test:
     runs-on: ubuntu-latest

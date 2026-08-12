@@ -30,6 +30,12 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Build the SPA (the `ui` build tag embeds it)
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
