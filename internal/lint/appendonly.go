@@ -223,6 +223,13 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"SlideReauthWindow":                 true,
 	"ConsumeSingleDecisionWindow":       true,
 	"DeleteReauthWindowsForEnvironment": true,
+	// The grant surface (#55). Grants live on the resolution surface because
+	// authorize() reads them to mint a proof, so a grant write cannot be
+	// gated behind one without a cycle; the chokepoint operation the service
+	// calls first is the authorization gate, these are the writes.
+	"AddGrantOrigin":     true,
+	"ReleaseGrantOrigin": true,
+	"DeleteGrantRow":     true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

@@ -88,9 +88,19 @@ type GetEnvironmentParams struct {
 	ChainEnvID     string
 }
 
-func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) (Environment, error) {
+type GetEnvironmentRow struct {
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	CreatedAt    pgtype.Timestamptz
+	DisplayOrder int64
+}
+
+func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) (GetEnvironmentRow, error) {
 	row := q.db.QueryRow(ctx, getEnvironment, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
-	var i Environment
+	var i GetEnvironmentRow
 	err := row.Scan(
 		&i.ID,
 		&i.OrgID,
@@ -100,6 +110,33 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.CreatedAt,
 		&i.DisplayOrder,
 	)
+	return i, err
+}
+
+const getEnvironmentSettings = `-- name: GetEnvironmentSettings :one
+
+SELECT protected, reauth_window_seconds FROM environments
+WHERE org_id = $1 AND project_id = $2 AND id = $3
+`
+
+type GetEnvironmentSettingsParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+type GetEnvironmentSettingsRow struct {
+	Protected           bool
+	ReauthWindowSeconds pgtype.Int8
+}
+
+// Protected-environment flag and per-environment reauthentication window
+// (#55, permission ADR - The reveal guard). Both live under
+// `project-settings`; a NULL window means "inherit the instance default".
+func (q *Queries) GetEnvironmentSettings(ctx context.Context, arg GetEnvironmentSettingsParams) (GetEnvironmentSettingsRow, error) {
+	row := q.db.QueryRow(ctx, getEnvironmentSettings, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
+	var i GetEnvironmentSettingsRow
+	err := row.Scan(&i.Protected, &i.ReauthWindowSeconds)
 	return i, err
 }
 
@@ -113,15 +150,25 @@ type ListEnvironmentsParams struct {
 	ChainProjectID string
 }
 
-func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]Environment, error) {
+type ListEnvironmentsRow struct {
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	CreatedAt    pgtype.Timestamptz
+	DisplayOrder int64
+}
+
+func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]ListEnvironmentsRow, error) {
 	rows, err := q.db.Query(ctx, listEnvironments, arg.ChainOrgID, arg.ChainProjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Environment
+	var items []ListEnvironmentsRow
 	for rows.Next() {
-		var i Environment
+		var i ListEnvironmentsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -210,6 +257,33 @@ func (q *Queries) SetEnvironmentOrder(ctx context.Context, arg SetEnvironmentOrd
 		arg.ChainOrgID,
 		arg.ChainProjectID,
 		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setEnvironmentSettings = `-- name: SetEnvironmentSettings :execrows
+UPDATE environments SET protected = $1, reauth_window_seconds = $2
+WHERE org_id = $3 AND project_id = $4 AND id = $5
+`
+
+type SetEnvironmentSettingsParams struct {
+	Protected           bool
+	ReauthWindowSeconds pgtype.Int8
+	ChainOrgID          string
+	ChainProjectID      string
+	ChainEnvID          string
+}
+
+func (q *Queries) SetEnvironmentSettings(ctx context.Context, arg SetEnvironmentSettingsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setEnvironmentSettings,
+		arg.Protected,
+		arg.ReauthWindowSeconds,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
 	)
 	if err != nil {
 		return 0, err

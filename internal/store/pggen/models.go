@@ -87,13 +87,15 @@ type CredentialAuthority struct {
 }
 
 type Environment struct {
-	ID           string
-	OrgID        string
-	ProjectID    string
-	Name         string
-	Note         string
-	CreatedAt    pgtype.Timestamptz
-	DisplayOrder int64
+	ID                  string
+	OrgID               string
+	ProjectID           string
+	Name                string
+	Note                string
+	CreatedAt           pgtype.Timestamptz
+	DisplayOrder        int64
+	Protected           bool
+	ReauthWindowSeconds pgtype.Int8
 }
 
 type ExternalIdentity struct {
@@ -123,6 +125,14 @@ type Grant struct {
 	ProjectID   pgtype.Text
 	EnvID       pgtype.Text
 	CreatedAt   pgtype.Timestamptz
+}
+
+type GrantOrigin struct {
+	ID        string
+	GrantID   string
+	Kind      string
+	Subject   string
+	CreatedAt pgtype.Timestamptz
 }
 
 type KeyGeneration struct {
@@ -203,6 +213,7 @@ type Principal struct {
 	Kind              string
 	CreatedAt         pgtype.Timestamptz
 	SessionGeneration int64
+	Class             pgtype.Text
 }
 
 type Project struct {

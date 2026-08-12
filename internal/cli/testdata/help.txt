@@ -51,6 +51,16 @@ instance configuration:
   wenv instance-config saml-sp-key list|rotate
   wenv instance-config saml-sp-key retire|compromise-retire <fingerprint>
 
+access:
+  wenv access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
+  wenv access grant add --principal <id> --capability <atom>
+  wenv access grant remove --principal <id> --capability <atom>
+  wenv access grant template --principal <id> --template <name>
+  wenv access member list [--org O] [--project P] [-o table|json]
+  wenv access member remove --principal <id>
+  wenv project-settings get --env E [-o table|json]
+  wenv project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
+
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context
 

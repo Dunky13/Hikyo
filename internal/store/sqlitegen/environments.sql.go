@@ -7,6 +7,7 @@ package sqlitegen
 
 import (
 	"context"
+	"database/sql"
 )
 
 const countEnvironments = `-- name: CountEnvironments :one
@@ -86,9 +87,19 @@ type GetEnvironmentParams struct {
 	ID        string
 }
 
-func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) (Environment, error) {
+type GetEnvironmentRow struct {
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	CreatedAt    string
+	DisplayOrder int64
+}
+
+func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) (GetEnvironmentRow, error) {
 	row := q.db.QueryRowContext(ctx, getEnvironment, arg.OrgID, arg.ProjectID, arg.ID)
-	var i Environment
+	var i GetEnvironmentRow
 	err := row.Scan(
 		&i.ID,
 		&i.OrgID,
@@ -98,6 +109,33 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.CreatedAt,
 		&i.DisplayOrder,
 	)
+	return i, err
+}
+
+const getEnvironmentSettings = `-- name: GetEnvironmentSettings :one
+
+SELECT protected, reauth_window_seconds FROM environments
+WHERE org_id = ? AND project_id = ? AND id = ?
+`
+
+type GetEnvironmentSettingsParams struct {
+	OrgID     string
+	ProjectID string
+	ID        string
+}
+
+type GetEnvironmentSettingsRow struct {
+	Protected           int64
+	ReauthWindowSeconds sql.NullInt64
+}
+
+// Protected-environment flag and per-environment reauthentication window
+// (#55, permission ADR - The reveal guard). Both live under
+// `project-settings`; a NULL window means "inherit the instance default".
+func (q *Queries) GetEnvironmentSettings(ctx context.Context, arg GetEnvironmentSettingsParams) (GetEnvironmentSettingsRow, error) {
+	row := q.db.QueryRowContext(ctx, getEnvironmentSettings, arg.OrgID, arg.ProjectID, arg.ID)
+	var i GetEnvironmentSettingsRow
+	err := row.Scan(&i.Protected, &i.ReauthWindowSeconds)
 	return i, err
 }
 
@@ -111,15 +149,25 @@ type ListEnvironmentsParams struct {
 	ProjectID string
 }
 
-func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]Environment, error) {
+type ListEnvironmentsRow struct {
+	ID           string
+	OrgID        string
+	ProjectID    string
+	Name         string
+	Note         string
+	CreatedAt    string
+	DisplayOrder int64
+}
+
+func (q *Queries) ListEnvironments(ctx context.Context, arg ListEnvironmentsParams) ([]ListEnvironmentsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listEnvironments, arg.OrgID, arg.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Environment
+	var items []ListEnvironmentsRow
 	for rows.Next() {
-		var i Environment
+		var i ListEnvironmentsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.OrgID,
@@ -208,6 +256,33 @@ type SetEnvironmentOrderParams struct {
 func (q *Queries) SetEnvironmentOrder(ctx context.Context, arg SetEnvironmentOrderParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setEnvironmentOrder,
 		arg.DisplayOrder,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setEnvironmentSettings = `-- name: SetEnvironmentSettings :execrows
+UPDATE environments SET protected = ?, reauth_window_seconds = ?
+WHERE org_id = ? AND project_id = ? AND id = ?
+`
+
+type SetEnvironmentSettingsParams struct {
+	Protected           int64
+	ReauthWindowSeconds sql.NullInt64
+	OrgID               string
+	ProjectID           string
+	ID                  string
+}
+
+func (q *Queries) SetEnvironmentSettings(ctx context.Context, arg SetEnvironmentSettingsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setEnvironmentSettings,
+		arg.Protected,
+		arg.ReauthWindowSeconds,
 		arg.OrgID,
 		arg.ProjectID,
 		arg.ID,

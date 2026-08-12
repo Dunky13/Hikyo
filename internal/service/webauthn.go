@@ -713,10 +713,7 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 			return err
 		}
 		single := effWin <= 0
-		hardCap := s.ReauthHardCap
-		if hardCap <= 0 {
-			hardCap = effWin
-		}
+		hardCap := s.hardCap()
 		hardExpires := now.Add(hardCap)
 		// A sliding window must never exceed the hard cap, even on open — clamp it
 		// exactly as the TOTP/OIDC openers do (A2). A single-decision 0-window still

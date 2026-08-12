@@ -100,6 +100,55 @@ const (
 	OpAuditExportEnv      Operation = "audit.export-env"
 	OpAuditInstanceQuery  Operation = "audit.instance-query"
 	OpAuditInstanceExport Operation = "audit.instance-export"
+
+	// The grant surface (#55, permission-model ADR). One operation per
+	// ADDRESSED depth, as with audit reads and credential-reset: the registry
+	// pins one depth per tenant operation, so the four depths are four rows
+	// sharing one service implementation.
+	//
+	// The formula atom sits at the depth `manage-members` is grantable at,
+	// which is NOT always the addressed depth. Granting `read` on one
+	// environment is authorized by `manage-members(project)` — the atom's
+	// level truncates the resolved chain, so an env-addressed grant asks the
+	// project question. That is the ADR's own rule ("manage-members at org /
+	// project: create, modify and revoke grants at or below that scope")
+	// expressed in the formula rather than in service code.
+	OpGrantCreateOrg      Operation = "grant.create-org"
+	OpGrantCreateProject  Operation = "grant.create-project"
+	OpGrantCreateEnv      Operation = "grant.create-env"
+	OpGrantCreateInstance Operation = "grant.create-instance"
+
+	OpGrantRevokeOrg      Operation = "grant.revoke-org"
+	OpGrantRevokeProject  Operation = "grant.revoke-project"
+	OpGrantRevokeEnv      Operation = "grant.revoke-env"
+	OpGrantRevokeInstance Operation = "grant.revoke-instance"
+
+	// Listing the membership surface is `manage-members` too, not `read`:
+	// who holds which capability is administrative information, and the ADR
+	// puts every grant read and write under the same atom ("create, modify
+	// and revoke grants at or below that scope" is the administration of the
+	// list the surface shows).
+	OpGrantListOrg      Operation = "grant.list-org"
+	OpGrantListProject  Operation = "grant.list-project"
+	OpGrantListInstance Operation = "grant.list-instance"
+
+	// Template application is grant creation with a name attached: the
+	// expansion happens AT GRANT TIME and produces ordinary grants, so it
+	// carries the same formula as a create at the same depth.
+	OpTemplateApplyOrg      Operation = "grant.template-org"
+	OpTemplateApplyProject  Operation = "grant.template-project"
+	OpTemplateApplyEnv      Operation = "grant.template-env"
+	OpTemplateApplyInstance Operation = "grant.template-instance"
+
+	// The protected-environment flag and the per-environment reauthentication
+	// window (#55). `project-settings` is deliberately split out of
+	// `definitions-edit` — these exist to restrain the definitions editor, and
+	// a guard whose off-switch sits in the hand it restrains is not a guard.
+	// The read is bare `read(E)`: an environment's protection state is part of
+	// its public shape, and hiding it from a reader would make the reveal
+	// ceremony inexplicable.
+	OpEnvSettingsRead   Operation = "environment.settings-read"
+	OpEnvSettingsUpdate Operation = "environment.settings-update"
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -131,6 +180,9 @@ const (
 	StoreEnvironmentsRename     StoreOp = "environments.Rename"
 	StoreEnvironmentsSetOrder   StoreOp = "environments.SetOrder"
 	StoreEnvironmentsDelete     StoreOp = "environments.Delete"
+	// The protected flag and per-environment window (#55).
+	StoreEnvironmentsGetSettings StoreOp = "environments.Settings"
+	StoreEnvironmentsSetSettings StoreOp = "environments.SetSettings"
 
 	StoreFoldersCreate StoreOp = "folders.Create"
 	StoreFoldersGet    StoreOp = "folders.Get"
@@ -176,6 +228,7 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreEnvironmentsNextOrder:    true,
 	StoreFoldersGet:               true,
 	StoreFoldersList:              true,
+	StoreEnvironmentsGetSettings:  true,
 	StoreKeysActiveMasterWrappers: true,
 	StoreKeysActiveTier3:          true,
 	StoreAuditTenantPage:          true,
@@ -633,6 +686,176 @@ var operations = map[Operation]opSpec{
 		formula:  Formula{{Cap: domain.CapAuditRead, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreAuditInstancePage: true, StoreAuditInstanceInsert: true},
 		events:   []audit.EventType{audit.EventAuditExportStarted, audit.EventAuditExportCompleted},
+	},
+
+	// The grant surface (#55). The grant table is class=authn, so the writes
+	// ride the enumerated resolution surface — authorize() reads grants to
+	// mint a proof, and a grant write gated behind one would be a cycle. What
+	// IS a store op here is the audit insert: the grant trail is tenant-owned
+	// at org/project/env scope, instance-owned above it.
+	OpGrantCreateOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	OpGrantCreateProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	// Env-addressed grants ask the PROJECT question: `manage-members` is not
+	// grantable at environment scope, so the atom truncates the chain.
+	OpGrantCreateEnv: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	OpGrantCreateInstance: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+
+	OpGrantRevokeOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		// A release that leaves the row alive (another origin kind still holds
+		// it) is a MODIFICATION; only the release that deleted the row is a
+		// revocation. Both are reachable from this operation.
+		events: []audit.EventType{audit.EventGrantRevoked, audit.EventGrantModified},
+	},
+	OpGrantRevokeProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		// A release that leaves the row alive (another origin kind still holds
+		// it) is a MODIFICATION; only the release that deleted the row is a
+		// revocation. Both are reachable from this operation.
+		events: []audit.EventType{audit.EventGrantRevoked, audit.EventGrantModified},
+	},
+	OpGrantRevokeEnv: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		// A release that leaves the row alive (another origin kind still holds
+		// it) is a MODIFICATION; only the release that deleted the row is a
+		// revocation. Both are reachable from this operation.
+		events: []audit.EventType{audit.EventGrantRevoked, audit.EventGrantModified},
+	},
+	OpGrantRevokeInstance: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventGrantRevoked, audit.EventGrantModified},
+	},
+
+	// Listing is not `audited: none`: the permit rule admits only tenant-class
+	// bare-`read` operations, and reading who can reach production secrets is
+	// not that. It is audited as an ordinary trail query would be — through
+	// the surrounding operation's own event, which for a pure list is the
+	// grant.list event the service emits.
+	OpGrantListOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventGrantMembershipRead},
+	},
+	OpGrantListProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventGrantMembershipRead},
+	},
+	OpGrantListInstance: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventGrantMembershipRead},
+	},
+
+	// Template application. Same formula as a create at the same depth,
+	// because that is exactly what it is: the template name exists only
+	// inside the expansion, and what lands is ordinary grants.
+	OpTemplateApplyOrg: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	OpTemplateApplyProject: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	OpTemplateApplyEnv: {
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+	OpTemplateApplyInstance: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+		},
+	},
+
+	// The protected flag and the per-environment reauthentication window.
+	OpEnvSettingsRead: {
+		class:       ClassTenant,
+		level:       domain.LevelEnv,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps:    map[StoreOp]bool{StoreEnvironmentsGetSettings: true},
+		auditedNone: true,
+	},
+	OpEnvSettingsUpdate: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapProjectSettings, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreEnvironmentsGetSettings: true, StoreEnvironmentsSetSettings: true,
+			StoreAuditTenantInsert: true,
+		},
+		// auth.effective_window_lowered is emitted by the LowerEffectiveWindow
+		// library this knob calls (#54 B6) — declared here because #55 is the
+		// caller the completeness invariant was waiting for.
+		events: []audit.EventType{
+			audit.EventReauthWindowChanged, audit.EventProtectedFlagChange,
+			audit.EventAuthEffectiveWindowLowered,
+		},
 	},
 }
 

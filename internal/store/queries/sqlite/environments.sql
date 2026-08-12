@@ -44,3 +44,15 @@ WHERE org_id = ? AND project_id = ? AND id = ?;
 
 -- name: DeleteEnvironment :execrows
 DELETE FROM environments WHERE org_id = ? AND project_id = ? AND id = ?;
+
+-- Protected-environment flag and per-environment reauthentication window
+-- (#55, permission ADR - The reveal guard). Both live under
+-- `project-settings`; a NULL window means "inherit the instance default".
+
+-- name: GetEnvironmentSettings :one
+SELECT protected, reauth_window_seconds FROM environments
+WHERE org_id = ? AND project_id = ? AND id = ?;
+
+-- name: SetEnvironmentSettings :execrows
+UPDATE environments SET protected = ?, reauth_window_seconds = ?
+WHERE org_id = ? AND project_id = ? AND id = ?;

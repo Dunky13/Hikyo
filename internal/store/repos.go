@@ -462,6 +462,59 @@ func (r sqliteEnvs) NextOrder(ctx context.Context, p authz.Proof) (int64, error)
 	})
 }
 
+// Settings / SetSettings: the protected-environment flag and the
+// per-environment reauthentication window (#55). Both columns are non-chain,
+// so they mutate under the ordinary binding rule; the chain still comes
+// exclusively from the proof.
+func (r sqliteEnvs) Settings(ctx context.Context, p authz.Proof) (EnvironmentSettings, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsGetSettings, r.tok)
+	if err != nil {
+		return EnvironmentSettings{}, err
+	}
+	row, err := r.q.GetEnvironmentSettings(ctx, sqlitegen.GetEnvironmentSettingsParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), ID: string(chain.Env),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return EnvironmentSettings{}, ErrNotFound
+	}
+	if err != nil {
+		return EnvironmentSettings{}, err
+	}
+	return EnvironmentSettings{
+		Protected: row.Protected == 1,
+		HasWindow: row.ReauthWindowSeconds.Valid,
+		Window:    time.Duration(row.ReauthWindowSeconds.Int64) * time.Second,
+	}, nil
+}
+
+func (r sqliteEnvs) SetSettings(ctx context.Context, p authz.Proof, s EnvironmentSettings) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsSetSettings, r.tok)
+	if err != nil {
+		return err
+	}
+	protected := int64(0)
+	if s.Protected {
+		protected = 1
+	}
+	return affected(r.q.SetEnvironmentSettings(ctx, sqlitegen.SetEnvironmentSettingsParams{
+		Protected:           protected,
+		ReauthWindowSeconds: nullWindow(s),
+		OrgID:               string(chain.Org),
+		ProjectID:           string(chain.Project),
+		ID:                  string(chain.Env),
+	}))
+}
+
+// nullWindow renders "no window of its own" as SQL NULL rather than a zero,
+// because 0 is a legal window value (every disclosure reauthenticates) and
+// must never be confused with "inherit the instance default".
+func nullWindow(s EnvironmentSettings) sql.NullInt64 {
+	if !s.HasWindow {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(s.Window / time.Second), Valid: true}
+}
+
 func (r sqliteEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) error {
 	chain, err := authz.Verify(p, authz.StoreEnvironmentsUpdateNote, r.tok)
 	if err != nil {
@@ -923,6 +976,45 @@ func (r pgEnvs) UpdateNote(ctx context.Context, p authz.Proof, note string) erro
 		ChainOrgID:     string(chain.Org),
 		ChainProjectID: string(chain.Project),
 		ChainEnvID:     string(chain.Env),
+	}))
+}
+
+func (r pgEnvs) Settings(ctx context.Context, p authz.Proof) (EnvironmentSettings, error) {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsGetSettings, r.tok)
+	if err != nil {
+		return EnvironmentSettings{}, err
+	}
+	row, err := r.q.GetEnvironmentSettings(ctx, pggen.GetEnvironmentSettingsParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: string(chain.Env),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return EnvironmentSettings{}, ErrNotFound
+	}
+	if err != nil {
+		return EnvironmentSettings{}, err
+	}
+	return EnvironmentSettings{
+		Protected: row.Protected,
+		HasWindow: row.ReauthWindowSeconds.Valid,
+		Window:    time.Duration(row.ReauthWindowSeconds.Int64) * time.Second,
+	}, nil
+}
+
+func (r pgEnvs) SetSettings(ctx context.Context, p authz.Proof, s EnvironmentSettings) error {
+	chain, err := authz.Verify(p, authz.StoreEnvironmentsSetSettings, r.tok)
+	if err != nil {
+		return err
+	}
+	window := pgtype.Int8{}
+	if s.HasWindow {
+		window = pgtype.Int8{Int64: int64(s.Window / time.Second), Valid: true}
+	}
+	return affected(r.q.SetEnvironmentSettings(ctx, pggen.SetEnvironmentSettingsParams{
+		Protected:           s.Protected,
+		ReauthWindowSeconds: window,
+		ChainOrgID:          string(chain.Org),
+		ChainProjectID:      string(chain.Project),
+		ChainEnvID:          string(chain.Env),
 	}))
 }
 
