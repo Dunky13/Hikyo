@@ -50,6 +50,7 @@ jobs:
         run: |
           archive="$RUNNER_TEMP/shellcheck.tar.xz"
           curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error \
+            --retry 4 --retry-delay 2 --retry-all-errors \
             "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.xz" \
             --output "$archive"
           printf '%s  %s\n' "$SHELLCHECK_SHA256" "$archive" | sha256sum --check --strict
