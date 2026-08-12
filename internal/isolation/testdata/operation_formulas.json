@@ -312,6 +312,134 @@
     ]
   },
   {
+    "operation": "key-group.create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key-group.delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key-group.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "key-group.list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "key-group.rename",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.declassify",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "reveal@project"
+    ]
+  },
+  {
+    "operation": "key.delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.get",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "key.list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "key.reclassify",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.rename",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.secret-rule-change",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "reveal@project"
+    ]
+  },
+  {
+    "operation": "key.set-group",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.update-declaration",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
+    "operation": "key.update-metadata",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "definitions-edit@project"
+    ]
+  },
+  {
     "operation": "oidc-provider.delete",
     "class": "instance",
     "level": "instance",

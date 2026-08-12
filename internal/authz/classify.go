@@ -180,6 +180,25 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template": ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         ClassTenant,
+	// The key catalogue (#49). Every route is tenant-class at project depth:
+	// a key is declared once per project, and a key the caller cannot reach
+	// answers byte-identically to one that is not there — including the two
+	// reveal-gated routes, whose refusal must be indistinguishable or the gate
+	// itself becomes the one-bit oracle it exists to close.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys":                      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/keys":                     ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys/{key}":                ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key}":              ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key}":             ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name":           ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     ClassTenant,
 
 	// `wenv admin create`: the bootstrap member of the closed local-authority
 	// exception set. System class, whose probe contract is network
@@ -216,10 +235,12 @@ var wireRegistry = map[string]Class{
 	// a verb whose class understated its reach would let an instance-scoped
 	// call ride in under a tenant probe contract. `project`, `env` and `folder`
 	// reach tenant routes exclusively.
-	"cli:org":             ClassInstance,
-	"cli:project":         ClassTenant,
-	"cli:env":             ClassTenant,
-	"cli:folder":          ClassTenant,
+	"cli:org":     ClassInstance,
+	"cli:project": ClassTenant,
+	"cli:env":     ClassTenant,
+	"cli:folder":  ClassTenant,
+	// `key` reaches the catalogue and the group routes, all tenant-class.
+	"cli:key":             ClassTenant,
 	"cli:instance-config": ClassInstance,
 	"cli:doctor":          ClassInstance,
 	// `access` reaches BOTH classes — the org/project/env grant routes are
@@ -457,6 +478,27 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template": {OpTemplateApplyEnv},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsRead},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsUpdate},
+	// The key catalogue (#49).
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys":            {OpKeyList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/keys":           {OpKeyCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/keys/{key}":      {OpKeyGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key}":    {OpKeyUpdateMetadata},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key}":   {OpKeyDelete},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name": {OpKeyRename},
+	// These two routes REACH a second operation at runtime - the reveal gate
+	// the schema ADR puts in front of a value-dependent rule change on a
+	// `secret` key, and in front of declassification. Both are listed for the
+	// same reason credential-reset lists its pair: the linkage must record
+	// every operation a route can reach, or the registry describes an
+	// authorization posture the router does not have.
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration":    {OpKeyUpdateDeclaration, OpKeySecretRuleChange},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification": {OpKeyReclassify, OpKeyDeclassify},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group":          {OpKeySetGroup},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":                {OpKeyGroupList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":               {OpKeyGroupCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":        {OpKeyGroupGet},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      {OpKeyGroupRename},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     {OpKeyGroupDelete},
 
 	// OIDC provider administration (#54), instance-config.
 	"http:GET /api/v1/instance/oidc-providers":           {OpProviderList},

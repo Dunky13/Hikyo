@@ -22,6 +22,7 @@ import (
 	"github.com/Dunky13/wenv/internal/authz"
 	"github.com/Dunky13/wenv/internal/crypto"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/schema"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 	"github.com/Dunky13/wenv/internal/store/keyring"
@@ -459,6 +460,82 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		}
 	})
 
+	t.Run("reveal_gate_attempts_survive_the_rollback", func(t *testing.T) {
+		// "Every attempt is audited" is a claim about the outcomes that ROLL
+		// BACK: a refused gate and a gate that passed before a later failure
+		// both leave nothing behind if the record is an in-transaction insert.
+		// Both therefore ride the settlement path, which is the one writer that
+		// survives a rollback — and the key rides in the ENVELOPE's object,
+		// because grant.denied's payload is a closed schema shared by every
+		// operation and must not grow a key field.
+		keys := &service.Keys{DB: db}
+		scope := domain.Scope{Org: orgA, Project: prjA1}
+		// alice holds definitions-edit in org A and NOT reveal, which is the
+		// legal, supported grant shape the gate exists for.
+		secret, err := keys.Create(tctx(t), service.LocalPrincipal(alice), scope, service.KeySpec{
+			Name: "GATED_PROBE", Classification: string(schema.Secret),
+			Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+			Presence:    schema.DefaultPresenceRules(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tighten := func(pattern string) service.KeyDeclarationUpdate {
+			return service.KeyDeclarationUpdate{
+				Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, Pattern: pattern}},
+				Presence:    schema.DefaultPresenceRules(),
+			}
+		}
+		gateRows := func(outcome string) int64 {
+			return queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events"+
+				" WHERE type = 'settings.key_reveal_gate_attempt' AND outcome = '"+outcome+"'"+
+				" AND object_id = '"+secret.ID+"'")
+		}
+
+		// 1. Refused. The transaction rolls back; the attempt and the denial
+		// both survive, both naming the key.
+		if _, err := keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(alice), scope, secret.ID, tighten("A.*")); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("a reveal-less rule change on a secret key answered %v", err)
+		}
+		if n := queryInt(t, db, "SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'grant.denied' AND object_id = '"+secret.ID+"'"); n != 1 {
+			t.Fatalf("the gate denial carries the key id %d times, want exactly 1", n)
+		}
+		if n := gateRows("denied"); n != 1 {
+			t.Fatalf("a refused gate attempt was recorded %d times, want exactly 1", n)
+		}
+
+		// 2. Passed, then the operation fails on something later. The mutation
+		// rolls back; the attempt must not.
+		revealer := domain.PrincipalID("usr_gate_revealer")
+		execRaw(t, db, `INSERT INTO principals (id, kind, created_at) VALUES ('usr_gate_revealer', 'human', `+ts+`)`)
+		for i, capability := range []string{"definitions-edit", "read", "reveal"} {
+			execRaw(t, db, fmt.Sprintf(
+				`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+				 VALUES ('grt_gate_%d', 'usr_gate_revealer', '%s', '%s', NULL, NULL, %s)`,
+				i, capability, orgA, ts))
+		}
+		// RE2 has no lookahead, so the declaration cannot compile — and it is
+		// examined only AFTER the gate, which is the ordering this exercises.
+		_, err = keys.UpdateDeclaration(tctx(t), service.LocalPrincipal(revealer), scope, secret.ID, tighten(`(?=x)y`))
+		if !errors.Is(err, domain.ErrInvalid) {
+			t.Fatalf("an uncompilable declaration from a reveal holder answered %v", err)
+		}
+		if n := gateRows("success"); n != 1 {
+			t.Fatalf("a passed gate whose operation later failed was recorded %d times, want exactly 1", n)
+		}
+		// The mutation really did roll back: the declaration is untouched.
+		after, err := keys.Get(tctx(t), service.LocalPrincipal(revealer), scope, secret.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if after.Declaration.Rule.Pattern != "" {
+			t.Fatalf("the failed update committed a pattern: %q", after.Declaration.Rule.Pattern)
+		}
+		if err := keys.Delete(tctx(t), service.LocalPrincipal(alice), scope, secret.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("denial_durability_under_induced_commit_failure", func(t *testing.T) {
 		// Break the denial writer's target table, then probe: the response
 		// MUST NOT be the uniform denial — a denial answer without its
@@ -763,7 +840,11 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	stmts := []string{
 		`INSERT INTO principals (id, kind, created_at) VALUES ('usr_hierarchy_audit', 'human', ` + ts + `)`,
 	}
-	for i, capability := range []string{"manage-projects", "definitions-edit", "read"} {
+	// `reveal` joins the set for the key catalogue (#49): the two reveal gates
+	// — a value-dependent rule change on a `secret` key, and declassification —
+	// are the only path to settings.key_reveal_gate_passed, so a fixture without
+	// it could not prove that type has an emitter.
+	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "reveal"} {
 		stmts = append(stmts, fmt.Sprintf(
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 			 VALUES ('grt_ha_%d', 'usr_hierarchy_audit', '%s', '%s', NULL, NULL, %s)`,
@@ -804,6 +885,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	if err := folders.Delete(ctx, actor, scope, folder.ID); err != nil {
 		t.Fatal(err)
 	}
+	runCatalogueLifecycle(t, db, actor, scope)
 	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
 		t.Fatal(err)
 	}
@@ -821,5 +903,78 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	}
 	if err := orgs.Delete(ctx, service.LocalPrincipal(root), domain.OrgID(throwaway.ID)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// runCatalogueLifecycle drives every key-catalogue mutation (#49) so each
+// settings.key_* type has a real emitter behind it before the emitter check
+// reads the trails. It ends with an EMPTY catalogue, because the project
+// delete that follows refuses while any key or group is still declared.
+func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope) {
+	t.Helper()
+	ctx := tctx(t)
+	keys := &service.Keys{DB: db}
+	groups := &service.KeyGroups{DB: db}
+
+	secret, err := keys.Create(ctx, actor, scope, service.KeySpec{
+		Name:           "AUDITED_SECRET",
+		Classification: string(schema.Secret),
+		FolderPath:     "audited",
+		Declaration:    schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+		Presence:       schema.DefaultPresenceRules(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := keys.Create(ctx, actor, scope, service.KeySpec{
+		Name:           "AUDITED_CONFIG",
+		Classification: string(schema.Config),
+		Declaration:    schema.Declaration{Rule: &schema.Rule{Type: schema.TypeBoolean}},
+		Presence:       schema.DefaultPresenceRules(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.Rename(ctx, actor, scope, secret.ID, "AUDITED_SECRET_RENAMED"); err != nil {
+		t.Fatal(err)
+	}
+	folder, description, note, deprecated := "audited/moved", "documented", "superseded", true
+	if _, err := keys.UpdateMetadata(ctx, actor, scope, secret.ID, service.KeyMetadataUpdate{
+		FolderPath: &folder, Description: &description,
+		Deprecated: &deprecated, DeprecationNote: &note,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A tightened rule on a SECRET key: the reveal gate fires here, which is
+	// the only emitter of settings.key_reveal_gate_passed's rule-change form.
+	minLength := 8
+	if _, err := keys.UpdateDeclaration(ctx, actor, scope, secret.ID, service.KeyDeclarationUpdate{
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString, MinLength: &minLength}},
+		Presence:    schema.DefaultPresenceRules(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	group, err := groups.Create(ctx, actor, scope, "audited-group")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keys.SetGroup(ctx, actor, scope, secret.ID, group.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := groups.Rename(ctx, actor, scope, group.ID, "audited-group-renamed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := groups.Delete(ctx, actor, scope, group.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Declassification: the second reveal gate, plus the reclassification
+	// record itself.
+	if _, err := keys.Reclassify(ctx, actor, scope, secret.ID, string(schema.Config)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{secret.ID, config.ID} {
+		if err := keys.Delete(ctx, actor, scope, id); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

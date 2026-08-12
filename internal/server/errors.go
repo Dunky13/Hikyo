@@ -10,6 +10,7 @@ import (
 	"github.com/Dunky13/wenv/api/apigen"
 	"github.com/Dunky13/wenv/internal/admission"
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/schema"
 	"github.com/Dunky13/wenv/internal/service"
 )
 
@@ -27,14 +28,22 @@ import (
 // and withholding it would make every malformed request a guessing game for
 // no security gain.
 
-// limitExceededMessage is the one fixed message that states a bound. The ops
-// spec requires the environment cap to be a NAMED refusal, and a body that may
+// limitExceededMessage is the one fixed message that states the bounds. The ops
+// spec requires a structural cap to be a NAMED refusal, and a body that may
 // carry nothing derived from the request can still carry a constant — but the
-// number is built from the constant the service enforces, not retyped here. Two
-// hand-written 50s is one of them going stale the day the cap moves.
+// numbers are built from the constants the service enforces, not retyped here.
+// Two hand-written 50s is one of them going stale the day the cap moves.
+//
+// It enumerates every bound rather than naming the one that fired, because
+// "fixed message per code" means exactly one body for `limit_exceeded`: a
+// message that varied by which cap was hit would be a body derived from the
+// request. Which bound fired is in the server's own error, which is logged and
+// never returned. Giving each bound its own code — so the response could name
+// it — is recorded as a disposition item rather than smuggled in here.
 var limitExceededMessage = fmt.Sprintf(
-	"a structural bound was reached: a project holds at most %d environments",
-	service.MaxEnvironmentsPerProject)
+	"a structural bound was reached: a project holds at most %d environments, "+
+		"declares at most %d keys, and declares at most %d key groups",
+	service.MaxEnvironmentsPerProject, schema.MaxKeysPerProject, schema.MaxKeyGroupsPerProject)
 
 var messages = map[apigen.ErrorCode]string{
 	apigen.ErrorCodeBadRequest:      "the request does not satisfy the API contract",

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/wenv/internal/schema"
 	"github.com/Dunky13/wenv/internal/service"
 	"github.com/Dunky13/wenv/internal/store"
 )
@@ -524,6 +525,141 @@ var tenantProbes = []tenantProbe{
 			return folderSvc(db).Delete(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "fld_missing")
 		},
 	},
+
+	// The key catalogue (#49). Every twin is AUTHORIZED-but-missing, per the
+	// harness's own rule: a probe whose twin is itself unauthorized proves
+	// nothing about the boundary it claims to test.
+	{
+		name: "key_get_cross_org", axis: axisCrossOrgHuman,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Get(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), keyA1)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Get(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing")
+			return err
+		},
+	},
+	{
+		name: "key_get_cross_project_machine", axis: axisCrossProjectMachine,
+		run: func(t *testing.T, db *store.DB) error {
+			// The key exists — in the sibling project this machine cannot reach.
+			// Addressed through prjA1, which it CAN reach, so the refusal comes
+			// from the chain predicate rather than from the scope check.
+			_, err := keySvc(db).Get(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), keyA2)
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Get(tctx(t), service.LocalPrincipal(mchA1), scopeProject(orgA, prjA1), "key_missing")
+			return err
+		},
+	},
+	{
+		name: "key_list_no_grants", axis: axisCapabilityDenial,
+		run: func(t *testing.T, db *store.DB) error {
+			_, _, err := keySvc(db).List(tctx(t), service.LocalPrincipal(nobody), scopeProject(orgA, prjA1))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, _, err := keySvc(db).List(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"))
+			return err
+		},
+	},
+	{
+		name: "key_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"))
+			return err
+		},
+	},
+	{
+		name: "key_create_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Create(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), probeKeySpec("INTRUDER"))
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), probeKeySpec("INTRUDER"))
+			return err
+		},
+	},
+	{
+		name: "key_rename_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Rename(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), keyA1, "PWNED")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Rename(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "PWNED")
+			return err
+		},
+	},
+	{
+		name: "key_declaration_cross_project_machine", axis: axisCrossProjectMachine, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).UpdateDeclaration(tctx(t), service.LocalPrincipal(mchA1),
+				scopeProject(orgA, prjA1), keyA2, probeDeclarationUpdate())
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).UpdateDeclaration(tctx(t), service.LocalPrincipal(mchA1),
+				scopeProject(orgA, prjA1), "key_missing", probeDeclarationUpdate())
+			return err
+		},
+	},
+	{
+		name: "key_reclassify_read_only_principal", axis: axisCapabilityDenial, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Reclassify(tctx(t), service.LocalPrincipal(reader), scopeProject(orgA, prjA1), keyA1, "secret")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keySvc(db).Reclassify(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing", "secret")
+			return err
+		},
+	},
+	{
+		name: "key_delete_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			return keySvc(db).Delete(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), keyA1)
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			return keySvc(db).Delete(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, prjA1), "key_missing")
+		},
+	},
+	{
+		name: "key_group_create_cross_org", axis: axisCrossOrgHuman, mutation: true,
+		run: func(t *testing.T, db *store.DB) error {
+			_, err := keyGroupSvc(db).Create(tctx(t), service.LocalPrincipal(bob), scopeProject(orgA, prjA1), "intruder")
+			return err
+		},
+		missing: func(t *testing.T, db *store.DB) error {
+			_, err := keyGroupSvc(db).Create(tctx(t), service.LocalPrincipal(alice), scopeProject(orgA, "prj_missing"), "intruder")
+			return err
+		},
+	},
+}
+
+// probeKeySpec and probeDeclarationUpdate are the minimal well-formed inputs
+// the mutation probes carry. They must be VALID: a probe refused for a
+// malformed declaration would prove nothing about the tenant boundary.
+func probeKeySpec(name string) service.KeySpec {
+	return service.KeySpec{
+		Name: name, Classification: "config",
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+		Presence:    schema.DefaultPresenceRules(),
+	}
+}
+
+func probeDeclarationUpdate() service.KeyDeclarationUpdate {
+	return service.KeyDeclarationUpdate{
+		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeBoolean}},
+		Presence:    schema.DefaultPresenceRules(),
+	}
 }
 
 func runTenantProbes(t *testing.T, db *store.DB) {
@@ -574,6 +710,11 @@ func contentSnapshot(t *testing.T, db *store.DB) string {
 		"SELECT id || '=' || name || '|' FROM projects ORDER BY id",
 		"SELECT id || '=' || name || ':' || note || ':' || display_order || '|' FROM environments ORDER BY id",
 		"SELECT id || '=' || path || '|' FROM folders ORDER BY id",
+		// The key catalogue (#49): every mutable field a refused mutation could
+		// touch. COALESCE because group_id is the one nullable column, and a
+		// NULL would make the whole concatenation NULL and hide every row.
+		"SELECT id || '=' || name || ':' || classification || ':' || folder_path || ':' || declaration || ':' || required_mode || ':' || forbidden_mode || ':' || COALESCE(group_id, '') || '|' FROM keys ORDER BY id",
+		"SELECT org_id || '/' || project_id || '=' || revision || '|' FROM project_schema_revisions ORDER BY org_id, project_id",
 	} {
 		out.WriteString(queryStrings(t, db, q))
 		out.WriteString(";")

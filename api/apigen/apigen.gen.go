@@ -98,6 +98,75 @@ func (e IdentityProviderKind) Valid() bool {
 	}
 }
 
+// Defines values for KeyClassification.
+const (
+	Config KeyClassification = "config"
+	Secret KeyClassification = "secret"
+)
+
+// Valid indicates whether the value is a known member of the KeyClassification enum.
+func (e KeyClassification) Valid() bool {
+	switch e {
+	case Config:
+		return true
+	case Secret:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyPresenceMode.
+const (
+	All      KeyPresenceMode = "all"
+	Explicit KeyPresenceMode = "explicit"
+	None     KeyPresenceMode = "none"
+)
+
+// Valid indicates whether the value is a known member of the KeyPresenceMode enum.
+func (e KeyPresenceMode) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Explicit:
+		return true
+	case None:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KeyRuleType.
+const (
+	KeyRuleTypeBoolean KeyRuleType = "boolean"
+	KeyRuleTypeEnum    KeyRuleType = "enum"
+	KeyRuleTypeInteger KeyRuleType = "integer"
+	KeyRuleTypeJson    KeyRuleType = "json"
+	KeyRuleTypeString  KeyRuleType = "string"
+	KeyRuleTypeUrl     KeyRuleType = "url"
+)
+
+// Valid indicates whether the value is a known member of the KeyRuleType enum.
+func (e KeyRuleType) Valid() bool {
+	switch e {
+	case KeyRuleTypeBoolean:
+		return true
+	case KeyRuleTypeEnum:
+		return true
+	case KeyRuleTypeInteger:
+		return true
+	case KeyRuleTypeJson:
+		return true
+	case KeyRuleTypeString:
+		return true
+	case KeyRuleTypeUrl:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OidcStartRequestPurpose.
 const (
 	OidcStartRequestPurposeLink   OidcStartRequestPurpose = "link"
@@ -175,16 +244,16 @@ func (e RoleTemplate) Valid() bool {
 
 // Defines values for SamlMetadataSource.
 const (
-	File SamlMetadataSource = "file"
-	Url  SamlMetadataSource = "url"
+	SamlMetadataSourceFile SamlMetadataSource = "file"
+	SamlMetadataSourceUrl  SamlMetadataSource = "url"
 )
 
 // Valid indicates whether the value is a known member of the SamlMetadataSource enum.
 func (e SamlMetadataSource) Valid() bool {
 	switch e {
-	case File:
+	case SamlMetadataSourceFile:
 		return true
-	case Url:
+	case SamlMetadataSourceUrl:
 		return true
 	default:
 		return false
@@ -384,6 +453,49 @@ type CreateGrantRequest struct {
 
 	// Principal A prefixed UUIDv7, e.g. `org_0198…`.
 	Principal ID `json:"principal"`
+}
+
+// CreateKeyGroupRequest defines model for CreateKeyGroupRequest.
+type CreateKeyGroupRequest struct {
+	Name string `json:"name"`
+}
+
+// CreateKeyRequest defines model for CreateKeyRequest.
+type CreateKeyRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration     KeyDeclaration `json:"declaration"`
+	Deprecated      *bool          `json:"deprecated,omitempty"`
+	DeprecationNote *string        `json:"deprecation_note,omitempty"`
+	Description     *string        `json:"description,omitempty"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath *KeyFolderPath `json:"folder_path,omitempty"`
+	GroupId    *string        `json:"group_id,omitempty"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence *KeyPresenceRules `json:"presence,omitempty"`
 }
 
 // CreateOrgRequest defines model for CreateOrgRequest.
@@ -696,6 +808,213 @@ type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
 }
 
+// Key defines model for Key.
+type Key struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration     KeyDeclaration `json:"declaration"`
+	Deprecated      bool           `json:"deprecated"`
+	DeprecationNote string         `json:"deprecation_note"`
+	Description     string         `json:"description"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath KeyFolderPath `json:"folder_path"`
+
+	// GroupId The key's group, or empty when it belongs to none.
+	GroupId string `json:"group_id"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId ID `json:"org_id"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence KeyPresenceRules `json:"presence"`
+
+	// ProjectId A prefixed UUIDv7, e.g. `org_0198…`.
+	ProjectId ID `json:"project_id"`
+}
+
+// KeyClassification Classification IS the sensitivity boundary. A matrix row is uniformly
+// secret or config; it changes only through the reclassification
+// ceremony. Closed, deliberately: a third value would be a third
+// disclosure regime.
+type KeyClassification string
+
+// KeyDeclaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+// meanings for one word inside one product is a trap. Alternatives may
+// not nest.
+type KeyDeclaration struct {
+	AnyOf *[]KeyRule `json:"any_of,omitempty"`
+
+	// Rule One primitive type declaration with its constraints. Each constraint
+	// belongs to exactly one type, and a constraint declared on the wrong
+	// type is REFUSED rather than ignored: a silently ignored `pattern` on an
+	// integer key is the "appears to enforce something and does not" failure
+	// the schema model rejects everywhere. This document carries shape; the
+	// service is the authority on every rule below.
+	Rule *KeyRule `json:"rule,omitempty"`
+}
+
+// KeyFolderPath The key's namespace within the project. Organizational only: a plain
+// slash-separated path, empty for the catalogue root. It is a PATH, not a
+// folder reference - no folder row need exist for it.
+type KeyFolderPath = string
+
+// KeyGroup defines model for KeyGroup.
+type KeyGroup struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Inert A group with fewer than two members couples nothing. It is flagged
+	// rather than deleted behind the operator's back - they are usually
+	// mid-way through building it.
+	Inert bool `json:"inert"`
+
+	// Members The member key names, sorted.
+	Members []KeyName `json:"members"`
+	Name    string    `json:"name"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId ID `json:"org_id"`
+
+	// ProjectId A prefixed UUIDv7, e.g. `org_0198…`.
+	ProjectId ID `json:"project_id"`
+}
+
+// KeyGroupList defines model for KeyGroupList.
+type KeyGroupList struct {
+	Count int        `json:"count"`
+	Items []KeyGroup `json:"items"`
+}
+
+// KeyList defines model for KeyList.
+type KeyList struct {
+	// Count Total rows matching, which for an unpaged list equals `items` length.
+	Count int   `json:"count"`
+	Items []Key `json:"items"`
+
+	// SchemaRevision The project's monotonic key-catalogue revision, which IS its schema
+	// revision. It advances on every semantic declaration change and on
+	// nothing else.
+	SchemaRevision int64 `json:"schema_revision"`
+}
+
+// KeyName The canonical key grammar: uppercase ASCII, digits and underscore, no
+// leading digit. It is the environment-variable-safe grammar every
+// delivery surface assumes - an execve environment block, a Kubernetes
+// Secret data key, an adapter effective name - so it is a delivery
+// constraint, not a style preference. `maxLength` counts code points
+// here and bytes in the service; the grammar is ASCII, so they agree.
+type KeyName = string
+
+// KeyPresence A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+// and covers environments created later, so expanding it into the ids
+// existing at declaration time would silently exempt a new environment
+// from a rule the operator wrote as "always". `none` is the default.
+type KeyPresence struct {
+	// EnvironmentIds `explicit` only; empty or absent for `all` and `none`.
+	EnvironmentIds *[]ID           `json:"environment_ids,omitempty"`
+	Mode           KeyPresenceMode `json:"mode"`
+}
+
+// KeyPresenceMode defines model for KeyPresence.Mode.
+type KeyPresenceMode string
+
+// KeyPresenceRules Presence is the ONLY thing that varies per environment; every other
+// constraint is project-wide. `required` is a predicate about presence
+// only - it means "resolves to set" and says nothing about content.
+type KeyPresenceRules struct {
+	// ForbiddenIn A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+	// and covers environments created later, so expanding it into the ids
+	// existing at declaration time would silently exempt a new environment
+	// from a rule the operator wrote as "always". `none` is the default.
+	ForbiddenIn KeyPresence `json:"forbidden_in"`
+
+	// RequiredIn A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+	// and covers environments created later, so expanding it into the ids
+	// existing at declaration time would silently exempt a new environment
+	// from a rule the operator wrote as "always". `none` is the default.
+	RequiredIn KeyPresence `json:"required_in"`
+}
+
+// KeyRule One primitive type declaration with its constraints. Each constraint
+// belongs to exactly one type, and a constraint declared on the wrong
+// type is REFUSED rather than ignored: a silently ignored `pattern` on an
+// integer key is the "appears to enforce something and does not" failure
+// the schema model rejects everywhere. This document carries shape; the
+// service is the authority on every rule below.
+type KeyRule struct {
+	// AllowEmpty `string` only; defaults to false.
+	AllowEmpty *bool `json:"allow_empty,omitempty"`
+
+	// JsonSchema `json` only: a JSON Schema 2020-12 document, carried as a STRING so
+	// the bytes the profile checks are the bytes the client sent. A
+	// re-encoded object would lose duplicate-key detection (Go's decoder
+	// is last-wins) and number precision, and duplicate object keys are a
+	// rejection here, not last-wins. The accepted subset is a pinned,
+	// profiled, budgeted allowlist enforced by the service.
+	JsonSchema *string `json:"json_schema,omitempty"`
+
+	// Max `integer` only.
+	Max *int64 `json:"max,omitempty"`
+
+	// MaxLength `string` only.
+	MaxLength *int `json:"max_length,omitempty"`
+
+	// Members `enum` only. Members must be non-empty and distinct after the
+	// write-time trim.
+	Members *[]string `json:"members,omitempty"`
+
+	// Min `integer` only.
+	Min *int64 `json:"min,omitempty"`
+
+	// MinLength `string` only.
+	MinLength *int `json:"min_length,omitempty"`
+
+	// Pattern `string` only. RE2, and ANCHORED TO THE WHOLE VALUE - implicitly
+	// `\A(?:...)\z`, never a substring search. Backreferences and
+	// lookaround do not exist in RE2 and are refused at declaration.
+	Pattern *string `json:"pattern,omitempty"`
+
+	// Schemes `url` only: the allowed scheme list.
+	Schemes *[]string   `json:"schemes,omitempty"`
+	Type    KeyRuleType `json:"type"`
+}
+
+// KeyRuleType defines model for KeyRule.Type.
+type KeyRuleType string
+
 // LocalLoginRequest defines model for LocalLoginRequest.
 type LocalLoginRequest struct {
 	Password string `json:"password"`
@@ -872,6 +1191,15 @@ type ProjectList struct {
 // unknown value rather than reject the response.
 type ProtocolCapability = string
 
+// ReclassifyKeyRequest defines model for ReclassifyKeyRequest.
+type ReclassifyKeyRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+}
+
 // RecoveryBeginRequest defines model for RecoveryBeginRequest.
 type RecoveryBeginRequest struct {
 	Code     string `json:"code"`
@@ -915,6 +1243,22 @@ type RenameFolderRequest struct {
 	// bytes — the same bound entity names carry. A 129-character ASCII segment
 	// satisfies this schema and is refused with `bad_request`.
 	Path FolderPath `json:"path"`
+}
+
+// RenameKeyGroupRequest defines model for RenameKeyGroupRequest.
+type RenameKeyGroupRequest struct {
+	Name string `json:"name"`
+}
+
+// RenameKeyRequest defines model for RenameKeyRequest.
+type RenameKeyRequest struct {
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
 }
 
 // RenameRequest defines model for RenameRequest.
@@ -1155,6 +1499,12 @@ type Session struct {
 // actually used.
 type SessionArtifact = string
 
+// SetKeyGroupRequest defines model for SetKeyGroupRequest.
+type SetKeyGroupRequest struct {
+	// GroupId The group to join, or empty to leave every group.
+	GroupId string `json:"group_id"`
+}
+
 // Timestamp RFC 3339 UTC, microsecond precision.
 type Timestamp = time.Time
 
@@ -1182,6 +1532,38 @@ type TotpEnrolStartResult struct {
 type TotpProofRequest struct {
 	// Password The account-security proof for removing the factor.
 	Password string `json:"password"`
+}
+
+// UpdateKeyDeclarationRequest defines model for UpdateKeyDeclarationRequest.
+type UpdateKeyDeclarationRequest struct {
+	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+	// value is valid if it satisfies AT LEAST ONE alternative - deliberately
+	// not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+	// meanings for one word inside one product is a trap. Alternatives may
+	// not nest.
+	Declaration KeyDeclaration `json:"declaration"`
+
+	// Presence Presence is the ONLY thing that varies per environment; every other
+	// constraint is project-wide. `required` is a predicate about presence
+	// only - it means "resolves to set" and says nothing about content.
+	Presence KeyPresenceRules `json:"presence"`
+}
+
+// UpdateKeyMetadataRequest defines model for UpdateKeyMetadataRequest.
+type UpdateKeyMetadataRequest struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification  *KeyClassification `json:"classification,omitempty"`
+	Deprecated      *bool              `json:"deprecated,omitempty"`
+	DeprecationNote *string            `json:"deprecation_note,omitempty"`
+	Description     *string            `json:"description,omitempty"`
+
+	// FolderPath The key's namespace within the project. Organizational only: a plain
+	// slash-separated path, empty for the catalogue root. It is a PATH, not a
+	// folder reference - no folder row need exist for it.
+	FolderPath *KeyFolderPath `json:"folder_path,omitempty"`
 }
 
 // WebauthnCredentialProofRequest The account-security proof for removing a credential — the pre-existing
@@ -1258,6 +1640,12 @@ type GrantPrincipal = ID
 
 // IdentityID A prefixed UUIDv7, e.g. `org_0198…`.
 type IdentityID = ID
+
+// KeyGroupID A prefixed UUIDv7, e.g. `org_0198…`.
+type KeyGroupID = ID
+
+// KeyID A prefixed UUIDv7, e.g. `org_0198…`.
+type KeyID = ID
 
 // OrgID A prefixed UUIDv7, e.g. `org_0198…`.
 type OrgID = ID
@@ -1467,6 +1855,30 @@ type CreateProjectGrantJSONRequestBody = CreateGrantRequest
 
 // ApplyProjectTemplateJSONRequestBody defines body for ApplyProjectTemplate for application/json ContentType.
 type ApplyProjectTemplateJSONRequestBody = ApplyTemplateRequest
+
+// CreateKeyGroupJSONRequestBody defines body for CreateKeyGroup for application/json ContentType.
+type CreateKeyGroupJSONRequestBody = CreateKeyGroupRequest
+
+// RenameKeyGroupJSONRequestBody defines body for RenameKeyGroup for application/json ContentType.
+type RenameKeyGroupJSONRequestBody = RenameKeyGroupRequest
+
+// CreateKeyJSONRequestBody defines body for CreateKey for application/json ContentType.
+type CreateKeyJSONRequestBody = CreateKeyRequest
+
+// UpdateKeyMetadataJSONRequestBody defines body for UpdateKeyMetadata for application/json ContentType.
+type UpdateKeyMetadataJSONRequestBody = UpdateKeyMetadataRequest
+
+// ReclassifyKeyJSONRequestBody defines body for ReclassifyKey for application/json ContentType.
+type ReclassifyKeyJSONRequestBody = ReclassifyKeyRequest
+
+// UpdateKeyDeclarationJSONRequestBody defines body for UpdateKeyDeclaration for application/json ContentType.
+type UpdateKeyDeclarationJSONRequestBody = UpdateKeyDeclarationRequest
+
+// SetKeyGroupJSONRequestBody defines body for SetKeyGroup for application/json ContentType.
+type SetKeyGroupJSONRequestBody = SetKeyGroupRequest
+
+// RenameKeyJSONRequestBody defines body for RenameKey for application/json ContentType.
+type RenameKeyJSONRequestBody = RenameKeyRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1719,6 +2131,48 @@ type ServerInterface interface {
 	// ApplyProjectTemplate Apply a role template at project scope.
 	// (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
 	ApplyProjectTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// ListKeyGroups List the project's key groups.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+	ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateKeyGroup Declare a key group.
+	// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+	CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteKeyGroup Delete a key group.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// GetKeyGroup Read one key group.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// RenameKeyGroup Rename a key group.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID)
+	// ListKeys List the project's key catalogue.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+	ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateKey Declare a key.
+	// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+	CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteKey Delete a key.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// GetKey Read one key declaration.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// UpdateKeyMetadata Update a key's non-semantic metadata.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// ReclassifyKey The reclassification ceremony.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+	ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+	UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// SetKeyGroup Set or clear a key's group membership.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+	SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// RenameKey Rename a key.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -2220,6 +2674,90 @@ func (_ Unimplemented) CreateProjectGrant(w http.ResponseWriter, r *http.Request
 // ApplyProjectTemplate Apply a role template at project scope.
 // (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
 func (_ Unimplemented) ApplyProjectTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKeyGroups List the project's key groups.
+// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+func (_ Unimplemented) ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateKeyGroup Declare a key group.
+// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+func (_ Unimplemented) CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteKeyGroup Delete a key group.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKeyGroup Read one key group.
+// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RenameKeyGroup Rename a key group.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+func (_ Unimplemented) RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKeys List the project's key catalogue.
+// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+func (_ Unimplemented) ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateKey Declare a key.
+// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+func (_ Unimplemented) CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteKey Delete a key.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKey Read one key declaration.
+// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateKeyMetadata Update a key's non-semantic metadata.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+func (_ Unimplemented) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReclassifyKey The reclassification ceremony.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+func (_ Unimplemented) ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+func (_ Unimplemented) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetKeyGroup Set or clear a key's group membership.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+func (_ Unimplemented) SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RenameKey Rename a key.
+// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4474,6 +5012,586 @@ func (siw *ServerInterfaceWrapper) ApplyProjectTemplate(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListKeyGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListKeyGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeyGroups(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) CreateKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKeyGroup(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) GetKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) RenameKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "group" -------------
+	var group KeyGroupID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "group", chi.URLParam(r, "group"), &group, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameKeyGroup(w, r, org, project, group)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKeys operation middleware
+func (siw *ServerInterfaceWrapper) ListKeys(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKeys(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateKey operation middleware
+func (siw *ServerInterfaceWrapper) CreateKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateKey(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteKey operation middleware
+func (siw *ServerInterfaceWrapper) DeleteKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKey operation middleware
+func (siw *ServerInterfaceWrapper) GetKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateKeyMetadata operation middleware
+func (siw *ServerInterfaceWrapper) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateKeyMetadata(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReclassifyKey operation middleware
+func (siw *ServerInterfaceWrapper) ReclassifyKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReclassifyKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateKeyDeclaration operation middleware
+func (siw *ServerInterfaceWrapper) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateKeyDeclaration(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetKeyGroup operation middleware
+func (siw *ServerInterfaceWrapper) SetKeyGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetKeyGroup(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameKey operation middleware
+func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key KeyID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameKey(w, r, org, project, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -4733,6 +5851,48 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings", wrapper.SetEnvironmentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.ListKeys)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys", wrapper.CreateKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.DeleteKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.GetKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}", wrapper.UpdateKeyMetadata)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/name", wrapper.RenameKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration", wrapper.UpdateKeyDeclaration)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/classification", wrapper.ReclassifyKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/keys/{key}/group", wrapper.SetKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups", wrapper.ListKeyGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups", wrapper.CreateKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.DeleteKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.GetKeyGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/key-groups/{group}", wrapper.RenameKeyGroup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/methods", wrapper.AuthMethods)
@@ -12206,6 +13366,1384 @@ func (response ApplyProjectTemplate500JSONResponse) VisitApplyProjectTemplateRes
 	return err
 }
 
+type ListKeyGroupsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListKeyGroupsResponseObject interface {
+	VisitListKeyGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListKeyGroups200JSONResponse KeyGroupList
+
+func (response ListKeyGroups200JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListKeyGroups401JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListKeyGroups404JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListKeyGroups429JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeyGroups500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListKeyGroups500JSONResponse) VisitListKeyGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroupRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateKeyGroupJSONRequestBody
+}
+
+type CreateKeyGroupResponseObject interface {
+	VisitCreateKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type CreateKeyGroup201JSONResponse KeyGroup
+
+func (response CreateKeyGroup201JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateKeyGroup400JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateKeyGroup401JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateKeyGroup404JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateKeyGroup409JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateKeyGroup429JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateKeyGroup500JSONResponse) VisitCreateKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+}
+
+type DeleteKeyGroupResponseObject interface {
+	VisitDeleteKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type DeleteKeyGroup204Response struct {
+}
+
+func (response DeleteKeyGroup204Response) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteKeyGroup401JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteKeyGroup404JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteKeyGroup409JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteKeyGroup429JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteKeyGroup500JSONResponse) VisitDeleteKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+}
+
+type GetKeyGroupResponseObject interface {
+	VisitGetKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type GetKeyGroup200JSONResponse KeyGroup
+
+func (response GetKeyGroup200JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetKeyGroup401JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetKeyGroup404JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetKeyGroup429JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetKeyGroup500JSONResponse) VisitGetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroupRequestObject struct {
+	Org     OrgID      `json:"org"`
+	Project ProjectID  `json:"project"`
+	Group   KeyGroupID `json:"group"`
+	Body    *RenameKeyGroupJSONRequestBody
+}
+
+type RenameKeyGroupResponseObject interface {
+	VisitRenameKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type RenameKeyGroup200JSONResponse KeyGroup
+
+func (response RenameKeyGroup200JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameKeyGroup400JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameKeyGroup401JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameKeyGroup404JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameKeyGroup409JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RenameKeyGroup429JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response RenameKeyGroup500JSONResponse) VisitRenameKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeysRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListKeysResponseObject interface {
+	VisitListKeysResponse(w http.ResponseWriter) error
+}
+
+type ListKeys200JSONResponse KeyList
+
+func (response ListKeys200JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListKeys401JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListKeys404JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListKeys429JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListKeys500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListKeys500JSONResponse) VisitListKeysResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateKeyJSONRequestBody
+}
+
+type CreateKeyResponseObject interface {
+	VisitCreateKeyResponse(w http.ResponseWriter) error
+}
+
+type CreateKey201JSONResponse Key
+
+func (response CreateKey201JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateKey400JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateKey401JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateKey404JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateKey409JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateKey429JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateKey500JSONResponse) VisitCreateKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+}
+
+type DeleteKeyResponseObject interface {
+	VisitDeleteKeyResponse(w http.ResponseWriter) error
+}
+
+type DeleteKey204Response struct {
+}
+
+func (response DeleteKey204Response) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteKey401JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteKey404JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteKey409JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteKey429JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteKey500JSONResponse) VisitDeleteKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+}
+
+type GetKeyResponseObject interface {
+	VisitGetKeyResponse(w http.ResponseWriter) error
+}
+
+type GetKey200JSONResponse Key
+
+func (response GetKey200JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetKey401JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetKey404JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetKey429JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetKey500JSONResponse) VisitGetKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadataRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *UpdateKeyMetadataJSONRequestBody
+}
+
+type UpdateKeyMetadataResponseObject interface {
+	VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error
+}
+
+type UpdateKeyMetadata200JSONResponse Key
+
+func (response UpdateKeyMetadata200JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateKeyMetadata400JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateKeyMetadata401JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateKeyMetadata404JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateKeyMetadata409JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateKeyMetadata429JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyMetadata500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateKeyMetadata500JSONResponse) VisitUpdateKeyMetadataResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *ReclassifyKeyJSONRequestBody
+}
+
+type ReclassifyKeyResponseObject interface {
+	VisitReclassifyKeyResponse(w http.ResponseWriter) error
+}
+
+type ReclassifyKey200JSONResponse Key
+
+func (response ReclassifyKey200JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReclassifyKey400JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReclassifyKey401JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReclassifyKey404JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReclassifyKey409JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReclassifyKey429JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReclassifyKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReclassifyKey500JSONResponse) VisitReclassifyKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclarationRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *UpdateKeyDeclarationJSONRequestBody
+}
+
+type UpdateKeyDeclarationResponseObject interface {
+	VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error
+}
+
+type UpdateKeyDeclaration200JSONResponse Key
+
+func (response UpdateKeyDeclaration200JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateKeyDeclaration400JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateKeyDeclaration401JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateKeyDeclaration404JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateKeyDeclaration409JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateKeyDeclaration429JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateKeyDeclaration500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateKeyDeclaration500JSONResponse) VisitUpdateKeyDeclarationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroupRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *SetKeyGroupJSONRequestBody
+}
+
+type SetKeyGroupResponseObject interface {
+	VisitSetKeyGroupResponse(w http.ResponseWriter) error
+}
+
+type SetKeyGroup200JSONResponse Key
+
+func (response SetKeyGroup200JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetKeyGroup400JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetKeyGroup401JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetKeyGroup404JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup409JSONResponse struct{ ConflictJSONResponse }
+
+func (response SetKeyGroup409JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetKeyGroup429JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetKeyGroup500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetKeyGroup500JSONResponse) VisitSetKeyGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKeyRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Key     KeyID     `json:"key"`
+	Body    *RenameKeyJSONRequestBody
+}
+
+type RenameKeyResponseObject interface {
+	VisitRenameKeyResponse(w http.ResponseWriter) error
+}
+
+type RenameKey200JSONResponse Key
+
+func (response RenameKey200JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameKey400JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameKey401JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameKey404JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameKey409JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RenameKey429JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
@@ -12457,6 +14995,48 @@ type StrictServerInterface interface {
 	// ApplyProjectTemplate Apply a role template at project scope.
 	// (POST /api/v1/orgs/{org}/projects/{project}/grants/template)
 	ApplyProjectTemplate(ctx context.Context, request ApplyProjectTemplateRequestObject) (ApplyProjectTemplateResponseObject, error)
+	// ListKeyGroups List the project's key groups.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups)
+	ListKeyGroups(ctx context.Context, request ListKeyGroupsRequestObject) (ListKeyGroupsResponseObject, error)
+	// CreateKeyGroup Declare a key group.
+	// (POST /api/v1/orgs/{org}/projects/{project}/key-groups)
+	CreateKeyGroup(ctx context.Context, request CreateKeyGroupRequestObject) (CreateKeyGroupResponseObject, error)
+	// DeleteKeyGroup Delete a key group.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	DeleteKeyGroup(ctx context.Context, request DeleteKeyGroupRequestObject) (DeleteKeyGroupResponseObject, error)
+	// GetKeyGroup Read one key group.
+	// (GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	GetKeyGroup(ctx context.Context, request GetKeyGroupRequestObject) (GetKeyGroupResponseObject, error)
+	// RenameKeyGroup Rename a key group.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group})
+	RenameKeyGroup(ctx context.Context, request RenameKeyGroupRequestObject) (RenameKeyGroupResponseObject, error)
+	// ListKeys List the project's key catalogue.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys)
+	ListKeys(ctx context.Context, request ListKeysRequestObject) (ListKeysResponseObject, error)
+	// CreateKey Declare a key.
+	// (POST /api/v1/orgs/{org}/projects/{project}/keys)
+	CreateKey(ctx context.Context, request CreateKeyRequestObject) (CreateKeyResponseObject, error)
+	// DeleteKey Delete a key.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	DeleteKey(ctx context.Context, request DeleteKeyRequestObject) (DeleteKeyResponseObject, error)
+	// GetKey Read one key declaration.
+	// (GET /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	GetKey(ctx context.Context, request GetKeyRequestObject) (GetKeyResponseObject, error)
+	// UpdateKeyMetadata Update a key's non-semantic metadata.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key})
+	UpdateKeyMetadata(ctx context.Context, request UpdateKeyMetadataRequestObject) (UpdateKeyMetadataResponseObject, error)
+	// ReclassifyKey The reclassification ceremony.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification)
+	ReclassifyKey(ctx context.Context, request ReclassifyKeyRequestObject) (ReclassifyKeyResponseObject, error)
+	// UpdateKeyDeclaration Replace a key's value-dependent rules and presence rules.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration)
+	UpdateKeyDeclaration(ctx context.Context, request UpdateKeyDeclarationRequestObject) (UpdateKeyDeclarationResponseObject, error)
+	// SetKeyGroup Set or clear a key's group membership.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/group)
+	SetKeyGroup(ctx context.Context, request SetKeyGroupRequestObject) (SetKeyGroupResponseObject, error)
+	// RenameKey Rename a key.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
+	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -14921,6 +17501,450 @@ func (sh *strictHandler) ApplyProjectTemplate(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ApplyProjectTemplateResponseObject); ok {
 		if err := validResponse.VisitApplyProjectTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeyGroups operation middleware
+func (sh *strictHandler) ListKeyGroups(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListKeyGroupsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeyGroups(ctx, request.(ListKeyGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeyGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeyGroupsResponseObject); ok {
+		if err := validResponse.VisitListKeyGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKeyGroup operation middleware
+func (sh *strictHandler) CreateKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKeyGroup(ctx, request.(CreateKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyGroupResponseObject); ok {
+		if err := validResponse.VisitCreateKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteKeyGroup operation middleware
+func (sh *strictHandler) DeleteKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request DeleteKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteKeyGroup(ctx, request.(DeleteKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteKeyGroupResponseObject); ok {
+		if err := validResponse.VisitDeleteKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetKeyGroup operation middleware
+func (sh *strictHandler) GetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request GetKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetKeyGroup(ctx, request.(GetKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetKeyGroupResponseObject); ok {
+		if err := validResponse.VisitGetKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameKeyGroup operation middleware
+func (sh *strictHandler) RenameKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, group KeyGroupID) {
+	var request RenameKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Group = group
+
+	var body RenameKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameKeyGroup(ctx, request.(RenameKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameKeyGroupResponseObject); ok {
+		if err := validResponse.VisitRenameKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListKeys operation middleware
+func (sh *strictHandler) ListKeys(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListKeysRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListKeys(ctx, request.(ListKeysRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListKeys")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListKeysResponseObject); ok {
+		if err := validResponse.VisitListKeysResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateKey operation middleware
+func (sh *strictHandler) CreateKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateKey(ctx, request.(CreateKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateKeyResponseObject); ok {
+		if err := validResponse.VisitCreateKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteKey operation middleware
+func (sh *strictHandler) DeleteKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request DeleteKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteKey(ctx, request.(DeleteKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteKeyResponseObject); ok {
+		if err := validResponse.VisitDeleteKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetKey operation middleware
+func (sh *strictHandler) GetKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request GetKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetKey(ctx, request.(GetKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetKeyResponseObject); ok {
+		if err := validResponse.VisitGetKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateKeyMetadata operation middleware
+func (sh *strictHandler) UpdateKeyMetadata(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request UpdateKeyMetadataRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body UpdateKeyMetadataJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateKeyMetadata(ctx, request.(UpdateKeyMetadataRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateKeyMetadata")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateKeyMetadataResponseObject); ok {
+		if err := validResponse.VisitUpdateKeyMetadataResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReclassifyKey operation middleware
+func (sh *strictHandler) ReclassifyKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request ReclassifyKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body ReclassifyKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReclassifyKey(ctx, request.(ReclassifyKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReclassifyKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReclassifyKeyResponseObject); ok {
+		if err := validResponse.VisitReclassifyKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateKeyDeclaration operation middleware
+func (sh *strictHandler) UpdateKeyDeclaration(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request UpdateKeyDeclarationRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body UpdateKeyDeclarationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateKeyDeclaration(ctx, request.(UpdateKeyDeclarationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateKeyDeclaration")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateKeyDeclarationResponseObject); ok {
+		if err := validResponse.VisitUpdateKeyDeclarationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetKeyGroup operation middleware
+func (sh *strictHandler) SetKeyGroup(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request SetKeyGroupRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body SetKeyGroupJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetKeyGroup(ctx, request.(SetKeyGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetKeyGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetKeyGroupResponseObject); ok {
+		if err := validResponse.VisitSetKeyGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameKey operation middleware
+func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	var request RenameKeyRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Key = key
+
+	var body RenameKeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameKey(ctx, request.(RenameKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameKeyResponseObject); ok {
+		if err := validResponse.VisitRenameKeyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

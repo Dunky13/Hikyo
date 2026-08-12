@@ -26,6 +26,7 @@
     "cli:folder": "client transport for the tenant-scoped folder routes, whose operations carry the audit mapping",
     "cli:instance-config": "client transport for the instance-scoped provider routes, whose operations carry the audit mapping",
     "cli:doctor": "client transport for GET /api/v1/instance/saml-providers; the server audits that provider read and returns the canonical warnings",
+    "cli:key": "client transport for the tenant-scoped key-catalogue routes, whose operations carry the audit mapping",
     "cli:access": "client transport for the /grants routes at every depth, whose operations carry the audit mapping (grant.created / grant.modified / grant.revoked / grant.template_applied / grant.membership_read)",
     "cli:project-settings": "client transport for the environment settings routes, whose operations carry the audit mapping (settings.protected_flag_changed / settings.reauthentication_window_changed / auth.effective_window_lowered)"
   },

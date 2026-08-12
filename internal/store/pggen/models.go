@@ -135,9 +135,42 @@ type GrantOrigin struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Key struct {
+	ID              string
+	OrgID           string
+	ProjectID       string
+	Name            string
+	FolderPath      string
+	Classification  string
+	Description     string
+	Deprecated      bool
+	DeprecationNote string
+	Declaration     string
+	RequiredMode    string
+	ForbiddenMode   string
+	GroupID         pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+}
+
 type KeyGeneration struct {
 	Scope      string
 	Generation int64
+}
+
+type KeyGroup struct {
+	ID        string
+	OrgID     string
+	ProjectID string
+	Name      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type KeyPresenceEnvironment struct {
+	OrgID         string
+	ProjectID     string
+	KeyID         string
+	EnvironmentID string
+	Rule          string
 }
 
 type MasterKey struct {
@@ -221,6 +254,12 @@ type Project struct {
 	OrgID     string
 	Name      string
 	CreatedAt pgtype.Timestamptz
+}
+
+type ProjectSchemaRevision struct {
+	OrgID     string
+	ProjectID string
+	Revision  int64
 }
 
 type ReauthWindow struct {

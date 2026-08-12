@@ -49,6 +49,11 @@ const (
 	envA1 = domain.EnvID("env_a1")
 	envA2 = domain.EnvID("env_a2")
 	envB1 = domain.EnvID("env_b1")
+	// Key-catalogue fixtures (#49). One key per fixture project, so a key probe
+	// addresses a row that genuinely EXISTS and fails only at the boundary —
+	// the difference between proving isolation and proving a typo.
+	keyA1 = "key_a1"
+	keyA2 = "key_a2"
 )
 
 // Microsecond width, because the authn resolver's decodeTime parses grant and
@@ -62,6 +67,14 @@ var fixtureSQL = []string{
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_a1', 'org_a', 'a1', ` + ts + `)`,
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_a2', 'org_a', 'a2', ` + ts + `)`,
 	`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_b1', 'org_b', 'b1', ` + ts + `)`,
+	// The key-catalogue revision row is born with a project (#49). These
+	// projects are seeded with raw SQL rather than through projects.Create, so
+	// the row must be seeded too: without it EVERY catalogue mutation here
+	// fails on the revision bump, and a probe that passes because the fixture
+	// is broken proves nothing about the boundary it names.
+	`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_a', 'prj_a1', 0)`,
+	`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_a', 'prj_a2', 0)`,
+	`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_b', 'prj_b1', 0)`,
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a1', 'org_a', 'prj_a1', 'dev', '', ` + ts + `, 0)`,
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_a2', 'org_a', 'prj_a2', 'dev', '', ` + ts + `, 0)`,
 	`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_b1', 'org_b', 'prj_b1', 'dev', '', ` + ts + `, 0)`,
@@ -77,6 +90,11 @@ var fixtureSQL = []string{
 	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_a1', 'org_a', 'prj_a1', 'shared', ` + ts + `)`,
 	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_a2', 'org_a', 'prj_a2', 'shared', ` + ts + `)`,
 	`INSERT INTO folders (id, org_id, project_id, path, created_at) VALUES ('fld_b1', 'org_b', 'prj_b1', 'shared', ` + ts + `)`,
+	// Keys (#49): one per fixture project, config-classified so the reveal gate
+	// is not what refuses a cross-tenant probe — the tenant boundary must be,
+	// or the probe would prove the wrong thing.
+	`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at) VALUES ('key_a1', 'org_a', 'prj_a1', 'SHARED_KEY', '', 'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
+	`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at) VALUES ('key_a2', 'org_a', 'prj_a2', 'SHARED_KEY', '', 'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_alice', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_bob', 'human', ` + ts + `)`,
 	`INSERT INTO principals (id, kind, created_at) VALUES ('usr_root', 'human', ` + ts + `)`,
@@ -241,7 +259,13 @@ func queryInt(t *testing.T, db *store.DB, q string) int64 {
 	return n
 }
 
-var fixtureTables = []string{"orgs", "projects", "environments", "folders", "principals", "grants", "grant_origins"}
+var fixtureTables = []string{
+	"orgs", "projects", "environments", "folders", "principals", "grants", "grant_origins",
+	// The key catalogue (#49). project_schema_revisions is here too: an
+	// unauthorized mutation that rolled its write back but left the revision
+	// advanced would be a pinned input moving for nothing.
+	"keys", "key_groups", "key_presence_environments", "project_schema_revisions",
+}
 
 // rowCounts is the row-diff half of the no-side-effect assertion.
 func rowCounts(t *testing.T, db *store.DB) map[string]int64 {
@@ -303,6 +327,13 @@ func openPostgres(t *testing.T) *store.DB {
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
 		"saml_providers", "oidc_providers", "accounts",
 		"auth_instance_state",
+		// The key catalogue (#49) sits between projects and environments:
+		// presence rows reference both keys and environments, keys reference
+		// key_groups, and the schema-revision row references projects — so all
+		// four drop before the hierarchy they hang from.
+		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
+		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
+		// goes first of the pair.
 		"grant_origins", "grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",
@@ -389,6 +420,9 @@ func services(db *store.DB) (*service.Orgs, *service.Projects, *service.Environm
 // folderSvc is the fourth hierarchy service; it is separate from services()
 // only so the existing three-value call sites stay untouched.
 func folderSvc(db *store.DB) *service.Folders { return &service.Folders{DB: db} }
+
+func keySvc(db *store.DB) *service.Keys           { return &service.Keys{DB: db} }
+func keyGroupSvc(db *store.DB) *service.KeyGroups { return &service.KeyGroups{DB: db} }
 
 // Fixture scopes, so a probe reads as "who, addressing what" rather than as a
 // struct literal repeated forty times.
