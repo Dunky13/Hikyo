@@ -70,6 +70,8 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runEnv(ctx, io, rest)
 	case "folder":
 		err = runFolder(ctx, io, rest)
+	case "key":
+		err = runKey(ctx, io, rest)
 	case "instance-config":
 		err = runInstanceConfig(ctx, io, rest)
 	case "doctor":
@@ -134,6 +136,12 @@ hierarchy:
   wenv folder list|show|create|rename|delete       --org/--project select the project
   wenv folder create --path <path>
   wenv folder rename <folder> --path <new-path>
+  wenv key list|show|create|rename|declare|reclassify|update|set-group|delete
+  wenv key create --name <NAME> --classification secret|config --declaration <json>
+  wenv key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
+  wenv key declare <key> --declaration <json> [--required-in all|none|<ids>]
+  wenv key reclassify <key> --classification secret|config    the ceremony, never update
+  wenv key group list|show|create|rename|delete
 
 instance configuration:
   wenv instance-config provider create --kind saml --name <name> --entity-id <entityID> \

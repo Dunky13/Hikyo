@@ -48,6 +48,7 @@ type sqliteReadRepos struct{ r sqliteRepos }
 
 func (s sqliteReadRepos) Orgs() OrgReader                 { return s.r.Orgs() }
 func (s sqliteReadRepos) Keys() KeyReader                 { return s.r.Keys() }
+func (s sqliteReadRepos) Catalogue() CatalogueReader      { return s.r.Catalogue() }
 func (s sqliteReadRepos) Projects() ProjectReader         { return s.r.Projects() }
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
 func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
@@ -57,6 +58,7 @@ type pgReadRepos struct{ r pgRepos }
 
 func (p pgReadRepos) Orgs() OrgReader                 { return p.r.Orgs() }
 func (p pgReadRepos) Keys() KeyReader                 { return p.r.Keys() }
+func (p pgReadRepos) Catalogue() CatalogueReader      { return p.r.Catalogue() }
 func (p pgReadRepos) Projects() ProjectReader         { return p.r.Projects() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
 func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
@@ -155,6 +157,9 @@ func (r sqliteRepos) Environments() EnvironmentRepo {
 }
 func (r sqliteRepos) Folders() FolderRepo {
 	return sqliteFolders{q: sqlitegen.New(r.db), tok: r.tok}
+}
+func (r sqliteRepos) Catalogue() CatalogueRepo {
+	return sqliteCatalogue{q: sqlitegen.New(r.db), tok: r.tok}
 }
 
 type sqliteOrgs struct {
@@ -275,11 +280,22 @@ func (r sqliteProjects) Create(ctx context.Context, p authz.Proof, proj NewProje
 	if err != nil {
 		return err
 	}
-	return constraint(r.q.CreateProject(ctx, sqlitegen.CreateProjectParams{
+	if err := constraint(r.q.CreateProject(ctx, sqlitegen.CreateProjectParams{
 		ID:        proj.ID,
 		OrgID:     string(chain.Org), // chain column: proof-bound, never caller input
 		Name:      proj.Name,
 		CreatedAt: CanonTime(proj.CreatedAt).Format(timeFormat),
+	})); err != nil {
+		return err
+	}
+	// The project's key-catalogue revision row is born with the project (#49).
+	// It rides inside this method, not beside it, so there is no window in
+	// which a project exists without the revision every later schema change
+	// advances — and no second store operation to authorize for a row nobody
+	// addresses independently.
+	return constraint(r.q.InsertProjectSchemaRevision(ctx, sqlitegen.InsertProjectSchemaRevisionParams{
+		OrgID:     string(chain.Org), // chain column: proof-bound
+		ProjectID: proj.ID,           // the row being created, like ID above
 	}))
 }
 
@@ -351,6 +367,17 @@ func (r sqliteProjects) Rename(ctx context.Context, p authz.Proof, name string) 
 func (r sqliteProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
+		return err
+	}
+	// The key-catalogue revision row dies with the project, inside the same
+	// store operation that created it (#49). It is the project's own counter,
+	// not content: a project holding keys or groups is refused by THEIR foreign
+	// keys, which is the non-empty-parent refusal, and this row must not add a
+	// second refusal for an empty one.
+	if err := constraint(r.q.DeleteProjectSchemaRevision(ctx, sqlitegen.DeleteProjectSchemaRevisionParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})); err != nil {
 		return err
 	}
 	return affected(r.q.DeleteProject(ctx, sqlitegen.DeleteProjectParams{
@@ -671,6 +698,7 @@ func (r pgRepos) Orgs() OrgRepo                 { return pgOrgs{q: pggen.New(r.d
 func (r pgRepos) Projects() ProjectRepo         { return pgProjects{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Environments() EnvironmentRepo { return pgEnvs{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Folders() FolderRepo           { return pgFolders{q: pggen.New(r.db), tok: r.tok} }
+func (r pgRepos) Catalogue() CatalogueRepo      { return pgCatalogue{q: pggen.New(r.db), tok: r.tok} }
 
 type pgOrgs struct {
 	q   *pggen.Queries
@@ -780,11 +808,19 @@ func (r pgProjects) Create(ctx context.Context, p authz.Proof, proj NewProject) 
 	if err != nil {
 		return err
 	}
-	return constraint(r.q.CreateProject(ctx, pggen.CreateProjectParams{
+	if err := constraint(r.q.CreateProject(ctx, pggen.CreateProjectParams{
 		ID:         proj.ID,
 		ChainOrgID: string(chain.Org), // chain column: proof-bound, never caller input
 		Name:       proj.Name,
 		CreatedAt:  pgtype.Timestamptz{Time: CanonTime(proj.CreatedAt), Valid: true},
+	})); err != nil {
+		return err
+	}
+	// See the sqlite copy: the key-catalogue revision row is born with the
+	// project, inside the same store operation.
+	return constraint(r.q.InsertProjectSchemaRevision(ctx, pggen.InsertProjectSchemaRevisionParams{
+		ChainOrgID: string(chain.Org), // chain column: proof-bound
+		ProjectID:  proj.ID,           // the row being created, like ID above
 	}))
 }
 
@@ -856,6 +892,13 @@ func (r pgProjects) Rename(ctx context.Context, p authz.Proof, name string) erro
 func (r pgProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
+		return err
+	}
+	// See the sqlite copy: the revision row dies with the project.
+	if err := constraint(r.q.DeleteProjectSchemaRevision(ctx, pggen.DeleteProjectSchemaRevisionParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})); err != nil {
 		return err
 	}
 	return affected(r.q.DeleteProject(ctx, pggen.DeleteProjectParams{

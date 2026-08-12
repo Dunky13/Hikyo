@@ -115,6 +115,8 @@ type API struct {
 	Projects      ProjectService
 	Environments  EnvironmentService
 	Folders       FolderService
+	Keys          KeyService
+	KeyGroups     KeyGroupService
 	Grants        GrantService
 	Settings      SettingsService
 	Providers     ProviderService

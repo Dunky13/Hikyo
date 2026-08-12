@@ -36,3 +36,22 @@ wenv org show org_a --org org_b --instance unknown-ref -> 2 usage
 wenv project show prj_a --project prj_b --instance unknown-ref -> 2 usage
 wenv project delete prj_x --org org_x --instance unknown-ref -> 4 refused
 wenv account passkey enrol -> 4 refused
+wenv key -> 2 usage
+wenv key warp -> 2 usage
+wenv key group -> 2 usage
+wenv key group warp -> 2 usage
+wenv key create --instance unknown-ref -> 2 usage
+wenv key create --name A --instance unknown-ref -> 2 usage
+wenv key create --name A --classification config --instance unknown-ref -> 2 usage
+wenv key show --instance unknown-ref -> 2 usage
+wenv key declare key_x --instance unknown-ref -> 2 usage
+wenv key reclassify key_x --instance unknown-ref -> 2 usage
+wenv key create --name A --classification config --declaration {oops --instance unknown-ref -> 2 usage
+wenv key create --name A --classification config --declaration {"rule":{"type":"string"},"rules":{}} --instance unknown-ref -> 2 usage
+wenv key create --name A --classification config --declaration {"rule":{"type":"string","patern":"^A"}} --instance unknown-ref -> 2 usage
+wenv key declare key_x --declaration {"rule":{"type":"string"}} {"rule":{"type":"integer"}} --instance unknown-ref -> 2 usage
+wenv key declare key_x --declaration {} --required-in env_a,,env_b --instance unknown-ref -> 2 usage
+wenv key list stray --instance unknown-ref -> 2 usage
+wenv key delete key_x typo --instance unknown-ref -> 2 usage
+wenv key group list stray --instance unknown-ref -> 2 usage
+wenv key list --instance unknown-ref --org org_x --project prj_x -> 4 refused

@@ -515,6 +515,239 @@ export type EnvironmentSettings = {
     reauth_window_seconds?: number | null;
 };
 
+/**
+ * The canonical key grammar: uppercase ASCII, digits and underscore, no
+ * leading digit. It is the environment-variable-safe grammar every
+ * delivery surface assumes - an execve environment block, a Kubernetes
+ * Secret data key, an adapter effective name - so it is a delivery
+ * constraint, not a style preference. `maxLength` counts code points
+ * here and bytes in the service; the grammar is ASCII, so they agree.
+ *
+ */
+export type KeyName = string;
+
+/**
+ * Classification IS the sensitivity boundary. A matrix row is uniformly
+ * secret or config; it changes only through the reclassification
+ * ceremony. Closed, deliberately: a third value would be a third
+ * disclosure regime.
+ *
+ */
+export type KeyClassification = 'secret' | 'config';
+
+/**
+ * The key's namespace within the project. Organizational only: a plain
+ * slash-separated path, empty for the catalogue root. It is a PATH, not a
+ * folder reference - no folder row need exist for it.
+ *
+ */
+export type KeyFolderPath = string;
+
+/**
+ * One primitive type declaration with its constraints. Each constraint
+ * belongs to exactly one type, and a constraint declared on the wrong
+ * type is REFUSED rather than ignored: a silently ignored `pattern` on an
+ * integer key is the "appears to enforce something and does not" failure
+ * the schema model rejects everywhere. This document carries shape; the
+ * service is the authority on every rule below.
+ *
+ */
+export type KeyRule = {
+    type: 'string' | 'integer' | 'boolean' | 'enum' | 'url' | 'json';
+    /**
+     * `string` only.
+     */
+    min_length?: number;
+    /**
+     * `string` only.
+     */
+    max_length?: number;
+    /**
+     * `string` only. RE2, and ANCHORED TO THE WHOLE VALUE - implicitly
+     * `\A(?:...)\z`, never a substring search. Backreferences and
+     * lookaround do not exist in RE2 and are refused at declaration.
+     *
+     */
+    pattern?: string;
+    /**
+     * `string` only; defaults to false.
+     */
+    allow_empty?: boolean;
+    /**
+     * `integer` only.
+     */
+    min?: number;
+    /**
+     * `integer` only.
+     */
+    max?: number;
+    /**
+     * `enum` only. Members must be non-empty and distinct after the
+     * write-time trim.
+     *
+     */
+    members?: Array<string>;
+    /**
+     * `url` only: the allowed scheme list.
+     */
+    schemes?: Array<string>;
+    /**
+     * `json` only: a JSON Schema 2020-12 document, carried as a STRING so
+     * the bytes the profile checks are the bytes the client sent. A
+     * re-encoded object would lose duplicate-key detection (Go's decoder
+     * is last-wins) and number precision, and duplicate object keys are a
+     * rejection here, not last-wins. The accepted subset is a pinned,
+     * profiled, budgeted allowlist enforced by the service.
+     *
+     */
+    json_schema?: string;
+};
+
+/**
+ * Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+ * value is valid if it satisfies AT LEAST ONE alternative - deliberately
+ * not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+ * meanings for one word inside one product is a trap. Alternatives may
+ * not nest.
+ *
+ */
+export type KeyDeclaration = {
+    rule?: KeyRule;
+    any_of?: Array<KeyRule>;
+};
+
+/**
+ * A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+ * and covers environments created later, so expanding it into the ids
+ * existing at declaration time would silently exempt a new environment
+ * from a rule the operator wrote as "always". `none` is the default.
+ *
+ */
+export type KeyPresence = {
+    mode: 'all' | 'none' | 'explicit';
+    /**
+     * `explicit` only; empty or absent for `all` and `none`.
+     */
+    environment_ids?: Array<Id>;
+};
+
+/**
+ * Presence is the ONLY thing that varies per environment; every other
+ * constraint is project-wide. `required` is a predicate about presence
+ * only - it means "resolves to set" and says nothing about content.
+ *
+ */
+export type KeyPresenceRules = {
+    required_in: KeyPresence;
+    forbidden_in: KeyPresence;
+};
+
+export type Key = {
+    id: Id;
+    org_id: Id;
+    project_id: Id;
+    name: KeyName;
+    folder_path: KeyFolderPath;
+    classification: KeyClassification;
+    description: string;
+    deprecated: boolean;
+    deprecation_note: string;
+    declaration: KeyDeclaration;
+    presence: KeyPresenceRules;
+    /**
+     * The key's group, or empty when it belongs to none.
+     */
+    group_id: string;
+    created_at: Timestamp;
+};
+
+export type KeyList = {
+    items: Array<Key>;
+    /**
+     * Total rows matching, which for an unpaged list equals `items` length.
+     */
+    count: number;
+    /**
+     * The project's monotonic key-catalogue revision, which IS its schema
+     * revision. It advances on every semantic declaration change and on
+     * nothing else.
+     *
+     */
+    schema_revision: number;
+};
+
+export type CreateKeyRequest = {
+    name: KeyName;
+    classification: KeyClassification;
+    folder_path?: KeyFolderPath;
+    description?: string;
+    deprecated?: boolean;
+    deprecation_note?: string;
+    declaration: KeyDeclaration;
+    presence?: KeyPresenceRules;
+    group_id?: string;
+};
+
+export type UpdateKeyMetadataRequest = {
+    folder_path?: KeyFolderPath;
+    description?: string;
+    deprecated?: boolean;
+    deprecation_note?: string;
+    classification?: KeyClassification;
+};
+
+export type RenameKeyRequest = {
+    name: KeyName;
+};
+
+export type UpdateKeyDeclarationRequest = {
+    declaration: KeyDeclaration;
+    presence: KeyPresenceRules;
+};
+
+export type ReclassifyKeyRequest = {
+    classification: KeyClassification;
+};
+
+export type SetKeyGroupRequest = {
+    /**
+     * The group to join, or empty to leave every group.
+     */
+    group_id: string;
+};
+
+export type KeyGroup = {
+    id: Id;
+    org_id: Id;
+    project_id: Id;
+    name: string;
+    /**
+     * The member key names, sorted.
+     */
+    members: Array<KeyName>;
+    /**
+     * A group with fewer than two members couples nothing. It is flagged
+     * rather than deleted behind the operator's back - they are usually
+     * mid-way through building it.
+     *
+     */
+    inert: boolean;
+    created_at: Timestamp;
+};
+
+export type KeyGroupList = {
+    items: Array<KeyGroup>;
+    count: number;
+};
+
+export type CreateKeyGroupRequest = {
+    name: string;
+};
+
+export type RenameKeyGroupRequest = {
+    name: string;
+};
+
 export type AuthMethods = {
     providers: Array<AuthMethodProvider>;
     local_login_enabled: boolean;
@@ -901,6 +1134,16 @@ export type GrantPrincipal = Id;
  * The capability atom being revoked.
  */
 export type GrantCapability = Capability;
+
+/**
+ * Key identifier - the immutable id, never the mutable name.
+ */
+export type KeyId = Id;
+
+/**
+ * Key group identifier.
+ */
+export type KeyGroupId = Id;
 
 /**
  * Identity-provider slug.
@@ -3973,6 +4216,934 @@ export type SetEnvironmentSettingsResponses = {
 };
 
 export type SetEnvironmentSettingsResponse = SetEnvironmentSettingsResponses[keyof SetEnvironmentSettingsResponses];
+
+export type ListKeysData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys';
+};
+
+export type ListKeysErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListKeysError = ListKeysErrors[keyof ListKeysErrors];
+
+export type ListKeysResponses = {
+    /**
+     * The project's keys, by name, and the schema revision.
+     */
+    200: KeyList;
+};
+
+export type ListKeysResponse = ListKeysResponses[keyof ListKeysResponses];
+
+export type CreateKeyData = {
+    body: CreateKeyRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys';
+};
+
+export type CreateKeyErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateKeyError = CreateKeyErrors[keyof CreateKeyErrors];
+
+export type CreateKeyResponses = {
+    /**
+     * The declared key.
+     */
+    201: Key;
+};
+
+export type CreateKeyResponse = CreateKeyResponses[keyof CreateKeyResponses];
+
+export type DeleteKeyData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}';
+};
+
+export type DeleteKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteKeyError = DeleteKeyErrors[keyof DeleteKeyErrors];
+
+export type DeleteKeyResponses = {
+    /**
+     * Deleted.
+     */
+    204: void;
+};
+
+export type DeleteKeyResponse = DeleteKeyResponses[keyof DeleteKeyResponses];
+
+export type GetKeyData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}';
+};
+
+export type GetKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetKeyError = GetKeyErrors[keyof GetKeyErrors];
+
+export type GetKeyResponses = {
+    /**
+     * The key.
+     */
+    200: Key;
+};
+
+export type GetKeyResponse = GetKeyResponses[keyof GetKeyResponses];
+
+export type UpdateKeyMetadataData = {
+    body: UpdateKeyMetadataRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}';
+};
+
+export type UpdateKeyMetadataErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateKeyMetadataError = UpdateKeyMetadataErrors[keyof UpdateKeyMetadataErrors];
+
+export type UpdateKeyMetadataResponses = {
+    /**
+     * The updated key.
+     */
+    200: Key;
+};
+
+export type UpdateKeyMetadataResponse = UpdateKeyMetadataResponses[keyof UpdateKeyMetadataResponses];
+
+export type RenameKeyData = {
+    body: RenameKeyRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}/name';
+};
+
+export type RenameKeyErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RenameKeyError = RenameKeyErrors[keyof RenameKeyErrors];
+
+export type RenameKeyResponses = {
+    /**
+     * The renamed key.
+     */
+    200: Key;
+};
+
+export type RenameKeyResponse = RenameKeyResponses[keyof RenameKeyResponses];
+
+export type UpdateKeyDeclarationData = {
+    body: UpdateKeyDeclarationRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration';
+};
+
+export type UpdateKeyDeclarationErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateKeyDeclarationError = UpdateKeyDeclarationErrors[keyof UpdateKeyDeclarationErrors];
+
+export type UpdateKeyDeclarationResponses = {
+    /**
+     * The updated key.
+     */
+    200: Key;
+};
+
+export type UpdateKeyDeclarationResponse = UpdateKeyDeclarationResponses[keyof UpdateKeyDeclarationResponses];
+
+export type ReclassifyKeyData = {
+    body: ReclassifyKeyRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}/classification';
+};
+
+export type ReclassifyKeyErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReclassifyKeyError = ReclassifyKeyErrors[keyof ReclassifyKeyErrors];
+
+export type ReclassifyKeyResponses = {
+    /**
+     * The reclassified key.
+     */
+    200: Key;
+};
+
+export type ReclassifyKeyResponse = ReclassifyKeyResponses[keyof ReclassifyKeyResponses];
+
+export type SetKeyGroupData = {
+    body: SetKeyGroupRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key identifier - the immutable id, never the mutable name.
+         */
+        key: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/keys/{key}/group';
+};
+
+export type SetKeyGroupErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetKeyGroupError = SetKeyGroupErrors[keyof SetKeyGroupErrors];
+
+export type SetKeyGroupResponses = {
+    /**
+     * The updated key.
+     */
+    200: Key;
+};
+
+export type SetKeyGroupResponse = SetKeyGroupResponses[keyof SetKeyGroupResponses];
+
+export type ListKeyGroupsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/key-groups';
+};
+
+export type ListKeyGroupsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListKeyGroupsError = ListKeyGroupsErrors[keyof ListKeyGroupsErrors];
+
+export type ListKeyGroupsResponses = {
+    /**
+     * The project's key groups, by name.
+     */
+    200: KeyGroupList;
+};
+
+export type ListKeyGroupsResponse = ListKeyGroupsResponses[keyof ListKeyGroupsResponses];
+
+export type CreateKeyGroupData = {
+    body: CreateKeyGroupRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/key-groups';
+};
+
+export type CreateKeyGroupErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateKeyGroupError = CreateKeyGroupErrors[keyof CreateKeyGroupErrors];
+
+export type CreateKeyGroupResponses = {
+    /**
+     * The created group.
+     */
+    201: KeyGroup;
+};
+
+export type CreateKeyGroupResponse = CreateKeyGroupResponses[keyof CreateKeyGroupResponses];
+
+export type DeleteKeyGroupData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key group identifier.
+         */
+        group: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/key-groups/{group}';
+};
+
+export type DeleteKeyGroupErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteKeyGroupError = DeleteKeyGroupErrors[keyof DeleteKeyGroupErrors];
+
+export type DeleteKeyGroupResponses = {
+    /**
+     * Deleted.
+     */
+    204: void;
+};
+
+export type DeleteKeyGroupResponse = DeleteKeyGroupResponses[keyof DeleteKeyGroupResponses];
+
+export type GetKeyGroupData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key group identifier.
+         */
+        group: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/key-groups/{group}';
+};
+
+export type GetKeyGroupErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetKeyGroupError = GetKeyGroupErrors[keyof GetKeyGroupErrors];
+
+export type GetKeyGroupResponses = {
+    /**
+     * The group.
+     */
+    200: KeyGroup;
+};
+
+export type GetKeyGroupResponse = GetKeyGroupResponses[keyof GetKeyGroupResponses];
+
+export type RenameKeyGroupData = {
+    body: RenameKeyGroupRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Key group identifier.
+         */
+        group: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/key-groups/{group}';
+};
+
+export type RenameKeyGroupErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RenameKeyGroupError = RenameKeyGroupErrors[keyof RenameKeyGroupErrors];
+
+export type RenameKeyGroupResponses = {
+    /**
+     * The renamed group.
+     */
+    200: KeyGroup;
+};
+
+export type RenameKeyGroupResponse = RenameKeyGroupResponses[keyof RenameKeyGroupResponses];
 
 export type AuthMethodsData = {
     body?: never;

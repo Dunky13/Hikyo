@@ -138,6 +138,36 @@ func TestExitCodeMatrix(t *testing.T) {
 		// taxonomy spells a declined ceremony 4.
 		{"project delete without a confirmation", []string{"project", "delete", "prj_x", "--org", "org_x", "--instance", "unknown-ref"}, cli.ExitRefused},
 		{"passkey enrol refuses by name", []string{"account", "passkey", "enrol"}, cli.ExitRefused},
+		// The key catalogue (#49). Same syntax-before-authentication ordering:
+		// every one of these names an unestablished instance, so an answer of 4
+		// instead of 2 would mean validation had moved after resolution.
+		{"key without a subverb", []string{"key"}, cli.ExitUsage},
+		{"unknown key subverb", []string{"key", "warp"}, cli.ExitUsage},
+		{"key group without a subverb", []string{"key", "group"}, cli.ExitUsage},
+		{"unknown key group subverb", []string{"key", "group", "warp"}, cli.ExitUsage},
+		{"key create without a name", []string{"key", "create", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key create without a classification", []string{"key", "create", "--name", "A", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key create without a declaration", []string{"key", "create", "--name", "A", "--classification", "config", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key show without a key", []string{"key", "show", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key declare without a declaration", []string{"key", "declare", "key_x", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key reclassify without a classification", []string{"key", "reclassify", "key_x", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// A malformed declaration is a client-side syntax error, refused before
+		// a request is spent to be told the same thing.
+		{"key create with a malformed declaration", []string{"key", "create", "--name", "A", "--classification", "config", "--declaration", "{oops", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// A member the declaration vocabulary does not have is REFUSED, never
+		// dropped: a silently discarded `patern` would send a valid declaration
+		// with the constraint the operator wrote missing, and the server's
+		// additionalProperties would never see the typo because it never left
+		// this process.
+		{"key create with an unknown declaration member", []string{"key", "create", "--name", "A", "--classification", "config", "--declaration", `{"rule":{"type":"string"},"rules":{}}`, "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key create with a misspelled rule constraint", []string{"key", "create", "--name", "A", "--classification", "config", "--declaration", `{"rule":{"type":"string","patern":"^A"}}`, "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key declare with trailing content after the declaration", []string{"key", "declare", "key_x", "--declaration", `{"rule":{"type":"string"}} {"rule":{"type":"integer"}}`, "--instance", "unknown-ref"}, cli.ExitUsage},
+		// An impossible presence spelling is likewise caught client-side.
+		{"key declare with an empty environment id", []string{"key", "declare", "key_x", "--declaration", "{}", "--required-in", "env_a,,env_b", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on key list", []string{"key", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"extra positional on key delete", []string{"key", "delete", "key_x", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on key group list", []string{"key", "group", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"key list with no session", []string{"key", "list", "--instance", "unknown-ref", "--org", "org_x", "--project", "prj_x"}, cli.ExitRefused},
 	}
 	var report strings.Builder
 	for _, tc := range cases {
@@ -372,6 +402,46 @@ func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
 				OrgId:     "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
 				ProjectId: "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
 				Name:      "prod", DisplayOrder: 0, CreatedAt: stamp,
+			}},
+			Count: 1,
+		}},
+		// The key catalogue (#49). The declaration and the presence rules are
+		// inside the pinned document: a rule an operator cannot read back is a
+		// rule they cannot review, and a member quietly dropped from either is
+		// exactly what this fixture exists to catch.
+		{"key-json.json", apigen.KeyList{
+			Items: []apigen.Key{{
+				Id:              "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+				OrgId:           "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+				ProjectId:       "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
+				Name:            "DATABASE_URL",
+				FolderPath:      "services/api",
+				Classification:  "secret",
+				Description:     "primary datastore",
+				Deprecated:      false,
+				DeprecationNote: "",
+				Declaration: apigen.KeyDeclaration{Rule: &apigen.KeyRule{
+					Type: "url", Schemes: &[]string{"postgres"},
+				}},
+				Presence: apigen.KeyPresenceRules{
+					RequiredIn:  apigen.KeyPresence{Mode: "all"},
+					ForbiddenIn: apigen.KeyPresence{Mode: "none"},
+				},
+				GroupId:   "kgr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66",
+				CreatedAt: stamp,
+			}},
+			Count:          1,
+			SchemaRevision: 7,
+		}},
+		{"key-group-json.json", apigen.KeyGroupList{
+			Items: []apigen.KeyGroup{{
+				Id:        "kgr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f66",
+				OrgId:     "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11",
+				ProjectId: "prj_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f22",
+				Name:      "database",
+				Members:   []string{"DATABASE_URL", "DATABASE_USER"},
+				Inert:     false,
+				CreatedAt: stamp,
 			}},
 			Count: 1,
 		}},

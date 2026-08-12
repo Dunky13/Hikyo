@@ -208,6 +208,52 @@ const (
 	// recovery.break_glass_grant records a grant issued under local host
 	// authority — the one authorization path not evaluated against a grant.
 	EventBreakGlassGrant EventType = "recovery.break_glass_grant"
+	// settings.key_* — the key catalogue's lifecycle (#49). The catalogue IS
+	// the project's schema, so these are schema events; they are named
+	// `settings.*` like the rest of the definitions surface because an
+	// investigator asks "who changed the project's definitions?", not "which
+	// subsystem owned the row".
+	//
+	// NO PAYLOAD HERE EVER CARRIES A VALUE, A DECLARATION BODY, OR AN
+	// INSTANCE-DERIVED PATH. Key NAMES are schema and are recorded; a folder
+	// path is recorded as `namespace`, because the #48 convention reserves
+	// every *_path spelling for instance-derived JSON pointers into a value.
+	EventKeyCreated EventType = "settings.key_created"
+	EventKeyRenamed EventType = "settings.key_renamed"
+	EventKeyDeleted EventType = "settings.key_deleted"
+	// settings.key_declaration_changed records a semantic schema change: the
+	// value-dependent rules, the presence rules, or both. It carries the
+	// resulting schema revision, because "the validation guarantee moved" is
+	// the fact a later snapshot pins.
+	EventKeyDeclarationChanged EventType = "settings.key_declaration_changed"
+	// settings.key_metadata_changed records the NON-semantic half. It exists
+	// separately precisely because it materializes nothing and moves no
+	// revision — collapsing it into the declaration event would make the trail
+	// unable to answer which changes could have affected delivery.
+	EventKeyMetadataChanged EventType = "settings.key_metadata_changed"
+	// settings.key_reclassified records the ceremony in both directions,
+	// recorded under the STRICTER of the pre- and post-change classification
+	// so neither direction lands under the laxer regime.
+	EventKeyReclassified EventType = "settings.key_reclassified"
+	// settings.key_reveal_gate_attempt is the disclosure-class record of EVERY
+	// reveal-gated attempt on a `secret` key — a value-dependent rule change or
+	// a declassification — whatever its outcome: allowed (success), refused
+	// (denied), or rate-limited (failure). The schema ADR's obligation is
+	// "every attempt is audited", so the denied and limited cases matter most,
+	// and both roll their transaction back; the row therefore rides the
+	// rollback-surviving settlement path rather than an in-transaction insert.
+	//
+	// The before-commit disclosure record the ADR separately requires for
+	// declassification is settings.key_reclassified, which IS written inside
+	// the committing transaction ahead of the classification write.
+	EventKeyRevealGateAttempt EventType = "settings.key_reveal_gate_attempt"
+
+	EventKeyGroupCreated EventType = "settings.key_group_created"
+	EventKeyGroupRenamed EventType = "settings.key_group_renamed"
+	EventKeyGroupDeleted EventType = "settings.key_group_deleted"
+	// settings.key_group_membership_changed records a key joining or leaving a
+	// group. Membership is coupling, and coupling is a schema change.
+	EventKeyGroupMembershipChanged EventType = "settings.key_group_membership_changed"
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -717,6 +763,74 @@ var registry = map[EventType]TypeSpec{
 	EventFolderRenamed: hierarchyEvent(renameSchema("namespace")),
 	EventFolderDeleted: hierarchyEvent(Schema{"namespace": {Kind: KindFreeText, Required: true}}),
 
+	// The key catalogue (#49). Tenant-trail, security-class, success-only, for
+	// the same reason as the hierarchy rows: each records a COMMITTED mutation,
+	// and a refusal is either the uniform nonexistent response (the denial
+	// writer covers authorization) or a constraint refusal that rolled back.
+	//
+	// `classification` is a schema-typed enum, not free text: `secret|config`
+	// is trusted vocabulary. `name` is the key's name, which is schema and
+	// therefore recordable — values never are.
+	EventKeyCreated: hierarchyEvent(Schema{
+		"name":           {Kind: KindFreeText, Required: true},
+		"classification": {Kind: KindString, Required: true},
+		"namespace":      {Kind: KindFreeText, Required: true},
+	}),
+	EventKeyRenamed: hierarchyEvent(renameSchema("name")),
+	EventKeyDeleted: hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
+	// `rules_changed` and `presence_changed` are separate booleans rather than
+	// one "changed" flag, because the two halves have different authorization
+	// stories: value-dependent rules on a `secret` key are reveal-gated,
+	// presence rules never are. An investigator must be able to tell which of
+	// the two a given commit moved.
+	EventKeyDeclarationChanged: hierarchyEvent(Schema{
+		"name":             {Kind: KindFreeText, Required: true},
+		"schema_revision":  {Kind: KindInt, Required: true},
+		"rules_changed":    {Kind: KindBool, Required: true},
+		"presence_changed": {Kind: KindBool, Required: true},
+	}),
+	EventKeyMetadataChanged: hierarchyEvent(Schema{
+		"name":      {Kind: KindFreeText, Required: true},
+		"namespace": {Kind: KindFreeText, Required: true},
+	}),
+	EventKeyReclassified: hierarchyEvent(Schema{
+		"name":                    {Kind: KindFreeText, Required: true},
+		"previous_classification": {Kind: KindString, Required: true},
+		"classification":          {Kind: KindString, Required: true},
+	}),
+	// Three licensed outcomes, one per attempt disposition. No declaration
+	// body and no instance data: these rows are written outside the operation's
+	// own authorization scope, so they carry only schema vocabulary — the key's
+	// id and name, and which gate was attempted.
+	EventKeyRevealGateAttempt: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes: map[Outcome]bool{
+			OutcomeSuccess: true, OutcomeDenied: true, OutcomeFailure: true,
+		},
+		Trails: map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"key_id": {Kind: KindString, Required: true},
+			"name":   {Kind: KindFreeText, Required: true},
+			// value-dependent-rule-change | declassification
+			"gate": {Kind: KindString, Required: true},
+		},
+	},
+	EventKeyGroupCreated: hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),
+	EventKeyGroupRenamed: hierarchyEvent(renameSchema("name")),
+	EventKeyGroupDeleted: hierarchyEvent(Schema{
+		"name": {Kind: KindFreeText, Required: true},
+		// Deleting a group dissolves a coupling; how many keys it uncoupled is
+		// the fact that matters, and the ids are the object of the event.
+		"members_released": {Kind: KindInt, Required: true},
+	}),
+	// The group ids are server-minted vocabulary; "" spells "no group", which
+	// is why both sides are optional rather than required.
+	EventKeyGroupMembershipChanged: hierarchyEvent(Schema{
+		"name":              {Kind: KindFreeText, Required: true},
+		"previous_group_id": {Kind: KindString},
+		"group_id":          {Kind: KindString},
+	}),
 	// The grant lifecycle (#55). Both trails: a grant at org/project/env
 	// scope is tenant-trail work, an instance-scope grant has no tenant to
 	// own it. Security retention — grant history is the ADR's named

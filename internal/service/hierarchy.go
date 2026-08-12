@@ -794,8 +794,24 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 		if err != nil {
 			return err
 		}
+		// Environment lifecycle and presence rules are ONE serialization domain
+		// per project (#49, schema-model ADR): without the project row, this
+		// delete and a concurrent `required_in` edit naming this environment
+		// each read a consistent world and commit into an inconsistent one —
+		// a dangling reference, or a lost cascade.
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
 		before, err := r.Environments().Get(ctx, p)
 		if err != nil {
+			return err
+		}
+		// The cascade runs BEFORE the delete and in the same transaction: the
+		// presence rows carry a composite foreign key to this environment, so
+		// the order is not a preference — the delete would be refused
+		// otherwise. It also collapses any explicit set it empties and moves
+		// the catalogue revision; see cascadeEnvironmentPresence.
+		if err := cascadeEnvironmentPresence(ctx, r, p, string(scope.Env)); err != nil {
 			return err
 		}
 		if err := r.Environments().Delete(ctx, p); err != nil {

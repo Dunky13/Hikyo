@@ -202,6 +202,8 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Projects:     &service.Projects{DB: db},
 		Environments: &service.Environments{DB: db},
 		Folders:      &service.Folders{DB: db},
+		Keys:         &service.Keys{DB: db},
+		KeyGroups:    &service.KeyGroups{DB: db},
 		Grants:       &service.Grants{DB: db},
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the

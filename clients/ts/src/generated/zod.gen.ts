@@ -404,6 +404,185 @@ export const zEnvironmentSettings = z.object({
     ]))
 });
 
+/**
+ * The canonical key grammar: uppercase ASCII, digits and underscore, no
+ * leading digit. It is the environment-variable-safe grammar every
+ * delivery surface assumes - an execve environment block, a Kubernetes
+ * Secret data key, an adapter effective name - so it is a delivery
+ * constraint, not a style preference. `maxLength` counts code points
+ * here and bytes in the service; the grammar is ASCII, so they agree.
+ *
+ */
+export const zKeyName = z.string().min(1).max(128).regex(/^[A-Z_][A-Z0-9_]*$/);
+
+/**
+ * Classification IS the sensitivity boundary. A matrix row is uniformly
+ * secret or config; it changes only through the reclassification
+ * ceremony. Closed, deliberately: a third value would be a third
+ * disclosure regime.
+ *
+ */
+export const zKeyClassification = z.enum(['secret', 'config']);
+
+/**
+ * The key's namespace within the project. Organizational only: a plain
+ * slash-separated path, empty for the catalogue root. It is a PATH, not a
+ * folder reference - no folder row need exist for it.
+ *
+ */
+export const zKeyFolderPath = z.string().max(256);
+
+/**
+ * One primitive type declaration with its constraints. Each constraint
+ * belongs to exactly one type, and a constraint declared on the wrong
+ * type is REFUSED rather than ignored: a silently ignored `pattern` on an
+ * integer key is the "appears to enforce something and does not" failure
+ * the schema model rejects everywhere. This document carries shape; the
+ * service is the authority on every rule below.
+ *
+ */
+export const zKeyRule = z.object({
+    type: z.enum([
+        'string',
+        'integer',
+        'boolean',
+        'enum',
+        'url',
+        'json'
+    ]),
+    min_length: z.optional(z.int().gte(0)),
+    max_length: z.optional(z.int().gte(0)),
+    pattern: z.optional(z.string().max(512)),
+    allow_empty: z.optional(z.boolean()),
+    min: z.optional(z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })),
+    max: z.optional(z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })),
+    members: z.optional(z.array(z.string().max(512)).max(64)),
+    schemes: z.optional(z.array(z.string()).max(32)),
+    json_schema: z.optional(z.string().max(16384))
+});
+
+/**
+ * Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+ * value is valid if it satisfies AT LEAST ONE alternative - deliberately
+ * not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+ * meanings for one word inside one product is a trap. Alternatives may
+ * not nest.
+ *
+ */
+export const zKeyDeclaration = z.object({
+    rule: z.optional(zKeyRule),
+    any_of: z.optional(z.array(zKeyRule).min(2).max(8))
+});
+
+/**
+ * A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+ * and covers environments created later, so expanding it into the ids
+ * existing at declaration time would silently exempt a new environment
+ * from a rule the operator wrote as "always". `none` is the default.
+ *
+ */
+export const zKeyPresence = z.object({
+    mode: z.enum([
+        'all',
+        'none',
+        'explicit'
+    ]),
+    environment_ids: z.optional(z.array(zId))
+});
+
+/**
+ * Presence is the ONLY thing that varies per environment; every other
+ * constraint is project-wide. `required` is a predicate about presence
+ * only - it means "resolves to set" and says nothing about content.
+ *
+ */
+export const zKeyPresenceRules = z.object({
+    required_in: zKeyPresence,
+    forbidden_in: zKeyPresence
+});
+
+export const zKey = z.object({
+    id: zId,
+    org_id: zId,
+    project_id: zId,
+    name: zKeyName,
+    folder_path: zKeyFolderPath,
+    classification: zKeyClassification,
+    description: z.string().max(4096),
+    deprecated: z.boolean(),
+    deprecation_note: z.string().max(4096),
+    declaration: zKeyDeclaration,
+    presence: zKeyPresenceRules,
+    group_id: z.string(),
+    created_at: zTimestamp
+});
+
+export const zKeyList = z.object({
+    items: z.array(zKey),
+    count: z.int().gte(0),
+    schema_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zCreateKeyRequest = z.object({
+    name: zKeyName,
+    classification: zKeyClassification,
+    folder_path: z.optional(zKeyFolderPath),
+    description: z.optional(z.string().max(4096)),
+    deprecated: z.optional(z.boolean()),
+    deprecation_note: z.optional(z.string().max(4096)),
+    declaration: zKeyDeclaration,
+    presence: z.optional(zKeyPresenceRules),
+    group_id: z.optional(z.string())
+});
+
+export const zUpdateKeyMetadataRequest = z.object({
+    folder_path: z.optional(zKeyFolderPath),
+    description: z.optional(z.string().max(4096)),
+    deprecated: z.optional(z.boolean()),
+    deprecation_note: z.optional(z.string().max(4096)),
+    classification: z.optional(zKeyClassification)
+});
+
+export const zRenameKeyRequest = z.object({
+    name: zKeyName
+});
+
+export const zUpdateKeyDeclarationRequest = z.object({
+    declaration: zKeyDeclaration,
+    presence: zKeyPresenceRules
+});
+
+export const zReclassifyKeyRequest = z.object({
+    classification: zKeyClassification
+});
+
+export const zSetKeyGroupRequest = z.object({
+    group_id: z.string()
+});
+
+export const zKeyGroup = z.object({
+    id: zId,
+    org_id: zId,
+    project_id: zId,
+    name: z.string().max(128),
+    members: z.array(zKeyName),
+    inert: z.boolean(),
+    created_at: zTimestamp
+});
+
+export const zKeyGroupList = z.object({
+    items: z.array(zKeyGroup),
+    count: z.int().gte(0)
+});
+
+export const zCreateKeyGroupRequest = z.object({
+    name: z.string().min(1).max(128)
+});
+
+export const zRenameKeyGroupRequest = z.object({
+    name: z.string().min(1).max(128)
+});
+
 export const zOidcStartRequest = z.object({
     purpose: z.enum([
         'login',
@@ -755,6 +934,16 @@ export const zGrantPrincipal = zId;
  * The capability atom being revoked.
  */
 export const zGrantCapability = zCapability;
+
+/**
+ * Key identifier - the immutable id, never the mutable name.
+ */
+export const zKeyId = zId;
+
+/**
+ * Key group identifier.
+ */
+export const zKeyGroupId = zId;
 
 /**
  * Identity-provider slug.
@@ -1429,6 +1618,212 @@ export const zSetEnvironmentSettingsData = z.object({
  * The settings as stored.
  */
 export const zSetEnvironmentSettingsResponse = zEnvironmentSettings;
+
+export const zListKeysData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's keys, by name, and the schema revision.
+ */
+export const zListKeysResponse = zKeyList;
+
+export const zCreateKeyData = z.object({
+    body: zCreateKeyRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The declared key.
+ */
+export const zCreateKeyResponse = zKey;
+
+export const zDeleteKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteKeyResponse = z.void();
+
+export const zGetKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The key.
+ */
+export const zGetKeyResponse = zKey;
+
+export const zUpdateKeyMetadataData = z.object({
+    body: zUpdateKeyMetadataRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The updated key.
+ */
+export const zUpdateKeyMetadataResponse = zKey;
+
+export const zRenameKeyData = z.object({
+    body: zRenameKeyRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The renamed key.
+ */
+export const zRenameKeyResponse = zKey;
+
+export const zUpdateKeyDeclarationData = z.object({
+    body: zUpdateKeyDeclarationRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The updated key.
+ */
+export const zUpdateKeyDeclarationResponse = zKey;
+
+export const zReclassifyKeyData = z.object({
+    body: zReclassifyKeyRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The reclassified key.
+ */
+export const zReclassifyKeyResponse = zKey;
+
+export const zSetKeyGroupData = z.object({
+    body: zSetKeyGroupRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        key: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The updated key.
+ */
+export const zSetKeyGroupResponse = zKey;
+
+export const zListKeyGroupsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's key groups, by name.
+ */
+export const zListKeyGroupsResponse = zKeyGroupList;
+
+export const zCreateKeyGroupData = z.object({
+    body: zCreateKeyGroupRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created group.
+ */
+export const zCreateKeyGroupResponse = zKeyGroup;
+
+export const zDeleteKeyGroupData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        group: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteKeyGroupResponse = z.void();
+
+export const zGetKeyGroupData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        group: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The group.
+ */
+export const zGetKeyGroupResponse = zKeyGroup;
+
+export const zRenameKeyGroupData = z.object({
+    body: zRenameKeyGroupRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        group: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The renamed group.
+ */
+export const zRenameKeyGroupResponse = zKeyGroup;
 
 export const zAuthMethodsData = z.object({
     body: z.optional(z.never()),

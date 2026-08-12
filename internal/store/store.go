@@ -233,9 +233,15 @@ type FolderRepo interface {
 }
 
 // Repos bundles the full repositories bound to one write transaction.
+//
+// Keys() is the KEYRING (#43, wrapped crypto material); Catalogue() is the KEY
+// CATALOGUE (#49, the project's schema). The two are unrelated senses of the
+// word and the accessors keep them apart, so no caller can reach one meaning
+// to while holding the other.
 type Repos interface {
 	Orgs() OrgRepo
 	Keys() KeyRepo
+	Catalogue() CatalogueRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -248,6 +254,7 @@ type Repos interface {
 type ReadRepos interface {
 	Orgs() OrgReader
 	Keys() KeyReader
+	Catalogue() CatalogueReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader

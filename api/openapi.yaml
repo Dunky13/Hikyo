@@ -70,6 +70,12 @@ tags:
       by-id route is tenant-scoped, so unauthorized is indistinguishable from
       nonexistent at every level.
 
+  - name: keys
+    description: |
+      The key catalogue and its groups - the project's schema. There is no
+      separate schema object: every constraint is declared inline on the Key,
+      so the catalogue revision IS the schema revision. Tenant-scoped
+      throughout, at project depth.
 paths:
   /api/v1/meta:
     get:
@@ -1787,6 +1793,522 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/keys:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listKeys
+      tags: [keys]
+      summary: List the project's key catalogue.
+      description: |
+        The catalogue IS the project's schema, so the response carries the
+        project's monotonic schema revision beside the keys: a reader that acts
+        on this list can say which schema it saw.
+      x-wenv-class: tenant
+      x-wenv-operation: key.list
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project's keys, by name, and the schema revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createKey
+      tags: [keys]
+      summary: Declare a key.
+      description: |
+        The schema is closed: typing a key name that does not exist is a key
+        CREATION, an explicit act, never a silent value write. Declaration
+        well-formedness BLOCKS the save — a value may be wrong, a rule may not
+        be meaningless — so an unsupported RE2 construct, an out-of-profile
+        JSON Schema keyword, a reference cycle or a bound violation is refused
+        here rather than discovered at publish.
+      x-wenv-class: tenant
+      x-wenv-operation: key.create
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKeyRequest"
+      responses:
+        "201":
+          description: The declared key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/keys/{key}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyID"
+    get:
+      operationId: getKey
+      tags: [keys]
+      summary: Read one key declaration.
+      x-wenv-class: tenant
+      x-wenv-operation: key.get
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: updateKeyMetadata
+      tags: [keys]
+      summary: Update a key's non-semantic metadata.
+      description: |
+        Folder path, description, deprecation flag and deprecation note only.
+        These cannot change what any environment delivers or whether it
+        validates, so they need `definitions-edit` alone, take no reveal gate,
+        and move no schema revision.
+
+        A body carrying `classification` is REFUSED — classification changes
+        only through the reclassification ceremony. The field is declared here
+        so the refusal names the ceremony rather than reading as an unknown
+        member.
+      x-wenv-class: tenant
+      x-wenv-operation: key.update-metadata
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKeyMetadataRequest"
+      responses:
+        "200":
+          description: The updated key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteKey
+      tags: [keys]
+      summary: Delete a key.
+      description: |
+        Removes the declaration, its explicit presence rows and its group
+        membership. The group survives, possibly inert.
+      x-wenv-class: tenant
+      x-wenv-operation: key.delete
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/keys/{key}/name:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyID"
+    put:
+      operationId: renameKey
+      tags: [keys]
+      summary: Rename a key.
+      description: |
+        Identity is the immutable id, so a rename never breaks a reference —
+        but it DOES change the delivered payload's key set, which makes it a
+        content-affecting schema change and advances the schema revision.
+      x-wenv-class: tenant
+      x-wenv-operation: key.rename
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameKeyRequest"
+      responses:
+        "200":
+          description: The renamed key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/keys/{key}/declaration:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyID"
+    put:
+      operationId: updateKeyDeclaration
+      tags: [keys]
+      summary: Replace a key's value-dependent rules and presence rules.
+      description: |
+        Changing a VALUE-DEPENDENT rule on a `secret`-classified key is a
+        disclosure: the result bit itself leaks the value, so such a change
+        additionally requires current `reveal` on that key and is rejected
+        WITHOUT EVALUATING the new declaration when the caller lacks it. The
+        refusal is the uniform nonexistent shape, because a distinguishable one
+        would itself be the oracle the gate exists to close.
+
+        Presence rules are not value-dependent and need no reveal: they report
+        only whether an entry is set or absent.
+      x-wenv-class: tenant
+      x-wenv-operation: key.update-declaration
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateKeyDeclarationRequest"
+      responses:
+        "200":
+          description: The updated key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/keys/{key}/classification:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyID"
+    put:
+      operationId: reclassifyKey
+      tags: [keys]
+      summary: The reclassification ceremony.
+      description: |
+        The ONLY path that changes a key's classification. Declassifying
+        (`secret` to `config`) additionally requires current `reveal`: after it
+        the value is readable under ordinary environment read, and you must be
+        able to see a secret in order to stop it being one. Tightening
+        (`config` to `secret`) needs no reveal and cannot un-disclose what was
+        already served as config.
+      x-wenv-class: tenant
+      x-wenv-operation: key.reclassify
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReclassifyKeyRequest"
+      responses:
+        "200":
+          description: The reclassified key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/keys/{key}/group:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyID"
+    put:
+      operationId: setKeyGroup
+      tags: [keys]
+      summary: Set or clear a key's group membership.
+      description: |
+        A key belongs to at most one group; an empty `group_id` takes it out of
+        every group. Membership is coupling, and coupling is a schema change.
+      x-wenv-class: tenant
+      x-wenv-operation: key.set-group
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetKeyGroupRequest"
+      responses:
+        "200":
+          description: The updated key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Key"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/key-groups:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listKeyGroups
+      tags: [keys]
+      summary: List the project's key groups.
+      description: |
+        Each group reports its members and whether it is INERT — a group left
+        with fewer than two members couples nothing, which is surfaced rather
+        than silently repaired.
+      x-wenv-class: tenant
+      x-wenv-operation: key-group.list
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The project's key groups, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyGroupList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createKeyGroup
+      tags: [keys]
+      summary: Declare a key group.
+      x-wenv-class: tenant
+      x-wenv-operation: key-group.create
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKeyGroupRequest"
+      responses:
+        "201":
+          description: The created group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/key-groups/{group}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/KeyGroupID"
+    get:
+      operationId: getKeyGroup
+      tags: [keys]
+      summary: Read one key group.
+      x-wenv-class: tenant
+      x-wenv-operation: key-group.get
+      x-wenv-formula: [read@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "200":
+          description: The group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyGroup"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameKeyGroup
+      tags: [keys]
+      summary: Rename a key group.
+      description: |
+        A group name is never delivered and never validated against, so —
+        unlike a key rename — it moves no schema revision.
+      x-wenv-class: tenant
+      x-wenv-operation: key-group.rename
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameKeyGroupRequest"
+      responses:
+        "200":
+          description: The renamed group.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteKeyGroup
+      tags: [keys]
+      summary: Delete a key group.
+      description: |
+        Dissolves the coupling and releases its members; it never deletes the
+        keys it coupled.
+      x-wenv-class: tenant
+      x-wenv-operation: key-group.delete
+      x-wenv-formula: [definitions-edit@project]
+      x-wenv-artifacts: [human-session]
+      x-wenv-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/methods:
     get:
       operationId: authMethods
@@ -2981,6 +3503,20 @@ components:
       description: The capability atom being revoked.
       schema:
         $ref: "#/components/schemas/Capability"
+    KeyID:
+      name: key
+      in: path
+      required: true
+      description: Key identifier - the immutable id, never the mutable name.
+      schema:
+        $ref: "#/components/schemas/ID"
+    KeyGroupID:
+      name: group
+      in: path
+      required: true
+      description: Key group identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
     ProviderSlug:
       name: provider
       in: path
@@ -3842,6 +4378,349 @@ components:
             it inherits the instance default - which is NOT the same statement
             as 0, and 0 is a legal value meaning every disclosure
             reauthenticates.
+
+    KeyName:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: "^[A-Z_][A-Z0-9_]*$"
+      description: |
+        The canonical key grammar: uppercase ASCII, digits and underscore, no
+        leading digit. It is the environment-variable-safe grammar every
+        delivery surface assumes - an execve environment block, a Kubernetes
+        Secret data key, an adapter effective name - so it is a delivery
+        constraint, not a style preference. `maxLength` counts code points
+        here and bytes in the service; the grammar is ASCII, so they agree.
+
+    KeyClassification:
+      type: string
+      enum: [secret, config]
+      description: |
+        Classification IS the sensitivity boundary. A matrix row is uniformly
+        secret or config; it changes only through the reclassification
+        ceremony. Closed, deliberately: a third value would be a third
+        disclosure regime.
+
+    KeyFolderPath:
+      type: string
+      maxLength: 256
+      description: |
+        The key's namespace within the project. Organizational only: a plain
+        slash-separated path, empty for the catalogue root. It is a PATH, not a
+        folder reference - no folder row need exist for it.
+
+    KeyRule:
+      type: object
+      additionalProperties: false
+      required: [type]
+      description: |
+        One primitive type declaration with its constraints. Each constraint
+        belongs to exactly one type, and a constraint declared on the wrong
+        type is REFUSED rather than ignored: a silently ignored `pattern` on an
+        integer key is the "appears to enforce something and does not" failure
+        the schema model rejects everywhere. This document carries shape; the
+        service is the authority on every rule below.
+      properties:
+        type:
+          type: string
+          enum: [string, integer, boolean, enum, url, json]
+        min_length:
+          type: integer
+          minimum: 0
+          description: "`string` only."
+        max_length:
+          type: integer
+          minimum: 0
+          description: "`string` only."
+        pattern:
+          type: string
+          maxLength: 512
+          description: |
+            `string` only. RE2, and ANCHORED TO THE WHOLE VALUE - implicitly
+            `\A(?:...)\z`, never a substring search. Backreferences and
+            lookaround do not exist in RE2 and are refused at declaration.
+        allow_empty:
+          type: boolean
+          description: "`string` only; defaults to false."
+        min:
+          type: integer
+          format: int64
+          description: "`integer` only."
+        max:
+          type: integer
+          format: int64
+          description: "`integer` only."
+        members:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            maxLength: 512
+          description: |
+            `enum` only. Members must be non-empty and distinct after the
+            write-time trim.
+        schemes:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+          description: "`url` only: the allowed scheme list."
+        json_schema:
+          type: string
+          maxLength: 16384
+          description: |
+            `json` only: a JSON Schema 2020-12 document, carried as a STRING so
+            the bytes the profile checks are the bytes the client sent. A
+            re-encoded object would lose duplicate-key detection (Go's decoder
+            is last-wins) and number precision, and duplicate object keys are a
+            rejection here, not last-wins. The accepted subset is a pinned,
+            profiled, budgeted allowlist enforced by the service.
+
+    KeyDeclaration:
+      type: object
+      additionalProperties: false
+      description: |
+        Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
+        value is valid if it satisfies AT LEAST ONE alternative - deliberately
+        not `oneOf`, whose JSON Schema meaning is exactly-one, because two
+        meanings for one word inside one product is a trap. Alternatives may
+        not nest.
+      properties:
+        rule:
+          $ref: "#/components/schemas/KeyRule"
+        any_of:
+          type: array
+          minItems: 2
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/KeyRule"
+
+    KeyPresence:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: |
+        A mode plus an explicit set, never a bare id list: `all` is SYMBOLIC
+        and covers environments created later, so expanding it into the ids
+        existing at declaration time would silently exempt a new environment
+        from a rule the operator wrote as "always". `none` is the default.
+      properties:
+        mode:
+          type: string
+          enum: [all, none, explicit]
+        environment_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/ID"
+          description: "`explicit` only; empty or absent for `all` and `none`."
+
+    KeyPresenceRules:
+      type: object
+      additionalProperties: false
+      required: [required_in, forbidden_in]
+      description: |
+        Presence is the ONLY thing that varies per environment; every other
+        constraint is project-wide. `required` is a predicate about presence
+        only - it means "resolves to set" and says nothing about content.
+      properties:
+        required_in:
+          $ref: "#/components/schemas/KeyPresence"
+        forbidden_in:
+          $ref: "#/components/schemas/KeyPresence"
+
+    Key:
+      type: object
+      required:
+        [id, org_id, project_id, name, folder_path, classification, description,
+         deprecated, deprecation_note, declaration, presence, group_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        project_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        folder_path:
+          $ref: "#/components/schemas/KeyFolderPath"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        description:
+          type: string
+          maxLength: 4096
+        deprecated:
+          type: boolean
+        deprecation_note:
+          type: string
+          maxLength: 4096
+        declaration:
+          $ref: "#/components/schemas/KeyDeclaration"
+        presence:
+          $ref: "#/components/schemas/KeyPresenceRules"
+        group_id:
+          type: string
+          description: The key's group, or empty when it belongs to none.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    KeyList:
+      type: object
+      required: [items, count, schema_revision]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Key"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+        schema_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          description: |
+            The project's monotonic key-catalogue revision, which IS its schema
+            revision. It advances on every semantic declaration change and on
+            nothing else.
+
+    CreateKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, classification, declaration]
+      properties:
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        folder_path:
+          $ref: "#/components/schemas/KeyFolderPath"
+        description:
+          type: string
+          maxLength: 4096
+        deprecated:
+          type: boolean
+        deprecation_note:
+          type: string
+          maxLength: 4096
+        declaration:
+          $ref: "#/components/schemas/KeyDeclaration"
+        presence:
+          $ref: "#/components/schemas/KeyPresenceRules"
+        group_id:
+          type: string
+
+    UpdateKeyMetadataRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        folder_path:
+          $ref: "#/components/schemas/KeyFolderPath"
+        description:
+          type: string
+          maxLength: 4096
+        deprecated:
+          type: boolean
+        deprecation_note:
+          type: string
+          maxLength: 4096
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+
+    RenameKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/KeyName"
+
+    UpdateKeyDeclarationRequest:
+      type: object
+      additionalProperties: false
+      required: [declaration, presence]
+      properties:
+        declaration:
+          $ref: "#/components/schemas/KeyDeclaration"
+        presence:
+          $ref: "#/components/schemas/KeyPresenceRules"
+
+    ReclassifyKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [classification]
+      properties:
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+
+    SetKeyGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [group_id]
+      properties:
+        group_id:
+          type: string
+          description: The group to join, or empty to leave every group.
+
+    KeyGroup:
+      type: object
+      required: [id, org_id, project_id, name, members, inert, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        project_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+          maxLength: 128
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyName"
+          description: The member key names, sorted.
+        inert:
+          type: boolean
+          description: |
+            A group with fewer than two members couples nothing. It is flagged
+            rather than deleted behind the operator's back - they are usually
+            mid-way through building it.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    KeyGroupList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyGroup"
+        count:
+          type: integer
+          minimum: 0
+
+    CreateKeyGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+
+    RenameKeyGroupRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
 
     AuthMethods:
       type: object
