@@ -449,3 +449,79 @@ func reissuedResult(artifact service.Artifact) service.LoginResult {
 	out.SessionToken = "hik_1_cli_reissued"
 	return out
 }
+
+// The rail's endpoint. It is a self-projection, so the properties the
+// transport owes it are narrow and all negative: it never refuses on
+// authorization, it returns identity only, and an unresolvable session is
+// indistinguishable from one whose grants name no org.
+func TestListMyOrgsIsASelfProjection(t *testing.T) {
+	t.Run("returns the caller's orgs", func(t *testing.T) {
+		srv := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
+			mine: func(context.Context, service.Actor) ([]service.MyOrg, error) {
+				return []service.MyOrg{{ID: testOrgID, Name: "acme"}}, nil
+			},
+		})
+		resp, payload := call(t, srv, http.MethodGet, api.PathPrefix+"/me/orgs", "hik_1_cli_x", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d: %s", resp.StatusCode, payload)
+		}
+		var got apigen.MyOrgList
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Count != 1 || len(got.Items) != 1 || got.Items[0].Name != "acme" {
+			t.Fatalf("body = %s", payload)
+		}
+		// Identity only: metadata and the active flag are operator-set state
+		// and belong to getOrg, which authorizes. If they ever appear here the
+		// contract test above would already have failed — this pins the intent.
+		if strings.Contains(string(payload), "metadata") || strings.Contains(string(payload), "active") {
+			t.Fatalf("the navigation surface leaked operator-set org state: %s", payload)
+		}
+	})
+
+	t.Run("no orgs is an empty list, not a refusal", func(t *testing.T) {
+		srv := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{})
+		resp, payload := call(t, srv, http.MethodGet, api.PathPrefix+"/me/orgs", "hik_1_cli_x", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d: %s", resp.StatusCode, payload)
+		}
+		var got apigen.MyOrgList
+		if err := json.Unmarshal(payload, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Count != 0 || len(got.Items) != 0 {
+			t.Fatalf("body = %s", payload)
+		}
+	})
+
+	t.Run("an unresolvable session is the uniform 401", func(t *testing.T) {
+		srv := newTestServer(t, stubAuth{}, stubOrgs{
+			mine: func(context.Context, service.Actor) ([]service.MyOrg, error) {
+				return nil, domain.ErrUnauthenticated
+			},
+		})
+		resp, payload := call(t, srv, http.MethodGet, api.PathPrefix+"/me/orgs", "hik_1_cli_x", nil)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status %d, want 401", resp.StatusCode)
+		}
+		if code := decodeError(t, payload).Error.Code; code != apigen.ErrorCodeUnauthenticated {
+			t.Fatalf("code %q", code)
+		}
+	})
+
+	// The cookie leg reaches it without a synchronizer token: it is a GET.
+	t.Run("a browser session reaches it without stepping up", func(t *testing.T) {
+		srv := newTestServer(t, stubAuth{identity: liveIdentityFn}, stubOrgs{
+			mine: func(context.Context, service.Actor) ([]service.MyOrg, error) {
+				return []service.MyOrg{{ID: testOrgID, Name: "acme"}}, nil
+			},
+		})
+		resp, payload := raw(t, srv, http.MethodGet, api.PathPrefix+"/me/orgs", nil, func(r *http.Request) {
+			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "hik_1_br_stub"})
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d, want 200: %s", resp.StatusCode, payload)
+		}
+	})
+}

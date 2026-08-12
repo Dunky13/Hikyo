@@ -602,6 +602,31 @@ func (q *Queries) GetOIDCTransactionByState(ctx context.Context, stateVerifier [
 	return i, err
 }
 
+const getOrgIdentity = `-- name: GetOrgIdentity :one
+SELECT id, name FROM orgs WHERE id = ?
+`
+
+type GetOrgIdentityRow struct {
+	ID   string
+	Name string
+}
+
+// The org rail's identity lookup (#56). The caller's own org set is projected
+// from their own grant rows, so there is no scope to authorize against and no
+// proof to bind: the projection IS the authorization, and it can name only
+// organisations the caller already holds a grant in. Identity only - an org's
+// metadata and active flag are operator-set state and are read through the
+// proof-gated GetOrg.
+//
+// Not annotated, and it does not need to be: orgs is class=org chain=id, and
+// the id equality is that chain as a top-level conjunct.
+func (q *Queries) GetOrgIdentity(ctx context.Context, id string) (GetOrgIdentityRow, error) {
+	row := q.db.QueryRowContext(ctx, getOrgIdentity, id)
+	var i GetOrgIdentityRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const getPasswordCredential = `-- name: GetPasswordCredential :one
 SELECT account_id, verifier, kdf_memory_kib, kdf_time, kdf_parallelism,
        dek_version, credential_epoch, row_version, updated_at

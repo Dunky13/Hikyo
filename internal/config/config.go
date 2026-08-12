@@ -55,6 +55,17 @@ type Config struct {
 	Argon2Time         uint32
 	Argon2Parallelism  uint8
 	AdmissionBudgetMiB int
+
+	// DevAdmissionPerIPPerMinute raises the per-source-IP pre-auth allowance.
+	// Zero means the locked default.
+	//
+	// It exists for one caller — the browser flow suite, which drives every
+	// login of every flow from one loopback address, a traffic shape the
+	// default is deliberately not sized for. It is refused outside development
+	// mode (see Load), so no production instance can have its ceiling raised
+	// by an environment variable, and the key name says so out loud for anyone
+	// who copies it into a compose file.
+	DevAdmissionPerIPPerMinute int
 }
 
 // knownEnv is the closed set of HIKYO_* keys this build understands.
@@ -68,6 +79,10 @@ var knownEnv = map[string]bool{
 	"HIKYO_ARGON2_TIME":          true,
 	"HIKYO_ARGON2_PARALLELISM":   true,
 	"HIKYO_ADMISSION_BUDGET_MIB": true,
+
+	// Development-only. Named so the deployment it does not belong in is
+	// obvious at a glance, and refused at boot outside --dev regardless.
+	"HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE": true,
 
 	// Client-side keys. They configure no server behaviour, but they are
 	// listed here because the unknown-key warning is a typo detector: a
@@ -157,6 +172,24 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 			return nil, nil, err
 		}
 		cfg.AdmissionBudgetMiB = int(budget)
+
+		// The dev-only override. Fail-closed twice over: a non-dev process
+		// refuses to start when it is set at all, and a malformed or
+		// non-positive value is an error rather than a silent fallback to the
+		// default — a typo in a security ceiling must not mean "use the
+		// default", which is the same rule every other tunable here follows.
+		if raw := strings.TrimSpace(getenv("HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE")); raw != "" {
+			if !cfg.Dev {
+				return nil, nil, fmt.Errorf(
+					"HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE is a development-mode override and this is not a development server: " +
+						"remove it, or pass --dev if this is an evaluation instance")
+			}
+			perIP, err := strconv.Atoi(raw)
+			if err != nil || perIP < 1 {
+				return nil, nil, fmt.Errorf("HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: %q is not a positive integer", raw)
+			}
+			cfg.DevAdmissionPerIPPerMinute = perIP
+		}
 	}
 	if subcommand == "server" {
 		trustedProxyCIDRs, err := parseTrustedProxyCIDRs(getenv("HIKYO_TRUSTED_PROXY_CIDRS"))

@@ -1,5 +1,5 @@
-import { listOrgs, localLogin, logout, whoami } from '@hikyo/client';
-import { zLoginResult, zOrgList, zWhoAmI } from '@hikyo/zod';
+import { listMyOrgs, localLogin, logout, whoami } from '@hikyo/client';
+import { zLoginResult, zMyOrgList, zWhoAmI } from '@hikyo/zod';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
@@ -32,7 +32,7 @@ export function loginFailureText(error: unknown): string {
 
 export type WhoAmI = z.infer<typeof zWhoAmI>;
 export type LoginResult = z.infer<typeof zLoginResult>;
-export type OrgList = z.infer<typeof zOrgList>;
+export type MyOrgList = z.infer<typeof zMyOrgList>;
 
 export const sessionKey = ['session'] as const;
 export const orgsKey = ['orgs'] as const;
@@ -61,25 +61,20 @@ export function useSession(): UseQueryResult<WhoAmI | null> {
 }
 
 /**
- * orgsRefusalText explains a refused organisation list.
+ * useOrgs is the rail's data source: the organisations the caller's OWN grants
+ * name.
  *
- * A single-factor password session cannot list organisations: `org.list`
- * carries the instance-config capability, which the human-auth ADR makes
- * MFA-mandatory. That is the locked behaviour, not a bug — but it must be
- * SAID, because an empty rail that silently means "you were refused" is the
- * kind of quiet fallback that teaches people the product is broken.
+ * Deliberately NOT `listOrgs`. That one enumerates every org on the instance
+ * under `instance-config`, which is MFA-mandatory — so a password-only session
+ * was refused and the rail showed an empty shell with a "you need a second
+ * factor" notice. That notice was the UI apologising for asking the wrong
+ * question: navigation is not operator enumeration, and a member's own orgs
+ * need no capability at all.
  */
-export function orgsRefusalText(error: unknown): string {
-  if (error instanceof ApiError && error.status === 403) {
-    return 'Organisations are not listed for this session: instance administration needs a second factor.';
-  }
-  return 'Organisations could not be loaded.';
-}
-
-export function useOrgs(enabled: boolean): UseQueryResult<OrgList> {
+export function useOrgs(enabled: boolean): UseQueryResult<MyOrgList> {
   return useQuery({
     queryKey: orgsKey,
-    queryFn: () => parsed(listOrgs(), zOrgList),
+    queryFn: () => parsed(listMyOrgs(), zMyOrgList),
     enabled,
     retry: false,
   });

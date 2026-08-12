@@ -104,6 +104,7 @@ type OrgService interface {
 	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
 	Get(ctx context.Context, actor service.Actor, org domain.OrgID) (service.Org, error)
 	List(ctx context.Context, actor service.Actor) ([]service.Org, error)
+	ListMine(ctx context.Context, actor service.Actor) ([]service.MyOrg, error)
 	Rename(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Org, error)
 	Delete(ctx context.Context, actor service.Actor, org domain.OrgID) error
 }
@@ -412,6 +413,25 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 		return nil, err
 	}
 	return apigen.CreateOrg201JSONResponse(wireOrg(org)), nil
+}
+
+// ListMyOrgs is the navigation surface: the organisations the caller's own
+// grants name. Distinct from ListOrgs, which is the operator's enumeration of
+// every org and is MFA-mandatory — see the contract and service for why the
+// sidebar must not go through it.
+func (a *API) ListMyOrgs(ctx context.Context, _ apigen.ListMyOrgsRequestObject) (apigen.ListMyOrgsResponseObject, error) {
+	orgs, err := a.Orgs.ListMine(ctx, service.Bearer(bearer(ctx)))
+	if err != nil {
+		if classify(err) == apigen.ErrorCodeUnauthenticated {
+			return apigen.ListMyOrgs401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+		}
+		return nil, err
+	}
+	items := make([]apigen.MyOrg, 0, len(orgs))
+	for _, o := range orgs {
+		items = append(items, apigen.MyOrg{Id: o.ID, Name: o.Name})
+	}
+	return apigen.ListMyOrgs200JSONResponse{Items: items, Count: len(items)}, nil
 }
 
 func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (apigen.ListOrgsResponseObject, error) {

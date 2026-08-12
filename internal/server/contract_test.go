@@ -214,8 +214,19 @@ type stubOrgs struct {
 	create func(ctx context.Context, a service.Actor, name string, active bool, meta json.RawMessage) (service.Org, error)
 	get    func(ctx context.Context, a service.Actor, org domain.OrgID) (service.Org, error)
 	list   func(ctx context.Context, a service.Actor) ([]service.Org, error)
+	mine   func(ctx context.Context, a service.Actor) ([]service.MyOrg, error)
 	rename func(ctx context.Context, a service.Actor, org domain.OrgID, name string) (service.Org, error)
 	del    func(ctx context.Context, a service.Actor, org domain.OrgID) error
+}
+
+func (s stubOrgs) ListMine(ctx context.Context, a service.Actor) ([]service.MyOrg, error) {
+	if s.mine == nil {
+		// The honest default for a caller whose grants name no org: an empty
+		// list, not a refusal. Nothing about this surface can fail on
+		// authorization — that is the point of it.
+		return nil, nil
+	}
+	return s.mine(ctx, a)
 }
 
 func (s stubOrgs) Create(ctx context.Context, a service.Actor, n string, active bool, m json.RawMessage) (service.Org, error) {

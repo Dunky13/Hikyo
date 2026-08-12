@@ -196,6 +196,55 @@ func (s *Orgs) Get(ctx context.Context, actor Actor, org domain.OrgID) (Org, err
 	return orgOf(out), nil
 }
 
+// MyOrg is an organisation as a navigation destination — identity only. The
+// rail needs a name and a route; `metadata` and `active` are operator-set
+// state and belong to Get, which authorizes.
+type MyOrg struct {
+	ID   string
+	Name string
+}
+
+// ListMine is the navigation surface: exactly the organisations the caller's
+// own grants name, at org scope or below.
+//
+// It is NOT List with a filter, and the difference is the whole point. List
+// enumerates every org on the instance under `instance-config`, which the
+// human-auth ADR makes MFA-mandatory — correct for operator work, absurd in
+// front of a sidebar. This projects the caller's own grant rows, so there is
+// no capability to require (holding a grant IS the predicate, and requiring
+// one would be circular) and nothing to leak: every row it can return names an
+// org the caller already holds authority in.
+//
+// It therefore emits no audit event, for the same reason `whoami` and
+// `listIdentities` emit none. The audit model's default-deny governs
+// REGISTRY OPERATIONS — `audited: none` is a permit an operation must earn.
+// This is not an operation: it reaches no chokepoint, mutates nothing, and
+// reads only the caller's own grant projection. Recording "a principal looked
+// at their own sidebar" on every page load would add a row per boot that no
+// investigation could ever act on, which is noise the trail has to carry
+// forever.
+//
+// Runs in a read transaction: nothing here writes.
+func (s *Orgs) ListMine(ctx context.Context, actor Actor) ([]MyOrg, error) {
+	var rows []authz.OrgIdentity
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		rows, err = az.OrgsForPrincipal(ctx, caller.Principal)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MyOrg, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, MyOrg{ID: string(r.ID), Name: r.Name})
+	}
+	return out, nil
+}
+
 // List is the instance-scoped enumeration of every org, and therefore itself
 // audited (the audit model's default-deny rule refuses `audited: none` to
 // instance-class operations). The event commits with the read, which is why

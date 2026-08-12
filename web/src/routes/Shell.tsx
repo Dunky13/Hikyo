@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 
-import { orgsRefusalText, useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
+import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import {
   applyThemeChoice,
   nextThemeChoice,
@@ -72,12 +72,24 @@ export function Shell({ session }: { session: WhoAmI }) {
       </nav>
 
       <nav id="sidebar" className="sidebar" aria-label="Sections" data-open={navOpen}>
+        {orgs.isSuccess && items.length === 0 ? (
+          // The zero-org state (prototype iteration 14). It is a real state,
+          // not an error: a principal whose grants name no organisation has
+          // nowhere to navigate yet, and saying so is the whole of it. An
+          // instance operator is in exactly this state until someone grants
+          // them membership — their enumeration surface is elsewhere and
+          // behind its own second factor.
+          <p className="sidebar__empty" role="status">
+            No organisations yet. You will see one here once you are granted
+            access to it.
+          </p>
+        ) : null}
         {orgs.isError ? (
           <p className="alert" role="status">
             <span className="alert__glyph" aria-hidden="true">
               !
             </span>
-            <span>{orgsRefusalText(orgs.error)}</span>
+            <span>Your organisations could not be loaded. Reload to try again.</span>
           </p>
         ) : null}
         {SECTIONS.map((section) => (

@@ -235,6 +235,12 @@ select {
   overflow-y: auto;
 }
 
+.sidebar__empty {
+  margin: 0;
+  color: var(--tx-dim);
+  max-width: 40ch;
+}
+
 .sidebar__section h2 {
   margin: 0 0 8px;
   font-size: 12px;

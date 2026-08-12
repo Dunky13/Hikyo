@@ -34,11 +34,10 @@ const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 /**
  * STORAGE_STATE is a signed-in browser context, minted once for the whole run.
  *
- * It exists because the instance throttles: `admission.PerIPPerMinute` allows
- * ten attempts a minute from one source, and a suite that signs in through the
- * form before every test would throttle ITSELF long before it found a bug.
  * Signing in is the login flow's subject; every other flow starts from a
- * session, which is also how a real browser works.
+ * session, which is also how a real browser works — and it keeps the suite's
+ * spend against the instance's pre-auth allowance proportional to what is
+ * actually being tested rather than to how many tests there are.
  */
 export const STORAGE_STATE = fileURLToPath(new URL('../.auth/state.json', import.meta.url));
 
@@ -97,6 +96,17 @@ export async function startInstance(): Promise<void> {
   const proc = spawn(binary, ['server', '--dev', '--listen', `${HOST}:${PORT}`], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      // Every login of every flow, on both viewport projects, arrives from one
+      // loopback address inside about twenty seconds — a traffic shape the
+      // locked per-IP allowance of ten a minute is deliberately not sized for.
+      // Raising it here is not weakening the product: the key is refused
+      // outside `--dev` and the server will not start with it set in
+      // production. The alternative was deleting tests to fit under the
+      // ceiling, which is measuring the throttle instead of the UI.
+      HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: '500',
+    },
   });
   running = { proc, dir };
   proc.stderr?.on('data', (chunk: Buffer) => {

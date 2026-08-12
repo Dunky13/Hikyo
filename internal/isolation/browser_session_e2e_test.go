@@ -3,6 +3,7 @@ package isolation
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -278,4 +279,118 @@ func runBrowserFederationFlow(t *testing.T, db *store.DB) {
 		t.Fatalf("unlink: %v", err)
 	}
 	browserSession("identity unlink", unlinked)
+}
+
+// The navigation surface (#56): `ListMine` projects the caller's OWN grants
+// onto the organisations they name.
+//
+// It is the rail's data source, and the reason it exists rather than reusing
+// `List` is that `List` enumerates every org on the instance under
+// `instance-config` — MFA-mandatory, correct for an operator, absurd in front
+// of a sidebar. So the properties that matter are: a member sees their own
+// orgs, sees nobody else's, and reaches it with an ordinary password session.
+func TestListMineProjectsOnlyTheCallersOwnOrgsSQLite(t *testing.T) {
+	runListMineProjection(t, seededDB(t, openSQLite))
+}
+
+func TestListMineProjectsOnlyTheCallersOwnOrgsPostgres(t *testing.T) {
+	runListMineProjection(t, seededDB(t, openPostgres))
+}
+
+func runListMineProjection(t *testing.T, db *store.DB) {
+	orgs := &service.Orgs{DB: db}
+	ctx := t.Context()
+
+	names := func(who domain.PrincipalID) []string {
+		t.Helper()
+		rows, err := orgs.ListMine(ctx, service.LocalPrincipal(who))
+		if err != nil {
+			t.Fatalf("%s: %v", who, err)
+		}
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.Name)
+		}
+		return out
+	}
+
+	// alice holds org-scoped grants in org A and nothing in org B.
+	if got := names(alice); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("alice sees %v, want exactly [org-a]", got)
+	}
+	// bob is the cross-org prober: org B, and org A must be invisible to him.
+	if got := names(bob); !slices.Equal(got, []string{"org-b"}) {
+		t.Fatalf("bob sees %v, want exactly [org-b] — a cross-org leak", got)
+	}
+	// A grant BELOW org depth still names its org. Without this the rail is
+	// empty for the persona the permission ADR says drives the product: the
+	// developer scoped to one project or one environment.
+	if got := names(mchA1); !slices.Equal(got, []string{"org-a"}) {
+		t.Fatalf("a project-scoped principal sees %v, want [org-a]", got)
+	}
+	// An INSTANCE-scoped principal's grants name no org, so the list is empty
+	// — and that is correct. Instance scope inherits downward, so expanding it
+	// here would reproduce the operator's org enumeration without its
+	// MFA-mandatory gate.
+	if got := names(root); len(got) != 0 {
+		t.Fatalf("an instance-scoped principal sees %v, want [] — that is org.list's job, behind its own gate", got)
+	}
+	// No grants, no orgs, no error.
+	if got := names(nobody); len(got) != 0 {
+		t.Fatalf("a principal with no grants sees %v, want []", got)
+	}
+}
+
+// The rail's real caller: an ordinary password session, no second factor. The
+// projection above is exercised through LocalPrincipal; this proves the same
+// answer arrives over a browser session that could not pass `org.list`.
+func TestListMineNeedsNoSecondFactorSQLite(t *testing.T) {
+	runListMineFromABrowserSession(t, seededDB(t, openSQLite))
+}
+
+func TestListMineNeedsNoSecondFactorPostgres(t *testing.T) {
+	runListMineFromABrowserSession(t, seededDB(t, openPostgres))
+}
+
+func runListMineFromABrowserSession(t *testing.T, db *store.DB) {
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	ctx := t.Context()
+	orgs := &service.Orgs{DB: db}
+
+	// The bootstrap administrator's grants are all instance-scoped (the admin
+	// template expands at instance scope, and org.create seeds the creator
+	// nothing), so its rail starts empty — the honest zero state, not a bug.
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactBrowser)
+	if err != nil {
+		t.Fatalf("browser login: %v", err)
+	}
+	before, err := orgs.ListMine(ctx, service.Bearer(login.SessionToken))
+	if err != nil {
+		t.Fatalf("list mine: %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("a purely instance-scoped principal starts with %v, want []", before)
+	}
+
+	// Give it a membership the way #55's grant API eventually will. No cleanup:
+	// the harness opens a fresh datastore per test.
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) `+
+		`VALUES ('g_fa_read', '`+string(boot.PrincipalID)+`', 'read', 'org_a', NULL, NULL, `+ts+`)`)
+
+	// A password-only session. `org.list` would refuse it — instance-config is
+	// MFA-mandatory — and the rail must not need that.
+	if _, err := orgs.List(ctx, service.Bearer(login.SessionToken)); err == nil {
+		t.Fatal("org.list accepted a single-factor session; this test's premise is gone")
+	}
+	after, err := orgs.ListMine(ctx, service.Bearer(login.SessionToken))
+	if err != nil {
+		t.Fatalf("list mine after the grant: %v", err)
+	}
+	if len(after) != 1 || after[0].Name != "org-a" {
+		t.Fatalf("the rail shows %v, want exactly [org-a]", after)
+	}
+	// Identity only: metadata is operator-set state and belongs to org.get.
+	if after[0].ID != "org_a" {
+		t.Fatalf("org id = %q, want org_a", after[0].ID)
+	}
 }

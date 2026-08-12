@@ -192,10 +192,25 @@ presses Tab first. Without it the assertion measures the wrong state.
    a suite that drove the login form per test would measure the throttle.
    Global setup mints a browser session over HTTP (same endpoint, same
    `artifact: browser` request) into a Playwright storage state; the login flow
-   and the sign-out flow still authenticate for real. **Budget note for the next
-   flow author:** a full suite spends about 7 of the 10 attempts per minute, so
-   a new flow should reuse `STORAGE_STATE` rather than sign in — and two full
-   local runs inside one minute will legitimately 429.
+   and the sign-out flow still authenticate for real.
+
+   **Correction to an earlier note in this document: cross-run 429 is
+   impossible.** `admission.Limiter` keeps `ipHits` in a plain in-memory map
+   built at boot, and the harness spawns a fresh binary in a fresh temp
+   directory per run and kills it at teardown — no throttle state survives a
+   run. The risk was only ever within a single run, where a full suite spent
+   about 7 of the 10 allowed attempts.
+
+   That headroom is now bought properly rather than by rationing tests:
+   `HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE` raises the per-source allowance, the
+   harness sets it to 500 on the server it spawns, and the key is fail-closed
+   twice — a non-`--dev` process **refuses to start** when it is set at all,
+   and a malformed or non-positive value is an error rather than a silent
+   fallback to the default. The precedent for a configurable admission value is
+   `HIKYO_ADMISSION_BUDGET_MIB`, already in `knownEnv`; the ADR routes admission
+   values to the ops spec. The alternative was deleting or merging flow tests to
+   fit under a security constant, which is measuring the throttle instead of the
+   UI.
 6. **`exactOptionalPropertyTypes` is off** in `web/tsconfig.json`: the
    generated hey-api client does not satisfy it, and `clients/ts` does not set
    it either.
@@ -209,14 +224,58 @@ presses Tab first. Without it the assertion measures the wrong state.
    successful login overwrites both cookies, and browser session cookies do not
    survive the browser anyway.
 
-## Behaviour worth knowing
+## The navigation surface: `GET /api/v1/me/orgs`
 
-**A password-only session cannot list organisations.** `org.list` carries
-`CapInstanceConfig`, which is MFA-mandatory, so the bootstrap admin gets 403
-until a factor is enrolled. The rail is therefore empty and the chrome says
-why (`role="status"`, naming the second factor) rather than looking like an
-instance with no organisations. The shell flow asserts that notice. When the
-factor-enrolment UI lands, the notice becomes the entry point to it.
+The rail cannot be built on `listOrgs`. That operation is `ClassInstance` with
+`Formula{instance-config@none}`, and `instance-config` is MFA-mandatory — it is
+the *operator's* enumeration of every organisation on the instance, and putting
+it behind a sidebar meant a password-only session saw an empty rail with a "you
+need a second factor" notice. That notice was the UI apologising for asking the
+wrong question.
+
+`listMyOrgs` asks the right one: **the organisations the caller's own grants
+name**, at org scope or below. Decisions, each argued rather than assumed:
+
+- **No new authz registry operation, deliberately.** The registry's `opSpec`
+  offers `events` or `auditedNone`, and `auditedNone` is default-deny —
+  permitted only for tenant-class, bare-`read`, non-mutating operations. This
+  addresses no tenant object, so it is not tenant-class; and there is no
+  capability to require, because *holding a grant is the predicate* and
+  demanding one would be circular. It is a resolution-surface read, exactly
+  like `GET /auth/identities` ("the caller's own linked identities"), and it is
+  classified the same way: `ClassUnauthenticated` in the wire registry, no
+  `x-wenv-operation`/`x-wenv-formula` pair. **The registry entry that was not
+  created is itself the decision** — recorded here so the next reader does not
+  re-derive it.
+- **Not audited, pinned as a reviewed deviation** in
+  `testdata/audited_exemptions.json` beside `whoami` and the identity list. The
+  audit model's default-deny governs registry operations; this is not one. Its
+  subjects are already recorded when grants are created or revoked, and its
+  result set can contain nothing the caller does not already hold — so an event
+  would record "a principal looked at their own sidebar" once per page load,
+  which no investigation could act on.
+- **A grant BELOW org depth still names its org.** `covers()` in
+  `authorize.go` only matches downward, so a project- or env-scoped grant does
+  *not* satisfy `read@org` — filtering the rail through `org.get` would have
+  emptied it for exactly the persona the permission ADR says drives the
+  product. The projection reads the grant rows directly instead.
+- **An instance-scoped principal gets an EMPTY list, and that is correct.**
+  Instance scope inherits downward, so expanding it here would silently
+  reproduce `listOrgs` on a surface without its gate. The bootstrap
+  administrator is in this state (the admin template expands at instance scope
+  and `org.create` seeds its creator nothing), so the rail's zero state —
+  prototype iteration 14, text + ARIA, no step-up wall — is what a fresh
+  instance shows. The Playwright shell flow asserts exactly that; the datastore
+  e2e (`TestListMineProjectsOnlyTheCallersOwnOrgs*`,
+  `TestListMineNeedsNoSecondFactor*`, both engines) carries member-sees-own-org,
+  cross-org-invisible, depth-below-org, and MFA-not-required.
+- **Identity only.** `MyOrg` is `{id, name}`. `metadata` and `active` are
+  operator-set state read through `getOrg`, which authorizes; returning them to
+  a member who could not call `getOrg` would be a genuine over-disclosure.
+- Store side: no new grants query — `ListGrantsForPrincipal` already exists and
+  is already pinned, so the annotated-query fixture is untouched. One new
+  `GetOrgIdentity` on `orgs`, which needs no annotation because `orgs` is
+  `class=org chain=id` and `WHERE id` is that chain as a top-level conjunct.
 
 ## Release wiring
 
@@ -255,3 +314,39 @@ pnpm --dir web e2e              # boots a real --dev instance, desktop + mobile
 ```
 
 CI runs exactly that order in the `web` job.
+
+---
+
+## Files created / modified (this run)
+
+Created:
+- `internal/server/spa.go`, `internal/server/spa_test.go`
+- `internal/server/browser.go`, `internal/server/browser_test.go`
+- `internal/webui/webui.go`, `internal/webui/absent.go`, `internal/webui/embedded.go`
+- `internal/isolation/browser_session_e2e_test.go`
+- `web/**`
+- `docs/handoff/56-ui-shell.md`
+
+Modified (highlights):
+- `api/openapi.yaml` — optional `artifact` on LocalLoginRequest; `GET /api/v1/me/orgs`
+  (`listMyOrgs`) + `MyOrg`/`MyOrgList`; regenerated Go + TS clients
+- `internal/authz/` — `Identity.CSRFVerifier`; `TxAuthorizer.OrgsForPrincipal`;
+  wire classification for the new route
+- `internal/store/authn/` — `csrf_verifier` read-back; `OrgsForPrincipal`,
+  `GetOrgIdentity`
+- `internal/service/` — `type Artifact`; `VerifyBrowserCSRF` + `ErrCSRFMismatch`;
+  artifact-preserving reissue on every account-security mutation; `Orgs.ListMine`
+- `internal/server/` — `New(…, fs.FS)`, security headers, SPA leg, CSRF gate,
+  shared cookie-bearing responses, `ListMyOrgs`
+- `internal/admission/`, `internal/config/`, `internal/app/` —
+  `PerIPPerMinute` override, dev-gated fail-closed
+- `internal/isolation/testdata/{annotated_queries,audited_exemptions}.json` —
+  reviewed pins
+- `.github/workflows/{ci,release}.yml`, `.goreleaser.yaml` — frontend build
+  before GoReleaser, `-tags=ui`
+- `.gitignore`, `clients/ts/package.json` (`packageManager`)
+
+Campsite fixes: `SlideIdleClock` slid a BROWSER session by the CLI idle window;
+the skip link was a 39px touch
+target on a phone; `completeLink` reissued a session without re-authenticating
+the acting one.

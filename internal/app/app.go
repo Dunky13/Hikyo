@@ -255,6 +255,7 @@ func AuthComponents(cfg *config.Config) (crypto.PasswordParams, *admission.Limit
 	limiter, err := admission.New(admission.Config{
 		BudgetMiB:      cfg.AdmissionBudgetMiB,
 		ArgonMemoryKiB: kdf.MemoryKiB,
+		PerIPPerMinute: cfg.DevAdmissionPerIPPerMinute,
 	})
 	if err != nil {
 		return crypto.PasswordParams{}, nil, err

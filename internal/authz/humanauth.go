@@ -538,6 +538,20 @@ func (a *TxAuthorizer) StrandedRevealPrincipals(ctx context.Context, org, projec
 	return a.r.StrandedRevealPrincipals(ctx, org, project, env)
 }
 
+// OrgIdentity re-exports the resolution surface's navigation record so
+// internal/service can name it without importing internal/store/authn, which
+// the boundary test forbids.
+type OrgIdentity = authn.OrgIdentity
+
+// OrgsForPrincipal projects the caller's OWN grants onto the organisations
+// they name. It authorizes nothing and needs no proof: the result set is
+// defined by the caller's own grant rows, so it can disclose nothing they do
+// not already hold. See the resolver for why an instance-scoped principal
+// correctly gets an empty set.
+func (a *TxAuthorizer) OrgsForPrincipal(ctx context.Context, p domain.PrincipalID) ([]OrgIdentity, error) {
+	return a.r.OrgsForPrincipal(ctx, p)
+}
+
 // GrantsForResetTarget reads the credential-reset target's full grant set for
 // the org-bounded test, under the row lock the reset holds.
 func (a *TxAuthorizer) GrantsForResetTarget(ctx context.Context, p domain.PrincipalID) ([]domain.Grant, error) {

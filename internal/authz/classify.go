@@ -47,6 +47,14 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/logout":               ClassUnauthenticated,
 	"http:GET /api/v1/auth/whoami":                ClassUnauthenticated,
 
+	// The navigation surface (#56). Self-scoped like whoami and the identity
+	// list: it projects the caller's OWN grant rows onto the organisations
+	// they name, reaches no chokepoint operation and can disclose nothing the
+	// caller does not already hold. Its probe contract is therefore
+	// enumeration uniformity — an unresolvable session must be
+	// indistinguishable from one whose grants name no org — not tenancy.
+	"http:GET /api/v1/me/orgs": ClassUnauthenticated,
+
 	// Factor endpoints (#54). Unauthenticated-class like logout/whoami: they
 	// take a session but an unresolvable one is exactly the case they must not
 	// distinguish, so their probe contract is enumeration uniformity, not

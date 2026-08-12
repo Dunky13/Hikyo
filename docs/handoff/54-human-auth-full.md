@@ -335,6 +335,14 @@ CSRF token delivered via authenticated `GET /auth/whoami` after the redirect
 lands, regenerated on rotation **[A9]**. `Authenticate` must accept both
 artifact types (today hard-pins cli).
 
+> **[A9] superseded at #56.** Delivery is the readable `__Host-wenv-csrf`
+> cookie beside the HttpOnly session cookie, not `whoami` — chosen as the more
+> secure shape: whoami-delivery would mint on a GET (a write on a safe method)
+> and churn the token across tabs, while both variants are equally
+> same-origin-readable and the session row's one-way verifier remains the
+> actual boundary. Rationale + full contract: `56-ui-shell.md`. Everything
+> else in this paragraph (A10, dual-presentation refusal) stands.
+
 Assurance enforcement flips to `true` (the tripwire test demands it once any
 factor event registers). MFA-mandatory ⇒ session factors carry ≥2 distinct
 classes, or `webauthn` (UV = inherent 2FA), or `oidc:<issuer>` whose recorded

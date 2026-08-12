@@ -74,18 +74,22 @@ test.describe('app chrome', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   });
 
-  // A refusal the skeleton genuinely produces: `org.list` carries the
-  // instance-config capability, which the human-auth ADR makes MFA-mandatory,
-  // so a password-only session cannot list organisations. The rail is
-  // therefore empty — and the chrome has to SAY so rather than look like an
-  // instance that has no organisations.
-  test('explains a refused organisation list instead of showing an empty rail', async ({
-    page,
-  }) => {
+  // The rail's zero state. The bootstrap administrator's grants are all
+  // instance-scoped, and `listMyOrgs` projects only the orgs a caller's own
+  // grants NAME — so this session has none, correctly.
+  //
+  // What used to be here was a "you need a second factor" notice, because the
+  // rail asked `listOrgs`, the operator's enumeration of every org on the
+  // instance, which is MFA-mandatory. That notice was the UI apologising for
+  // asking the wrong question; the zero state is the honest answer to the
+  // right one, and it must still be text + ARIA rather than an empty column.
+  test('shows the zero-organisation state rather than an empty rail', async ({ page }) => {
     await openNav(page);
     const notice = page.getByRole('status');
     await expectStatusIsTextAndAria(page, notice);
-    await expect(notice).toContainText('second factor');
+    await expect(notice).toContainText('No organisations yet');
+    // And no step-up wall: nothing on the navigation surface asks for one.
+    await expect(page.getByText(/second factor/i)).toHaveCount(0);
   });
 
   // The matrix is DERIVED from the registry, not re-listed beside it: this
