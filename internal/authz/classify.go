@@ -86,16 +86,56 @@ var wireRegistry = map[string]Class{
 	// enumeration uniformity is therefore their probe contract. Metadata is
 	// documentation-class public material under pre-auth admission. Provider
 	// administration is instance-config.
-	"http:POST /api/v1/auth/saml/{provider}/start":                            ClassUnauthenticated,
-	"http:POST /api/v1/auth/saml/{provider}/acs":                              ClassUnauthenticated,
-	"http:GET /api/v1/auth/saml/{provider}/metadata":                          ClassUnauthenticated,
-	"http:GET /api/v1/instance/saml-providers":                                ClassInstance,
-	"http:GET /api/v1/instance/saml-providers/{slug}":                         ClassInstance,
-	"http:PUT /api/v1/instance/saml-providers/{slug}":                         ClassInstance,
-	"http:PATCH /api/v1/instance/saml-providers/{slug}":                       ClassInstance,
-	"http:DELETE /api/v1/instance/saml-providers/{slug}":                      ClassInstance,
-	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata":       ClassInstance,
-	"http:GET /api/v1/instance/saml-sp-keys":                                  ClassInstance,
+	"http:POST /api/v1/auth/saml/{provider}/start":                      ClassUnauthenticated,
+	"http:POST /api/v1/auth/saml/{provider}/acs":                        ClassUnauthenticated,
+	"http:GET /api/v1/auth/saml/{provider}/metadata":                    ClassUnauthenticated,
+	"http:GET /api/v1/instance/saml-providers":                          ClassInstance,
+	"http:GET /api/v1/instance/saml-providers/{slug}":                   ClassInstance,
+	"http:PUT /api/v1/instance/saml-providers/{slug}":                   ClassInstance,
+	"http:PATCH /api/v1/instance/saml-providers/{slug}":                 ClassInstance,
+	"http:DELETE /api/v1/instance/saml-providers/{slug}":                ClassInstance,
+	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata": ClassInstance,
+	"http:GET /api/v1/instance/saml-sp-keys":                            ClassInstance,
+
+	// SCIM provisioning (#73). Every route is tenant-class at org depth: a
+	// binding a caller may not reach answers byte-identically to one that is
+	// not there, which is what keeps the mount from being a cross-org oracle.
+	// The wire routes are protocol paths — the same closed exception class the
+	// authentication ceremonies belong to — and are parity-exempt, but they are
+	// NOT unauthenticated: each one presents a provisioning credential.
+	"http:GET /api/v1/orgs/{org}/scim-bindings":                               ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim-bindings":                              ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}":                     ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}":                  ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":           ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":            ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":         ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials":         ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim-bindings/{binding}/credentials":        ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}":    ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users":     ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups":    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig":     ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes":             ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas":                   ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Users":                     ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Users":                    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":                ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":                ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":              ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":             ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups":                    ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups":                   ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":               ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":               ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":             ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Bulk":                     ClassTenant,
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Me":                        ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search":            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search":           ClassTenant,
 	"http:POST /api/v1/instance/saml-sp-keys/rotate":                          ClassInstance,
 	"http:DELETE /api/v1/instance/saml-sp-keys/{fingerprint}":                 ClassInstance,
 	"http:POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire": ClassInstance,
@@ -330,6 +370,11 @@ var wireRegistry = map[string]Class{
 	// exactly like a project that is not there. The instance credential
 	// policy rides `instance-config`, not this verb.
 	"cli:sa": ClassTenant,
+	// `scim` reaches ONLY tenant-class routes: every SCIM administration
+	// operation is org-addressed, so a binding the caller may not reach answers
+	// exactly like one that is not there. The wire routes are tenant-class too,
+	// but no CLI verb reaches them — they are the identity provider's.
+	"cli:scim": ClassTenant,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
@@ -364,6 +409,26 @@ var wireRegistry = map[string]Class{
 // single x-hikyo-operation in the contract, since two ops of different classes
 // cannot be carried by one row; the completeness invariant unions both sources.
 var wireEvents = map[string][]audit.EventType{
+	// The credential-versus-binding-path mismatch (#73 §8). It is refused
+	// BEFORE any operation authorizes — there is no proof and no operation
+	// row to hang it on — so like the authentication surface's own events it
+	// is declared here, against the mount every wire request enters through.
+	//
+	// All THREE discovery routes declare it, and they are the only routes that
+	// must: their operation (`scim-discovery.read`) declares no events at all
+	// (ADR §10 annotates the probe class audited-none-equivalent, pinned in
+	// internal/isolation/testdata/audited_exemptions.json), so this is the whole
+	// of their audit linkage. Every other wire route inherits an event list from
+	// its own operation.
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig": {
+		audit.EventSCIMCredentialRefused,
+	},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes": {
+		audit.EventSCIMCredentialRefused,
+	},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas": {
+		audit.EventSCIMCredentialRefused,
+	},
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
 		audit.EventAuthSessionCreated,
@@ -665,13 +730,48 @@ var wireRoutes = map[string][]Operation{
 	"http:DELETE /api/v1/instance/oidc-providers/{slug}": {OpProviderDelete},
 
 	// SAML provider administration (#72), under the same instance-config atom.
-	"http:GET /api/v1/instance/saml-providers":                                {OpSAMLProviderList},
-	"http:GET /api/v1/instance/saml-providers/{slug}":                         {OpSAMLProviderGet},
-	"http:PUT /api/v1/instance/saml-providers/{slug}":                         {OpSAMLProviderPut},
-	"http:PATCH /api/v1/instance/saml-providers/{slug}":                       {OpSAMLProviderPatch},
-	"http:DELETE /api/v1/instance/saml-providers/{slug}":                      {OpSAMLProviderDelete},
-	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata":       {OpSAMLProviderRefreshMetadata},
-	"http:GET /api/v1/instance/saml-sp-keys":                                  {OpSAMLSPKeyList},
+	"http:GET /api/v1/instance/saml-providers":                          {OpSAMLProviderList},
+	"http:GET /api/v1/instance/saml-providers/{slug}":                   {OpSAMLProviderGet},
+	"http:PUT /api/v1/instance/saml-providers/{slug}":                   {OpSAMLProviderPut},
+	"http:PATCH /api/v1/instance/saml-providers/{slug}":                 {OpSAMLProviderPatch},
+	"http:DELETE /api/v1/instance/saml-providers/{slug}":                {OpSAMLProviderDelete},
+	"http:POST /api/v1/instance/saml-providers/{slug}/refresh-metadata": {OpSAMLProviderRefreshMetadata},
+	"http:GET /api/v1/instance/saml-sp-keys":                            {OpSAMLSPKeyList},
+
+	// SCIM provisioning (#73).
+	"http:GET /api/v1/orgs/{org}/scim-bindings":                               {OpSCIMBindingList},
+	"http:POST /api/v1/orgs/{org}/scim-bindings":                              {OpSCIMBindingCreate},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}":                     {OpSCIMBindingGet},
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}":                  {OpSCIMBindingDelete},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":            {OpSCIMMappingList},
+	"http:POST /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":           {OpSCIMMappingCreate},
+	"http:PUT /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":            {OpSCIMMappingUpdate},
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/mappings":         {OpSCIMMappingDelete},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials":         {OpSCIMCredentialList},
+	"http:POST /api/v1/orgs/{org}/scim-bindings/{binding}/credentials":        {OpSCIMCredentialMint},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}":    {OpSCIMCredentialGet},
+	"http:DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}": {OpSCIMCredentialRevoke},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users":     {OpSCIMDirectoryUsers},
+	"http:GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups":    {OpSCIMDirectoryGroups},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig":     {OpSCIMDiscovery},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes":             {OpSCIMDiscovery},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas":                   {OpSCIMDiscovery},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Users":                     {OpSCIMUserList},
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Users":                    {OpSCIMUserCreate},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":                {OpSCIMUserGet},
+	"http:PUT /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":                {OpSCIMUserReplace},
+	"http:PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":              {OpSCIMUserPatch},
+	"http:DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}":             {OpSCIMUserDelete},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups":                    {OpSCIMGroupList},
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups":                   {OpSCIMGroupCreate},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":               {OpSCIMGroupGet},
+	"http:PUT /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":               {OpSCIMGroupReplace},
+	"http:PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":             {OpSCIMGroupPatch},
+	"http:DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}":            {OpSCIMGroupDelete},
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Bulk":                     {OpSCIMUnsupported},
+	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Me":                        {OpSCIMUnsupported},
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search":            {OpSCIMUnsupported},
+	"http:POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search":           {OpSCIMUnsupported},
 	"http:POST /api/v1/instance/saml-sp-keys/rotate":                          {OpSAMLSPKeyRotate},
 	"http:DELETE /api/v1/instance/saml-sp-keys/{fingerprint}":                 {OpSAMLSPKeyRetire},
 	"http:POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire": {OpSAMLSPKeyCompromiseRetire},

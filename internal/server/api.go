@@ -129,6 +129,13 @@ type API struct {
 	Settings      SettingsService
 	Providers     ProviderService
 	SAMLProviders SAMLProviderService
+	// SCIM is the provisioning ADMINISTRATION surface (human sessions,
+	// `manage-members` at org scope); SCIMWire is the identity provider's own
+	// protocol path (a provisioning credential, `scim-provision`). They are two
+	// fields rather than one because they are two authorization languages, and
+	// a single interface would let a handler reach the wrong one by autocomplete.
+	SCIM     SCIMAdminService
+	SCIMWire SCIMWireService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP

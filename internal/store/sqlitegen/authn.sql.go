@@ -1568,6 +1568,7 @@ SELECT MAX(e) AS max_epoch FROM (
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM reauth_windows
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM recovery_codes
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM saml_transactions
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM scim_credentials
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM sessions
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_challenges
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_credentials

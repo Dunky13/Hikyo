@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -2008,36 +2008,35 @@ export const setCredentialPolicy = <ThrowOnError extends boolean = false>(option
 });
 
 /**
- * List the configured OIDC federation issuers.
+ * List this organisation's SCIM bindings.
  *
- * Instance-scoped, never org- or project-scoped: an org-scoped issuer would
- * let an org admin add a provider and mint identities authenticating into
- * the instance.
- *
- * Audited rather than silent — reading which external authorities the
- * instance trusts to name principals is not a bare tenant read.
+ * Each binding with its attention states — the org admin's answer to
+ * "what does SCIM think is wrong?". Provider availability and staleness
+ * are reconciled on read, in both directions, so the view is current
+ * rather than as of the last write.
  *
  */
-export const listFederationIssuers = <ThrowOnError extends boolean = false>(options?: Options<ListFederationIssuersData, ThrowOnError>) => (options?.client ?? client).get<ListFederationIssuersResponses, ListFederationIssuersErrors, ThrowOnError>({
+export const listScimBindings = <ThrowOnError extends boolean = false>(options: Options<ListScimBindingsData, ThrowOnError>) => (options.client ?? client).get<ListScimBindingsResponses, ListScimBindingsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/instance/federation-issuers',
+    url: '/api/v1/orgs/{org}/scim-bindings',
     ...options
 });
 
 /**
- * Configure an OIDC federation issuer.
+ * Create the organisation's SCIM binding for one identity provider.
  *
- * The issuer string is stored and matched BYTE-EXACT, with no
- * canonicalization step. OpenID Connect defines `iss` as case-sensitive, so
- * any normalization that folds case, resolves a URL or strips a trailing
- * slash can merge two distinct external issuers into one configuration —
- * and the uniqueness constraint would enforce the merge rather than catch
- * it.
+ * At most one binding per (organisation, provider): the concurrent-create
+ * race resolves to one row and the loser is refused with `conflict`. The
+ * subject source and the NameID profile are immutable after creation, and
+ * the provider reference is read-only — creating a binding grants no
+ * authority over the provider it names. Creating the binding also creates
+ * its provisioning connection and that connection's structural
+ * `scim-provision` grant, atomically.
  *
  */
-export const createFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<CreateFederationIssuerData, ThrowOnError>) => (options.client ?? client).post<CreateFederationIssuerResponses, CreateFederationIssuerErrors, ThrowOnError>({
+export const createScimBinding = <ThrowOnError extends boolean = false>(options: Options<CreateScimBindingData, ThrowOnError>) => (options.client ?? client).post<CreateScimBindingResponses, CreateScimBindingErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/instance/federation-issuers',
+    url: '/api/v1/orgs/{org}/scim-bindings',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -2046,32 +2045,83 @@ export const createFederationIssuer = <ThrowOnError extends boolean = false>(opt
 });
 
 /**
- * Remove an issuer configuration.
+ * Delete a SCIM binding, running its atomic teardown.
  *
- * Refused with 409 while live bindings still name it. A cascade would
- * deprovision N workloads under an operation whose name says
- * "configuration", and an orphaning delete would leave bindings that
- * silently stop authenticating. The operator revokes the bindings first,
- * which is the same act stated honestly.
+ * One transaction, in order: every credential is revoked so no new wire
+ * transaction can begin; every `scim` origin the binding holds is
+ * released (lockout conversion included, and any resulting retention
+ * origins survive the binding); the provisioning connection and its
+ * structural grant are retired; the directory, mapping table and binding
+ * row go. Identity links and accounts SURVIVE — they are account
+ * property, exactly as they would be had the user been invited.
  *
  */
-export const deleteFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<DeleteFederationIssuerData, ThrowOnError>) => (options.client ?? client).delete<DeleteFederationIssuerResponses, DeleteFederationIssuerErrors, ThrowOnError>({
+export const deleteScimBinding = <ThrowOnError extends boolean = false>(options: Options<DeleteScimBindingData, ThrowOnError>) => (options.client ?? client).delete<DeleteScimBindingResponses, DeleteScimBindingErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/instance/federation-issuers/{issuer}',
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}',
     ...options
 });
 
 /**
- * Move an issuer's JWKS source or refused audiences.
+ * Read one SCIM binding and its attention states.
  *
- * The mutable half only. The issuer string and the platform type cannot
- * move: changing either would silently re-point every binding underneath at
- * a different external authority, which is a replacement, not an edit.
+ * Deliberately keeps working while the referenced provider is disabled or
+ * removed: the whole wire surface fails closed in that state, and "state
+ * is preserved for repair" is not preserved by a surface that refuses to
+ * show the state.
  *
  */
-export const updateFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<UpdateFederationIssuerData, ThrowOnError>) => (options.client ?? client).patch<UpdateFederationIssuerResponses, UpdateFederationIssuerErrors, ThrowOnError>({
+export const getScimBinding = <ThrowOnError extends boolean = false>(options: Options<GetScimBindingData, ThrowOnError>) => (options.client ?? client).get<GetScimBindingResponses, GetScimBindingErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/instance/federation-issuers/{issuer}',
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}',
+    ...options
+});
+
+/**
+ * Delete an addressed mapping row and release every origin it holds.
+ *
+ * Reconciles in this transaction, with no round-trip to the identity
+ * provider: the org administrator is never stuck behind an IdP they do
+ * not control. The row is addressed by query parameters because the
+ * triple is an address, and query parameters are the shape every
+ * intermediary handles the same way.
+ *
+ */
+export const deleteScimMapping = <ThrowOnError extends boolean = false>(options: Options<DeleteScimMappingData, ThrowOnError>) => (options.client ?? client).delete<DeleteScimMappingResponses, DeleteScimMappingErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings',
+    ...options
+});
+
+/**
+ * List the binding's group-to-template mapping table.
+ *
+ * Each row with the capabilities it expands into, so a reader does not
+ * have to know the template table by heart, and with its `inert` flag —
+ * a row whose group was deleted at the identity provider grants nothing
+ * until a human edits or deletes it.
+ *
+ */
+export const listScimMappings = <ThrowOnError extends boolean = false>(options: Options<ListScimMappingsData, ThrowOnError>) => (options.client ?? client).get<ListScimMappingsResponses, ListScimMappingsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings',
+    ...options
+});
+
+/**
+ * Add a mapping row, granting the group's current members immediately.
+ *
+ * The blast-radius moment. The locked rule demands the org-scope warning
+ * "at grant time", when a human is present — under SCIM no human attends
+ * the sync, so the consequence language is returned HERE, in the same
+ * transaction that creates the origins for every member the group already
+ * has. There is no "waits for the next push" gap, and the `warnings`
+ * array is part of the response rather than an optional decoration.
+ *
+ */
+export const createScimMapping = <ThrowOnError extends boolean = false>(options: Options<CreateScimMappingData, ThrowOnError>) => (options.client ?? client).post<CreateScimMappingResponses, CreateScimMappingErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -2080,29 +2130,20 @@ export const updateFederationIssuer = <ThrowOnError extends boolean = false>(opt
 });
 
 /**
- * Mint a federated `(issuer, subject)` binding. Nothing at rest.
+ * Retarget an addressed mapping row's template.
  *
- * The full authorization formula is `manage-identities(project)` AND a
- * disclosure capability over EVERY environment reachable in the resulting
- * post-state AND reauthentication — the same formula a bearer mint carries,
- * and for the same reason: the actor decides which external identity may
- * speak as this service account, and that identity reaches everything the
- * account's grants reach.
- *
- * There is no PUT and no PATCH. Bindings are IMMUTABLE; a change is a
- * replacement mint through this route naming `replaces`, so the predecessor
- * is revoked and the successor inserted in one transaction. Editing in place
- * would let a principal without `reveal` re-point a production binding at an
- * identity they control while the recorded authorization stayed behind.
- *
- * Bindings are LISTED and DELETED through the credentials routes: a binding
- * is a credential row, so a second pair of routes over the same rows would
- * be two places for one formula to drift.
+ * The row is addressed by (group, scope) and keeps its id, which is what
+ * makes narrowing precise: origins key on the row, so a delete-and-
+ * recreate would release every origin it holds and immediately recreate
+ * most of them — momentarily revoking capabilities that never stopped
+ * being granted. Widening creates the newly covered origins now;
+ * narrowing releases the no-longer-covered part in this same transaction,
+ * with no round-trip to the identity provider.
  *
  */
-export const createFederatedBinding = <ThrowOnError extends boolean = false>(options: Options<CreateFederatedBindingData, ThrowOnError>) => (options.client ?? client).post<CreateFederatedBindingResponses, CreateFederatedBindingErrors, ThrowOnError>({
+export const updateScimMapping = <ThrowOnError extends boolean = false>(options: Options<UpdateScimMappingData, ThrowOnError>) => (options.client ?? client).put<UpdateScimMappingResponses, UpdateScimMappingErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings',
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -2111,31 +2152,371 @@ export const createFederatedBinding = <ThrowOnError extends boolean = false>(opt
 });
 
 /**
- * Fetch the authorized projection, conditionally.
+ * List the binding's provisioning credentials.
  *
- * The machine fetch surface. Presenting a current cursor answers
- * `current: true` with NO content and no key names — only a fetch that
- * actually delivers values is a disclosure — and either disposition emits
- * exactly one immutable access record.
- *
- * Authorization is evaluated on the conditional path EXACTLY as on the
- * delivering path, so a caller who has lost `read` receives the uniform
- * nonexistent response rather than "current".
- *
- * Today there are no value tables, so what is delivered is the key
- * catalogue and each key's declared presence for this environment: config
- * keys and secret PRESENCE only, no plaintext anywhere. That is the surface
- * the Compose and Kubernetes integrations consume, and it is the seam the
- * value tables land behind.
- *
- * Both a `hik_` bearer credential and an externally issued OIDC ID token
- * authenticate here, with identical authority: a machine principal's
- * authority is the union of the grants on its service account and nothing
- * else, so there is no per-credential scope for either kind to widen.
+ * Ids and metadata, never token material — which does not exist to be
+ * listed, because only the verifier was ever stored.
  *
  */
-export const fetchDelivery = <ThrowOnError extends boolean = false>(options: Options<FetchDeliveryData, ThrowOnError>) => (options.client ?? client).get<FetchDeliveryResponses, FetchDeliveryErrors, ThrowOnError>({
+export const listScimCredentials = <ThrowOnError extends boolean = false>(options: Options<ListScimCredentialsData, ThrowOnError>) => (options.client ?? client).get<ListScimCredentialsResponses, ListScimCredentialsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery',
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials',
+    ...options
+});
+
+/**
+ * Mint a NEW provisioning credential; several may be live at once.
+ *
+ * Display-once: the token is in this response and nowhere else, ever.
+ * Overlap rotation is mint-new, update the identity provider, revoke-old,
+ * with identical authority throughout — so a mint that joins an
+ * already-live credential reports `rotated` and there is no third verb
+ * and no offline window.
+ *
+ */
+export const mintScimCredential = <ThrowOnError extends boolean = false>(options: Options<MintScimCredentialData, ThrowOnError>) => (options.client ?? client).post<MintScimCredentialResponses, MintScimCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one provisioning credential.
+ *
+ * Bites at the next request. The row is marked rather than deleted, so
+ * the verifier stays occupied and the id keeps naming a real thing here.
+ *
+ */
+export const revokeScimCredential = <ThrowOnError extends boolean = false>(options: Options<RevokeScimCredentialData, ThrowOnError>) => (options.client ?? client).delete<RevokeScimCredentialResponses, RevokeScimCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}',
+    ...options
+});
+
+/**
+ * Read one provisioning credential's metadata.
+ */
+export const getScimCredential = <ThrowOnError extends boolean = false>(options: Options<GetScimCredentialData, ThrowOnError>) => (options.client ?? client).get<GetScimCredentialResponses, GetScimCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}',
+    ...options
+});
+
+/**
+ * The provisioned user directory, with per-user attention flags.
+ *
+ * Carries the loud per-user flag a deprovision raises: the identity
+ * provider declared this human gone, and grants made by hand in this org
+ * remain and are still usable. That flag exists precisely because a human
+ * must decide about the manual remainder.
+ *
+ */
+export const listScimDirectoryUsers = <ThrowOnError extends boolean = false>(options: Options<ListScimDirectoryUsersData, ThrowOnError>) => (options.client ?? client).get<ListScimDirectoryUsersResponses, ListScimDirectoryUsersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/directory/users',
+    ...options
+});
+
+/**
+ * The provisioned group directory.
+ */
+export const listScimDirectoryGroups = <ThrowOnError extends boolean = false>(options: Options<ListScimDirectoryGroupsData, ThrowOnError>) => (options.client ?? client).get<ListScimDirectoryGroupsResponses, ListScimDirectoryGroupsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups',
+    ...options
+});
+
+/**
+ * Advertise what this SCIM service provider implements.
+ *
+ * The closed truth of what is implemented: no Bulk, no filter beyond the
+ * four `eq` probes, no sorting, no ETag, no change password. Each absence
+ * is advertised here AND refused by name at its endpoint, never
+ * half-implemented.
+ *
+ */
+export const scimServiceProviderConfig = <ThrowOnError extends boolean = false>(options: Options<ScimServiceProviderConfigData, ThrowOnError>) => (options.client ?? client).get<ScimServiceProviderConfigResponses, ScimServiceProviderConfigErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig',
+    ...options
+});
+
+/**
+ * The resource types this service provider implements.
+ *
+ * The closed set — User and Group, and nothing else.
+ */
+export const scimResourceTypes = <ThrowOnError extends boolean = false>(options: Options<ScimResourceTypesData, ThrowOnError>) => (options.client ?? client).get<ScimResourceTypesResponses, ScimResourceTypesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes',
+    ...options
+});
+
+/**
+ * The schemas this service provider implements.
+ */
+export const scimSchemas = <ThrowOnError extends boolean = false>(options: Options<ScimSchemasData, ThrowOnError>) => (options.client ?? client).get<ScimSchemasResponses, ScimSchemasErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Schemas',
+    ...options
+});
+
+/**
+ * List or filter provisioned users.
+ *
+ * The filter grammar is closed to `userName eq "…"` and
+ * `externalId eq "…"`; anything else is `invalidFilter`. Paging is
+ * RFC-shaped and 1-based, `count` is clamped to the server's bound, and
+ * an out-of-range page returns an empty `Resources` with a truthful
+ * `totalResults`. `sortBy` is refused with 501: sorting is advertised
+ * absent and is not half-implemented here.
+ *
+ */
+export const scimListUsers = <ThrowOnError extends boolean = false>(options: Options<ScimListUsersData, ThrowOnError>) => (options.client ?? client).get<ScimListUsersResponses, ScimListUsersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users',
+    ...options
+});
+
+/**
+ * Provision a user, pre-linked and with zero grants.
+ *
+ * Creates the account with its external identity ALREADY BOUND — no
+ * invitation token, no credential-establishment authority, no session, no
+ * assurance. If the asserted identity already exists instance-wide the
+ * account is ATTACHED instead, through the same query path and with a
+ * byte-shape-identical response, so a caller cannot tell the two apart.
+ * Grants come only from group mappings. The `password` attribute is
+ * refused by name: provisioning never establishes credentials.
+ *
+ */
+export const scimCreateUser = <ThrowOnError extends boolean = false>(options: Options<ScimCreateUserData, ThrowOnError>) => (options.client ?? client).post<ScimCreateUserResponses, ScimCreateUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * Deprovision and remove a user from this binding's directory.
+ *
+ * Releases every origin this binding holds for the user, removes every
+ * member reference to them from this binding's groups in the same
+ * transaction, and advances their session generation UNCONDITIONALLY —
+ * even when no grant row changed, because the identity provider has
+ * declared this human gone. The account and its identity links survive:
+ * other organisations' memberships and other providers are not this
+ * provider's to kill.
+ *
+ */
+export const scimDeleteUser = <ThrowOnError extends boolean = false>(options: Options<ScimDeleteUserData, ThrowOnError>) => (options.client ?? client).delete<ScimDeleteUserResponses, ScimDeleteUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}',
+    ...options
+});
+
+/**
+ * Read one provisioned user.
+ */
+export const scimGetUser = <ThrowOnError extends boolean = false>(options: Options<ScimGetUserData, ThrowOnError>) => (options.client ?? client).get<ScimGetUserResponses, ScimGetUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}',
+    ...options
+});
+
+/**
+ * Patch a provisioned user through the closed operation matrix.
+ *
+ * Accepted cells only — add/replace on the pathless value object, on a
+ * plain attribute path and on `active`; remove on a non-required plain
+ * attribute. Everything else is `invalidPath`, `members` on a User
+ * included. A PATCH is ATOMIC: one invalid operation fails the whole
+ * request with nothing committed. Stringified booleans for `active` are
+ * normalized on ingest, a named tolerance.
+ *
+ */
+export const scimPatchUser = <ThrowOnError extends boolean = false>(options: Options<ScimPatchUserData, ThrowOnError>) => (options.client ?? client).patch<ScimPatchUserResponses, ScimPatchUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * Replace a provisioned user (RFC replacement).
+ *
+ * Omitted mutable attributes clear to their defaults and `active`
+ * defaults TRUE, so an omitted `active` REACTIVATES. `userName` is
+ * required. The subject source is exempt from replacement: the subject is
+ * write-once per resource, and a change is refused with `mutability` —
+ * an identifier migration at the identity provider is the rebinding
+ * hazard the identity model exists to prevent. `groups` is ignored on
+ * input; membership is authored exclusively through Group operations.
+ *
+ */
+export const scimReplaceUser = <ThrowOnError extends boolean = false>(options: Options<ScimReplaceUserData, ThrowOnError>) => (options.client ?? client).put<ScimReplaceUserResponses, ScimReplaceUserErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * List or filter provisioned groups.
+ *
+ * `displayName eq "…"` and `externalId eq "…"` only. The first is
+ * load-bearing rather than a convenience: Okta and Entra both discover a
+ * group by it before creating or updating one.
+ *
+ */
+export const scimListGroups = <ThrowOnError extends boolean = false>(options: Options<ScimListGroupsData, ThrowOnError>) => (options.client ?? client).get<ScimListGroupsResponses, ScimListGroupsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups',
+    ...options
+});
+
+/**
+ * Provision a group.
+ *
+ * Members are references to THIS binding's provisioned users; one
+ * resolving to no such user is refused with `invalidValue`, because the
+ * identity provider can only reference ids this server minted.
+ * Group-typed members are refused by name: v1 is flat.
+ *
+ */
+export const scimCreateGroup = <ThrowOnError extends boolean = false>(options: Options<ScimCreateGroupData, ThrowOnError>) => (options.client ?? client).post<ScimCreateGroupResponses, ScimCreateGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete a provisioned group.
+ *
+ * Releases that group's origins for every member and flips every
+ * referencing mapping row to INERT with an attention state, rather than
+ * deleting rows behind the administrator's back: a row the server tidied
+ * away is a row nobody got to decide about.
+ *
+ */
+export const scimDeleteGroup = <ThrowOnError extends boolean = false>(options: Options<ScimDeleteGroupData, ThrowOnError>) => (options.client ?? client).delete<ScimDeleteGroupResponses, ScimDeleteGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}',
+    ...options
+});
+
+/**
+ * Read one provisioned group.
+ */
+export const scimGetGroup = <ThrowOnError extends boolean = false>(options: Options<ScimGetGroupData, ThrowOnError>) => (options.client ?? client).get<ScimGetGroupResponses, ScimGetGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}',
+    ...options
+});
+
+/**
+ * Patch a provisioned group through the closed operation matrix.
+ *
+ * Accepted cells only — add/replace on the pathless value object, on a
+ * plain attribute path and on `members`; remove on a non-required plain
+ * attribute, on `members` (clear) and on `members[value eq "…"]` (remove
+ * one reference). Everything else is `invalidPath`, `active` on a Group
+ * included.
+ *
+ */
+export const scimPatchGroup = <ThrowOnError extends boolean = false>(options: Options<ScimPatchGroupData, ThrowOnError>) => (options.client ?? client).patch<ScimPatchGroupResponses, ScimPatchGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * Replace a provisioned group (RFC replacement).
+ *
+ * `displayName` is required and the member set is replaced wholesale.
+ * Adding a member creates that user's origins from this group's mapping
+ * rows; removing one releases exactly this group's origins for them.
+ *
+ */
+export const scimReplaceGroup = <ThrowOnError extends boolean = false>(options: Options<ScimReplaceGroupData, ThrowOnError>) => (options.client ?? client).put<ScimReplaceGroupResponses, ScimReplaceGroupErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/scim+json',
+        ...options.headers
+    }
+});
+
+/**
+ * Refused — Bulk is not implemented.
+ *
+ * Advertised absent in ServiceProviderConfig and refused HERE by name,
+ * with the RFC 7644 error body and HTTP 501. It carries no `scimType`:
+ * that field is a 400-class discriminator, and inventing one for a 501
+ * would name a code the RFC does not define. The route exists so the
+ * refusal is the protocol's own shape rather than a generic 404.
+ *
+ */
+export const scimBulk = <ThrowOnError extends boolean = false>(options: Options<ScimBulkData, ThrowOnError>) => (options.client ?? client).post<unknown, ScimBulkErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Bulk',
+    ...options
+});
+
+/**
+ * Refused — /Me is not implemented.
+ *
+ * A provisioning connection has no "me": it asserts identities, it does
+ * not have one. Advertised absent and refused by name with HTTP 501.
+ *
+ */
+export const scimMe = <ThrowOnError extends boolean = false>(options: Options<ScimMeData, ThrowOnError>) => (options.client ?? client).get<unknown, ScimMeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Me',
+    ...options
+});
+
+/**
+ * Refused — the .search POST query is not implemented.
+ *
+ * The filter grammar this provider answers is closed to four `eq` probes
+ * and is expressed as a query parameter. A POST query would be a second,
+ * wider filter surface; advertised absent and refused by name with 501.
+ *
+ */
+export const scimSearchUsers = <ThrowOnError extends boolean = false>(options: Options<ScimSearchUsersData, ThrowOnError>) => (options.client ?? client).post<unknown, ScimSearchUsersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/.search',
+    ...options
+});
+
+/**
+ * Refused — the .search POST query is not implemented.
+ */
+export const scimSearchGroups = <ThrowOnError extends boolean = false>(options: Options<ScimSearchGroupsData, ThrowOnError>) => (options.client ?? client).post<unknown, ScimSearchGroupsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search',
     ...options
 });

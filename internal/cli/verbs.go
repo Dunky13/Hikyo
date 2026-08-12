@@ -79,6 +79,7 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"access":           runAccess,
 	"project-settings": runProjectSettings,
 	"sa":               runServiceAccount,
+	"scim":             runSCIM,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -210,6 +211,17 @@ oidc federation:
   binding, so there is no override.
 
   Bindings are listed and revoked through "sa credential".
+scim provisioning (org scope; the identity provider's own wire is not a CLI surface):
+  hikyo scim binding create --org O --provider <provider> --kind oidc|saml
+  hikyo scim binding list|show|delete [<binding>]
+  hikyo scim mapping add <binding> --group <idp-group-id> --template <name> (--project P [--env E] | --org-scope)
+  hikyo scim mapping update <binding> --group <idp-group-id> --template <name> (--project P [--env E] | --org-scope)
+  hikyo scim mapping remove <binding> --group <idp-group-id> (--project P [--env E] | --org-scope)
+  hikyo scim mapping list <binding> [-o table|json]
+  hikyo scim credential mint <binding> [--output-file PATH | --dangerously-print] [--indefinite]
+  hikyo scim credential list|show|revoke <binding> [<credential-id>]
+  hikyo scim user list <binding> [-o table|json]
+  hikyo scim group list <binding> [-o table|json]
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context

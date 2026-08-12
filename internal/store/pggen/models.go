@@ -398,6 +398,94 @@ type SamlTransaction struct {
 	ConsumedAt          pgtype.Timestamptz
 }
 
+type ScimAttention struct {
+	ID         string
+	OrgID      string
+	BindingID  string
+	State      string
+	SubjectRef string
+	Cause      string
+	EnteredAt  pgtype.Timestamptz
+}
+
+type ScimBinding struct {
+	ID                       string
+	OrgID                    string
+	ProviderKind             string
+	ProviderID               string
+	ProviderSlug             string
+	ProviderIssuer           string
+	SubjectSource            string
+	NameidFormat             string
+	NameidQualifier          string
+	NameidQualifierPresent   bool
+	NameidSpQualifier        string
+	NameidSpQualifierPresent bool
+	ConnectionPrincipalID    string
+	LastContactAt            pgtype.Timestamptz
+	CreatedAt                pgtype.Timestamptz
+}
+
+type ScimCredential struct {
+	ID              string
+	OrgID           string
+	BindingID       string
+	PrincipalID     string
+	Verifier        []byte
+	CredentialEpoch int64
+	CreatedAt       pgtype.Timestamptz
+	ExpiresAt       pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
+}
+
+type ScimGroup struct {
+	ID               string
+	OrgID            string
+	BindingID        string
+	DisplayName      string
+	DisplayNameLower string
+	ExternalID       string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type ScimGroupMember struct {
+	ID        string
+	OrgID     string
+	BindingID string
+	GroupID   string
+	UserID    string
+	CreatedAt pgtype.Timestamptz
+}
+
+type ScimMapping struct {
+	ID             string
+	OrgID          string
+	BindingID      string
+	GroupID        string
+	Template       string
+	ScopeProjectID string
+	ScopeEnvID     string
+	Inert          bool
+	CreatedAt      pgtype.Timestamptz
+}
+
+type ScimUser struct {
+	ID            string
+	OrgID         string
+	BindingID     string
+	AccountID     string
+	UserName      string
+	UserNameLower string
+	ExternalID    string
+	Subject       string
+	Active        bool
+	Attributes    string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type ServiceAccount struct {
 	ID          string
 	PrincipalID string

@@ -68,23 +68,30 @@ func NewPG(db pggen.DBTX) *Resolver {
 //
 // Nil in production: the wrapper is installed at Resolver construction, so an
 // unset observer costs one atomic load per transaction, never per query.
-var queryObserver atomic.Pointer[func()]
+//
+// The callback receives the SQL TEXT, which sqlc prefixes with its own
+// `-- name: <Query> :one` header — a stable query IDENTITY. A count alone
+// cannot tell two different query SEQUENCES of equal length apart, and the
+// cross-org oracle fixtures need exactly that distinction: an attach path and a
+// create path that issue different lookups must not cancel out to the same
+// number.
+var queryObserver atomic.Pointer[func(string)]
 
 // SetQueryObserver installs a test-only per-query callback and returns a
 // function that removes it. Not for production code; there is no call site
 // outside tests, and the boundary test pins that.
-func SetQueryObserver(f func()) func() {
+func SetQueryObserver(f func(sql string)) func() {
 	queryObserver.Store(&f)
 	return func() { queryObserver.Store(nil) }
 }
 
 type observedSQLite struct {
 	db sqlitegen.DBTX
-	on func()
+	on func(string)
 }
 
 func (o observedSQLite) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	o.on()
+	o.on(q)
 	return o.db.ExecContext(ctx, q, args...)
 }
 
@@ -93,32 +100,32 @@ func (o observedSQLite) PrepareContext(ctx context.Context, q string) (*sql.Stmt
 }
 
 func (o observedSQLite) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	o.on()
+	o.on(q)
 	return o.db.QueryContext(ctx, q, args...)
 }
 
 func (o observedSQLite) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
-	o.on()
+	o.on(q)
 	return o.db.QueryRowContext(ctx, q, args...)
 }
 
 type observedPG struct {
 	db pggen.DBTX
-	on func()
+	on func(string)
 }
 
 func (o observedPG) Exec(ctx context.Context, q string, args ...any) (pgconn.CommandTag, error) {
-	o.on()
+	o.on(q)
 	return o.db.Exec(ctx, q, args...)
 }
 
 func (o observedPG) Query(ctx context.Context, q string, args ...any) (pgx.Rows, error) {
-	o.on()
+	o.on(q)
 	return o.db.Query(ctx, q, args...)
 }
 
 func (o observedPG) QueryRow(ctx context.Context, q string, args ...any) pgx.Row {
-	o.on()
+	o.on(q)
 	return o.db.QueryRow(ctx, q, args...)
 }
 

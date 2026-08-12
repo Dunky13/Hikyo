@@ -19,7 +19,29 @@ type (
 	Origin     = authn.Origin
 	GrantLine  = authn.GrantLine
 	EnvSetting = authn.EnvironmentSettings
+	// GrantOriginRow and LockoutRetention arrive with the SCIM release
+	// algorithm (#73 §2.4): the first is one (grant row, origin) pair, the
+	// second is a row a retention origin is holding alive.
+	GrantOriginRow   = authn.GrantOriginRow
+	LockoutRetention = authn.LockoutRetention
+	// The SCIM provisioning credential as AUTHENTICATION sees it (#73 §7).
+	// Its administration lives on the proof-carrying repository instead.
+	SCIMCredential = authn.SCIMCredential
 )
+
+// ResolveChain answers "is this (org, project, environment) a real chain" —
+// the same single-query resolution authorize() itself performs, exposed for the
+// one caller that must ask about a scope it is NOT currently authorizing: a
+// SCIM mapping row names a scope at AUTHORING time and expands it at every
+// sync, and a row whose environment does not belong to its project would write
+// grants against a chain that never existed.
+//
+// It mints no proof and reveals nothing a caller could not learn by addressing
+// the scope: an unresolvable chain answers domain.ErrNotFound uniformly,
+// whether the link is missing or foreign.
+func (a *TxAuthorizer) ResolveChain(ctx context.Context, scope domain.Scope) (domain.Scope, error) {
+	return a.r.ResolveChain(ctx, scope)
+}
 
 // GrantRowsForPrincipal lists a principal's grants with their row ids — the
 // dedup read every create performs under the principal-row lock.
@@ -83,4 +105,46 @@ func (a *TxAuthorizer) PrincipalClass(ctx context.Context, p domain.PrincipalID)
 // GrantOriginsFor lists the origins holding one grant row.
 func (a *TxAuthorizer) GrantOriginsFor(ctx context.Context, grantID string) ([]Origin, error) {
 	return a.r.GrantOriginsFor(ctx, grantID)
+}
+
+// GrantOriginsForPrincipal lists every origin holding every grant row of one
+// principal, read at one instant. The SCIM release algorithm (#73 §2.4) decides
+// per origin and then counts what remains per row; seeing the two tables at
+// different instants would let a row be judged against origins that had already
+// moved.
+func (a *TxAuthorizer) GrantOriginsForPrincipal(ctx context.Context, p domain.PrincipalID) ([]GrantOriginRow, error) {
+	return a.r.GrantOriginsForPrincipal(ctx, p)
+}
+
+// LockoutRetentionsInOrg is the org-bounded cure sweep.
+func (a *TxAuthorizer) LockoutRetentionsInOrg(ctx context.Context, org domain.OrgID) ([]LockoutRetention, error) {
+	return a.r.LockoutRetentionsInOrg(ctx, org)
+}
+
+// LockoutRetentions lists every `lockout-retention` origin in the instance,
+// which is what the deterministic cure sweep walks (#73 §2.4).
+func (a *TxAuthorizer) LockoutRetentions(ctx context.Context) ([]LockoutRetention, error) {
+	return a.r.LockoutRetentions(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// SCIM provisioning credentials (#73 §7)
+//
+// They sit on the resolution surface for the same reason sessions do: a SCIM
+// wire request presents one BEFORE any operation is authorized.
+// ---------------------------------------------------------------------------
+
+func (a *TxAuthorizer) SCIMCredentialByVerifier(ctx context.Context, presented []byte) (SCIMCredential, error) {
+	return a.r.SCIMCredentialByVerifier(ctx, presented)
+}
+
+func (a *TxAuthorizer) TouchSCIMCredential(ctx context.Context, id string, at time.Time) error {
+	return a.r.TouchSCIMCredential(ctx, id, at)
+}
+
+// The two ends of the provisioning connection's life: created with its binding,
+// retired by §6's state machine atomically with the structural grant it held.
+// Neither takes a class: the first hardcodes it and the second requires it.
+func (a *TxAuthorizer) CreateProvisioningPrincipal(ctx context.Context, id domain.PrincipalID, at time.Time) error {
+	return a.r.CreateProvisioningPrincipal(ctx, id, at)
 }

@@ -4618,6 +4618,1688 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  # ---------------------------------------------------------------------------
+  # SCIM administration (#73, scim-provisioning ADR §8; spellings §1).
+  #
+  # Domain surface with full UI<->CLI parity: binding CRUD, mapping-table
+  # administration, credential lifecycle, and the provisioned directory views.
+  # Every operation is `manage-members` held at ORG SCOPE EXACTLY — a mapping
+  # row causes grants its author need not hold, and unheld-capability granting
+  # is an org/instance power, so a project-scope member manager must not reach
+  # it through SCIM. The atom is MFA-mandatory, so every route declares 403.
+  # ---------------------------------------------------------------------------
+  /api/v1/orgs/{org}/scim-bindings:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    get:
+      operationId: listScimBindings
+      tags: [scim]
+      summary: List this organisation's SCIM bindings.
+      description: |
+        Each binding with its attention states — the org admin's answer to
+        "what does SCIM think is wrong?". Provider availability and staleness
+        are reconciled on read, in both directions, so the view is current
+        rather than as of the last write.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-binding.list
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The organisation's bindings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimBindingList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createScimBinding
+      tags: [scim]
+      summary: Create the organisation's SCIM binding for one identity provider.
+      description: |
+        At most one binding per (organisation, provider): the concurrent-create
+        race resolves to one row and the loser is refused with `conflict`. The
+        subject source and the NameID profile are immutable after creation, and
+        the provider reference is read-only — creating a binding grants no
+        authority over the provider it names. Creating the binding also creates
+        its provisioning connection and that connection's structural
+        `scim-provision` grant, atomically.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-binding.create
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScimBindingRequest"
+      responses:
+        "200":
+          description: The created binding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimBinding"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: getScimBinding
+      tags: [scim]
+      summary: Read one SCIM binding and its attention states.
+      description: |
+        Deliberately keeps working while the referenced provider is disabled or
+        removed: the whole wire surface fails closed in that state, and "state
+        is preserved for repair" is not preserved by a surface that refuses to
+        show the state.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-binding.get
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The binding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimBinding"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteScimBinding
+      tags: [scim]
+      summary: Delete a SCIM binding, running its atomic teardown.
+      description: |
+        One transaction, in order: every credential is revoked so no new wire
+        transaction can begin; every `scim` origin the binding holds is
+        released (lockout conversion included, and any resulting retention
+        origins survive the binding); the provisioning connection and its
+        structural grant are retired; the directory, mapping table and binding
+        row go. Identity links and accounts SURVIVE — they are account
+        property, exactly as they would be had the user been invited.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-binding.delete
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: The binding and everything it owned are gone.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}/mappings:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: listScimMappings
+      tags: [scim]
+      summary: List the binding's group-to-template mapping table.
+      description: |
+        Each row with the capabilities it expands into, so a reader does not
+        have to know the template table by heart, and with its `inert` flag —
+        a row whose group was deleted at the identity provider grants nothing
+        until a human edits or deletes it.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-mapping.list
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The mapping table.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimMappingList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createScimMapping
+      tags: [scim]
+      summary: Add a mapping row, granting the group's current members immediately.
+      description: |
+        The blast-radius moment. The locked rule demands the org-scope warning
+        "at grant time", when a human is present — under SCIM no human attends
+        the sync, so the consequence language is returned HERE, in the same
+        transaction that creates the origins for every member the group already
+        has. There is no "waits for the next push" gap, and the `warnings`
+        array is part of the response rather than an optional decoration.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-mapping.create
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimMappingRequest"
+      responses:
+        "200":
+          description: The row, its consequence language, and what it granted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimMappingResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: updateScimMapping
+      tags: [scim]
+      summary: Retarget an addressed mapping row's template.
+      description: |
+        The row is addressed by (group, scope) and keeps its id, which is what
+        makes narrowing precise: origins key on the row, so a delete-and-
+        recreate would release every origin it holds and immediately recreate
+        most of them — momentarily revoking capabilities that never stopped
+        being granted. Widening creates the newly covered origins now;
+        narrowing releases the no-longer-covered part in this same transaction,
+        with no round-trip to the identity provider.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-mapping.update
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimMappingRequest"
+      responses:
+        "200":
+          description: The row, its consequence language, and what it changed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimMappingResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteScimMapping
+      tags: [scim]
+      summary: Delete an addressed mapping row and release every origin it holds.
+      description: |
+        Reconciles in this transaction, with no round-trip to the identity
+        provider: the org administrator is never stuck behind an IdP they do
+        not control. The row is addressed by query parameters because the
+        triple is an address, and query parameters are the shape every
+        intermediary handles the same way.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-mapping.delete
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      parameters:
+        - name: group
+          in: query
+          required: true
+          description: The server-minted SCIM group id the row names.
+          schema:
+            $ref: "#/components/schemas/ID"
+        - name: project
+          in: query
+          required: false
+          description: The row's project scope, absent for an org-scoped row.
+          schema:
+            $ref: "#/components/schemas/ID"
+        - name: environment
+          in: query
+          required: false
+          description: The row's environment scope.
+          schema:
+            $ref: "#/components/schemas/ID"
+      responses:
+        "200":
+          description: The deleted row and the origin count it released.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimMappingResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}/credentials:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: listScimCredentials
+      tags: [scim]
+      summary: List the binding's provisioning credentials.
+      description: |
+        Ids and metadata, never token material — which does not exist to be
+        listed, because only the verifier was ever stored.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-credential.list
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The binding's credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimCredentialList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: mintScimCredential
+      tags: [scim]
+      summary: Mint a NEW provisioning credential; several may be live at once.
+      description: |
+        Display-once: the token is in this response and nowhere else, ever.
+        Overlap rotation is mint-new, update the identity provider, revoke-old,
+        with identical authority throughout — so a mint that joins an
+        already-live credential reports `rotated` and there is no third verb
+        and no offline window.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-credential.mint
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintScimCredentialRequest"
+      responses:
+        "200":
+          description: The credential and its display-once token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimMintResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+      - $ref: "#/components/parameters/ScimResourceID"
+    get:
+      operationId: getScimCredential
+      tags: [scim]
+      summary: Read one provisioning credential's metadata.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-credential.get
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimCredential"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeScimCredential
+      tags: [scim]
+      summary: Revoke one provisioning credential.
+      description: |
+        Bites at the next request. The row is marked rather than deleted, so
+        the verifier stays occupied and the id keeps naming a real thing here.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-credential.revoke
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: The credential is dead.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: listScimDirectoryUsers
+      tags: [scim]
+      summary: The provisioned user directory, with per-user attention flags.
+      description: |
+        Carries the loud per-user flag a deprovision raises: the identity
+        provider declared this human gone, and grants made by hand in this org
+        remain and are still usable. That flag exists precisely because a human
+        must decide about the manual remainder.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-directory.users
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The provisioned users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimDirectoryUserList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: listScimDirectoryGroups
+      tags: [scim]
+      summary: The provisioned group directory.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-directory.groups
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The provisioned groups.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimDirectoryGroupList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  # ---------------------------------------------------------------------------
+  # The SCIM wire (#73 §8) — identity-protocol endpoints.
+  #
+  # RFC 7644 fixes the relative path shapes and identity providers take a
+  # configurable base URL, so the per-binding base composes cleanly. These are
+  # the IdP's wire and are meaningless to the SPA and to a human at a CLI: they
+  # join the closed parity-exemption list as protocol paths, exactly as the
+  # SAML and OIDC ceremony endpoints do.
+  #
+  # The credential presented must match the binding IN THE PATH — a mismatch is
+  # a named authentication failure, audited, and answered 401. There is no
+  # ambient routing by credential.
+  #
+  # No route here declares 403: `scim-provision` is not MFA-mandatory (machines
+  # do not reauthenticate), so the assurance leg a 403 exists for cannot arise.
+  # ---------------------------------------------------------------------------
+  /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimServiceProviderConfig
+      tags: [scim-protocol]
+      summary: Advertise what this SCIM service provider implements.
+      description: |
+        The closed truth of what is implemented: no Bulk, no filter beyond the
+        four `eq` probes, no sorting, no ETag, no change password. Each absence
+        is advertised here AND refused by name at its endpoint, never
+        half-implemented.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-discovery.read
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The ServiceProviderConfig resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimResourceTypes
+      tags: [scim-protocol]
+      summary: The resource types this service provider implements.
+      description: The closed set — User and Group, and nothing else.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-discovery.read
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The ResourceTypes list.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Schemas:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimSchemas
+      tags: [scim-protocol]
+      summary: The schemas this service provider implements.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-discovery.read
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The Schemas list.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Users:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimListUsers
+      tags: [scim-protocol]
+      summary: List or filter provisioned users.
+      description: |
+        The filter grammar is closed to `userName eq "…"` and
+        `externalId eq "…"`; anything else is `invalidFilter`. Paging is
+        RFC-shaped and 1-based, `count` is clamped to the server's bound, and
+        an out-of-range page returns an empty `Resources` with a truthful
+        `totalResults`. `sortBy` is refused with 501: sorting is advertised
+        absent and is not half-implemented here.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.list
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/ScimFilter"
+        - $ref: "#/components/parameters/ScimStartIndex"
+        - $ref: "#/components/parameters/ScimCount"
+        - $ref: "#/components/parameters/ScimSortBy"
+        - $ref: "#/components/parameters/ScimSortOrder"
+      responses:
+        "200":
+          description: An RFC 7644 ListResponse.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    post:
+      operationId: scimCreateUser
+      tags: [scim-protocol]
+      summary: Provision a user, pre-linked and with zero grants.
+      description: |
+        Creates the account with its external identity ALREADY BOUND — no
+        invitation token, no credential-establishment authority, no session, no
+        assurance. If the asserted identity already exists instance-wide the
+        account is ATTACHED instead, through the same query path and with a
+        byte-shape-identical response, so a caller cannot tell the two apart.
+        Grants come only from group mappings. The `password` attribute is
+        refused by name: provisioning never establishes credentials.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.create
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "201":
+          description: The provisioned User resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+      - $ref: "#/components/parameters/ScimResourceID"
+    get:
+      operationId: scimGetUser
+      tags: [scim-protocol]
+      summary: Read one provisioned user.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.get
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The User resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    put:
+      operationId: scimReplaceUser
+      tags: [scim-protocol]
+      summary: Replace a provisioned user (RFC replacement).
+      description: |
+        Omitted mutable attributes clear to their defaults and `active`
+        defaults TRUE, so an omitted `active` REACTIVATES. `userName` is
+        required. The subject source is exempt from replacement: the subject is
+        write-once per resource, and a change is refused with `mutability` —
+        an identifier migration at the identity provider is the rebinding
+        hazard the identity model exists to prevent. `groups` is ignored on
+        input; membership is authored exclusively through Group operations.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.replace
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "200":
+          description: The replaced User resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    patch:
+      operationId: scimPatchUser
+      tags: [scim-protocol]
+      summary: Patch a provisioned user through the closed operation matrix.
+      description: |
+        Accepted cells only — add/replace on the pathless value object, on a
+        plain attribute path and on `active`; remove on a non-required plain
+        attribute. Everything else is `invalidPath`, `members` on a User
+        included. A PATCH is ATOMIC: one invalid operation fails the whole
+        request with nothing committed. Stringified booleans for `active` are
+        normalized on ingest, a named tolerance.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.patch
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "200":
+          description: The patched User resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    delete:
+      operationId: scimDeleteUser
+      tags: [scim-protocol]
+      summary: Deprovision and remove a user from this binding's directory.
+      description: |
+        Releases every origin this binding holds for the user, removes every
+        member reference to them from this binding's groups in the same
+        transaction, and advances their session generation UNCONDITIONALLY —
+        even when no grant row changed, because the identity provider has
+        declared this human gone. The account and its identity links survive:
+        other organisations' memberships and other providers are not this
+        provider's to kill.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-user.delete
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: The directory entry is gone.
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Groups:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimListGroups
+      tags: [scim-protocol]
+      summary: List or filter provisioned groups.
+      description: |
+        `displayName eq "…"` and `externalId eq "…"` only. The first is
+        load-bearing rather than a convenience: Okta and Entra both discover a
+        group by it before creating or updating one.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.list
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      parameters:
+        - $ref: "#/components/parameters/ScimFilter"
+        - $ref: "#/components/parameters/ScimStartIndex"
+        - $ref: "#/components/parameters/ScimCount"
+        - $ref: "#/components/parameters/ScimSortBy"
+        - $ref: "#/components/parameters/ScimSortOrder"
+      responses:
+        "200":
+          description: An RFC 7644 ListResponse.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    post:
+      operationId: scimCreateGroup
+      tags: [scim-protocol]
+      summary: Provision a group.
+      description: |
+        Members are references to THIS binding's provisioned users; one
+        resolving to no such user is refused with `invalidValue`, because the
+        identity provider can only reference ids this server minted.
+        Group-typed members are refused by name: v1 is flat.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.create
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "201":
+          description: The provisioned Group resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+      - $ref: "#/components/parameters/ScimResourceID"
+    get:
+      operationId: scimGetGroup
+      tags: [scim-protocol]
+      summary: Read one provisioned group.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.get
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The Group resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    put:
+      operationId: scimReplaceGroup
+      tags: [scim-protocol]
+      summary: Replace a provisioned group (RFC replacement).
+      description: |
+        `displayName` is required and the member set is replaced wholesale.
+        Adding a member creates that user's origins from this group's mapping
+        rows; removing one releases exactly this group's origins for them.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.replace
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "200":
+          description: The replaced Group resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    patch:
+      operationId: scimPatchGroup
+      tags: [scim-protocol]
+      summary: Patch a provisioned group through the closed operation matrix.
+      description: |
+        Accepted cells only — add/replace on the pathless value object, on a
+        plain attribute path and on `members`; remove on a non-required plain
+        attribute, on `members` (clear) and on `members[value eq "…"]` (remove
+        one reference). Everything else is `invalidPath`, `active` on a Group
+        included.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.patch
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimResource"
+      responses:
+        "200":
+          description: The patched Group resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "400":
+          description: |
+            An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "409":
+          description: |
+            A uniqueness violation - duplicate userName, displayName or subject.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "413":
+          description: |
+            The request body exceeds this service provider's bound.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+    delete:
+      operationId: scimDeleteGroup
+      tags: [scim-protocol]
+      summary: Delete a provisioned group.
+      description: |
+        Releases that group's origins for every member and flips every
+        referencing mapping row to INERT with an attention state, rather than
+        deleting rows behind the administrator's back: a row the server tidied
+        away is a row nobody got to decide about.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-group.delete
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: The group is gone.
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Bulk:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    post:
+      operationId: scimBulk
+      tags: [scim-protocol]
+      summary: Refused — Bulk is not implemented.
+      description: |
+        Advertised absent in ServiceProviderConfig and refused HERE by name,
+        with the RFC 7644 error body and HTTP 501. It carries no `scimType`:
+        that field is a 400-class discriminator, and inventing one for a 501
+        would name a code the RFC does not define. The route exists so the
+        refusal is the protocol's own shape rather than a generic 404.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-unsupported.refuse
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Me:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    get:
+      operationId: scimMe
+      tags: [scim-protocol]
+      summary: Refused — /Me is not implemented.
+      description: |
+        A provisioning connection has no "me": it asserts identities, it does
+        not have one. Advertised absent and refused by name with HTTP 501.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-unsupported.refuse
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    post:
+      operationId: scimSearchUsers
+      tags: [scim-protocol]
+      summary: Refused — the .search POST query is not implemented.
+      description: |
+        The filter grammar this provider answers is closed to four `eq` probes
+        and is expressed as a query parameter. A POST query would be a second,
+        wider filter surface; advertised absent and refused by name with 501.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-unsupported.refuse
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
+  /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ScimBindingID"
+    post:
+      operationId: scimSearchGroups
+      tags: [scim-protocol]
+      summary: Refused — the .search POST query is not implemented.
+      x-hikyo-class: tenant
+      x-hikyo-operation: scim-unsupported.refuse
+      x-hikyo-formula: [scim-provision@org]
+      x-hikyo-artifacts: [scim-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "401":
+          description: |
+            Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "404":
+          description: |
+            A resource this binding did not mint, or a binding this caller cannot reach.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          description: |
+            An internal error, in the RFC 7644 shape. The SCIM surface answers
+            its own error dialect for every status: an identity provider that
+            met one Hikyo envelope among SCIM bodies would have to parse two.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+        "501":
+          description: |
+            A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimResource"
+
 components:
   securitySchemes:
     hikyoSession:
@@ -4774,6 +6456,85 @@ components:
       schema:
         type: string
         maxLength: 128
+    ScimBindingID:
+      name: binding
+      in: path
+      required: true
+      description: SCIM binding identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ScimCount:
+      name: count
+      in: query
+      required: false
+      description: |
+        Desired page size. It is a REQUEST: a value above this provider's bound
+        is answered with the bound rather than refused.
+
+        Typed `string` and unconstrained for the same reason as `startIndex`.
+      schema:
+        type: string
+    ScimFilter:
+      name: filter
+      in: query
+      required: false
+      description: |
+        An RFC 7644 filter, closed to `attribute eq "value"` over the four
+        probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+
+        Deliberately unconstrained HERE. Contract validation runs BEFORE the
+        provisioning credential is authenticated, so any constraint declared on
+        a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+        instead of the uniform 401 — telling them something about their request
+        before they have proved they may ask. Every bound and every grammar
+        refusal for this parameter lives in the protocol layer, after
+        authentication, where it is rendered as an RFC 7644 error.
+      schema:
+        type: string
+    ScimResourceID:
+      name: id
+      in: path
+      required: true
+      description: |
+        A server-minted resource identifier. The identity provider can only
+        reference ids this server minted.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ScimSortBy:
+      name: sortBy
+      in: query
+      required: false
+      description: |
+        Present only so its presence can be REFUSED by name with 501. Sorting
+        is advertised absent in ServiceProviderConfig and is not
+        half-implemented. Unconstrained: see `filter`.
+      schema:
+        type: string
+    ScimSortOrder:
+      name: sortOrder
+      in: query
+      required: false
+      description: |
+        Present only so its presence can be REFUSED by name with 501, exactly
+        like `sortBy`. Refusing one and ignoring the other would be the
+        half-implementation the ADR forbids. Unconstrained: see `filter`.
+      schema:
+        type: string
+    ScimStartIndex:
+      name: startIndex
+      in: query
+      required: false
+      description: |
+        1-based index of the first result; a value below 1 is read as 1, per
+        RFC 7644 §3.4.2.4.
+
+        Typed `string`, not `integer`, and carrying no `minimum`: see the note
+        on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+        which is both an unauthenticated refusal and a contradiction of the
+        RFC's own "read as 1". Parsing and clamping happen in the protocol
+        layer after authentication.
+      schema:
+        type: string
 
   responses:
     BadRequest:
@@ -7495,6 +9256,388 @@ components:
           $ref: "#/components/schemas/Timestamp"
         last_used_at:
           $ref: "#/components/schemas/Timestamp"
+    CreateScimBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [provider_kind, provider_slug, subject_source]
+      properties:
+        provider_kind:
+          type: string
+          enum: [oidc, saml]
+        provider_slug:
+          type: string
+          maxLength: 256
+        subject_source:
+          type: string
+          maxLength: 256
+          description: |
+            `externalId` or a declared enterprise/custom extension path.
+            `userName` is refused by name: RFC 7643 defines it
+            `caseExact: false` and server-unique, which contradicts byte-exact
+            identity material.
+        nameid_format:
+          type: string
+          maxLength: 256
+          description: |
+            SAML bindings only. A scalar SCIM attribute cannot carry the locked
+            SAML subject, so the binding declares the NameID PROFILE and the
+            subject-source attribute supplies the NameID value alone.
+        nameid_qualifier:
+          type: string
+          maxLength: 256
+        nameid_qualifier_present:
+          type: boolean
+          description: |
+            Presence is carried separately from value because an absent
+            qualifier and an empty one are different inputs to the injective
+            encoder, and collapsing them would make two SAML subjects collide.
+        nameid_sp_qualifier:
+          type: string
+          maxLength: 256
+        nameid_sp_qualifier_present:
+          type: boolean
+    MintScimCredentialRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        proof:
+          type: string
+          maxLength: 512
+          description: |
+            The reauthentication proof: a TOTP code, or the account password
+            where no factor is enrolled. Minting a provisioning credential is
+            `manage-members(org)` AND reauthentication, so a stolen elevated
+            session cannot issue a durable bearer on its own.
+        indefinite:
+          type: boolean
+          description: |
+            Requires the instance opt-in, which is default-off. Without it an
+            indefinite credential is refused by name.
+    ScimAttention:
+      type: object
+      description: |
+        One raised attention state on a binding. Each names its cause AND a
+        server-authored remediation: a state that only says something is wrong
+        makes the binding view a puzzle.
+      additionalProperties: false
+      required: [state, subject_ref, cause, entered_at, remediation]
+      properties:
+        state:
+          type: string
+          description: |
+            provider_unavailable | lockout_retention | manual_grants_remain |
+            inert_mapping | stale | post_restore
+          enum:
+            - provider_unavailable
+            - lockout_retention
+            - manual_grants_remain
+            - inert_mapping
+            - stale
+            - post_restore
+        subject_ref:
+          type: string
+          description: Which object the state is about; empty for a binding-wide state.
+        cause:
+          type: string
+          description: The triggering operation, empty where the state has no single trigger.
+        entered_at:
+          $ref: "#/components/schemas/Timestamp"
+        remediation:
+          type: string
+          description: Server-authored — what to do about it.
+    ScimBinding:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - org_id
+        - provider_kind
+        - provider_slug
+        - provider_issuer
+        - subject_source
+        - connection_principal_id
+        - created_at
+        - attention
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        org_id:
+          $ref: "#/components/schemas/ID"
+        provider_kind:
+          type: string
+          enum: [oidc, saml]
+        provider_slug:
+          type: string
+        provider_issuer:
+          type: string
+          description: |
+            Frozen at creation. A provider whose issuer moved under a binding
+            is a rebinding hazard, not a rename to follow silently.
+        subject_source:
+          type: string
+          description: |
+            The SCIM attribute path carrying identity material, immutable after
+            creation. `userName` is refused by name.
+        nameid_format:
+          type: string
+          description: The SAML NameID profile's Format URI; empty for an OIDC binding.
+        nameid_qualifier:
+          type: string
+          description: The SAML NameID profile's fixed NameQualifier.
+        nameid_qualifier_present:
+          type: boolean
+          description: |
+            Whether the assertion carries a NameQualifier at all. Presence is
+            reported separately from value because an absent qualifier and an
+            empty one are different inputs to the injective subject encoder.
+        nameid_sp_qualifier:
+          type: string
+          description: The SAML NameID profile's fixed SPNameQualifier.
+        nameid_sp_qualifier_present:
+          type: boolean
+        connection_principal_id:
+          $ref: "#/components/schemas/ID"
+        last_contact_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        attention:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimAttention"
+    ScimBindingList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimBinding"
+        count:
+          type: integer
+    ScimBlastWarning:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message]
+      description: |
+        Server-authored consequence language. It is authored on the server, not
+        in a client, because the locked rule is about what the human is TOLD,
+        and a client rendering its own wording is a second, unreviewed policy.
+      properties:
+        code:
+          type: string
+          enum: [org_scope, reveal_expanding, production_environment, populated_group]
+        severity:
+          type: string
+          enum: [warning, critical]
+        message:
+          type: string
+    ScimCredential:
+      type: object
+      additionalProperties: false
+      required: [id, binding_id, created_at, live]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        binding_id:
+          $ref: "#/components/schemas/ID"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        revoked_at:
+          $ref: "#/components/schemas/Timestamp"
+        last_used_at:
+          $ref: "#/components/schemas/Timestamp"
+        live:
+          type: boolean
+    ScimCredentialList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimCredential"
+        count:
+          type: integer
+    ScimDirectoryGroup:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, member_count, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        display_name:
+          type: string
+        external_id:
+          type: string
+        member_count:
+          type: integer
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+    ScimDirectoryGroupList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimDirectoryGroup"
+        count:
+          type: integer
+    ScimDirectoryUser:
+      type: object
+      additionalProperties: false
+      required: [id, user_name, account_id, active, groups, created_at, updated_at, attention]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        user_name:
+          type: string
+        external_id:
+          type: string
+        account_id:
+          $ref: "#/components/schemas/ID"
+        active:
+          type: boolean
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/ID"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        attention:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimAttention"
+    ScimDirectoryUserList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimDirectoryUser"
+        count:
+          type: integer
+    ScimMapping:
+      type: object
+      additionalProperties: false
+      required: [id, binding_id, group_id, template, inert, created_at, capabilities]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        binding_id:
+          $ref: "#/components/schemas/ID"
+        group_id:
+          $ref: "#/components/schemas/ID"
+        template:
+          type: string
+        project_id:
+          type: string
+        environment_id:
+          type: string
+        inert:
+          type: boolean
+          description: |
+            The group this row names no longer exists at the identity provider.
+            An inert row grants nothing and is never removed automatically.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        capabilities:
+          type: array
+          description: |
+            What the row expands into. Expansion at sync time is expansion at
+            grant time, so this is exactly the set a human applying the same
+            template at the same scope would create.
+          items:
+            type: string
+    ScimMappingList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimMapping"
+        count:
+          type: integer
+    ScimMappingRequest:
+      type: object
+      additionalProperties: false
+      required: [group_id, template]
+      properties:
+        group_id:
+          $ref: "#/components/schemas/ID"
+        template:
+          type: string
+          maxLength: 64
+        project_id:
+          type: string
+          maxLength: 64
+          description: |
+            Absent means org scope, which is the WIDEST a binding can reach.
+            Nothing preselects a scope for you, least of all a production
+            environment.
+        environment_id:
+          type: string
+          maxLength: 64
+    ScimMappingResult:
+      type: object
+      additionalProperties: false
+      required: [mapping, warnings, members_affected, grants_created, origins_released]
+      properties:
+        mapping:
+          $ref: "#/components/schemas/ScimMapping"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScimBlastWarning"
+        members_affected:
+          type: integer
+        grants_created:
+          type: integer
+        origins_released:
+          type: integer
+    ScimMintResult:
+      type: object
+      additionalProperties: false
+      required: [credential, token, rotated]
+      properties:
+        credential:
+          $ref: "#/components/schemas/ScimCredential"
+        token:
+          type: string
+          description: |
+            Display-once. It is in this response and nowhere else, ever: only
+            the SHA-256 verifier was stored.
+        rotated:
+          type: boolean
+          description: |
+            This mint joined an already-live credential. That IS overlap
+            rotation — mint-new, update the identity provider, revoke-old, with
+            identical authority throughout.
+    ScimResource:
+      type: object
+      additionalProperties: true
+      description: |
+        A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
+        deliberately open: identity providers send and expect attributes this
+        provider stores as round-tripped display metadata, and pinning the
+        shape here would make a conformant IdP's request a contract violation.
+        What IS closed lives in the server: the subject source, the filter
+        grammar, the PATCH matrix and the error mapping, each with its own
+        named refusal.
 
 security:
   - hikyoSession: []

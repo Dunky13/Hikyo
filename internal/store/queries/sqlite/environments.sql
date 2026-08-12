@@ -56,3 +56,4 @@ WHERE org_id = ? AND project_id = ? AND id = ?;
 -- name: SetEnvironmentSettings :execrows
 UPDATE environments SET protected = ?, reauth_window_seconds = ?
 WHERE org_id = ? AND project_id = ? AND id = ?;
+

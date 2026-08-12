@@ -56,3 +56,4 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 -- name: SetEnvironmentSettings :execrows
 UPDATE environments SET protected = sqlc.arg(protected), reauth_window_seconds = sqlc.arg(reauth_window_seconds)
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);
+

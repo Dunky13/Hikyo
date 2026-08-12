@@ -150,6 +150,8 @@ type sqliteRepos struct {
 	tok *authz.TxToken
 }
 
+func (r sqliteRepos) SCIM() SCIMRepo { return scimRepo{sq: sqlitegen.New(r.db), tok: r.tok} }
+
 func (r sqliteRepos) Orgs() OrgRepo { return sqliteOrgs{q: sqlitegen.New(r.db), tok: r.tok} }
 func (r sqliteRepos) Projects() ProjectRepo {
 	return sqliteProjects{q: sqlitegen.New(r.db), tok: r.tok}
@@ -700,6 +702,7 @@ type pgRepos struct {
 	tok *authz.TxToken
 }
 
+func (r pgRepos) SCIM() SCIMRepo                { return scimRepo{pg: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Orgs() OrgRepo                 { return pgOrgs{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Projects() ProjectRepo         { return pgProjects{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Environments() EnvironmentRepo { return pgEnvs{q: pggen.New(r.db), tok: r.tok} }

@@ -80,8 +80,15 @@ func (r *Resolver) GrantRowsForPrincipal(ctx context.Context, p domain.Principal
 // UNIQUE key makes the second attach a conflict, so the caller checks first
 // (the same transaction and the same principal-row lock make that safe).
 func (r *Resolver) AddGrantOrigin(ctx context.Context, id, grantID string, p domain.PrincipalID, o Origin, at time.Time) error {
-	if !domain.IsMintableOrigin(o.Kind) {
-		return fmt.Errorf("authn: origin kind %q is not mintable by the grant surface", o.Kind)
+	// Two predicates, not one widened predicate. IsMintableOrigin is also the
+	// human grant surface's RELEASE gate — a revoke releases every origin kind
+	// it admits — so widening it to cover the SCIM kinds would make an
+	// administrator's revoke tear out `scim` origins, which is exactly the
+	// hand-mutation the scim ADR §4 refuses by name. The write gate is
+	// therefore "any kind SOME writer owns"; which writer may release which
+	// kind stays each surface's own question.
+	if !domain.IsMintableOrigin(o.Kind) && !domain.IsSystemOrigin(o.Kind) {
+		return fmt.Errorf("authn: origin kind %q is not mintable by any writer", o.Kind)
 	}
 	if o.Subject == "" {
 		return fmt.Errorf("authn: origin %q carries no subject", o.Kind)

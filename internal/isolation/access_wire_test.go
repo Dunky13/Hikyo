@@ -361,7 +361,7 @@ func runAccessWireQueryTrace(t *testing.T, db *store.DB) {
 func serviceQueryCount(t *testing.T, run func() error) int {
 	t.Helper()
 	var n int
-	restore := authn.SetQueryObserver(func() { n++ })
+	restore := authn.SetQueryObserver(func(string) { n++ })
 	defer restore()
 	if err := run(); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("outcome = %v, want the uniform nonexistent response", err)
@@ -477,8 +477,8 @@ func countedAuthorizeOp(t *testing.T, db *store.DB, principal domain.PrincipalID
 	return count, err
 }
 
-// TestQueryObserverIsTestOnly pins the claim the seam's own doc comment makes:
-// authn.SetQueryObserver has no production call site. A production caller
+// TestQueryObserverIsTestOnly pins the claim each observation seam's own doc
+// comment makes: no production call site. A production caller
 // would install a global mutable on the resolution surface and pay a callback
 // on every query — a real cost and a real shared-state hazard, for a hook that
 // exists only so the acceptance suite can measure the service path.
@@ -495,11 +495,15 @@ func TestQueryObserverIsTestOnly(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		// The declaration itself lives in the resolution surface; every other
-		// non-test mention is a production call site.
-		if bytes.Contains(body, []byte("SetQueryObserver")) &&
-			!strings.HasSuffix(path, filepath.Join("internal", "store", "authn", "authn.go")) {
-			t.Errorf("%s names SetQueryObserver outside a test — the seam is test-only", path)
+		// The declaration itself lives in the package that owns the seam;
+		// every other non-test mention is a production call site.
+		for seam, home := range map[string]string{
+			"SetQueryObserver":     filepath.Join("internal", "store", "authn", "authn.go"),
+			"SetSCIMPhaseObserver": filepath.Join("internal", "service", "scim.go"),
+		} {
+			if bytes.Contains(body, []byte(seam)) && !strings.HasSuffix(path, home) {
+				t.Errorf("%s names %s outside a test — the seam is test-only", path, seam)
+			}
 		}
 		return nil
 	})

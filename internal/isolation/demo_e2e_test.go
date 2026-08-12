@@ -84,6 +84,7 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		return out
 	}
 
+	scimDemoSvc := &service.SCIM{DB: db, Auth: auth}
 	httpSrv := httptest.NewServer(recorded(server.New(&service.System{DB: db}, &server.API{
 		Auth: auth, Orgs: orgs,
 		Projects:     &service.Projects{DB: db},
@@ -93,6 +94,11 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		// One Auth, so the window the settings knob writes and the window the
 		// reveal guard reads cannot come from two configurations.
 		Settings: &service.ProjectSettings{DB: db, Auth: auth},
+		// ONE SCIM service behind both surfaces, as production wires it: the
+		// administration verbs and the identity provider's wire read the same
+		// bindings, the same mapping table and the same bounds.
+		SCIM:     scimDemoSvc,
+		SCIMWire: scimDemoSvc,
 		Version:  "e2e",
 	}, nil)))
 	t.Cleanup(httpSrv.Close)
@@ -305,6 +311,25 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	// template role, list the independent grants it expanded into, revoke one,
 	// and watch the acting session die.
 	runAccessDemo(t, db, ios, relogin)
+
+	// The SCIM demo (#73), through the same real CLI over the same socket:
+	// configure a binding, mint its display-once credential, drive the identity
+	// provider's own wire with it, map a group to a template, and watch the
+	// provisioned human acquire the grants the mapping caused. It is the only
+	// test that exercises CLI -> HTTP -> service -> store for this surface;
+	// everything else asserts one layer.
+	// Minting a provisioning credential is `manage-members(org)` AND
+	// reauthentication, so the demo has to answer the proof prompt the way a
+	// human does.
+	// The clock advances first, and that is the fixture ADMITTING the rule
+	// rather than working around it: reauthentication evidence is SINGLE-USE
+	// and is consumed inside the mint transaction, so a code from the step-up
+	// this demo already performed is a replay and is refused. A human answering
+	// the prompt reads a fresh code off their authenticator, which is what a
+	// later time step is.
+	advanceClock(30 * time.Second)
+	prompts["Account-security proof"] = totpCode(t, otpauthURI, clockNow())
+	runSCIMDemo(t, db, ios, httpSrv.URL)
 
 	// Logging out revokes the artifact; the next call is refused with the
 	// authentication exit code, not a stale success.
