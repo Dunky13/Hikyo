@@ -254,6 +254,62 @@ const (
 	// settings.key_group_membership_changed records a key joining or leaving a
 	// group. Membership is coupling, and coupling is a schema change.
 	EventKeyGroupMembershipChanged EventType = "settings.key_group_membership_changed"
+
+	// identity.* — machine identities (#61, machine-identities ADR §
+	// Audit attribution). Every credential-lifecycle transition is here
+	// because the forensic question after a leak is "which token", and one
+	// service account holds several.
+	//
+	// identity.service_account_created / _deleted bracket the principal's
+	// life; the deletion event carries the blast radius it took with it (the
+	// credentials revoked and the grants released in the same transaction).
+	EventServiceAccountCreated EventType = "identity.service_account_created"
+	EventServiceAccountDeleted EventType = "identity.service_account_deleted"
+	// identity.credential_minted records a credential coming into existence
+	// AND the environments the authorizing formula ranged over, per authority
+	// class — the delivery mode itself is the CLI's to record, since the
+	// server never sees where the value went.
+	EventCredentialMinted EventType = "identity.credential_minted"
+	// identity.credential_revoked is the incident-response half. It is
+	// reachable under the PLAIN capability, with no reveal gate, because
+	// gating revocation on disclosure rights is a self-inflicted delay.
+	EventCredentialRevoked EventType = "identity.credential_revoked"
+	// identity.grant_widened records a grant mutation on a MACHINE principal
+	// that made plaintext newly reachable. It is a separate event from
+	// grant.created because it is a separate fact: a grant landing on a
+	// machine principal re-scopes every credential already in circulation,
+	// instantly, with nobody re-presenting anything.
+	EventMachineGrantWidened EventType = "identity.grant_widened"
+	// identity.lifetime_policy_changed records the instance lifetime
+	// controls moving, with the credentials the change clamped or stranded —
+	// the enumeration the actor was shown before it committed.
+	EventCredentialPolicyChanged EventType = "identity.lifetime_policy_changed"
+	// identity.credentials_listed is the metadata read. It is audited rather
+	// than `audited: none` for the same reason grant.membership_read is:
+	// reading which credentials can reach production is not a bare tenant
+	// read.
+	EventCredentialsListed EventType = "identity.credentials_listed"
+	// identity.lifetime_policy_read is the instance-scoped read of the
+	// lifetime controls. Instance-class operations cannot be `audited: none`
+	// under the audit-model ADR's default-deny permit rule, and this is the
+	// same shape auth.provider_read already has for OIDC configuration.
+	EventCredentialPolicyRead EventType = "identity.lifetime_policy_read"
+
+	// NOT REGISTERED HERE, deliberately: `identity.disclosure`, the per-key
+	// disclosure event on a machine fetch. #15's locked cardinality — one
+	// immutable event per disclosed key, never collapsed, never counted — is
+	// unchanged and binding, but there is no fetch path in this repository
+	// yet (no secret values, no delivery manifest, no cursor), so there is no
+	// key for a per-key event to name. This registry's closure invariant
+	// refuses a type with no emitter, and it is right to: registering it now
+	// would be dead catalogue asserting a guarantee nothing upholds.
+	//
+	// The same reasoning applies to a machine authentication-failure event.
+	// A failed machine presentation today rides the SAME silent path a failed
+	// human session does at the chokepoint; giving machines a failure event
+	// humans do not have would claim an asymmetry the system does not
+	// implement. Both land with the fetch surface and the pre-authentication
+	// admission wiring.
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -955,6 +1011,126 @@ var registry = map[EventType]TypeSpec{
 			"scope":     {Kind: KindString, Required: true},
 			"row_count": {Kind: KindInt, Required: true},
 		},
+	},
+
+	// Machine identities (#61). `principal_class` rides every one of these:
+	// the ADR requires machine principals to be visibly distinct from humans
+	// in audit attribution, and the distinction has to be a field an exporter
+	// can filter on, not an inference from the id's prefix.
+	EventServiceAccountCreated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			"name":               {Kind: KindFreeText, Required: true},
+		},
+	},
+	EventServiceAccountDeleted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			// The blast radius the deletion took with it, in one transaction.
+			"credentials_revoked": {Kind: KindInt, Required: true},
+		},
+	},
+	EventCredentialMinted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			"credential_id":      {Kind: KindString, Required: true},
+			"credential_kind":    {Kind: KindString, Required: true},
+			"lifetime":           {Kind: KindString, Required: true},
+			"expires_at":         {Kind: KindString},
+			// Whether the instance ceiling shortened what the caller asked
+			// for. A clamp that is invisible in the trail is a surprise
+			// waiting for the day the credential dies early.
+			"clamped": {Kind: KindBool, Required: true},
+			// The two authority classes the formula ranged over, kept
+			// separate here for the same reason they are computed separately:
+			// collapsing them loses which disclosure right was exercised.
+			"reveal_environments":         {Kind: KindStringList, Required: true},
+			"reveal_history_environments": {Kind: KindStringList, Required: true},
+		},
+	},
+	EventCredentialRevoked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			"credential_id":      {Kind: KindString, Required: true},
+			// `expire` distinguishes a credential the operator killed from
+			// one the clock did, which is the difference between an incident
+			// and a Tuesday.
+			"cause": {Kind: KindString, Required: true},
+		},
+	},
+	EventMachineGrantWidened: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"target_principal": {Kind: KindString, Required: true},
+			"principal_class":  {Kind: KindString, Required: true},
+			"capability":       {Kind: KindString, Required: true},
+			"scope":            {Kind: KindString, Required: true},
+			// The DELTA, per class. These are the newly reachable sets — not
+			// the post-state — because the delta is what the actor's own
+			// disclosure rights had to cover.
+			"newly_reachable_current":    {Kind: KindStringList, Required: true},
+			"newly_reachable_historical": {Kind: KindStringList, Required: true},
+		},
+	},
+	EventCredentialPolicyChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"max_finite_lifetime_seconds": {Kind: KindInt, Required: true},
+			"allow_indefinite":            {Kind: KindBool, Required: true},
+			"max_live_credentials":        {Kind: KindInt, Required: true},
+			// The enumeration the actor was shown BEFORE the change
+			// committed, carried into the trail so the surfaced list and the
+			// recorded one cannot differ.
+			"affected_credentials": {Kind: KindStringList, Required: true},
+			"clamped_count":        {Kind: KindInt, Required: true},
+		},
+	},
+	EventCredentialsListed: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"scope":     {Kind: KindString, Required: true},
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventCredentialPolicyRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema:        Schema{},
 	},
 }
 

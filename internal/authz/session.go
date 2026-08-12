@@ -30,10 +30,24 @@ type Assurance struct {
 	CeremonyID      string
 }
 
-// Identity is a live, resolved caller.
+// Identity is a live, resolved caller — human or machine.
 type Identity struct {
-	Principal         domain.PrincipalID
-	SessionID         string
+	Principal domain.PrincipalID
+	// Class is what this identity authenticated AS. It is set on every
+	// resolution path, never inferred from an empty field: the ADR requires
+	// machine principals to be visibly distinct from humans everywhere they
+	// appear, and a distinction carried by absence is one a caller forgets.
+	// A LocalPrincipal actor carries no class, because local host authority
+	// is neither.
+	Class domain.PrincipalClass
+	// SessionID is empty for a machine identity. A machine has no session,
+	// no cookie and no assurance record (#16's propagation), which is also
+	// what exempts it from the MFA-mandatory check it could never satisfy.
+	SessionID string
+	// CredentialID names the machine credential presented, and is empty for
+	// a human. It is the forensic answer to "which token", which is the
+	// question after a leak — one service account holds several.
+	CredentialID      string
 	Artifact          string
 	Assurance         Assurance
 	CreatedAt         time.Time
@@ -131,9 +145,19 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 	// which leg a value arrived on (header vs cookie) and enforces the CSRF
 	// requirement there; the verifier scheme is identical, so resolution does
 	// not branch on the type.
-	if presented == "" ||
-		(crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil &&
-			crypto.ParseArtifact(presented, crypto.ArtifactBrowserSession) != nil) {
+	//
+	// A MACHINE credential is refused here, and that is the point: this
+	// function is the human session mechanism, and its callers are the
+	// account-security surface — logout, factor enrolment, passkeys, identity
+	// linking, step-up. Every one of them assumes a session row exists to
+	// mutate, and a machine has none. AuthenticateCaller below is the single
+	// entry point that admits both, and it is what the operation chokepoint
+	// uses.
+	if presented == "" {
+		return Identity{}, domain.ErrUnauthenticated
+	}
+	if crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil &&
+		crypto.ParseArtifact(presented, crypto.ArtifactBrowserSession) != nil {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 
@@ -148,6 +172,32 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 		return Identity{}, rowErr
 	}
 	return a.authenticateResolvedSession(ctx, row, rowErr, now)
+}
+
+// AuthenticateCaller resolves ANY authentication artifact class — a human
+// session or a machine credential — and is the only entry point that admits a
+// machine. Both resolve inside this same transaction, uncached, at the same
+// chokepoint that mints proofs, which is what the machine-identities ADR
+// requires and what makes revocation bite at the next request.
+//
+// The split from Authenticate is deliberate and is the guard: a machine
+// credential has no session, no cookie and no assurance record (#16), so a
+// verb that manipulates one must not be reachable with a token. Making the
+// broad function the named one, rather than the default, means a new
+// session-surface verb is machine-proof unless someone opts it in.
+//
+// The branch is on the TYPE THE CALLER TYPED, not on anything the server
+// trusts: a value whose prefix says `au` still resolves against whatever row
+// its verifier matches, and the row decides everything.
+func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string, now time.Time) (Identity, error) {
+	if presented == "" {
+		return Identity{}, domain.ErrUnauthenticated
+	}
+	if crypto.ParseArtifact(presented, crypto.ArtifactWorkload) == nil ||
+		crypto.ParseArtifact(presented, crypto.ArtifactAutomation) == nil {
+		return a.authenticateMachine(ctx, presented, now)
+	}
+	return a.Authenticate(ctx, presented, now)
 }
 
 // AuthenticateSessionByID revalidates the session recorded in a server-side
@@ -212,6 +262,7 @@ func (a *TxAuthorizer) authenticateResolvedSession(ctx context.Context, row auth
 
 	return Identity{
 		Principal: row.PrincipalID,
+		Class:     domain.ClassHuman,
 		SessionID: row.ID,
 		Artifact:  row.Artifact,
 		Assurance: Assurance{

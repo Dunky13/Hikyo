@@ -67,6 +67,24 @@ access:
   hikyo project-settings get --env E [-o table|json]
   hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
 
+machine identities:
+  hikyo sa list [-o table|json]
+  hikyo sa create --name <name> --kind workload|automation
+  hikyo sa delete --id <id>
+  hikyo sa credential list --sa <id> [-o table|json]
+  hikyo sa credential mint --sa <id> [--lifetime 720h | --indefinite]
+      [--output-file PATH | --dangerously-print]
+  hikyo sa credential rotate --sa <id> --id <credential-id> [--lifetime 720h]
+      [--output-file PATH | --dangerously-print]
+  hikyo sa credential revoke --sa <id> --id <credential-id>
+  hikyo instance-config credential-policy get [-o table|json]
+  hikyo instance-config credential-policy set [--max-lifetime 2160h]
+      [--allow-indefinite true|false] [--max-live-credentials N] [--confirm]
+
+  a minted credential is shown ONCE. It reaches a workload through
+  --token-file <path> or HIKYO_TOKEN, never a --token flag: a secret in argv
+  is visible in ps, in /proc, and in shell history.
+
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
 

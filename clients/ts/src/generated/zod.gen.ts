@@ -325,6 +325,119 @@ export const zFolderList = z.object({
 });
 
 /**
+ * The closed set a service account may be created with. Declared at
+ * creation and IMMUTABLE afterwards.
+ *
+ */
+export const zServiceAccountKind = z.enum(['workload', 'automation']);
+
+/**
+ * How a credential authenticates its service account. The discriminator
+ * exists before a second kind does, so adding one is a new row type
+ * rather than a schema change.
+ *
+ */
+export const zCredentialKind = z.enum(['hikyo-token']);
+
+/**
+ * `indefinite` is a VALUE, not a large number: it is unreachable by
+ * raising the instance ceiling, and is admitted only under a separate,
+ * default-off instance opt-in.
+ *
+ */
+export const zCredentialLifetime = z.enum(['finite', 'indefinite']);
+
+export const zCreateServiceAccountRequest = z.object({
+    name: z.string().min(1).max(64),
+    kind: zServiceAccountKind
+});
+
+export const zServiceAccount = z.object({
+    id: zId,
+    principal_id: zId,
+    name: z.string().max(64),
+    kind: zServiceAccountKind,
+    created_at: zTimestamp,
+    created_by: zId,
+    live_credentials: z.int().gte(0)
+});
+
+export const zServiceAccountList = z.object({
+    items: z.array(zServiceAccount),
+    count: z.int().gte(0)
+});
+
+/**
+ * Metadata only. There is deliberately no value property: a credential
+ * value is displayed exactly once, at mint, and is never retrievable
+ * afterwards.
+ *
+ */
+export const zMachineCredential = z.object({
+    id: zId,
+    kind: zCredentialKind,
+    prefix_hint: z.string().max(32),
+    lifetime: zCredentialLifetime,
+    expires_at: z.optional(zTimestamp),
+    created_at: zTimestamp,
+    created_by: zId,
+    revoked_at: z.optional(zTimestamp),
+    last_used_at: z.optional(zTimestamp),
+    expiring_soon: z.boolean()
+});
+
+export const zMachineCredentialList = z.object({
+    items: z.array(zMachineCredential),
+    count: z.int().gte(0)
+});
+
+/**
+ * The zero request asks for the finite default, which is the rule that
+ * the easy path is bounded and a long-lived credential is a typed choice
+ * someone made.
+ *
+ */
+export const zMintCredentialRequest = z.object({
+    indefinite: z.optional(z.boolean()),
+    lifetime_seconds: z.optional(z.int().gte(1))
+});
+
+export const zMintCredentialResult = z.object({
+    value: z.string(),
+    credential: zMachineCredential,
+    clamped: z.boolean()
+});
+
+export const zCredentialPolicy = z.object({
+    max_finite_lifetime_seconds: z.int().gte(1),
+    allow_indefinite: z.boolean(),
+    max_live_credentials: z.int().gte(1),
+    updated_at: z.optional(zTimestamp),
+    updated_by: z.optional(zId)
+});
+
+export const zSetCredentialPolicyRequest = z.object({
+    max_finite_lifetime_seconds: z.int().gte(1),
+    allow_indefinite: z.boolean(),
+    max_live_credentials: z.int().gte(1),
+    confirm: z.optional(z.boolean())
+});
+
+export const zAffectedCredential = z.object({
+    id: zId,
+    service_account_id: zId,
+    expires_at: z.optional(zTimestamp),
+    reason: z.enum(['clamped', 'indefinite-withdrawn'])
+});
+
+export const zCredentialPolicyResult = z.object({
+    applied: z.boolean(),
+    policy: zCredentialPolicy,
+    affected: z.array(zAffectedCredential),
+    clamped_count: z.int().gte(0)
+});
+
+/**
  * One atom from the permission ADR's CLOSED capability set. The server
  * refuses anything outside it rather than storing a row nothing can ever
  * evaluate, so this is a bounded string rather than an enum only to keep
@@ -942,6 +1055,16 @@ export const zEnvironmentId = zId;
  * Folder identifier.
  */
 export const zFolderId = zId;
+
+/**
+ * Service-account identifier.
+ */
+export const zServiceAccountId = zId;
+
+/**
+ * Machine-credential identifier.
+ */
+export const zCredentialId = zId;
 
 /**
  * The principal whose grant is being revoked.
@@ -2268,3 +2391,116 @@ export const zCompromiseRetireSamlSpKeyData = z.object({
  * The newly active replacement key.
  */
 export const zCompromiseRetireSamlSpKeyResponse = zSamlSpKey;
+
+export const zListServiceAccountsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The project's service accounts.
+ */
+export const zListServiceAccountsResponse = zServiceAccountList;
+
+export const zCreateServiceAccountData = z.object({
+    body: zCreateServiceAccountRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created service account.
+ */
+export const zCreateServiceAccountResponse = zServiceAccount;
+
+export const zDeleteServiceAccountData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        serviceAccount: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteServiceAccountResponse = z.void();
+
+export const zListMachineCredentialsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        serviceAccount: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The credentials' metadata.
+ */
+export const zListMachineCredentialsResponse = zMachineCredentialList;
+
+export const zMintMachineCredentialData = z.object({
+    body: zMintCredentialRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        serviceAccount: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The credential value, returned EXACTLY ONCE. Nothing in the system
+ * can return it again.
+ *
+ */
+export const zMintMachineCredentialResponse = zMintCredentialResult;
+
+export const zRevokeMachineCredentialData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        serviceAccount: zId,
+        credential: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeMachineCredentialResponse = z.void();
+
+export const zGetCredentialPolicyData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The instance credential policy.
+ */
+export const zGetCredentialPolicyResponse = zCredentialPolicy;
+
+export const zSetCredentialPolicyData = z.object({
+    body: zSetCredentialPolicyRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The policy as written, with what the clamp touched.
+ */
+export const zSetCredentialPolicyResponse = zCredentialPolicyResult;

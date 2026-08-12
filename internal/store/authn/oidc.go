@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store/pggen"
 	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
@@ -386,6 +387,9 @@ func (r *Resolver) OIDCTransactionByState(ctx context.Context, stateVerifier []b
 		if err != nil {
 			return OIDCTransaction{}, notFoundOr(err)
 		}
+		if !verifierMatches(row.StateVerifier, stateVerifier) {
+			return OIDCTransaction{}, domain.ErrNotFound
+		}
 		created, err := decodeTime(row.CreatedAt)
 		if err != nil {
 			return OIDCTransaction{}, err
@@ -407,6 +411,9 @@ func (r *Resolver) OIDCTransactionByState(ctx context.Context, stateVerifier []b
 	row, err := r.pg.GetOIDCTransactionByState(ctx, stateVerifier)
 	if err != nil {
 		return OIDCTransaction{}, notFoundOr(err)
+	}
+	if !verifierMatches(row.StateVerifier, stateVerifier) {
+		return OIDCTransaction{}, domain.ErrNotFound
 	}
 	return OIDCTransaction{
 		ID: row.ID, Nonce: row.Nonce, PKCEVerifier: row.PkceVerifier, ProviderID: row.ProviderID,

@@ -111,7 +111,10 @@ func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Tim
 	if a.bearer == "" {
 		return authz.Identity{}, domain.ErrUnauthenticated
 	}
-	return az.Authenticate(ctx, a.bearer, now)
+	// The operation chokepoint admits both artifact classes: a machine
+	// credential authorizes operations exactly as a session does, and is
+	// refused by every session-surface verb because those call Authenticate.
+	return az.AuthenticateCaller(ctx, a.bearer, now)
 }
 
 func newID(prefix string) (string, error) {

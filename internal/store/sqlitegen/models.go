@@ -84,6 +84,15 @@ type CredentialAuthority struct {
 	CreatedAt                 string
 }
 
+type CredentialPolicy struct {
+	ID                       int64
+	MaxFiniteLifetimeSeconds int64
+	AllowIndefinite          int64
+	MaxLiveCredentials       int64
+	UpdatedAt                sql.NullString
+	UpdatedBy                sql.NullString
+}
+
 type Environment struct {
 	ID                  string
 	OrgID               string
@@ -169,6 +178,21 @@ type KeyPresenceEnvironment struct {
 	KeyID         string
 	EnvironmentID string
 	Rule          string
+}
+
+type MachineCredential struct {
+	ID               string
+	ServiceAccountID string
+	Kind             string
+	Verifier         []byte
+	PrefixHint       string
+	Lifetime         string
+	ExpiresAt        sql.NullString
+	CredentialEpoch  int64
+	CreatedAt        string
+	CreatedBy        string
+	RevokedAt        sql.NullString
+	LastUsedAt       sql.NullString
 }
 
 type MasterKey struct {
@@ -343,6 +367,17 @@ type SamlTransaction struct {
 	CreatedAt           string
 	ExpiresAt           string
 	ConsumedAt          sql.NullString
+}
+
+type ServiceAccount struct {
+	ID          string
+	PrincipalID string
+	OrgID       string
+	ProjectID   string
+	Name        string
+	Kind        string
+	CreatedAt   string
+	CreatedBy   string
 }
 
 type Session struct {

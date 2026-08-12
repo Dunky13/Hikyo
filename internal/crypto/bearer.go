@@ -56,6 +56,15 @@ const (
 	// ArtifactCSRF is the synchronizer token bound to a browser session,
 	// required on state-changing cookie-authenticated requests.
 	ArtifactCSRF ArtifactType = "cs"
+	// ArtifactWorkload and ArtifactAutomation are the two machine bearer
+	// credentials (#61): the ADR's `wl` and `au` rows of the closed type
+	// list. They are a HINT only — the prefix a scanner and a human read.
+	// Which service account a value belongs to, which class it is, what it
+	// may reach and when it expires are read from the row the verifier
+	// resolves to, so a value carrying `au` against a workload row is a
+	// workload credential.
+	ArtifactWorkload   ArtifactType = "wl"
+	ArtifactAutomation ArtifactType = "au"
 )
 
 // artifactFormatVersion is the grammar's `version` field. It exists so a

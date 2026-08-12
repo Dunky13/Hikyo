@@ -18,12 +18,15 @@ import (
 // administration (#72) joins this existing grammar; it is never local-admin
 // authority and every request still proves instance-config at the server.
 func runInstanceConfig(ctx context.Context, ios IO, args []string) error {
-	noun, rest, err := subverb("instance-config", args, "provider", "saml-sp-key")
+	noun, rest, err := subverb("instance-config", args, "provider", "saml-sp-key", "credential-policy")
 	if err != nil {
 		return err
 	}
 	if noun == "saml-sp-key" {
 		return runSAMLSPKey(ctx, ios, rest)
+	}
+	if noun == "credential-policy" {
+		return runCredentialPolicy(ctx, ios, rest)
 	}
 	if noun != "provider" {
 		return failf(ExitInternal, "hikyo instance-config: unhandled noun %q", noun)

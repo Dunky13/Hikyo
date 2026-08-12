@@ -86,6 +86,15 @@ type CredentialAuthority struct {
 	CreatedAt                 pgtype.Timestamptz
 }
 
+type CredentialPolicy struct {
+	ID                       int32
+	MaxFiniteLifetimeSeconds int64
+	AllowIndefinite          bool
+	MaxLiveCredentials       int64
+	UpdatedAt                pgtype.Timestamptz
+	UpdatedBy                pgtype.Text
+}
+
 type Environment struct {
 	ID                  string
 	OrgID               string
@@ -171,6 +180,21 @@ type KeyPresenceEnvironment struct {
 	KeyID         string
 	EnvironmentID string
 	Rule          string
+}
+
+type MachineCredential struct {
+	ID               string
+	ServiceAccountID string
+	Kind             string
+	Verifier         []byte
+	PrefixHint       string
+	Lifetime         string
+	ExpiresAt        pgtype.Timestamptz
+	CredentialEpoch  int64
+	CreatedAt        pgtype.Timestamptz
+	CreatedBy        string
+	RevokedAt        pgtype.Timestamptz
+	LastUsedAt       pgtype.Timestamptz
 }
 
 type MasterKey struct {
@@ -345,6 +369,17 @@ type SamlTransaction struct {
 	CreatedAt           pgtype.Timestamptz
 	ExpiresAt           pgtype.Timestamptz
 	ConsumedAt          pgtype.Timestamptz
+}
+
+type ServiceAccount struct {
+	ID          string
+	PrincipalID string
+	OrgID       string
+	ProjectID   string
+	Name        string
+	Kind        string
+	CreatedAt   pgtype.Timestamptz
+	CreatedBy   string
 }
 
 type Session struct {

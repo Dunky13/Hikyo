@@ -312,6 +312,70 @@
     ]
   },
   {
+    "operation": "identity.credential-list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
+    "operation": "identity.credential-mint",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
+    "operation": "identity.credential-policy-read",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "identity.credential-policy-update",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "identity.credential-revoke",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
+    "operation": "identity.service-account-create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
+    "operation": "identity.service-account-delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
+    "operation": "identity.service-account-list",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
+    ]
+  },
+  {
     "operation": "key-group.create",
     "class": "tenant",
     "level": "project",

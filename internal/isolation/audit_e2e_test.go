@@ -452,6 +452,9 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The permission surface (#55): every grant.* and settings.* type gets
 		// a real emitter before the trails are read.
 		runGrantLifecycle(t, db)
+		// The machine-identity surface (#61): every identity.* type gets a
+		// real emitter before the trails are read.
+		runIdentityLifecycle(t, db)
 		for _, typ := range audit.Types() {
 			spec, _ := audit.Spec(typ)
 			seen := int64(0)
