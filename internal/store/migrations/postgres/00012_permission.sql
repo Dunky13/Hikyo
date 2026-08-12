@@ -3,7 +3,7 @@
 -- to the sqlite dialect; see that file for the reasoning behind every column.
 -- Roll-forward only: no Down section.
 
--- wenv:table grant_origins class=authn chain=-
+-- hikyo:table grant_origins class=authn chain=-
 
 CREATE TABLE grant_origins (
     id TEXT PRIMARY KEY,

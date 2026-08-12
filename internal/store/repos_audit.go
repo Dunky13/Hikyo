@@ -9,12 +9,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store/auditrow"
-	"github.com/Dunky13/wenv/internal/store/pggen"
-	"github.com/Dunky13/wenv/internal/store/sqlitegen"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store/auditrow"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
 
 // Audit trail repositories (#45, audit-model ADR § Storage and export). The

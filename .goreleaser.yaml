@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.17.1/www/docs/static/schema.json
 version: 2
 
-project_name: wenv
+project_name: hikyo
 
 builds:
-  - id: wenv
-    main: ./cmd/wenv
-    binary: wenv
+  - id: hikyo
+    main: ./cmd/hikyo
+    binary: hikyo
     env:
       - CGO_ENABLED=0
       - GOFLAGS=-mod=readonly
@@ -28,7 +28,7 @@ builds:
         -X main.buildDate={{ .CommitDate }}
 
 archives:
-  - ids: [wenv]
+  - ids: [hikyo]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64

@@ -1,74 +1,74 @@
-wenv - environment and secret management
+hikyo - environment and secret management
 
 authentication:
-  wenv login <instance-url> --local [--as USER]   terminal-native local login
-  wenv logout [--instance REF]                    revoke the stored session
-  wenv whoami [--instance REF] [-o table|json]    describe the stored session
+  hikyo login <instance-url> --local [--as USER]   terminal-native local login
+  hikyo logout [--instance REF]                    revoke the stored session
+  hikyo whoami [--instance REF] [-o table|json]    describe the stored session
 
 accounts:
-  wenv account establish-credential --instance <url|ref> [--as USER]
-  wenv account factor enrol-totp [--output-file PATH | --dangerously-print]
-  wenv account factor confirm-totp
-  wenv account factor step-up
-  wenv account passkey enrol|list|remove          browser-only; refused on the terminal
-  wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
-  wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
-  wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]
+  hikyo account establish-credential --instance <url|ref> [--as USER]
+  hikyo account factor enrol-totp [--output-file PATH | --dangerously-print]
+  hikyo account factor confirm-totp
+  hikyo account factor step-up
+  hikyo account passkey enrol|list|remove          browser-only; refused on the terminal
+  hikyo account recovery-codes regenerate [--output-file PATH | --dangerously-print]
+  hikyo account recovery begin --instance <url|ref> --as USER [--output-file PATH]
+  hikyo account reset-credential <principal> [--output-file PATH | --dangerously-print]
 
 contexts:
-  wenv context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
-  wenv context list [-o table|json]
-  wenv context show <name> [-o table|json]
-  wenv context delete <name>
-  wenv context delete --instance <ref>            forget a trust-store entry
+  hikyo context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
+  hikyo context list [-o table|json]
+  hikyo context show <name> [-o table|json]
+  hikyo context delete <name>
+  hikyo context delete --instance <ref>            forget a trust-store entry
 
 diagnostics:
-  wenv doctor [--instance REF] [-o table|json]     report server-authoritative provider health
+  hikyo doctor [--instance REF] [-o table|json]     report server-authoritative provider health
 
 hierarchy:
-  wenv org list [-o table|json]
-  wenv org show <org> [-o table|json]
-  wenv org create --name <name>
-  wenv org rename <org> --name <new-name>
-  wenv org delete <org>
-  wenv project list|show|create|rename|delete      --org selects the organisation
-  wenv project create --name <name>
-  wenv project rename <project> --name <new-name>
-  wenv project delete <project> --confirm <project-name>   irreversible: shreds the key
-  wenv env list|show|create|rename|reorder|delete   --org/--project select the project
-  wenv env create --name <name>
-  wenv env rename <env> --name <new-name>
-  wenv env reorder <env-id,env-id,...>             the whole ordered set, once each
-  wenv folder list|show|create|rename|delete       --org/--project select the project
-  wenv folder create --path <path>
-  wenv folder rename <folder> --path <new-path>
-  wenv key list|show|create|rename|declare|reclassify|update|set-group|delete
-  wenv key create --name <NAME> --classification secret|config --declaration <json>
-  wenv key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
-  wenv key declare <key> --declaration <json> [--required-in all|none|<ids>]
-  wenv key reclassify <key> --classification secret|config    the ceremony, never update
-  wenv key group list|show|create|rename|delete
+  hikyo org list [-o table|json]
+  hikyo org show <org> [-o table|json]
+  hikyo org create --name <name>
+  hikyo org rename <org> --name <new-name>
+  hikyo org delete <org>
+  hikyo project list|show|create|rename|delete      --org selects the organisation
+  hikyo project create --name <name>
+  hikyo project rename <project> --name <new-name>
+  hikyo project delete <project> --confirm <project-name>   irreversible: shreds the key
+  hikyo env list|show|create|rename|reorder|delete   --org/--project select the project
+  hikyo env create --name <name>
+  hikyo env rename <env> --name <new-name>
+  hikyo env reorder <env-id,env-id,...>             the whole ordered set, once each
+  hikyo folder list|show|create|rename|delete       --org/--project select the project
+  hikyo folder create --path <path>
+  hikyo folder rename <folder> --path <new-path>
+  hikyo key list|show|create|rename|declare|reclassify|update|set-group|delete
+  hikyo key create --name <NAME> --classification secret|config --declaration <json>
+  hikyo key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
+  hikyo key declare <key> --declaration <json> [--required-in all|none|<ids>]
+  hikyo key reclassify <key> --classification secret|config    the ceremony, never update
+  hikyo key group list|show|create|rename|delete
 
 instance configuration:
-  wenv instance-config provider create --kind saml --name <name> --entity-id <entityID> \
+  hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \
       (--metadata-file <xml> | --metadata-url <url>)
-  wenv instance-config provider list|show|update|disable|remove
-  wenv instance-config provider refresh-metadata <name>
-  wenv instance-config saml-sp-key list|rotate
-  wenv instance-config saml-sp-key retire|compromise-retire <fingerprint>
+  hikyo instance-config provider list|show|update|disable|remove
+  hikyo instance-config provider refresh-metadata <name>
+  hikyo instance-config saml-sp-key list|rotate
+  hikyo instance-config saml-sp-key retire|compromise-retire <fingerprint>
 
 access:
-  wenv access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
-  wenv access grant add --principal <id> --capability <atom>
-  wenv access grant remove --principal <id> --capability <atom>
-  wenv access grant template --principal <id> --template <name>
-  wenv access member list [--org O] [--project P] [-o table|json]
-  wenv access member remove --principal <id>
-  wenv project-settings get --env E [-o table|json]
-  wenv project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
+  hikyo access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
+  hikyo access grant add --principal <id> --capability <atom>
+  hikyo access grant remove --principal <id> --capability <atom>
+  hikyo access grant template --principal <id> --template <name>
+  hikyo access member list [--org O] [--project P] [-o table|json]
+  hikyo access member remove --principal <id>
+  hikyo project-settings get --env E [-o table|json]
+  hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
 
 target resolution, per dimension, first hit wins:
-  --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context
+  --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
 
 exit codes:
   0 success   1 internal   2 usage   3 authentication   4 refused

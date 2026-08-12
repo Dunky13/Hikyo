@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 type stubSAMLAuth struct {
@@ -66,12 +66,12 @@ func TestSAMLStartSetsCrossSitePathScopedInitiatorCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acs := mustURL(t, "https://wenv.example/api/v1/auth/saml/corp/acs")
+	acs := mustURL(t, "https://hikyo.example/api/v1/auth/saml/corp/acs")
 	jar.SetCookies(acs, cookies)
-	if got := jar.Cookies(mustURL(t, "https://wenv.example/api/v1/auth/saml/corp/acs")); len(got) != 1 {
+	if got := jar.Cookies(mustURL(t, "https://hikyo.example/api/v1/auth/saml/corp/acs")); len(got) != 1 {
 		t.Fatalf("ACS cookies = %d, want 1", len(got))
 	}
-	if got := jar.Cookies(mustURL(t, "https://wenv.example/api/v1/whoami")); len(got) != 0 {
+	if got := jar.Cookies(mustURL(t, "https://hikyo.example/api/v1/whoami")); len(got) != 0 {
 		t.Fatalf("unrelated path received %d SAML cookies", len(got))
 	}
 }
@@ -83,7 +83,7 @@ func TestSAMLACSConsumesInitiatorAndMintsOrdinaryBrowserCookie(t *testing.T) {
 		CreatedAt: now, IdleExpires: now.Add(time.Hour), AbsExpires: now.Add(8 * time.Hour), Principal: "principal",
 	}}
 	provider, relay := "corp", "relay-state"
-	request := httptest.NewRequest(http.MethodPost, "https://wenv.example"+samlACSPath(provider), nil)
+	request := httptest.NewRequest(http.MethodPost, "https://hikyo.example"+samlACSPath(provider), nil)
 	request.AddCookie(&http.Cookie{Name: samlBindingCookieName(provider, relay), Value: "initiator-secret"})
 	ctx := context.WithValue(context.Background(), requestKey{}, request)
 	api := &API{SAMLAuth: stub}

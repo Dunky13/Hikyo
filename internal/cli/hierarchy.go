@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
 // The hierarchy verbs (#48): `project`, `env` and `folder`, plus the `org`
@@ -72,9 +72,9 @@ func runProject(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case sub == "create" && name == "":
-		return failf(ExitUsage, "usage: wenv project create --name <name> [--org ORG]")
+		return failf(ExitUsage, "usage: hikyo project create --name <name> [--org ORG]")
 	case sub == "rename" && name == "":
-		return failf(ExitUsage, "usage: wenv project rename <project> --name <new-name>")
+		return failf(ExitUsage, "usage: hikyo project rename <project> --name <new-name>")
 	case sub == "delete" && confirm == "":
 		// Refused, not usage: this is a ceremony declined, which the exit-code
 		// taxonomy spells 4. It is checked here so it refuses before any server
@@ -170,7 +170,7 @@ func runProject(ctx context.Context, ios IO, args []string) error {
 
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv project: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo project: unhandled subverb %q", sub)
 }
 
 // runEnv is the environment family. `reorder` takes the WHOLE ordered set for
@@ -214,14 +214,14 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 		}
 		if flags.positional() == "" {
 			return failf(ExitUsage,
-				"usage: wenv env reorder <env-id,env-id,...> — every environment in the project, once each, in display order")
+				"usage: hikyo env reorder <env-id,env-id,...> — every environment in the project, once each, in display order")
 		}
 	}
 	switch {
 	case sub == "create" && name == "":
-		return failf(ExitUsage, "usage: wenv env create --name <name> [--org ORG --project PROJECT]")
+		return failf(ExitUsage, "usage: hikyo env create --name <name> [--org ORG --project PROJECT]")
 	case sub == "rename" && name == "":
-		return failf(ExitUsage, "usage: wenv env rename <env> --name <new-name>")
+		return failf(ExitUsage, "usage: hikyo env rename <env> --name <new-name>")
 	}
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
@@ -296,7 +296,7 @@ func runEnv(ctx context.Context, ios IO, args []string) error {
 
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv env: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo env: unhandled subverb %q", sub)
 }
 
 // runFolder is the folder family: namespace and display grouping only.
@@ -329,7 +329,7 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if flags.positional() == "" {
-			return failf(ExitUsage, "usage: wenv folder %s <folder>", sub)
+			return failf(ExitUsage, "usage: hikyo folder %s <folder>", sub)
 		}
 	default:
 		if err := flags.checkNoPositionals("folder " + sub); err != nil {
@@ -338,9 +338,9 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case sub == "create" && path == "":
-		return failf(ExitUsage, "usage: wenv folder create --path <path>")
+		return failf(ExitUsage, "usage: hikyo folder create --path <path>")
 	case sub == "rename" && path == "":
-		return failf(ExitUsage, "usage: wenv folder rename <folder> --path <new-path>")
+		return failf(ExitUsage, "usage: hikyo folder rename <folder> --path <new-path>")
 	}
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
@@ -395,17 +395,17 @@ func runFolder(ctx context.Context, ios IO, args []string) error {
 
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv folder: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo folder: unhandled subverb %q", sub)
 }
 
 // subverb splits and VALIDATES the family's subverb before anything else runs.
-// An unknown subverb is a usage error at the door, so `wenv env warp` answers 2
+// An unknown subverb is a usage error at the door, so `hikyo env warp` answers 2
 // whether or not a session exists — previously it fell through to a default
 // branch after target resolution and could answer 3 when logged out.
 func subverb(family string, args []string, known ...string) (string, []string, error) {
 	usage := family + " " + strings.Join(known, "|")
 	if len(args) == 0 {
-		return "", nil, failf(ExitUsage, "usage: wenv %s", usage)
+		return "", nil, failf(ExitUsage, "usage: hikyo %s", usage)
 	}
 	if !slices.Contains(known, args[0]) {
 		return "", nil, failf(ExitUsage, "unknown %s verb %q: use %s", family, args[0], strings.Join(known, ", "))
@@ -423,7 +423,7 @@ func addressed(resolved Resolved, dim Dimension, positional, verb string) (strin
 	}
 	id, err := resolved.Require(dim)
 	if err != nil {
-		return "", failf(ExitUsage, "usage: wenv %s <%s> (or resolve --%s)", verb, dim, dim)
+		return "", failf(ExitUsage, "usage: hikyo %s <%s> (or resolve --%s)", verb, dim, dim)
 	}
 	return id, nil
 }

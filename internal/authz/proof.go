@@ -10,7 +10,7 @@ package authz
 import (
 	"sync/atomic"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // Proof is evidence that authorize() ran, for one operation, inside one

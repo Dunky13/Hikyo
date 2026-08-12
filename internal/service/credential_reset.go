@@ -5,12 +5,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // Administrator-issued and break-glass credential reset (#54, human-auth ADR -
@@ -18,7 +18,7 @@ import (
 //
 //   - network: a credential-reset-capability holder resets an org-bounded target,
 //     under the org-bounded serializable test;
-//   - break-glass: `wenv admin reset-credential` on the host, root key required,
+//   - break-glass: `hikyo admin reset-credential` on the host, root key required,
 //     no network route, reaching any target including instance-capability holders.
 //
 // Both mint a single-use, hashed, expiring credential-establishment authority
@@ -179,7 +179,7 @@ func (s *Auth) stageResetRefusal(ctx context.Context, az *authz.TxAuthorizer, ac
 	return az.RecordAuthEvent(ctx, e)
 }
 
-// BreakGlassResetCredential is the host-local tier: `wenv admin reset-credential`.
+// BreakGlassResetCredential is the host-local tier: `hikyo admin reset-credential`.
 // It runs on the server's own host under local authority (root key + host access
 // resolved by the caller before this runs), reaches no chokepoint operation, and
 // is the ONLY path permitted to reset a target regardless of the org-bounded

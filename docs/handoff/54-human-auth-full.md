@@ -1,6 +1,6 @@
 # Handoff: #54 Human auth, full — OIDC, WebAuthn, TOTP, recovery, sessions, assurance
 
-Issue: https://github.com/Dunky13/wenv/issues/54 (parent #41). Governing spec:
+Issue: https://github.com/Dunky13/hikyo/issues/54 (parent #41). Governing spec:
 `docs/adr/human-auth.md` (on `wayfinder-docs`:
 `git show wayfinder-docs:docs/adr/human-auth.md`), acceptance row A1 in
 `docs/adr/mvp-boundary.md`. Extends the #47 first slice
@@ -157,16 +157,16 @@ credential-reset/break-glass issuers all pre-exist in 00006. What landed:
   classification + mint run under a `principals` row lock every grant writer also
   takes (B14), making the org-bounded test serializable. Failures audited by
   cause (`instance-capability-target`, `unknown-target`), wire uniform (401/403).
-- **Break-glass** (`wenv admin reset-credential --principal ID`): host-local, root
+- **Break-glass** (`hikyo admin reset-credential --principal ID`): host-local, root
   key required, reaches any target incl instance-cap holders, no network route
   (contract test asserts exactly one credential-reset HTTP path, the network one).
-  Mirrors `wenv admin create`'s local-authority mechanism; no SystemProof (rides
+  Mirrors `hikyo admin create`'s local-authority mechanism; no SystemProof (rides
   the resolution surface like `BootstrapAdmin`).
 - **Grant-lock analyzer** (`lint.CheckGrantLock`, B14): pins that every grant-table
   writer takes `LockPrincipalRow`; the lock is folded into `Resolver.CreateGrant`;
   negative fixture `testdata/badgrant`. #55's general grant surface inherits the
   obligation.
-- CLI: `wenv account reset-credential <principal>` (network) + `wenv admin
+- CLI: `hikyo account reset-credential <principal>` (network) + `hikyo admin
   reset-credential` (host-local). Audit events `auth.credential_reset_issued`,
   `auth.effective_window_lowered` registered.
 
@@ -316,7 +316,7 @@ reconstructs via go-oidc (re-asserts byte-exact issuer) **[A20]**; IdP `error=`
 consumes+audits the tx **[A18]**; no caller-supplied return target **[A17]**.
 
 Anonymous-login CSRF/fixation: `binding_kind` discriminator, `session` or
-`browser-cookie` (`__Host-wenv-oidc-tx`, `SameSite=Lax`, per-tx-suffixed name),
+`browser-cookie` (`__Host-hikyo-oidc-tx`, `SameSite=Lax`, per-tx-suffixed name),
 hash on the tx row, byte-matched before consume, no default branch **[A2/A16/A22]**.
 
 OIDC reauth: refused when the provider's `assurance_policy` is NULL or the
@@ -399,7 +399,7 @@ the same tx as the mint, made serializable by a `SELECT ... FOR UPDATE` on the
 target `principals` row that every grant-mutation tx must also take — enforced
 by a new lint analyzer, obligation documented for #55/#44 **[B14]**;
 instance-capability targets refused over the network by name. Break-glass:
-`wenv admin reset-credential` host-local only, root key required, no network
+`hikyo admin reset-credential` host-local only, root key required, no network
 route (contract test asserts no such path).
 
 ### Wire + admission + audit + fixtures
@@ -441,9 +441,9 @@ pre-auth admission invariant extended to enumerate every new pre-auth route.
 - No `domain.OrgID`/`ProjectID`/`EnvID` typed values in store-method
   signatures **or struct fields** (proofsig analyzer); environment ids are
   plain `string` at the store boundary.
-- New endpoint → all five `x-wenv-*` extensions + regen + `wireRegistry` +
+- New endpoint → all five `x-hikyo-*` extensions + regen + `wireRegistry` +
   `wireRoutes`/`wireEvents`; four invariants fail until all done.
-- New table → `-- wenv:table <name> class=authn chain=-` in BOTH dialects.
+- New table → `-- hikyo:table <name> class=authn chain=-` in BOTH dialects.
 - New sensitive/material-holding type → embed `crypto.redactor` + pin in
   `lint.SensitiveTypes`.
 

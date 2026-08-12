@@ -41,7 +41,7 @@ done
 
 issue_chooser="$repo_root/.github/ISSUE_TEMPLATE/config.yml"
 require_file "$issue_chooser"
-require_text "$issue_chooser" 'https://github.com/Dunky13/wenv/security/advisories/new'
+require_text "$issue_chooser" 'https://github.com/Dunky13/hikyo/security/advisories/new'
 require_text "$issue_chooser" 'Do not report vulnerabilities in public issues.'
 
 security_channel_workflow="$repo_root/.github/workflows/security-channel.yml"
@@ -62,7 +62,7 @@ license_sha=$(sha256sum "$repo_root/LICENSE" | awk '{print $1}')
 require_text "$repo_root/LICENSE" 'Mozilla Public License Version 2.0'
 require_text "$repo_root/LICENSE" 'Exhibit B - "Incompatible With Secondary Licenses" Notice'
 
-pledge='Every capability required to run Wenv in production is and will remain open'
+pledge='Every capability required to run Hikyo in production is and will remain open'
 require_text "$repo_root/README.md" "$pledge"
 require_text "$repo_root/README.md" 'directory and there will never be one.'
 require_text "$repo_root/GOVERNANCE.md" "$pledge"
@@ -70,7 +70,7 @@ require_text "$repo_root/GOVERNANCE.md" '## Amendment procedure'
 require_text "$repo_root/GOVERNANCE.md" 'may be amended only by reopening its originating ticket'
 require_text "$repo_root/GOVERNANCE.md" 'Twelve consecutive months without maintainer response'
 require_text "$repo_root/GOVERNANCE.md" 'benevolent dictator for life (BDFL)'
-require_text "$repo_root/TRADEMARK.md" 'Permission is required to offer a hosted or packaged service under the Wenv'
+require_text "$repo_root/TRADEMARK.md" 'Permission is required to offer a hosted or packaged service under the Hikyo'
 require_text "$repo_root/TRADEMARK.md" 'does not limit the code freedoms granted by the Mozilla Public License 2.0.'
 require_text "$repo_root/CONTRIBUTING.md" 'Every commit in a pull request must carry a Developer Certificate of Origin'
 require_text "$repo_root/SECURITY.md" 'Do not report vulnerabilities in public issues.'
@@ -93,10 +93,10 @@ reject_text "$repo_root/GOVERNANCE.md" 'organization 2FA are enforced'
 
 security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
-require_text "$security_txt" 'Contact: https://github.com/Dunky13/wenv/security/advisories/new'
+require_text "$security_txt" 'Contact: https://github.com/Dunky13/hikyo/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
 require_text "$security_txt" 'Expires:'
-require_text "$security_txt" 'Canonical: https://dunky13.github.io/wenv/.well-known/security.txt'
+require_text "$security_txt" 'Canonical: https://dunky13.github.io/hikyo/.well-known/security.txt'
 source_expires=$(awk -F ': ' '$1 == "Expires" {print $2}' "$security_txt")
 "$NODE_BIN" -e '
 const expiry = Date.parse(process.argv[1]);
@@ -110,9 +110,9 @@ fallback_evidence="$repo_root/release/repository/fallback-channel-test.json"
 require_file "$fallback_evidence"
 require_text "$fallback_evidence" '"address": "security@developwent.io"'
 
-require_text "$repo_root/SUPPORT.md" 'Wenv supports exactly one version: the latest patch release of the latest minor'
+require_text "$repo_root/SUPPORT.md" 'Hikyo supports exactly one version: the latest patch release of the latest minor'
 require_text "$repo_root/SUPPORT.md" 'end-of-life on the same day a new minor is released'
-require_text "$repo_root/SUPPORT.md" 'Wenv does not maintain backport branches.'
+require_text "$repo_root/SUPPORT.md" 'Hikyo does not maintain backport branches.'
 require_text "$repo_root/SUPPORT.md" 'Prereleases are never supported.'
 
 for path in \
@@ -135,16 +135,16 @@ require_text "$site_root/security/index.html" 'The default embargo is 90 days fr
 require_text "$site_root/security/index.html" 'security@developwent.io'
 require_text "$site_root/security/index.html" 'Latest patch release of the latest minor'
 require_text "$site_root/security/index.html" 'All older stable releases'
-require_text "$site_root/support/index.html" 'Wenv supports exactly one version'
+require_text "$site_root/support/index.html" 'Hikyo supports exactly one version'
 require_text "$site_root/support/index.html" 'end-of-life on the same day a new minor is released'
-require_text "$site_root/support/index.html" 'Wenv does not maintain backport branches.'
+require_text "$site_root/support/index.html" 'Hikyo does not maintain backport branches.'
 require_text "$site_root/governance/index.html" 'may be amended only by reopening its originating ticket'
 require_text "$site_root/governance/index.html" 'Twelve consecutive months without maintainer response'
 require_text "$site_root/trademark/index.html" 'Permission is required to offer a hosted or packaged service'
 require_text "$site_root/contributing/index.html" 'Developer Certificate of Origin'
 require_text "$site_root/license/index.html" 'Mozilla Public License Version 2.0'
-require_text "$site_root/security/index.html" 'href="/wenv/support/"'
-require_text "$site_root/support/index.html" 'href="/wenv/security/"'
+require_text "$site_root/security/index.html" 'href="/hikyo/support/"'
+require_text "$site_root/support/index.html" 'href="/hikyo/security/"'
 reject_text "$site_root/security/index.html" 'href="./SUPPORT.md"'
 reject_text "$site_root/support/index.html" 'href="./SECURITY.md"'
 reject_text "$site_root/trademark/index.html" 'href="./SECURITY.md"'

@@ -31,8 +31,8 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Local dev database (wenv server --dev)
-wenv-dev.db*
+# Local dev database (hikyo server --dev)
+hikyo-dev.db*
 *.db.lock
 
 # Cross-model review artifacts

@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 func runSAMLAuditLifecycle(t *testing.T, auth *service.Auth, principal domain.PrincipalID, password string) {
 	t.Helper()
 	ctx := tctx(t)
 	now := time.Now().UTC()
-	auth.ExternalOrigin = "https://wenv.example"
+	auth.ExternalOrigin = "https://hikyo.example"
 	providers := &service.SAMLProviders{
 		DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin,
 		Now: func() time.Time { return now },

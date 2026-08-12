@@ -1,5 +1,5 @@
 {
-  "schema": "wenv.dev/trust-metadata/v1",
+  "schema": "hikyo.dev/trust-metadata/v1",
   "sequence": 1,
   "highest_release": null,
   "highest_release_sequence": null,

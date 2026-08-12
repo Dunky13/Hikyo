@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-tag-guard.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-tag-guard.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 remote="$fixture_dir/origin.git"
 repo="$fixture_dir/repo"

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // The grant surface (#55, permission-model ADR).
@@ -949,7 +949,7 @@ func renderScope(s domain.Scope) string {
 // ---------------------------------------------------------------------------
 
 // BreakGlassGrant issues a recovery grant under LOCAL HOST AUTHORITY —
-// `wenv admin grant`, on the server's own host, root key already loaded by the
+// `hikyo admin grant`, on the server's own host, root key already loaded by the
 // caller. It reaches no chokepoint operation and is, in the ADR's own words,
 // "the only authorization path in the system not evaluated against a grant".
 // There is deliberately no network route; the classification-totality

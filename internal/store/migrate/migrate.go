@@ -1,5 +1,5 @@
 // Package migrate applies the embedded goose migrations. Concurrent
-// migrators (boot racing an explicit `wenv migrate` racing an old server) are
+// migrators (boot racing an explicit `hikyo migrate` racing an old server) are
 // serialized per engine: a goose session-level advisory lock on postgres; on
 // sqlite, per-migration transactions do not lock the whole run against a
 // second process, so the entire run holds an advisory file lock beside the
@@ -21,7 +21,7 @@ import (
 	"github.com/pressly/goose/v3/database"
 	"github.com/pressly/goose/v3/lock"
 
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // Run applies all pending migrations, roll-forward only. Any error means the
@@ -66,7 +66,7 @@ func Check(ctx context.Context, cfg store.Config) error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 		if pending {
-			return errors.New("migrate: pending migrations — run `wenv migrate` or enable auto-migrate")
+			return errors.New("migrate: pending migrations — run `hikyo migrate` or enable auto-migrate")
 		}
 		embedded := map[int64]bool{}
 		for _, src := range p.ListSources() {

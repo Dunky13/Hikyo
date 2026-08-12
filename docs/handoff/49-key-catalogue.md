@@ -1,6 +1,6 @@
 # Handoff: #49 key catalogue & schema validation engine
 
-Issue: https://github.com/Dunky13/wenv/issues/49 (parent #41, blocked by #48 — merged).
+Issue: https://github.com/Dunky13/hikyo/issues/49 (parent #41, blocked by #48 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/schema-model.md` **as amended by**
 `docs/adr/flat-model.md` (ripple-register entry (a)–(h): no layers, no
 project defaults, no `masked`, presence `set | absent`, values attach to
@@ -40,7 +40,7 @@ saves and #51's publish consume exactly the rules these fixtures pin.
   the instance location. It is not redaction after the fact: the data never
   enters the failure. `TestSecretFailuresCarryNoInstanceData` probes with a
   distinctive marker so a leak is detectable by search.
-- **JSON Schema profile** (`jsonschema.go`): a Wenv-owned pre-pass over the
+- **JSON Schema profile** (`jsonschema.go`): a Hikyo-owned pre-pass over the
   parsed document, run BEFORE the library sees it. Explicit keyword
   **allowlist**; the ADR's exclusions refused **by name with their reason**
   (`format`, `$dynamicRef`, `$dynamicAnchor`, `unevaluatedProperties`,
@@ -187,11 +187,11 @@ behind each.
 `name`, `declaration`, `classification` and `group` — separate resources
 because they are separate operations with separate authorization stories
 (rename and declaration are semantic, metadata is not, classification is the
-ceremony). `x-wenv-min-revision: 1` throughout; 3.1 profile + freeze fixtures
+ceremony). `x-hikyo-min-revision: 1` throughout; 3.1 profile + freeze fixtures
 pass; TS client regenerated, typechecked, 4/4 contract fixtures.
 
-`wenv key list|show|create|rename|declare|reclassify|update|set-group|delete`
-plus `wenv key group …`. Syntax is validated before target resolution and
+`hikyo key list|show|create|rename|declare|reclassify|update|set-group|delete`
+plus `hikyo key group …`. Syntax is validated before target resolution and
 session lookup, `checkTarget`/`checkNoPositionals` on every subverb, a
 malformed `--declaration` or presence spelling refused client-side, goldens
 re-pinned (help, exit codes, two new `-o json` documents).
@@ -342,7 +342,7 @@ new key routes in `TestUniformNonexistentAtEveryLevel`.
 6. **CLI verb set grew again**: `key` with nine subverbs plus a nested `group`
    family. Declared additive under the ADR's own grammar, pre-freeze, exactly
    as #48's `rename`/`show`/`folder` were. #27/freeze must confirm or rename.
-7. **`x-wenv-class` for the two reveal-gated routes is `tenant`**, so their
+7. **`x-hikyo-class` for the two reveal-gated routes is `tenant`**, so their
    refusal is the uniform 404. Confirm that reading is wanted before an
    operator is told "no such key" for a key they can see in `key list`.
 
@@ -375,7 +375,7 @@ new key routes in `TestUniformNonexistentAtEveryLevel`.
 
 `go build` / `go vet` / `gofmt -l .` clean. `go test ./...` **zero failures on
 sqlite**; conformance + isolation + store **zero failures on postgres**
-(`WENV_TEST_POSTGRES_DSN`, database `wenv_test_49` — the two postgres reset
+(`HIKYO_TEST_POSTGRES_DSN`, database `wenv_test_49` — the two postgres reset
 helpers grew the four new tables in dependency order). Both runs taken after
 every edit, including the two-axis review pass below.
 

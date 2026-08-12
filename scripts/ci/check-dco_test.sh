@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo=$(mktemp -d "${TMPDIR:-/tmp}/wenv-dco-fixture.XXXXXX")
+repo=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-dco-fixture.XXXXXX")
 trap 'rm -rf "$repo"' EXIT HUP INT TERM
 
 git -C "$repo" init -q

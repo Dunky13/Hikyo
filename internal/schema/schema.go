@@ -13,7 +13,7 @@
 //     rule at all.
 //   - Compiled.Validate() is the VALUE authority: one declaration against one
 //     string, with the ADR's fixed lexical semantics and its error-disclosure
-//     rules. Everything Wenv delivers is a string on the wire, so a type is a
+//     rules. Everything Hikyo delivers is a string on the wire, so a type is a
 //     parse-and-reject rule, never a storage format.
 //
 // The contract layer carries shape only (a type name is a string, a bound is a
@@ -199,7 +199,7 @@ func CheckGroupName(name string) error {
 }
 
 // CheckDescription bounds the free-text description and refuses the two byte
-// classes no Wenv-held string may carry.
+// classes no Hikyo-held string may carry.
 func CheckDescription(what, s string) error {
 	switch {
 	case len(s) > MaxDescriptionBytes:

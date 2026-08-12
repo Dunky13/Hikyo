@@ -2,19 +2,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "wenv.fullname" . }}
+  name: {{ include "hikyo.fullname" . }}
   labels:
-    {{- include "wenv.labels" . | nindent 4 }}
+    {{- include "hikyo.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "wenv.name" . }}
+      app.kubernetes.io/name: {{ include "hikyo.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: {{ include "wenv.name" . }}
+        app.kubernetes.io/name: {{ include "hikyo.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       automountServiceAccountToken: false
@@ -28,12 +28,12 @@ spec:
           imagePullPolicy: IfNotPresent
           args: ["server", "--listen=0.0.0.0:8080"]
           env:
-            - name: WENV_DB
+            - name: HIKYO_DB
               valueFrom:
                 secretKeyRef:
                   name: {{ required "database.existingSecret is required" .Values.database.existingSecret }}
-                  key: WENV_DB
-            - name: WENV_TRUSTED_PROXY_CIDRS
+                  key: HIKYO_DB
+            - name: HIKYO_TRUSTED_PROXY_CIDRS
               value: {{ $trustedProxyCIDRs | quote }}
           ports:
             - name: http

@@ -3,7 +3,7 @@ package authz
 import (
 	"maps"
 
-	"github.com/Dunky13/wenv/internal/audit"
+	"github.com/Dunky13/hikyo/internal/audit"
 )
 
 // The wire registry: the probe classification for every non-operation entry
@@ -31,7 +31,7 @@ var wireRegistry = map[string]Class{
 
 	// The contract surface (#47). Every entry below exists in
 	// api/openapi.yaml and carries the same class there under
-	// `x-wenv-class`; api.TestContractClassesMatchTheWireRegistry fails the
+	// `x-hikyo-class`; api.TestContractClassesMatchTheWireRegistry fails the
 	// build if the two ever disagree, so the document cannot describe an
 	// authorization posture the router does not have.
 	//
@@ -200,7 +200,7 @@ var wireRegistry = map[string]Class{
 	"http:PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":      ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":     ClassTenant,
 
-	// `wenv admin create`: the bootstrap member of the closed local-authority
+	// `hikyo admin create`: the bootstrap member of the closed local-authority
 	// exception set. System class, whose probe contract is network
 	// unreachability — the totality invariant asserts it by finding no HTTP
 	// route, which is the guarantee that matters here: a first-administrator
@@ -215,7 +215,7 @@ var wireRegistry = map[string]Class{
 	"cli:server":  ClassSystem,
 	"cli:migrate": ClassSystem,
 
-	// `wenv version` (#46): local print of build metadata — no principal,
+	// `hikyo version` (#46): local print of build metadata — no principal,
 	// no server, no store; the pre-auth contract is trivially total.
 	"cli:version": ClassUnauthenticated,
 
@@ -283,7 +283,7 @@ var wireRegistry = map[string]Class{
 // that it reaches CapCredentialReset (MFA-mandatory) — AND declares its events
 // here, because its writes and audit ride the resolution surface (like the
 // account-security mutations) rather than a single operation row. It names no
-// single x-wenv-operation in the contract, since two ops of different classes
+// single x-hikyo-operation in the contract, since two ops of different classes
 // cannot be carried by one row; the completeness invariant unions both sources.
 var wireEvents = map[string][]audit.EventType{
 	"http:POST /api/v1/auth/local/login": {
@@ -415,9 +415,9 @@ var wireEvents = map[string][]audit.EventType{
 	// The bootstrap verb, running on the server's own host under local
 	// authority. Its mint is audited including the DELIVERY MODE, because a
 	// token that reached a log shipper is a different event from one written
-	// to a root-owned file. `wenv admin reset-credential` (#54 break-glass) is the
+	// to a root-owned file. `hikyo admin reset-credential` (#54 break-glass) is the
 	// same local-authority verb group and emits the reset issuance beside the mint.
-	// `wenv admin grant` (#55 break-glass) joins the same local-authority verb
+	// `hikyo admin grant` (#55 break-glass) joins the same local-authority verb
 	// group: a recovery grant issued on the host, with no network route.
 	"cli:admin": {
 		audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued,
@@ -526,7 +526,7 @@ var wireRoutes = map[string][]Operation{
 	// authorize(), which the service calls on the chosen op inside that tx —
 	// enforces capability + MFA + assurance. The route keeps its unauthenticated
 	// probe class (enumeration uniformity is its dominant contract, reinforced by
-	// B2's uniform refusal) and carries no single x-wenv-operation, since two ops
+	// B2's uniform refusal) and carries no single x-hikyo-operation, since two ops
 	// of different classes cannot be named by one contract row; its audit events
 	// also ride wireEvents below.
 	"http:POST /api/v1/accounts/{principal}/credential-reset": {OpCredentialReset, OpCredentialResetInstance},

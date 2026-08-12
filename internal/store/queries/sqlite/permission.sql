@@ -4,34 +4,34 @@
 -- gated behind one. Every query here is annotated and pinned.
 -- ASCII only: multibyte characters shift sqlite statement offsets.
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListGrantRowsForPrincipal :many
 SELECT id, capability, org_id, project_id, env_id FROM grants
 WHERE principal_id = ?;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: InsertGrantOrigin :exec
 INSERT INTO grant_origins (id, grant_id, kind, subject, created_at)
 VALUES (?, ?, ?, ?, ?);
 
 -- Releasing one origin. The grant row survives while another origin holds it;
 -- only the last release deletes the row (permission ADR, scim amendment (a)).
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: DeleteGrantOrigin :execrows
 DELETE FROM grant_origins WHERE grant_id = ? AND kind = ? AND subject = ?;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: CountGrantOrigins :one
 SELECT COUNT(*) FROM grant_origins WHERE grant_id = ?;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: DeleteGrantRow :execrows
 DELETE FROM grants WHERE id = ?;
 
 -- Membership inspection, per capability line with its origin chips. The JOIN
 -- means a grant with no origin cannot appear at all, which is the invariant
 -- stated as a query.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListGrantsWithOriginsForOrg :many
 SELECT g.id, g.principal_id, g.capability, g.org_id, g.project_id, g.env_id,
        g.created_at, o.kind, o.subject
@@ -45,7 +45,7 @@ ORDER BY g.principal_id, g.capability, g.id, o.kind, o.subject;
 -- the org's rows in Go afterwards makes the work scale with sibling-project
 -- membership, which is a structural oracle, and materializes administrative
 -- data from projects the caller was never authorized to see.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListGrantsWithOriginsForProject :many
 SELECT g.id, g.principal_id, g.capability, g.org_id, g.project_id, g.env_id,
        g.created_at, o.kind, o.subject
@@ -54,7 +54,7 @@ INNER JOIN grant_origins AS o ON o.grant_id = g.id
 WHERE g.org_id = ? AND g.project_id = ?
 ORDER BY g.principal_id, g.capability, g.id, o.kind, o.subject;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListGrantsWithOriginsAtInstance :many
 SELECT g.id, g.principal_id, g.capability, g.org_id, g.project_id, g.env_id,
        g.created_at, o.kind, o.subject
@@ -72,7 +72,7 @@ ORDER BY g.principal_id, g.capability, g.id, o.kind, o.subject;
 -- member manager would count toward the org census. The permission ADR draws
 -- the lockout line at org and instance scope, so a project-scope holder is
 -- not one of the org's holders.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListManageMembersHoldersForOrg :many
 SELECT DISTINCT principal_id FROM grants
 WHERE capability = 'manage-members'
@@ -80,7 +80,7 @@ WHERE capability = 'manage-members'
   AND (org_id = ? OR org_id IS NULL)
 ORDER BY principal_id;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListManageMembersHoldersAtInstance :many
 SELECT DISTINCT principal_id FROM grants
 WHERE capability = 'manage-members' AND org_id IS NULL
@@ -89,18 +89,18 @@ ORDER BY principal_id;
 -- The reveal guard reads the environment's own protection state and window.
 -- It is a resolution read, not a store read: the reauthentication machinery
 -- runs beside session resolution, before any operation proof exists.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: EnvironmentReauthSettings :one
 SELECT protected, reauth_window_seconds FROM environments WHERE id = ?;
 
 -- The machine allowlists key on the principal's class; kind discriminates
 -- human from machine. An unclassified machine principal fails closed in Go.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: GetPrincipalClass :one
 SELECT kind, class FROM principals WHERE id = ?;
 
 -- The origins holding ONE grant row, for dedup (does this grantor already
 -- hold it?) and for revocation (which origins may this surface release?).
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListGrantOriginsForGrant :many
 SELECT kind, subject FROM grant_origins WHERE grant_id = ? ORDER BY kind, subject;

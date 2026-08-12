@@ -32,7 +32,7 @@ git fetch --quiet origin main
 git merge-base --is-ancestor "$tag_sha" origin/main \
 	|| { printf 'release guard: tagged commit is not reachable from main\n' >&2; exit 1; }
 
-lookup_error=$(mktemp "${TMPDIR:-/tmp}/wenv-release-lookup.XXXXXX")
+lookup_error=$(mktemp "${TMPDIR:-/tmp}/hikyo-release-lookup.XXXXXX")
 trap 'rm -f "$lookup_error"' EXIT HUP INT TERM
 if "$GH_BIN" api "repos/$repository/releases/tags/$tag" >/dev/null 2>"$lookup_error"; then
 	printf 'release guard: version %s already has a GitHub release\n' "$tag" >&2

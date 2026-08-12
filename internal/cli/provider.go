@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
 // runInstanceConfig owns instance-scoped configuration verbs. SAML provider
@@ -26,7 +26,7 @@ func runInstanceConfig(ctx context.Context, ios IO, args []string) error {
 		return runSAMLSPKey(ctx, ios, rest)
 	}
 	if noun != "provider" {
-		return failf(ExitInternal, "wenv instance-config: unhandled noun %q", noun)
+		return failf(ExitInternal, "hikyo instance-config: unhandled noun %q", noun)
 	}
 	return runProvider(ctx, ios, rest)
 }
@@ -49,7 +49,7 @@ func runProvider(ctx context.Context, ios IO, args []string) error {
 	case "refresh-metadata":
 		return runProviderRefresh(ctx, ios, rest)
 	default:
-		return failf(ExitInternal, "wenv instance-config provider: unhandled verb %q", sub)
+		return failf(ExitInternal, "hikyo instance-config provider: unhandled verb %q", sub)
 	}
 }
 
@@ -79,7 +79,7 @@ func runProviderCreate(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case kind == "":
-		return failf(ExitUsage, "usage: wenv instance-config provider create --kind saml --name <name> --entity-id <entityID> (--metadata-file <xml> | --metadata-url <url>)")
+		return failf(ExitUsage, "usage: hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> (--metadata-file <xml> | --metadata-url <url>)")
 	case kind != "saml":
 		return failf(ExitUsage, "provider kind %q is not configurable by this command; use saml", kind)
 	case name == "":
@@ -489,7 +489,7 @@ func oidcProviderPath(name string) string {
 
 func providerName(flags commonFlags, verb string) (string, error) {
 	if len(flags.positionals) != 1 {
-		return "", failf(ExitUsage, "usage: wenv %s <name>", verb)
+		return "", failf(ExitUsage, "usage: hikyo %s <name>", verb)
 	}
 	return flags.positionals[0], nil
 }

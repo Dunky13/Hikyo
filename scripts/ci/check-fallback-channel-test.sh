@@ -35,7 +35,7 @@ try {
   fail("evidence is not valid JSON");
 }
 
-if (evidence.schema !== "wenv.dev/fallback-channel-test/v1") fail("unknown evidence schema");
+if (evidence.schema !== "hikyo.dev/fallback-channel-test/v1") fail("unknown evidence schema");
 if (evidence.address !== expectedAddress) fail("evidence address does not match fallback address");
 if (evidence.status !== "passed") fail("latest notification test has not passed");
 if (!/^[0-9a-f]{64}$/.test(evidence.message_id_sha256 || "")) {
@@ -44,7 +44,7 @@ if (!/^[0-9a-f]{64}$/.test(evidence.message_id_sha256 || "")) {
 
 const sentAt = Date.parse(evidence.sent_at);
 const receivedAt = Date.parse(evidence.received_at);
-const now = Date.parse(process.env.WENV_FALLBACK_TEST_NOW || new Date().toISOString());
+const now = Date.parse(process.env.HIKYO_FALLBACK_TEST_NOW || new Date().toISOString());
 if (![sentAt, receivedAt, now].every(Number.isFinite)) fail("test timestamps are invalid");
 if (receivedAt < sentAt) fail("receipt predates send time");
 if (receivedAt - sentAt > acknowledgementMilliseconds) {

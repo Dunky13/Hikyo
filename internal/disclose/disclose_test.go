@@ -23,7 +23,7 @@ func TestNonTTYWithNoFlagIsRefused(t *testing.T) {
 	// explicit destination, the value is refused rather than downgraded to
 	// stdout, where a log shipper would collect it.
 	var out bytes.Buffer
-	dest, err := Emit("Bootstrap token", "ew_1_bs_secret", Options{
+	dest, err := Emit("Bootstrap token", "hik_1_bs_secret", Options{
 		Stdout:       &out,
 		OpenTerminal: func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") },
 	})
@@ -44,7 +44,7 @@ func TestNonTTYWithNoFlagIsRefused(t *testing.T) {
 func TestTerminalPathNeverTouchesStdout(t *testing.T) {
 	var out bytes.Buffer
 	tty := &fakeTTY{}
-	dest, err := Emit("Bootstrap token", "ew_1_bs_secret", Options{
+	dest, err := Emit("Bootstrap token", "hik_1_bs_secret", Options{
 		Stdout:       &out,
 		OpenTerminal: func() (io.WriteCloser, error) { return tty, nil },
 	})
@@ -57,7 +57,7 @@ func TestTerminalPathNeverTouchesStdout(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("plaintext went to stdout on the interactive path: %q", out.String())
 	}
-	if !strings.Contains(tty.String(), "ew_1_bs_secret") {
+	if !strings.Contains(tty.String(), "hik_1_bs_secret") {
 		t.Fatal("the value did not reach the controlling terminal")
 	}
 	if !tty.closed {
@@ -67,7 +67,7 @@ func TestTerminalPathNeverTouchesStdout(t *testing.T) {
 
 func TestDangerouslyPrintIsTheOnlyStdoutPath(t *testing.T) {
 	var out bytes.Buffer
-	dest, err := Emit("Token", "ew_1_bs_secret", Options{
+	dest, err := Emit("Token", "hik_1_bs_secret", Options{
 		Stdout:           &out,
 		DangerouslyPrint: true,
 		// A terminal IS available; the explicit flag still wins, because the
@@ -80,7 +80,7 @@ func TestDangerouslyPrintIsTheOnlyStdoutPath(t *testing.T) {
 	if dest != DestStdout {
 		t.Fatalf("destination %q, want %q", dest, DestStdout)
 	}
-	if strings.TrimSpace(out.String()) != "ew_1_bs_secret" {
+	if strings.TrimSpace(out.String()) != "hik_1_bs_secret" {
 		t.Fatalf("stdout carried %q, want the bare value", out.String())
 	}
 }
@@ -94,7 +94,7 @@ func TestTwoDestinationsIsARefusal(t *testing.T) {
 
 func TestOutputFileIsCreatedFreshAt0600(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token")
-	dest, err := Emit("Token", "ew_1_bs_secret", Options{OutputFile: path})
+	dest, err := Emit("Token", "hik_1_bs_secret", Options{OutputFile: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestOutputFileIsCreatedFreshAt0600(t *testing.T) {
 	}
 	// The file holds the value and a newline and nothing else, so a script
 	// can read it directly.
-	if string(body) != "ew_1_bs_secret\n" {
+	if string(body) != "hik_1_bs_secret\n" {
 		t.Fatalf("file holds %q", body)
 	}
 }

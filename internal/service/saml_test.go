@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/samlsp"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/samlsp"
 )
 
 func TestAssessSAMLMetadataReturnsCompleteDiffAndOnlyRequiresNewTrust(t *testing.T) {
@@ -165,7 +165,7 @@ func TestSAMLEvaluateAssuranceUsesAcceptedContextSet(t *testing.T) {
 }
 
 func TestSAMLAllPurposesCarryCrossSiteInitiatorBinding(t *testing.T) {
-	provider := authz.SAMLProvider{ID: "samlp_1", EntityID: "https://idp.example", ACSURL: "https://wenv.example/api/v1/auth/saml/idp/acs"}
+	provider := authz.SAMLProvider{ID: "samlp_1", EntityID: "https://idp.example", ACSURL: "https://hikyo.example/api/v1/auth/saml/idp/acs"}
 	for _, purpose := range []string{purposeLogin, purposeLink, purposeReauth} {
 		transaction := newSAMLTransaction("samltx_1", "_request", "relay", "initiator",
 			provider, purpose, "ses_1", "acc_1", "env_1", 1)

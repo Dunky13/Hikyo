@@ -1,13 +1,13 @@
-{{- define "wenv.name" -}}
+{{- define "hikyo.name" -}}
 {{- .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "wenv.fullname" -}}
-{{- printf "%s-%s" .Release.Name (include "wenv.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "hikyo.fullname" -}}
+{{- printf "%s-%s" .Release.Name (include "hikyo.name" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "wenv.labels" -}}
-app.kubernetes.io/name: {{ include "wenv.name" . }}
+{{- define "hikyo.labels" -}}
+app.kubernetes.io/name: {{ include "hikyo.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}

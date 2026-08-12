@@ -11,8 +11,8 @@ if [ "$#" -ne 3 ]; then
 	printf 'usage: %s OWNER/REPO TAG REPLACEMENT_SHA\n' "$0" >&2
 	exit 2
 fi
-[ "${WENV_ALLOW_IMMUTABLE_TAG_PROBE:-}" = YES ] || {
-	printf 'tag probe refused: set WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES only for the disposable probe tag\n' >&2
+[ "${HIKYO_ALLOW_IMMUTABLE_TAG_PROBE:-}" = YES ] || {
+	printf 'tag probe refused: set HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES only for the disposable probe tag\n' >&2
 	exit 2
 }
 
@@ -32,7 +32,7 @@ replacement_commit=$(git rev-parse "$replacement_sha^{commit}")
 	printf 'tag probe refused: replacement must differ from current probe tag\n' >&2
 	exit 2
 }
-probe_error=$(mktemp "${TMPDIR:-/tmp}/wenv-tag-probe.XXXXXX")
+probe_error=$(mktemp "${TMPDIR:-/tmp}/hikyo-tag-probe.XXXXXX")
 trap 'rm -f "$probe_error"' EXIT HUP INT TERM
 
 if "$GH_BIN" api --method PATCH "repos/$repository/git/refs/tags/$tag" \

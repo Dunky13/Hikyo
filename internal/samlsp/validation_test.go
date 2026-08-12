@@ -22,8 +22,8 @@ func TestValidateResponseVerifiesExpiredPinnedCertificateAndExtractsClaims(t *te
 	raw, certificate := signedResponseFixture(t, now, false)
 	claims, err := ValidateResponse(raw, []*x509.Certificate{certificate}, ValidationExpectations{
 		ProviderEntityID: "https://idp.example/metadata",
-		SPEntityID:       "https://wenv.example/saml/metadata",
-		ACSURL:           "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID:       "https://hikyo.example/saml/metadata",
+		ACSURL:           "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RequestID:        "_request",
 		Now:              now,
 	})
@@ -51,7 +51,7 @@ func TestValidateResponseVerifiesExpiredPinnedCertificateAndExtractsClaims(t *te
 	if claims.NameID.NameQualifier == nil || *claims.NameID.NameQualifier != "https://idp.example/metadata" {
 		t.Fatalf("NameID.NameQualifier = %v", claims.NameID.NameQualifier)
 	}
-	if claims.NameID.SPNameQualifier == nil || *claims.NameID.SPNameQualifier != "https://wenv.example/saml/metadata" {
+	if claims.NameID.SPNameQualifier == nil || *claims.NameID.SPNameQualifier != "https://hikyo.example/saml/metadata" {
 		t.Fatalf("NameID.SPNameQualifier = %v", claims.NameID.SPNameQualifier)
 	}
 	if claims.Authn.ContextClassRef == nil || *claims.Authn.ContextClassRef != "urn:example:mfa" {
@@ -66,8 +66,8 @@ func TestValidateResponseRejectsTamperingAndInvalidPolicyFields(t *testing.T) {
 	raw, certificate := signedResponseFixture(t, now, false)
 	expected := ValidationExpectations{
 		ProviderEntityID: "https://idp.example/metadata",
-		SPEntityID:       "https://wenv.example/saml/metadata",
-		ACSURL:           "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID:       "https://hikyo.example/saml/metadata",
+		ACSURL:           "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RequestID:        "_request",
 		Now:              now,
 	}
@@ -95,8 +95,8 @@ func TestValidateResponseRequiresSuccessfulProtocolStatus(t *testing.T) {
 	})
 	_, err := ValidateResponse(raw, []*x509.Certificate{certificate}, ValidationExpectations{
 		ProviderEntityID: "https://idp.example/metadata",
-		SPEntityID:       "https://wenv.example/saml/metadata",
-		ACSURL:           "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID:       "https://hikyo.example/saml/metadata",
+		ACSURL:           "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RequestID:        "_request",
 		Now:              now,
 	})
@@ -129,8 +129,8 @@ func TestValidateResponseRequiresExactlyOneAuthnStatementAndAtMostOneContext(t *
 			raw, certificate := signedResponseFixtureWithTransform(t, now, tt.transform)
 			_, err := ValidateResponse(raw, []*x509.Certificate{certificate}, ValidationExpectations{
 				ProviderEntityID: "https://idp.example/metadata",
-				SPEntityID:       "https://wenv.example/saml/metadata",
-				ACSURL:           "https://wenv.example/api/v1/auth/saml/provider/acs",
+				SPEntityID:       "https://hikyo.example/saml/metadata",
+				ACSURL:           "https://hikyo.example/api/v1/auth/saml/provider/acs",
 				RequestID:        "_request",
 				Now:              now,
 			})
@@ -150,8 +150,8 @@ func TestValidateResponseRejectsUnsupportedSignedCondition(t *testing.T) {
 	})
 	_, err := ValidateResponse(raw, []*x509.Certificate{certificate}, ValidationExpectations{
 		ProviderEntityID: "https://idp.example/metadata",
-		SPEntityID:       "https://wenv.example/saml/metadata",
-		ACSURL:           "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID:       "https://hikyo.example/saml/metadata",
+		ACSURL:           "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RequestID:        "_request",
 		Now:              now,
 	})
@@ -191,14 +191,14 @@ func signedResponseFixtureWithTransform(t *testing.T, now time.Time, transform f
 	issueInstant := now.Add(-time.Minute).Format(time.RFC3339Nano)
 	notBefore := now.Add(-time.Minute).Format(time.RFC3339Nano)
 	notOnOrAfter := now.Add(4 * time.Minute).Format(time.RFC3339Nano)
-	xml := `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" ID="_response" InResponseTo="_request" Destination="https://wenv.example/api/v1/auth/saml/provider/acs" IssueInstant="` + issueInstant + `">` +
+	xml := `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" ID="_response" InResponseTo="_request" Destination="https://hikyo.example/api/v1/auth/saml/provider/acs" IssueInstant="` + issueInstant + `">` +
 		`<saml:Issuer>https://idp.example/metadata</saml:Issuer>` +
 		`<samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>` +
 		`<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_assertion" IssueInstant="` + issueInstant + `">` +
 		`<saml:Issuer>https://idp.example/metadata</saml:Issuer>` +
-		`<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" NameQualifier="https://idp.example/metadata" SPNameQualifier="https://wenv.example/saml/metadata">Alice</saml:NameID>` +
-		`<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="_request" Recipient="https://wenv.example/api/v1/auth/saml/provider/acs" NotOnOrAfter="` + notOnOrAfter + `"/></saml:SubjectConfirmation></saml:Subject>` +
-		`<saml:Conditions NotBefore="` + notBefore + `" NotOnOrAfter="` + notOnOrAfter + `"><saml:AudienceRestriction><saml:Audience>https://wenv.example/saml/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions>` +
+		`<saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" NameQualifier="https://idp.example/metadata" SPNameQualifier="https://hikyo.example/saml/metadata">Alice</saml:NameID>` +
+		`<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="_request" Recipient="https://hikyo.example/api/v1/auth/saml/provider/acs" NotOnOrAfter="` + notOnOrAfter + `"/></saml:SubjectConfirmation></saml:Subject>` +
+		`<saml:Conditions NotBefore="` + notBefore + `" NotOnOrAfter="` + notOnOrAfter + `"><saml:AudienceRestriction><saml:Audience>https://hikyo.example/saml/metadata</saml:Audience></saml:AudienceRestriction></saml:Conditions>` +
 		`<saml:AuthnStatement AuthnInstant="` + issueInstant + `"><saml:AuthnContext><saml:AuthnContextClassRef>urn:example:mfa</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>` +
 		`</saml:Assertion></samlp:Response>`
 	xml = transform(xml)

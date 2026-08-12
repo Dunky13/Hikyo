@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
 func TestMetadataConfirmationRerunQuotesUntrustedValues(t *testing.T) {
 	var stdout bytes.Buffer
-	endpoint := "https://idp.example/sso?next=$(touch /tmp/wenv-pwned)'suffix"
+	endpoint := "https://idp.example/sso?next=$(touch /tmp/hikyo-pwned)'suffix"
 	err := finishSAMLMutation(IO{Stdout: &stdout}, FormatJSON, apigen.SamlProviderMutationResult{
 		Applied: false,
 		Diff: apigen.SamlMetadataDiff{
@@ -26,7 +26,7 @@ func TestMetadataConfirmationRerunQuotesUntrustedValues(t *testing.T) {
 	message := cliErr.Error()
 	for _, want := range []string{
 		"--confirm-fingerprint 'sha256:$unsafe'",
-		"--confirm-endpoint 'https://idp.example/sso?next=$(touch /tmp/wenv-pwned)'\"'\"'suffix'",
+		"--confirm-endpoint 'https://idp.example/sso?next=$(touch /tmp/hikyo-pwned)'\"'\"'suffix'",
 	} {
 		if !strings.Contains(message, want) {
 			t.Errorf("rerun command does not safely quote %q:\n%s", want, message)

@@ -104,7 +104,7 @@ an ADR amendment, not an implementation refactor.
    transport scratch and are not release assets.
 7. Redownload the complete draft and verify it through
    `verify-bundle.sh --published --state
-   "$XDG_STATE_HOME/wenv/release-trust.json"`; then publish the draft. The
+   "$XDG_STATE_HOME/hikyo/release-trust.json"`; then publish the draft. The
    installer fetches current recovery-signed metadata from `main`, then runs the
    same published-subject check before extracting a binary. The pinned root and
    verifier code still come from the immutable release tag.

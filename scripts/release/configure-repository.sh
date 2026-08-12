@@ -70,7 +70,7 @@ $GH_BIN api "repos/$repository/immutable-releases" --jq '.enabled' | grep -x tru
 $GH_BIN api "repos/$repository/actions/permissions" --jq '.sha_pinning_required' | grep -x true >/dev/null
 
 probe_tag=v-ruleset-probe
-probe_error=$(mktemp "${TMPDIR:-/tmp}/wenv-probe-tag-lookup.XXXXXX")
+probe_error=$(mktemp "${TMPDIR:-/tmp}/hikyo-probe-tag-lookup.XXXXXX")
 trap 'rm -f "$probe_error"' EXIT HUP INT TERM
 if ! $GH_BIN api "repos/$repository/git/ref/tags/$probe_tag" >/dev/null 2>"$probe_error"; then
 	grep -F '(HTTP 404)' "$probe_error" >/dev/null || {
@@ -89,7 +89,7 @@ if [ "$replacement" = "$probe_commit" ]; then
 fi
 (
 	cd "$repo_root"
-	WENV_ALLOW_IMMUTABLE_TAG_PROBE=YES \
+	HIKYO_ALLOW_IMMUTABLE_TAG_PROBE=YES \
 		"$repo_root/scripts/release/probe-tag-move.sh" "$repository" "$probe_tag" "$replacement"
 )
 

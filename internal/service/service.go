@@ -14,11 +14,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
 // newAuditEvent is the one event constructor for every service emitter —
@@ -60,7 +60,7 @@ type System struct {
 // reachable and the schema matches this binary exactly. Boot already refuses
 // to serve on a mismatch, but the live check also catches the cross-process
 // race the ADR names — an old server still running after a newer
-// `wenv migrate` applied DDL (behind or ahead).
+// `hikyo migrate` applied DDL (behind or ahead).
 func (s *System) Ready(ctx context.Context) error {
 	if err := s.DB.Ping(ctx); err != nil {
 		return err

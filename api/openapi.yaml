@@ -1,4 +1,4 @@
-# Wenv HTTP API — the single source of truth for every client.
+# Hikyo HTTP API — the single source of truth for every client.
 #
 # Hand-written and reviewed like code (api-cli-surface ADR § Version promise):
 # the behavioural half of the freeze — authorization formula, side effects,
@@ -11,17 +11,17 @@
 #   * `jsonSchemaDialect` is the OAS 3.1 default dialect, alternates fail closed;
 #   * top-level `webhooks` is prohibited in v1.
 #
-# Wenv extensions, each cross-checked against the Go registries in CI so the
+# Hikyo extensions, each cross-checked against the Go registries in CI so the
 # document cannot drift from the code it describes:
-#   x-wenv-class      probe classification (tenant-isolation ADR invariant 1);
+#   x-hikyo-class      probe classification (tenant-isolation ADR invariant 1);
 #                     must equal internal/authz's wire-registry entry.
-#   x-wenv-operation  the registered authz operation this route reaches;
+#   x-hikyo-operation  the registered authz operation this route reaches;
 #                     absent for routes that reach none.
-#   x-wenv-formula    the authorization formula, spelled `cap@level`; must
+#   x-hikyo-formula    the authorization formula, spelled `cap@level`; must
 #                     equal the operation registry's formula pin.
-#   x-wenv-artifacts  the authentication-artifact eligibility set
+#   x-hikyo-artifacts  the authentication-artifact eligibility set
 #                     (api-cli-surface ADR § verb × artifact matrix).
-#   x-wenv-min-revision  the API revision an operation first appeared in; the
+#   x-hikyo-min-revision  the API revision an operation first appeared in; the
 #                     capability registry a new client checks against an old
 #                     server's advertised revision.
 #   x-extensible-enum an enum declared OPEN: it may gain values additively and
@@ -33,7 +33,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
 
 info:
-  title: Wenv API
+  title: Hikyo API
   version: "1"
   summary: Self-hosted environment and secret management.
   description: |
@@ -91,9 +91,9 @@ paths:
         Sits under the instance-wide pre-auth admission limits like every
         other pre-auth path.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: Instance metadata.
@@ -127,9 +127,9 @@ paths:
         epoch, weak password — answers the same `401` so presentation reveals
         nothing about which authorities exist.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -170,9 +170,9 @@ paths:
         login page, which this slice does not serve — see `/api/v1/meta` for
         which protocol flows an instance actually offers.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -204,9 +204,9 @@ paths:
         Deletes the presented session row. Idempotent in effect: a session
         that no longer resolves answers `401` like any other unauthenticated
         request, because there is nothing to revoke and nothing to report.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Session revoked.
@@ -226,9 +226,9 @@ paths:
         Reports the acting principal and how **this session** authenticated —
         the assurance record the chokepoint consults, never what the account
         could have presented (human-auth ADR § Assurance).
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The acting session.
@@ -255,9 +255,9 @@ paths:
         returns the `otpauth://` URI exactly once. It confirms nothing and
         mutates no session: `enrol/confirm` completes the enrolment. A confirmed
         factor already standing is refused (`400`).
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -292,9 +292,9 @@ paths:
         carrying ONLY the proof class — NOT `totp`. The user steps up separately
         to present the factor they just enrolled. The reissued token is returned
         and MUST replace the old one.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -328,9 +328,9 @@ paths:
         account-security mutation, so no generation advance and no session
         deletion, and the original authenticated_at is preserved (human-auth ADR
         § Assurance). The rotated token is returned and MUST replace the old one.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -364,9 +364,9 @@ paths:
         cannot drop the very factor it is (human-auth ADR § Account-security
         mutations, finding B7). Reissues the acting session carrying only the
         password class; the reissued token is returned.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -400,9 +400,9 @@ paths:
         regeneration). Replaces the batch atomically and returns the plaintext
         codes exactly once. Reissues the acting session; the reissued token is
         returned and MUST replace the old one.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -440,9 +440,9 @@ paths:
         Rides the instance-wide admission budget; an unknown username, an absent
         batch, a stale epoch and a non-matching code all answer the same `401`.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -475,11 +475,11 @@ paths:
         therefore itself audited — the audit model's default-deny rule refuses
         `audited: none` to instance-class operations. The event commits with
         the read.
-      x-wenv-class: instance
-      x-wenv-operation: org.list
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: org.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The organisations this principal may administer.
@@ -507,11 +507,11 @@ paths:
 
         Not idempotent: each call creates a distinct organisation. The name must
         be unused among live organisations; a collision is a `conflict`.
-      x-wenv-class: instance
-      x-wenv-operation: org.create
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: org.create
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -551,11 +551,11 @@ paths:
         one that does not exist, which is what "unauthorized access at each
         level returns the uniform nonexistent shape" requires of the top level
         too. There is therefore no `403` on this route — a refusal is a `404`.
-      x-wenv-class: tenant
-      x-wenv-operation: org.get
-      x-wenv-formula: [read@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: org.get
+      x-hikyo-formula: [read@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The organisation.
@@ -582,11 +582,11 @@ paths:
         operation addresses org depth. An organisation administrator therefore
         cannot rename the organisation they administer, and learns nothing from
         trying — the refusal is the uniform `404`.
-      x-wenv-class: tenant
-      x-wenv-operation: org.rename
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: org.rename
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -622,11 +622,11 @@ paths:
         Never cascades. An organisation that still holds projects, or grants
         pointing into it, is refused with `conflict` — emptying a tenant is
         explicit, separately audited work and not a side effect of one call.
-      x-wenv-class: tenant
-      x-wenv-operation: org.delete
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: org.delete
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -654,11 +654,11 @@ paths:
         A proof-scoped read at org depth. Unpaged: the hierarchy is bounded by
         the ops spec's own caps (50 environments per project) and an
         organisation's project list is administrative, not a data feed.
-      x-wenv-class: tenant
-      x-wenv-operation: project.list
-      x-wenv-formula: [read@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.list
+      x-hikyo-formula: [read@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The projects in this organisation, by name.
@@ -683,11 +683,11 @@ paths:
         unused among the organisation's live projects; a collision is a
         `conflict`, decided after authorization so it discloses nothing a
         caller could not already read.
-      x-wenv-class: tenant
-      x-wenv-operation: project.create
-      x-wenv-formula: [manage-projects@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.create
+      x-hikyo-formula: [manage-projects@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -722,11 +722,11 @@ paths:
       operationId: getProject
       tags: [hierarchy]
       summary: Read one project.
-      x-wenv-class: tenant
-      x-wenv-operation: project.get
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project.
@@ -750,11 +750,11 @@ paths:
         Changes the mutable name only. Identity is the immutable id, so a
         rename never breaks a reference. Idempotent: renaming to the current
         name succeeds and changes nothing.
-      x-wenv-class: tenant
-      x-wenv-operation: project.rename
-      x-wenv-formula: [manage-projects@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.rename
+      x-hikyo-formula: [manage-projects@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -788,11 +788,11 @@ paths:
         Never cascades. A project that still holds environments or folders is
         refused with `conflict`; emptying it is the caller's explicit,
         separately audited work.
-      x-wenv-class: tenant
-      x-wenv-operation: project.delete
-      x-wenv-formula: [manage-projects@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: project.delete
+      x-hikyo-formula: [manage-projects@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -818,11 +818,11 @@ paths:
       description: |
         Ordered by `display_order`, ties broken by name so the sequence is
         deterministic before any reorder has happened.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.list
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.list
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project's environments, in display order.
@@ -851,11 +851,11 @@ paths:
         A project holds at most 50 environments; the 51st is refused by name
         with `limit_exceeded`, decided against a count read inside the creating
         transaction.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.create
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.create
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -900,11 +900,11 @@ paths:
         `bad_request` with one fixed message, so a foreign id discloses nothing.
 
         Idempotent: applying the same order twice changes nothing.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.reorder
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.reorder
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -938,11 +938,11 @@ paths:
       operationId: getEnvironment
       tags: [hierarchy]
       summary: Read one environment.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.read
-      x-wenv-formula: [read@environment]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.read
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The environment.
@@ -965,11 +965,11 @@ paths:
       description: |
         Environment topology, so it carries `definitions-edit` rather than
         `edit`: renaming is a change to the project's shape, not to a value.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.rename
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.rename
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1003,11 +1003,11 @@ paths:
         The remaining environments keep their positions: display order is a
         property of each row, not an invariant over the set, so a gap is not a
         defect and closing it would be an unrequested write.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.delete
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.delete
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -1030,11 +1030,11 @@ paths:
       operationId: listFolders
       tags: [hierarchy]
       summary: List the project's folders.
-      x-wenv-class: tenant
-      x-wenv-operation: folder.list
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: folder.list
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project's folders, by path.
@@ -1057,11 +1057,11 @@ paths:
       description: |
         A folder is organizational only in v1: namespace and display grouping.
         No grant is ever scoped to one and no value ever attaches to one.
-      x-wenv-class: tenant
-      x-wenv-operation: folder.create
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: folder.create
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1097,11 +1097,11 @@ paths:
       operationId: getFolder
       tags: [hierarchy]
       summary: Read one folder.
-      x-wenv-class: tenant
-      x-wenv-operation: folder.get
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: folder.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The folder.
@@ -1125,11 +1125,11 @@ paths:
         Renames exactly the folder named. A v1 folder is a flat namespace
         label, not a tree node with children to carry along, so there is no
         cascade.
-      x-wenv-class: tenant
-      x-wenv-operation: folder.rename
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: folder.rename
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1159,11 +1159,11 @@ paths:
       operationId: deleteFolder
       tags: [hierarchy]
       summary: Delete a folder.
-      x-wenv-class: tenant
-      x-wenv-operation: folder.delete
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: folder.delete
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -1195,11 +1195,11 @@ paths:
         Grants inside an org are NOT listed here even though instance-scope
         grants reach into every org: membership of a scope is what was granted
         AT it.
-      x-wenv-class: instance
-      x-wenv-operation: grant.list-instance
-      x-wenv-formula: [manage-members@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: grant.list-instance
+      x-hikyo-formula: [manage-members@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The instance-scope grant lines.
@@ -1219,11 +1219,11 @@ paths:
       operationId: createInstanceGrant
       tags: [access]
       summary: Grant one capability at instance scope.
-      x-wenv-class: instance
-      x-wenv-operation: grant.create-instance
-      x-wenv-formula: [manage-members@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: grant.create-instance
+      x-hikyo-formula: [manage-members@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1256,11 +1256,11 @@ paths:
         the last one is gone, advancing the target's session generation and
         deleting their sessions in the same transaction. Refused when it would
         remove the last instance `manage-members` holder.
-      x-wenv-class: instance
-      x-wenv-operation: grant.revoke-instance
-      x-wenv-formula: [manage-members@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: grant.revoke-instance
+      x-hikyo-formula: [manage-members@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       parameters:
         - $ref: "#/components/parameters/GrantPrincipal"
         - $ref: "#/components/parameters/GrantCapability"
@@ -1289,11 +1289,11 @@ paths:
         The template expands AT GRANT TIME into individual capability grants,
         each separately visible and separately revocable. Nothing stores the
         template name.
-      x-wenv-class: instance
-      x-wenv-operation: grant.template-instance
-      x-wenv-formula: [manage-members@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: grant.template-instance
+      x-hikyo-formula: [manage-members@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1331,11 +1331,11 @@ paths:
         the org by inheritance are deliberately absent: listing them here would
         invite revoking an instance operator from a page with no authority over
         one.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.list-org
-      x-wenv-formula: [manage-members@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.list-org
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The organisation's grant lines.
@@ -1361,11 +1361,11 @@ paths:
         `manage-members` held at org scope may grant capabilities the grantor
         does not hold — the escalation path the threat model accepts, and the
         one that keeps a fresh installation bootstrappable.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.create-org
-      x-wenv-formula: [manage-members@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.create-org
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1399,11 +1399,11 @@ paths:
         Refused when it would remove the last org `manage-members` holder: an
         unadministrable organisation is a support incident with no in-product
         recovery.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.revoke-org
-      x-wenv-formula: [manage-members@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.revoke-org
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       parameters:
         - $ref: "#/components/parameters/GrantPrincipal"
         - $ref: "#/components/parameters/GrantCapability"
@@ -1432,11 +1432,11 @@ paths:
       operationId: applyOrgTemplate
       tags: [access]
       summary: Apply a role template at organisation scope.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.template-org
-      x-wenv-formula: [manage-members@org]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.template-org
+      x-hikyo-formula: [manage-members@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1471,11 +1471,11 @@ paths:
       operationId: listProjectGrants
       tags: [access]
       summary: List the project's membership surface.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.list-project
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.list-project
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project's grant lines.
@@ -1502,11 +1502,11 @@ paths:
         grantor currently holds at or above the target scope, so a stolen
         project-admin account is exactly the authority it was given and not
         automatic compromise of the project's secrets.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.create-project
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.create-project
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1536,11 +1536,11 @@ paths:
       operationId: revokeProjectGrant
       tags: [access]
       summary: Revoke one capability at project scope.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.revoke-project
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.revoke-project
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       parameters:
         - $ref: "#/components/parameters/GrantPrincipal"
         - $ref: "#/components/parameters/GrantCapability"
@@ -1570,11 +1570,11 @@ paths:
       operationId: applyProjectTemplate
       tags: [access]
       summary: Apply a role template at project scope.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.template-project
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.template-project
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1617,11 +1617,11 @@ paths:
         `grant.list-env` — "who can reach this environment" must include the
         org- and project-scoped grants that reach it, which an environment-only
         listing would silently omit; list at org or project scope instead.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.create-env
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.create-env
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1651,11 +1651,11 @@ paths:
       operationId: revokeEnvGrant
       tags: [access]
       summary: Revoke one capability on one environment.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.revoke-env
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.revoke-env
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       parameters:
         - $ref: "#/components/parameters/GrantPrincipal"
         - $ref: "#/components/parameters/GrantCapability"
@@ -1686,11 +1686,11 @@ paths:
       operationId: applyEnvTemplate
       tags: [access]
       summary: Apply a role template on one environment.
-      x-wenv-class: tenant
-      x-wenv-operation: grant.template-env
-      x-wenv-formula: [manage-members@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: grant.template-env
+      x-hikyo-formula: [manage-members@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1730,11 +1730,11 @@ paths:
         Bare `read(E)`: an environment's protection state is part of its public
         shape, and hiding it from a reader would make the reveal ceremony
         inexplicable to the person subject to it.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.settings-read
-      x-wenv-formula: [read@environment]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.settings-read
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The environment's settings.
@@ -1764,11 +1764,11 @@ paths:
         environment's window above that cap is refused, never silently clamped.
         Omitting `reauth_window_seconds` means "inherit the instance default";
         a null is that same statement written out.
-      x-wenv-class: tenant
-      x-wenv-operation: environment.settings-update
-      x-wenv-formula: [project-settings@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: environment.settings-update
+      x-hikyo-formula: [project-settings@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1805,11 +1805,11 @@ paths:
         The catalogue IS the project's schema, so the response carries the
         project's monotonic schema revision beside the keys: a reader that acts
         on this list can say which schema it saw.
-      x-wenv-class: tenant
-      x-wenv-operation: key.list
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.list
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project's keys, by name, and the schema revision.
@@ -1836,11 +1836,11 @@ paths:
         be meaningless — so an unsupported RE2 construct, an out-of-profile
         JSON Schema keyword, a reference cycle or a bound violation is refused
         here rather than discovered at publish.
-      x-wenv-class: tenant
-      x-wenv-operation: key.create
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.create
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1876,11 +1876,11 @@ paths:
       operationId: getKey
       tags: [keys]
       summary: Read one key declaration.
-      x-wenv-class: tenant
-      x-wenv-operation: key.get
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The key.
@@ -1910,11 +1910,11 @@ paths:
         only through the reclassification ceremony. The field is declared here
         so the refusal names the ceremony rather than reading as an unknown
         member.
-      x-wenv-class: tenant
-      x-wenv-operation: key.update-metadata
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.update-metadata
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -1947,11 +1947,11 @@ paths:
       description: |
         Removes the declaration, its explicit presence rows and its group
         membership. The group survives, possibly inert.
-      x-wenv-class: tenant
-      x-wenv-operation: key.delete
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.delete
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -1979,11 +1979,11 @@ paths:
         Identity is the immutable id, so a rename never breaks a reference —
         but it DOES change the delivered payload's key set, which makes it a
         content-affecting schema change and advances the schema revision.
-      x-wenv-class: tenant
-      x-wenv-operation: key.rename
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.rename
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2029,11 +2029,11 @@ paths:
 
         Presence rules are not value-dependent and need no reveal: they report
         only whether an entry is set or absent.
-      x-wenv-class: tenant
-      x-wenv-operation: key.update-declaration
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.update-declaration
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2076,11 +2076,11 @@ paths:
         able to see a secret in order to stop it being one. Tightening
         (`config` to `secret`) needs no reveal and cannot un-disclose what was
         already served as config.
-      x-wenv-class: tenant
-      x-wenv-operation: key.reclassify
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.reclassify
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2119,11 +2119,11 @@ paths:
       description: |
         A key belongs to at most one group; an empty `group_id` takes it out of
         every group. Membership is coupling, and coupling is a schema change.
-      x-wenv-class: tenant
-      x-wenv-operation: key.set-group
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key.set-group
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2162,11 +2162,11 @@ paths:
         Each group reports its members and whether it is INERT — a group left
         with fewer than two members couples nothing, which is surfaced rather
         than silently repaired.
-      x-wenv-class: tenant
-      x-wenv-operation: key-group.list
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key-group.list
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The project's key groups, by name.
@@ -2186,11 +2186,11 @@ paths:
       operationId: createKeyGroup
       tags: [keys]
       summary: Declare a key group.
-      x-wenv-class: tenant
-      x-wenv-operation: key-group.create
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key-group.create
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2226,11 +2226,11 @@ paths:
       operationId: getKeyGroup
       tags: [keys]
       summary: Read one key group.
-      x-wenv-class: tenant
-      x-wenv-operation: key-group.get
-      x-wenv-formula: [read@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key-group.get
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The group.
@@ -2253,11 +2253,11 @@ paths:
       description: |
         A group name is never delivered and never validated against, so —
         unlike a key rename — it moves no schema revision.
-      x-wenv-class: tenant
-      x-wenv-operation: key-group.rename
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key-group.rename
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2290,11 +2290,11 @@ paths:
       description: |
         Dissolves the coupling and releases its members; it never deletes the
         keys it coupled.
-      x-wenv-class: tenant
-      x-wenv-operation: key-group.delete
-      x-wenv-formula: [definitions-edit@project]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: tenant
+      x-hikyo-operation: key-group.delete
+      x-hikyo-formula: [definitions-edit@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -2320,9 +2320,9 @@ paths:
         discloses nothing about which accounts or factors exist. Under the
         discovery admission bucket.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The enabled login methods.
@@ -2348,9 +2348,9 @@ paths:
         `__Host-` browser-binding cookie set on this response (A2/A16); `link`
         and `reauth` require an authenticated session and are session-bound, and
         `link` verifies the account-security proof up front (A6).
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2390,9 +2390,9 @@ paths:
         exchanged only at the recorded provider, the ID token validated
         completely, and the purpose wall is structural. Returns the minted or
         rotated session.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       parameters:
         - name: code
           in: query
@@ -2439,12 +2439,12 @@ paths:
         `reauth` require and bind the acting human session. The initiator cookie
         is delivered only as a Secure, HttpOnly, SameSite=None cookie scoped to
         this provider's ACS path; it is never returned in JSON.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none, human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none, human-session]
+      x-hikyo-min-revision: 1
       security:
         - {}
-        - wenvSession: []
+        - hikyoSession: []
       requestBody:
         required: true
         content:
@@ -2477,9 +2477,9 @@ paths:
         Destination, both Issuer legs, RelayState, InResponseTo and initiator
         binding must all resolve to the same live transaction before an
         ordinary session can be minted, linked or reauthenticated.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none, human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none, human-session]
+      x-hikyo-min-revision: 1
       security: []
       requestBody:
         required: true
@@ -2489,7 +2489,7 @@ paths:
               $ref: "#/components/schemas/SamlACSRequest"
       responses:
         "200":
-          description: The minted or rotated ordinary Wenv session.
+          description: The minted or rotated ordinary Hikyo session.
           content:
             application/json:
               schema:
@@ -2515,9 +2515,9 @@ paths:
         the active and retiring SP signing certificates, and the signed-request
         policy. Served under pre-authentication admission controls.
       security: []
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [none]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: SAML 2.0 SP metadata XML.
@@ -2537,9 +2537,9 @@ paths:
       operationId: listIdentities
       tags: [auth]
       summary: List the caller's linked external identities.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The caller's linked identities.
@@ -2563,9 +2563,9 @@ paths:
         An account-security mutation: verifies the pre-existing password up
         front and starts an OIDC link transaction bound to the acting session.
         Returns the IdP authorization URL; the link lands at the callback.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2601,9 +2601,9 @@ paths:
         An account-security mutation proved by the pre-existing password. Refuses
         removing the last remaining credential; deletes the identity's sessions;
         reissues the acting session. The reissued token replaces the old one.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2653,9 +2653,9 @@ paths:
         holding an instance capability (break-glass only) — answers a single
         uniform `401`; the true cause is durable in the audit trail, never on the
         wire.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: A session-less credential-establishment authority, returned once.
@@ -2680,9 +2680,9 @@ paths:
         or a confirmed TOTP code, where one stands) and opens a registration
         ceremony, returning the browser-generated creation options verbatim.
         `enrol/finish` completes the enrolment.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2713,10 +2713,10 @@ paths:
       description: |
         Validates the opaque attestation response against the live ceremony,
         stores the credential, and reissues the acting session. A browser
-        session's reissued token is delivered on the `__Host-wenv` cookie.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+        session's reissued token is delivered on the `__Host-hikyo` cookie.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2748,9 +2748,9 @@ paths:
         Fully pre-auth: opens a discoverable-credential request ceremony and
         returns the opaque request options. Discloses nothing about which
         accounts or credentials exist.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: Opaque WebAuthn request options for the browser.
@@ -2775,11 +2775,11 @@ paths:
       description: |
         Validates the opaque assertion against the live ceremony and mints a
         browser session carrying WebAuthn assurance, delivered on the
-        `__Host-wenv` cookie. A signature-count regression disables the cloned
+        `__Host-hikyo` cookie. A signature-count regression disables the cloned
         credential (audited) and refuses.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2811,9 +2811,9 @@ paths:
         Opens a non-discoverable ceremony scoped to the acting account's
         credentials and returns opaque request options. `step-up/finish`
         elevates the session.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: Opaque WebAuthn request options for the browser.
@@ -2837,12 +2837,12 @@ paths:
       summary: Elevate the acting session by presenting a passkey.
       description: |
         Validates the opaque assertion and appends `webauthn` to the acting
-        session's factor set, rotating its token (delivered on the `__Host-wenv`
+        session's factor set, rotating its token (delivered on the `__Host-hikyo`
         cookie for a browser session). The original authenticated_at is
         preserved.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2874,9 +2874,9 @@ paths:
         Opens a ceremony whose challenge is bound to the enumerated unit
         (environment plus the sorted credential ids), so the assertion
         authorizes exactly that unit. `reauth/finish` opens the window.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2908,10 +2908,10 @@ paths:
         Validates the opaque assertion and opens a reauthentication window over
         the bound environment (single-decision where the effective window is
         zero). The reauth rotates the acting session; a browser session's
-        rotated token is delivered on the `__Host-wenv` cookie.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+        rotated token is delivered on the `__Host-hikyo` cookie.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2939,9 +2939,9 @@ paths:
       operationId: listPasskeys
       tags: [auth]
       summary: List the caller's enrolled passkeys.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The caller's enrolled credentials.
@@ -2968,10 +2968,10 @@ paths:
         TOTP code (never the credential being removed, B7). Refuses a removal
         that would drop a passwordless account below the passkey-only floor;
         reissues the acting session. A browser session's reissued token is
-        delivered on the `__Host-wenv` cookie.
-      x-wenv-class: unauthenticated
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+        delivered on the `__Host-hikyo` cookie.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -2999,11 +2999,11 @@ paths:
       operationId: listOidcProviders
       tags: [instance]
       summary: List configured OIDC providers.
-      x-wenv-class: instance
-      x-wenv-operation: oidc-provider.list
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: oidc-provider.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The configured providers.
@@ -3027,11 +3027,11 @@ paths:
       operationId: getOidcProvider
       tags: [instance]
       summary: Read one OIDC provider.
-      x-wenv-class: instance
-      x-wenv-operation: oidc-provider.get
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: oidc-provider.get
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The provider.
@@ -3058,11 +3058,11 @@ paths:
         Discovery is re-run and the document's issuer must byte-equal the
         configured one. A reconfigure sweeps every session authenticated through
         the provider (A4).
-      x-wenv-class: instance
-      x-wenv-operation: oidc-provider.put
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: oidc-provider.put
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -3093,11 +3093,11 @@ paths:
       description: |
         Sweeps every session authenticated through the provider (A4); its live
         transactions cascade (A14).
-      x-wenv-class: instance
-      x-wenv-operation: oidc-provider.delete
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: oidc-provider.delete
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Deleted.
@@ -3117,11 +3117,11 @@ paths:
       operationId: listSamlProviders
       tags: [instance]
       summary: List configured SAML providers.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.list
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The configured SAML providers.
@@ -3145,11 +3145,11 @@ paths:
       operationId: getSamlProvider
       tags: [instance]
       summary: Read one SAML provider.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.get
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.get
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The provider.
@@ -3178,11 +3178,11 @@ paths:
         certificate, endpoint and assurance-policy changes sweep this
         provider's sessions. SAML never provisions accounts, so no JIT member
         exists in this request schema.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.put
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.put
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -3218,11 +3218,11 @@ paths:
         metadata diff-and-confirm ceremony. Disabling sweeps this provider's
         sessions. This additive endpoint supports the locked `update` and
         `disable` CLI spellings without requiring unreadable metadata input.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.patch
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.patch
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -3255,11 +3255,11 @@ paths:
       tags: [instance]
       summary: Remove a SAML provider.
       description: Deletes every session authenticated through this provider.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.delete
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.delete
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Removed.
@@ -3286,11 +3286,11 @@ paths:
         assertion-signing certificate or metadata-signing fingerprint remains
         refused until named in `confirmed_fingerprints` and committed through
         this action. File-backed providers supply the replacement document.
-      x-wenv-class: instance
-      x-wenv-operation: saml-provider.refresh-metadata
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-provider.refresh-metadata
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       requestBody:
         required: true
         content:
@@ -3325,11 +3325,11 @@ paths:
       tags: [instance]
       summary: List SAML SP signing-key lifecycle state.
       description: Returns fingerprints and public lifecycle metadata only; private key material never leaves the server.
-      x-wenv-class: instance
-      x-wenv-operation: saml-sp-key.list
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-sp-key.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: Active and overlap-retiring SP keys.
@@ -3352,11 +3352,11 @@ paths:
       tags: [instance]
       summary: Rotate the active SAML SP signing key with an overlap window.
       description: Atomically marks the old active key retiring and publishes a new active key; both certificates remain in SP metadata until explicit retirement.
-      x-wenv-class: instance
-      x-wenv-operation: saml-sp-key.rotate
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-sp-key.rotate
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The newly active key.
@@ -3390,11 +3390,11 @@ paths:
       tags: [instance]
       summary: Retire and erase an overlap-retiring SAML SP key.
       description: Refuses the active key; rotate first so request-signing continuity is explicit.
-      x-wenv-class: instance
-      x-wenv-operation: saml-sp-key.retire
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-sp-key.retire
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "204":
           description: Retired key erased and removed from SP metadata.
@@ -3424,11 +3424,11 @@ paths:
       tags: [instance]
       summary: Immediately erase and replace a compromised active SAML SP key.
       description: Atomically removes the named active key and mints its replacement without publishing an overlap window.
-      x-wenv-class: instance
-      x-wenv-operation: saml-sp-key.compromise-retire
-      x-wenv-formula: [instance-config@instance]
-      x-wenv-artifacts: [human-session]
-      x-wenv-min-revision: 1
+      x-hikyo-class: instance
+      x-hikyo-operation: saml-sp-key.compromise-retire
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
       responses:
         "200":
           description: The newly active replacement key.
@@ -3451,10 +3451,10 @@ paths:
 
 components:
   securitySchemes:
-    wenvSession:
+    hikyoSession:
       type: http
       scheme: bearer
-      bearerFormat: ew_1_cli_...
+      bearerFormat: hik_1_cli_...
       description: |
         A CLI session artifact minted by an identity-protocol endpoint. The
         server trusts nothing inside the value: kind, principal, expiry and
@@ -3703,7 +3703,7 @@ components:
           minimum: 1
           description: |
             This server's API revision. A client refuses an operation whose
-            `x-wenv-min-revision` exceeds it, naming the server version — a
+            `x-hikyo-min-revision` exceeds it, naming the server version — a
             loud refusal, never a silent misbehave.
         protocol_capabilities:
           type: array
@@ -3773,7 +3773,7 @@ components:
             cookie attributes constrain browsers, not an attacker holding the
             value, which is why lifetimes are short and revocation is a
             delete. OMITTED for a browser-artifact session: that token is
-            delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+            delivered ONLY on the `__Host-hikyo` HttpOnly cookie so injected
             same-origin script cannot read it. A CLI-artifact session, which has
             no cookie channel, still carries it here.
         session:
@@ -5362,4 +5362,4 @@ components:
           $ref: "#/components/schemas/Timestamp"
 
 security:
-  - wenvSession: []
+  - hikyoSession: []

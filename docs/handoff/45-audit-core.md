@@ -1,6 +1,6 @@
 # Handoff: #45 audit core
 
-Issue: https://github.com/Dunky13/wenv/issues/45 (parent #41). Spec:
+Issue: https://github.com/Dunky13/hikyo/issues/45 (parent #41). Spec:
 `docs/adr/audit-model.md` on `wayfinder-docs` (incl. the scim/scanning/
 multi-instance amendment banners — all out of this ticket's scope), plus
 mvp-boundary rows A4 and A6.
@@ -22,8 +22,9 @@ mvp-boundary rows A4 and A6.
     emitting operation (fail-closed).
   - Free-text hygiene: `SanitizeFreeText` (UTF-8 sanitize, control-char
     strip, 512-byte bound — ops spec owns the concrete value — and the
-    `ew_<version>_<type>_<body>` token-grammar redaction filter,
-    fixture-tested incl. embedded-in-noise). The write boundary re-checks
+    active `hik_<version>_<type>_<body>` token-grammar redaction filter, which
+    also redacts invalid legacy `ew_` artifacts, fixture-tested incl.
+    embedded-in-noise). The write boundary re-checks
     and refuses rather than silently re-cleaning.
   - `Row`/`BuildRow`: the single envelope→column mapping, shared by both
     writers so they cannot drift. Fixed-width microsecond UTC text
@@ -90,7 +91,7 @@ mvp-boundary rows A4 and A6.
   unexported `keyHandle`/`dekEntry`) embed a redactor implementing the full
   surface — `String`/`GoString` (what fmt consults for `%v`/`%s`/`%#v`),
   `LogValue`, `MarshalText`, `MarshalJSON` — all returning
-  `[REDACTED:wenv-key-material]`. Coverage test plants a secret and
+  `[REDACTED:hikyo-key-material]`. Coverage test plants a secret and
   exercises every surface. Two new analyzers (`internal/lint`):
   `CheckRedactionSurfaces`/`CheckSensitiveFormatting` (no fmt/json/log/slog
   call takes a sensitive-typed argument outside `internal/crypto`; no
@@ -109,7 +110,7 @@ mvp-boundary rows A4 and A6.
 | 1 | Registry closure (runtime fail-closed + linkage + live emitters) | `audit.TestValidate*`, `isolation.TestInvariantAuditRegistryClosure`, `isolation.TestAuditCore*/every_registered_type_is_actually_emitted` |
 | 2 | Completeness vs the total probe classification, default-deny `audited: none` | `isolation.TestInvariantAuditCompleteness` (+ pinned `testdata/audited_exemptions.json`) |
 | 3 | Append-only, empty pinned deleter allowlist | `lint.TestAuditAppendOnly*`, `isolation.TestInvariantAuditAppendOnly` |
-| 4 | No plaintext: schema-field ban + `ew_` filter round-trip + dump-grep over both trails | `audit.TestRegistryForbiddenPayloadContent`, `audit.TestRedactTokens`, `audit.TestSanitizeFreeText`, `isolation.TestAuditCore*/no_token_material_in_trails` |
+| 4 | No plaintext: schema-field ban + `hik_` filter round-trip + dump-grep over both trails | `audit.TestRegistryForbiddenPayloadContent`, `audit.TestRedactTokens`, `audit.TestSanitizeFreeText`, `isolation.TestAuditCore*/no_token_material_in_trails` |
 | 5 | Cardinality (structural half: no counter/aggregate columns, pinned column set) | `isolation.TestInvariantAuditNoAggregates` — fetch-path halves arrive with #49+ |
 | 6 | Denial durability + siting + single writer | `isolation.TestAuditCore*/denial_*` (both engines), `denial_durability_under_induced_commit_failure`, boundary test (authn importers), and `lint.TestDenialWriterIsSoleWriter` — an analyzer refusing any mutating generated query call outside `WriteDenial` inside the resolution surface |
 | 7 | Durability settings | `store.TestVerifyPGDurability` (seam), `isolation.TestPostgresDurabilityBootRefusal` (real `ALTER DATABASE`), sqlite pragmas #42's |
@@ -253,7 +254,7 @@ secret, free-text filter fixtures.
   `annotated_queries.json` (authn gained `GetPrincipalKind`),
   `audited_exemptions.json`, and the pinned column sets in
   `TestInvariantAuditNoAggregates`.
-- Postgres locally: point `WENV_TEST_POSTGRES_DSN` at a scratch database
+- Postgres locally: point `HIKYO_TEST_POSTGRES_DSN` at a scratch database
   (needs CREATE DATABASE); the durability E2E derives `<name>_durability`
   and ALTERs/RESETs its `synchronous_commit`.
 - The `readOnlyStoreOps` pin in `authz/registry.go` is the

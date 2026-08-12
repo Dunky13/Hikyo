@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // The API transport. It owns exactly three things — moving bytes, attaching
@@ -354,7 +354,7 @@ func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequest
 }
 
 // loginResultOf renders a freshly minted or rotated session for the wire. A
-// browser-artifact token is delivered ONLY on the __Host-wenv HttpOnly cookie
+// browser-artifact token is delivered ONLY on the __Host-hikyo HttpOnly cookie
 // and is never echoed into the script-readable body (B2); a CLI artifact has no
 // cookie channel, so its token stays in the body.
 func loginResultOf(r service.LoginResult) apigen.LoginResult {
@@ -445,7 +445,7 @@ func (a *API) Middleware() []func(http.Handler) http.Handler {
 }
 
 // requestKey carries the raw request so the OIDC handlers can read cookies (the
-// browser-binding cookie and the __Host-wenv session cookie), which the strict
+// browser-binding cookie and the __Host-hikyo session cookie), which the strict
 // server does not thread into a handler.
 type requestKey struct{}
 
@@ -461,12 +461,12 @@ func requestFrom(ctx context.Context) *http.Request {
 }
 
 // browserSessionCookie is the __Host- browser session cookie name.
-const browserSessionCookie = "__Host-wenv"
+const browserSessionCookie = "__Host-hikyo"
 
 // oidcBindingCookiePrefix is the per-transaction browser-binding cookie name
 // prefix (A16): the suffix is derived from the state so concurrent tabs do not
 // clobber each other's binding.
-const oidcBindingCookiePrefix = "__Host-wenv-oidc-tx-"
+const oidcBindingCookiePrefix = "__Host-hikyo-oidc-tx-"
 
 // bindingCookieName derives the per-transaction binding cookie name from the
 // state value, deterministically at both start and callback.

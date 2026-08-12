@@ -6,9 +6,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // OIDC and provider-administration handlers (#54). They carry the raw bearer
@@ -102,7 +102,7 @@ func oidcStartError(a *API, ctx context.Context, err error) apigen.OidcStartResp
 	}
 }
 
-// oidcCallbackResponse sets the __Host-wenv session cookie for a minted browser
+// oidcCallbackResponse sets the __Host-hikyo session cookie for a minted browser
 // session before writing the JSON body.
 type oidcCallbackResponse struct {
 	body   apigen.LoginResult

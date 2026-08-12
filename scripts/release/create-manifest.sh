@@ -40,7 +40,7 @@ release_sequence=$(jq -r --arg version "$version" \
 
 printf '%s\n' "$image_digest" >"$dist/image-index.digest"
 printf '%s\n' "$chart_digest" >"$dist/chart-index.digest"
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/wenv-manifest.XXXXXX")
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-manifest.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT HUP INT TERM
 find "$dist" -maxdepth 1 -type f -print | LC_ALL=C sort >"$scratch/files"
 : >"$scratch/artifacts.jsonl"
@@ -51,12 +51,12 @@ while IFS= read -r path; do
 		release-manifest.json | *.sigstore.json) continue ;;
 		image-index.oci-payload.json) kind='oci-payload'; subject_kind=image ;;
 		chart-index.oci-payload.json) kind='oci-payload'; subject_kind=chart ;;
-		wenv_*.tar.gz | wenv_*.zip) kind=binary ;;
+		hikyo_*.tar.gz | hikyo_*.zip) kind=binary ;;
 		*.spdx.json | *.cdx.json) kind=sbom ;;
 		checksums.txt) kind=checksum ;;
 		image-index.digest) kind=image ;;
 		chart-index.digest) kind='chart-digest' ;;
-		wenv-*.tgz) kind=chart ;;
+		hikyo-*.tgz) kind=chart ;;
 		install.sh) kind=installer ;;
 		*) printf 'manifest: unclassified artifact %s\n' "$name" >&2; exit 1 ;;
 	esac
@@ -101,7 +101,7 @@ jq -s \
 	--argjson release_sequence "$release_sequence" \
 	--arg key_id "$key_id" \
 	'{
-		schema: "wenv.dev/release-manifest/v1",
+		schema: "hikyo.dev/release-manifest/v1",
 		version: $version,
 		tag: $tag,
 		source_commit: $commit,

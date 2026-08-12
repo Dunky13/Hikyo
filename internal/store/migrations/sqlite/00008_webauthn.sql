@@ -8,8 +8,8 @@
 -- are resolved on the proof-free surface, because the proof is what that answer
 -- produces.
 --
--- wenv:table webauthn_credentials class=authn chain=-
--- wenv:table webauthn_ceremonies class=authn chain=-
+-- hikyo:table webauthn_credentials class=authn chain=-
+-- hikyo:table webauthn_ceremonies class=authn chain=-
 
 -- An opaque, random per-account WebAuthn user handle. NEVER a username, email or
 -- account id (ADR: opaque random user handles): the handle travels to the
@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX accounts_webauthn_user_handle
     WHERE webauthn_user_handle IS NOT NULL;
 
 -- A registered WebAuthn credential (public key + metadata). The private key
--- never leaves the authenticator; wenv stores only the public key and the
+-- never leaves the authenticator; hikyo stores only the public key and the
 -- ceremony-derived flags. credential_id is the authenticator-chosen id, UNIQUE
 -- across the instance so an assertion resolves to one row. sign_count with
 -- row_version is the clone-detection CAS (B9): a real regression on a

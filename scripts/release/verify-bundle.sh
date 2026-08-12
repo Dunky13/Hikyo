@@ -54,7 +54,7 @@ root_dir=$(CDPATH='' cd -- "$(dirname "$root")" && pwd)
 [ -f "$metadata_signature" ] || fail "missing trust metadata signature $metadata_signature"
 
 jq -e '
-	.schema == "wenv.dev/trust-root/v1" and
+	.schema == "hikyo.dev/trust-root/v1" and
 	(.recovery.id | type == "string" and length > 0) and
 	(.recovery.public_key | type == "string" and length > 0) and
 	(.recovery.sha256 | test("^[0-9a-f]{64}$")) and
@@ -74,7 +74,7 @@ recovery_key="$root_dir/$recovery_name"
 jq -e --arg recovery_id "$recovery_id" --arg recovery_sha "$recovery_sha" '
 	. as $metadata |
 	.event.type as $event_type |
-	.schema == "wenv.dev/trust-metadata/v1" and
+	.schema == "hikyo.dev/trust-metadata/v1" and
 	((.sequence | type) == "number") and .sequence >= 1 and (.sequence | floor) == .sequence and
 	.recovery.id == $recovery_id and
 	.recovery.sha256 == $recovery_sha and
@@ -214,7 +214,7 @@ manifest_signature="$bundle_dir/release-manifest.sigstore.json"
 
 jq -e '
 	. as $manifest |
-	.schema == "wenv.dev/release-manifest/v1" and
+	.schema == "hikyo.dev/release-manifest/v1" and
 	(.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([+-][0-9A-Za-z.-]+)?$")) and
 	.tag == ("v" + .version) and
 	(.source_commit | test("^[0-9a-f]{40}$")) and
@@ -355,8 +355,8 @@ while [ "$i" -lt "$artifact_count" ]; do
 		chart_manifest_ref=$chart
 	elif [ "$kind" = chart ]; then
 		command -v tar >/dev/null 2>&1 || fail 'tar is required to verify the Helm chart'
-		chart_yaml=$(tar -xOf "$path" wenv/Chart.yaml) || fail "cannot read Chart.yaml from $name"
-		values_yaml=$(tar -xOf "$path" wenv/values.yaml) || fail "cannot read values.yaml from $name"
+		chart_yaml=$(tar -xOf "$path" hikyo/Chart.yaml) || fail "cannot read Chart.yaml from $name"
+		values_yaml=$(tar -xOf "$path" hikyo/values.yaml) || fail "cannot read values.yaml from $name"
 		chart_version=$(printf '%s\n' "$chart_yaml" | awk '$1 == "version:" {print $2}')
 		app_version=$(printf '%s\n' "$chart_yaml" | awk '$1 == "appVersion:" {print $2}')
 		pinned_image=$(printf '%s\n' "$values_yaml" | awk '$1 == "digest:" {print $2}')

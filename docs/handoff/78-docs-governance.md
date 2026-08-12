@@ -5,7 +5,7 @@
 This branch implements the repository-side work for MVP acceptance criteria
 O4–O6:
 
-- Starlight generates a GitHub Pages site at `https://dunky13.github.io/wenv/`.
+- Starlight generates a GitHub Pages site at `https://dunky13.github.io/hikyo/`.
 - Root policy files remain canonical; `docs/site/scripts/prepare-content.mjs`
   derives site pages at build time.
 - Release CI fails when locked security, governance, licensing, or support text is
@@ -33,7 +33,7 @@ The GitHub repository settings were applied while implementing this ticket:
 
 - Private Vulnerability Reporting: enabled.
 - GitHub Pages: enabled with `build_type=workflow`, HTTPS enforced, URL
-  `https://dunky13.github.io/wenv/`.
+  `https://dunky13.github.io/hikyo/`.
 
 The first live deployment starts only after this branch reaches `main`; the
 release live gate intentionally remains red until that deployment exists.
@@ -74,6 +74,6 @@ verifies both live shapes.
 ## Deployment verification after merge
 
 1. Confirm the `docs` workflow succeeds at the merge commit.
-2. Run `./scripts/ci/check-docs-live.sh https://dunky13.github.io/wenv security@developwent.io`.
-3. Confirm `https://dunky13.github.io/wenv/.well-known/security.txt` serves the
+2. Run `./scripts/ci/check-docs-live.sh https://dunky13.github.io/hikyo security@developwent.io`.
+3. Confirm `https://dunky13.github.io/hikyo/.well-known/security.txt` serves the
    two locked contacts.

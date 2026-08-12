@@ -5,7 +5,7 @@ set -eu
 
 [ "$#" -eq 1 ] || { printf 'usage: %s OCI_TAG\n' "$0" >&2; exit 2; }
 tag=$1
-error_file=$(mktemp "${TMPDIR:-/tmp}/wenv-oci-lookup.XXXXXX")
+error_file=$(mktemp "${TMPDIR:-/tmp}/hikyo-oci-lookup.XXXXXX")
 trap 'rm -f "$error_file"' EXIT HUP INT TERM
 
 if "$DOCKER_BIN" manifest inspect "$tag" >/dev/null 2>"$error_file"; then

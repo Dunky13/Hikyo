@@ -34,7 +34,7 @@ import (
 var SpecYAML []byte
 
 // Revision is this server's API revision, advertised at `/api/v1/meta`. A
-// client compares an operation's `x-wenv-min-revision` against it and refuses
+// client compares an operation's `x-hikyo-min-revision` against it and refuses
 // unsupported verbs naming the server version — a bare version string is not
 // the mechanism, the per-operation registry is.
 //
@@ -50,11 +50,11 @@ const PathPrefix = "/api/v1"
 // Extension keys. Each is cross-checked against a Go registry in CI, so the
 // document cannot describe an authorization posture the code does not have.
 const (
-	extClass       = "x-wenv-class"
-	extOperation   = "x-wenv-operation"
-	extFormula     = "x-wenv-formula"
-	extArtifacts   = "x-wenv-artifacts"
-	extMinRevision = "x-wenv-min-revision"
+	extClass       = "x-hikyo-class"
+	extOperation   = "x-hikyo-operation"
+	extFormula     = "x-hikyo-formula"
+	extArtifacts   = "x-hikyo-artifacts"
+	extMinRevision = "x-hikyo-min-revision"
 	// ExtOpenEnum marks an enum declared OPEN: it may gain values additively
 	// and every generated consumer must tolerate unknown ones. Open enums
 	// deliberately carry no `enum` keyword, so runtime validation tolerates

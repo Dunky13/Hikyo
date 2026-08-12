@@ -8,9 +8,9 @@ import (
 	"log"
 	"log/slog"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // Leak formats and marshals sensitive types outside their owning package,

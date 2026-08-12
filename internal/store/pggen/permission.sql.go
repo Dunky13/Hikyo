@@ -15,7 +15,7 @@ const countGrantOrigins = `-- name: CountGrantOrigins :one
 SELECT COUNT(*) FROM grant_origins WHERE grant_id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) CountGrantOrigins(ctx context.Context, grantID string) (int64, error) {
 	row := q.db.QueryRow(ctx, countGrantOrigins, grantID)
 	var count int64
@@ -34,7 +34,7 @@ type DeleteGrantOriginParams struct {
 	Subject string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteGrantOrigin(ctx context.Context, arg DeleteGrantOriginParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteGrantOrigin, arg.GrantID, arg.Kind, arg.Subject)
 	if err != nil {
@@ -47,7 +47,7 @@ const deleteGrantRow = `-- name: DeleteGrantRow :execrows
 DELETE FROM grants WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteGrantRow(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteGrantRow, id)
 	if err != nil {
@@ -65,7 +65,7 @@ type EnvironmentReauthSettingsRow struct {
 	ReauthWindowSeconds pgtype.Int8
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) EnvironmentReauthSettings(ctx context.Context, id string) (EnvironmentReauthSettingsRow, error) {
 	row := q.db.QueryRow(ctx, environmentReauthSettings, id)
 	var i EnvironmentReauthSettingsRow
@@ -82,7 +82,7 @@ type GetPrincipalClassRow struct {
 	Class pgtype.Text
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPrincipalClass(ctx context.Context, id string) (GetPrincipalClassRow, error) {
 	row := q.db.QueryRow(ctx, getPrincipalClass, id)
 	var i GetPrincipalClassRow
@@ -103,7 +103,7 @@ type InsertGrantOriginParams struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertGrantOrigin(ctx context.Context, arg InsertGrantOriginParams) error {
 	_, err := q.db.Exec(ctx, insertGrantOrigin,
 		arg.ID,
@@ -124,7 +124,7 @@ type ListGrantOriginsForGrantRow struct {
 	Subject string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantOriginsForGrant(ctx context.Context, grantID string) ([]ListGrantOriginsForGrantRow, error) {
 	rows, err := q.db.Query(ctx, listGrantOriginsForGrant, grantID)
 	if err != nil {
@@ -161,7 +161,7 @@ type ListGrantRowsForPrincipalRow struct {
 
 // Permission model, full (#55). Structurally identical to the sqlite
 // dialect; see that file for the reasoning.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantRowsForPrincipal(ctx context.Context, principalID string) ([]ListGrantRowsForPrincipalRow, error) {
 	rows, err := q.db.Query(ctx, listGrantRowsForPrincipal, principalID)
 	if err != nil {
@@ -209,7 +209,7 @@ type ListGrantsWithOriginsAtInstanceRow struct {
 	Subject     string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsAtInstance(ctx context.Context) ([]ListGrantsWithOriginsAtInstanceRow, error) {
 	rows, err := q.db.Query(ctx, listGrantsWithOriginsAtInstance)
 	if err != nil {
@@ -261,7 +261,7 @@ type ListGrantsWithOriginsForOrgRow struct {
 	Subject     string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsForOrg(ctx context.Context, orgID pgtype.Text) ([]ListGrantsWithOriginsForOrgRow, error) {
 	rows, err := q.db.Query(ctx, listGrantsWithOriginsForOrg, orgID)
 	if err != nil {
@@ -319,7 +319,7 @@ type ListGrantsWithOriginsForProjectRow struct {
 }
 
 // The project-scoped membership surface; see the sqlite dialect.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsForProject(ctx context.Context, arg ListGrantsWithOriginsForProjectParams) ([]ListGrantsWithOriginsForProjectRow, error) {
 	rows, err := q.db.Query(ctx, listGrantsWithOriginsForProject, arg.OrgID, arg.ProjectID)
 	if err != nil {
@@ -356,7 +356,7 @@ WHERE capability = 'manage-members' AND org_id IS NULL
 ORDER BY principal_id
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListManageMembersHoldersAtInstance(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, listManageMembersHoldersAtInstance)
 	if err != nil {
@@ -386,7 +386,7 @@ ORDER BY principal_id
 `
 
 // The project_id IS NULL conjunct is load-bearing: see the sqlite dialect.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListManageMembersHoldersForOrg(ctx context.Context, orgID pgtype.Text) ([]string, error) {
 	rows, err := q.db.Query(ctx, listManageMembersHoldersForOrg, orgID)
 	if err != nil {

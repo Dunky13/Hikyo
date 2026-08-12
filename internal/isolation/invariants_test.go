@@ -18,12 +18,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Dunky13/wenv/internal/app"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/cli"
-	"github.com/Dunky13/wenv/internal/lint"
-	"github.com/Dunky13/wenv/internal/server"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/app"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Dunky13/hikyo/internal/lint"
+	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 var facts = authz.RegistryFacts{}

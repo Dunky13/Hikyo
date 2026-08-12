@@ -13,9 +13,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/disclose"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/disclose"
 )
 
 // The v1 verb table this slice ships. The full taxonomy is closed by the
@@ -81,7 +81,7 @@ func Run(ctx context.Context, io IO, args []string) int {
 	case "project-settings":
 		err = runProjectSettings(ctx, io, rest)
 	default:
-		fmt.Fprintf(io.Stderr, "wenv: unknown command %q\n\n", verb)
+		fmt.Fprintf(io.Stderr, "hikyo: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
 		return ExitUsage
 	}
@@ -92,77 +92,77 @@ func Run(ctx context.Context, io IO, args []string) int {
 // snapshot: help output is part of the CLI's stable surface, and a diff to it
 // is reviewed like a spec change.
 func Usage(w io.Writer) {
-	fmt.Fprint(w, `wenv - environment and secret management
+	fmt.Fprint(w, `hikyo - environment and secret management
 
 authentication:
-  wenv login <instance-url> --local [--as USER]   terminal-native local login
-  wenv logout [--instance REF]                    revoke the stored session
-  wenv whoami [--instance REF] [-o table|json]    describe the stored session
+  hikyo login <instance-url> --local [--as USER]   terminal-native local login
+  hikyo logout [--instance REF]                    revoke the stored session
+  hikyo whoami [--instance REF] [-o table|json]    describe the stored session
 
 accounts:
-  wenv account establish-credential --instance <url|ref> [--as USER]
-  wenv account factor enrol-totp [--output-file PATH | --dangerously-print]
-  wenv account factor confirm-totp
-  wenv account factor step-up
-  wenv account passkey enrol|list|remove          browser-only; refused on the terminal
-  wenv account recovery-codes regenerate [--output-file PATH | --dangerously-print]
-  wenv account recovery begin --instance <url|ref> --as USER [--output-file PATH]
-  wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]
+  hikyo account establish-credential --instance <url|ref> [--as USER]
+  hikyo account factor enrol-totp [--output-file PATH | --dangerously-print]
+  hikyo account factor confirm-totp
+  hikyo account factor step-up
+  hikyo account passkey enrol|list|remove          browser-only; refused on the terminal
+  hikyo account recovery-codes regenerate [--output-file PATH | --dangerously-print]
+  hikyo account recovery begin --instance <url|ref> --as USER [--output-file PATH]
+  hikyo account reset-credential <principal> [--output-file PATH | --dangerously-print]
 
 contexts:
-  wenv context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
-  wenv context list [-o table|json]
-  wenv context show <name> [-o table|json]
-  wenv context delete <name>
-  wenv context delete --instance <ref>            forget a trust-store entry
+  hikyo context create <name> --instance <url|ref> [--org O] [--project P] [--env E]
+  hikyo context list [-o table|json]
+  hikyo context show <name> [-o table|json]
+  hikyo context delete <name>
+  hikyo context delete --instance <ref>            forget a trust-store entry
 
 diagnostics:
-  wenv doctor [--instance REF] [-o table|json]     report server-authoritative provider health
+  hikyo doctor [--instance REF] [-o table|json]     report server-authoritative provider health
 
 hierarchy:
-  wenv org list [-o table|json]
-  wenv org show <org> [-o table|json]
-  wenv org create --name <name>
-  wenv org rename <org> --name <new-name>
-  wenv org delete <org>
-  wenv project list|show|create|rename|delete      --org selects the organisation
-  wenv project create --name <name>
-  wenv project rename <project> --name <new-name>
-  wenv project delete <project> --confirm <project-name>   irreversible: shreds the key
-  wenv env list|show|create|rename|reorder|delete   --org/--project select the project
-  wenv env create --name <name>
-  wenv env rename <env> --name <new-name>
-  wenv env reorder <env-id,env-id,...>             the whole ordered set, once each
-  wenv folder list|show|create|rename|delete       --org/--project select the project
-  wenv folder create --path <path>
-  wenv folder rename <folder> --path <new-path>
-  wenv key list|show|create|rename|declare|reclassify|update|set-group|delete
-  wenv key create --name <NAME> --classification secret|config --declaration <json>
-  wenv key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
-  wenv key declare <key> --declaration <json> [--required-in all|none|<ids>]
-  wenv key reclassify <key> --classification secret|config    the ceremony, never update
-  wenv key group list|show|create|rename|delete
+  hikyo org list [-o table|json]
+  hikyo org show <org> [-o table|json]
+  hikyo org create --name <name>
+  hikyo org rename <org> --name <new-name>
+  hikyo org delete <org>
+  hikyo project list|show|create|rename|delete      --org selects the organisation
+  hikyo project create --name <name>
+  hikyo project rename <project> --name <new-name>
+  hikyo project delete <project> --confirm <project-name>   irreversible: shreds the key
+  hikyo env list|show|create|rename|reorder|delete   --org/--project select the project
+  hikyo env create --name <name>
+  hikyo env rename <env> --name <new-name>
+  hikyo env reorder <env-id,env-id,...>             the whole ordered set, once each
+  hikyo folder list|show|create|rename|delete       --org/--project select the project
+  hikyo folder create --path <path>
+  hikyo folder rename <folder> --path <new-path>
+  hikyo key list|show|create|rename|declare|reclassify|update|set-group|delete
+  hikyo key create --name <NAME> --classification secret|config --declaration <json>
+  hikyo key update <key> [--folder P] [--description D] [--deprecated] [--deprecation-note N]
+  hikyo key declare <key> --declaration <json> [--required-in all|none|<ids>]
+  hikyo key reclassify <key> --classification secret|config    the ceremony, never update
+  hikyo key group list|show|create|rename|delete
 
 instance configuration:
-  wenv instance-config provider create --kind saml --name <name> --entity-id <entityID> \
+  hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \
       (--metadata-file <xml> | --metadata-url <url>)
-  wenv instance-config provider list|show|update|disable|remove
-  wenv instance-config provider refresh-metadata <name>
-  wenv instance-config saml-sp-key list|rotate
-  wenv instance-config saml-sp-key retire|compromise-retire <fingerprint>
+  hikyo instance-config provider list|show|update|disable|remove
+  hikyo instance-config provider refresh-metadata <name>
+  hikyo instance-config saml-sp-key list|rotate
+  hikyo instance-config saml-sp-key retire|compromise-retire <fingerprint>
 
 access:
-  wenv access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
-  wenv access grant add --principal <id> --capability <atom>
-  wenv access grant remove --principal <id> --capability <atom>
-  wenv access grant template --principal <id> --template <name>
-  wenv access member list [--org O] [--project P] [-o table|json]
-  wenv access member remove --principal <id>
-  wenv project-settings get --env E [-o table|json]
-  wenv project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
+  hikyo access grant list [--org O] [--project P] [--instance-scope] [-o table|json]
+  hikyo access grant add --principal <id> --capability <atom>
+  hikyo access grant remove --principal <id> --capability <atom>
+  hikyo access grant template --principal <id> --template <name>
+  hikyo access member list [--org O] [--project P] [-o table|json]
+  hikyo access member remove --principal <id>
+  hikyo project-settings get --env E [-o table|json]
+  hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
 
 target resolution, per dimension, first hit wins:
-  --instance/--org/--project/--env, then WENV_*, then ./.wenv.json, then --context
+  --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
 
 exit codes:
   0 success   1 internal   2 usage   3 authentication   4 refused
@@ -209,7 +209,7 @@ func runLogin(ctx context.Context, ios IO, args []string) error {
 	}
 
 	if len(positional) == 0 {
-		return failf(ExitUsage, "usage: wenv login <instance-url> --local --as <username>")
+		return failf(ExitUsage, "usage: hikyo login <instance-url> --local --as <username>")
 	}
 	target := positional[0]
 
@@ -286,7 +286,7 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 	// channel as the credential. No terminal is involved and none is needed —
 	// an attacker who cannot read that channel cannot redirect the credential,
 	// and one who can already holds it.
-	if bundlePath := firstNonEmpty(trustFile, ios.Env.Getenv("WENV_TRUST_BUNDLE")); bundlePath != "" {
+	if bundlePath := firstNonEmpty(trustFile, ios.Env.Getenv("HIKYO_TRUST_BUNDLE")); bundlePath != "" {
 		raw, err := os.ReadFile(bundlePath)
 		if err != nil {
 			return TrustEntry{}, failf(ExitRefused, "reading the trust bundle: %v", err)
@@ -355,7 +355,7 @@ func establish(ios IO, st *State, target, name, trustFile string) (TrustEntry, e
 	if err != nil {
 		return TrustEntry{}, failf(ExitRefused,
 			"establishing an instance requires an interactive terminal so a human can confirm the certificate identity. "+
-				"For an automated context, provision a trust bundle with --trust-file or WENV_TRUST_BUNDLE")
+				"For an automated context, provision a trust bundle with --trust-file or HIKYO_TRUST_BUNDLE")
 	}
 	if !ok {
 		return TrustEntry{}, failf(ExitRefused, "establishment declined")
@@ -469,7 +469,7 @@ func runWhoami(ctx context.Context, ios IO, args []string) error {
 // confirms or renames it before the freeze.
 func runAccount(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 {
-		return failf(ExitUsage, "usage: wenv account establish-credential|factor|passkey|recovery-codes|recovery|reset-credential ...")
+		return failf(ExitUsage, "usage: hikyo account establish-credential|factor|passkey|recovery-codes|recovery|reset-credential ...")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -494,10 +494,10 @@ func runAccount(ctx context.Context, ios IO, args []string) error {
 // holder mints a credential-establishment authority for a target, returned once
 // and transmitted out of band. An instance-capability target has no network path
 // and is refused uniformly (like a nonexistent target, B2) - break-glass only,
-// via `wenv admin reset-credential` on the host.
+// via `hikyo admin reset-credential` on the host.
 func runResetCredential(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		return failf(ExitUsage, "usage: wenv account reset-credential <principal> [--output-file PATH | --dangerously-print]")
+		return failf(ExitUsage, "usage: hikyo account reset-credential <principal> [--output-file PATH | --dangerously-print]")
 	}
 	principal := args[0]
 	var outputFile string
@@ -567,7 +567,7 @@ func runEstablishCredential(ctx context.Context, ios IO, args []string) error {
 	}
 	target := flags.Instance
 	if target == "" {
-		target = ios.Env.Getenv("WENV_INSTANCE")
+		target = ios.Env.Getenv("HIKYO_INSTANCE")
 	}
 	if target == "" {
 		return failf(ExitUsage, "--instance <url|ref> is required")
@@ -616,7 +616,7 @@ func runEstablishCredential(ctx context.Context, ios IO, args []string) error {
 	// who expects to be logged in now would otherwise read the silence as a
 	// failure.
 	fmt.Fprintf(ios.Stderr,
-		"credential established at %s. It creates no session: log in with\n    wenv login %s --local --as %s\n",
+		"credential established at %s. It creates no session: log in with\n    hikyo login %s --local --as %s\n",
 		entry.Origin, entry.Origin, firstNonEmpty(as, "<username>"))
 	return nil
 }
@@ -633,7 +633,7 @@ func runEstablishCredential(ctx context.Context, ios IO, args []string) error {
 
 func runFactor(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 {
-		return failf(ExitUsage, "usage: wenv account factor enrol-totp|confirm-totp|step-up")
+		return failf(ExitUsage, "usage: hikyo account factor enrol-totp|confirm-totp|step-up")
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -681,7 +681,7 @@ func runFactorEnrolTOTP(ctx context.Context, ios IO, args []string) error {
 	if _, err := disclose.Emit("otpauth provisioning URI", start.OtpauthUri, deliver); err != nil {
 		return failf(ExitRefused, "disclosing the otpauth URI: %v", err)
 	}
-	fmt.Fprintf(ios.Stderr, "TOTP enrolment staged. Scan the URI, then confirm with\n    wenv account factor confirm-totp\n")
+	fmt.Fprintf(ios.Stderr, "TOTP enrolment staged. Scan the URI, then confirm with\n    hikyo account factor confirm-totp\n")
 	return nil
 }
 
@@ -707,7 +707,7 @@ func runFactorConfirmTOTP(ctx context.Context, ios IO, args []string) error {
 	if err := persistRotatedSession(st, artifact, result); err != nil {
 		return err
 	}
-	fmt.Fprintf(ios.Stderr, "TOTP enrolled. Step up to present it with\n    wenv account factor step-up\n")
+	fmt.Fprintf(ios.Stderr, "TOTP enrolled. Step up to present it with\n    hikyo account factor step-up\n")
 	return nil
 }
 
@@ -740,7 +740,7 @@ func runFactorStepUp(ctx context.Context, ios IO, args []string) error {
 
 func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 || args[0] != "regenerate" {
-		return failf(ExitUsage, "usage: wenv account recovery-codes regenerate")
+		return failf(ExitUsage, "usage: hikyo account recovery-codes regenerate")
 	}
 	var outputFile string
 	var dangerous bool
@@ -782,7 +782,7 @@ func runRecoveryCodes(ctx context.Context, ios IO, args []string) error {
 // credential-establishment authority, then establish a new password with it.
 func runRecovery(ctx context.Context, ios IO, args []string) error {
 	if len(args) == 0 || args[0] != "begin" {
-		return failf(ExitUsage, "usage: wenv account recovery begin --instance <url|ref> --as <username>")
+		return failf(ExitUsage, "usage: hikyo account recovery begin --instance <url|ref> --as <username>")
 	}
 	var (
 		as         string
@@ -804,7 +804,7 @@ func runRecovery(ctx context.Context, ios IO, args []string) error {
 	}
 	target := flags.Instance
 	if target == "" {
-		target = ios.Env.Getenv("WENV_INSTANCE")
+		target = ios.Env.Getenv("HIKYO_INSTANCE")
 	}
 	if target == "" {
 		return failf(ExitUsage, "--instance <url|ref> is required")
@@ -834,7 +834,7 @@ func runRecovery(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitRefused, "disclosing the authority: %v", err)
 	}
 	fmt.Fprintf(ios.Stderr,
-		"recovery authority issued. It creates no session: establish a new password with\n    wenv account establish-credential --instance %s --as %s\n",
+		"recovery authority issued. It creates no session: establish a new password with\n    hikyo account establish-credential --instance %s --as %s\n",
 		entry.Origin, as)
 	return nil
 }
@@ -871,7 +871,7 @@ func cliSessionToken(t *string) (string, error) {
 
 func runContext(_ context.Context, ios IO, args []string) error {
 	if len(args) == 0 {
-		return failf(ExitUsage, "usage: wenv context create|list|show|delete")
+		return failf(ExitUsage, "usage: hikyo context create|list|show|delete")
 	}
 	st, err := NewState(ios.Env)
 	if err != nil {
@@ -894,7 +894,7 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		}
 		name := first(positional)
 		if name == "" || *instance == "" {
-			return failf(ExitUsage, "usage: wenv context create <name> --instance <url|ref>")
+			return failf(ExitUsage, "usage: hikyo context create <name> --instance <url|ref>")
 		}
 		entry, err := establish(ios, st, *instance, "", *trustFile)
 		if err != nil {
@@ -947,7 +947,7 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		}
 		name := first(positional)
 		if name == "" {
-			return failf(ExitUsage, "usage: wenv context show <name>")
+			return failf(ExitUsage, "usage: hikyo context show <name>")
 		}
 		all, err := st.Contexts()
 		if err != nil {
@@ -976,7 +976,7 @@ func runContext(_ context.Context, ios IO, args []string) error {
 		}
 		name := first(positional)
 		if name == "" {
-			return failf(ExitUsage, "usage: wenv context delete <name> | --instance <ref>")
+			return failf(ExitUsage, "usage: hikyo context delete <name> | --instance <ref>")
 		}
 		return st.DeleteContext(name)
 
@@ -1018,7 +1018,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	switch sub {
 	case "show", "rename", "delete":
 		// Arity and flag agreement only. Whether a target is AVAILABLE is a
-		// resolution question, not a syntax one — `--org`, WENV_ORG, a pin file
+		// resolution question, not a syntax one — `--org`, HIKYO_ORG, a pin file
 		// and a context may each supply it — so it is asked after resolution, by
 		// addressed(), exactly as the other three families ask it.
 		if err := flags.checkTarget("org "+sub, DimOrg, flags.Org); err != nil {
@@ -1031,9 +1031,9 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case sub == "create" && orgName == "":
-		return failf(ExitUsage, "usage: wenv org create --name <name>")
+		return failf(ExitUsage, "usage: hikyo org create --name <name>")
 	case sub == "rename" && orgName == "":
-		return failf(ExitUsage, "usage: wenv org rename <org> --name <new-name>")
+		return failf(ExitUsage, "usage: hikyo org rename <org> --name <new-name>")
 	}
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
@@ -1112,7 +1112,7 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv org: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo org: unhandled subverb %q", sub)
 }
 
 // ---------------------------------------------------------------------------
@@ -1147,12 +1147,12 @@ func (c commonFlags) positional() string { return first(c.positionals) }
 // erroring there would break the whole point of per-dimension precedence.
 func (c commonFlags) checkTarget(verb string, dim Dimension, flagValue string) error {
 	if len(c.positionals) > 1 {
-		return failf(ExitUsage, "usage: wenv %s takes one %s, got %d: %s",
+		return failf(ExitUsage, "usage: hikyo %s takes one %s, got %d: %s",
 			verb, dim, len(c.positionals), strings.Join(c.positionals, " "))
 	}
 	if p := c.positional(); p != "" && flagValue != "" && p != flagValue {
 		return failf(ExitUsage,
-			"wenv %s names %s %q but --%s says %q — refusing rather than picking one",
+			"hikyo %s names %s %q but --%s says %q — refusing rather than picking one",
 			verb, dim, p, dim, flagValue)
 	}
 	return nil
@@ -1164,7 +1164,7 @@ func (c commonFlags) checkTarget(verb string, dim Dimension, flagValue string) e
 // happily and drop the word.
 func (c commonFlags) checkNoPositionals(verb string) error {
 	if len(c.positionals) > 0 {
-		return failf(ExitUsage, "usage: wenv %s takes no positional arguments, got: %s",
+		return failf(ExitUsage, "usage: hikyo %s takes no positional arguments, got: %s",
 			verb, strings.Join(c.positionals, " "))
 	}
 	return nil
@@ -1247,7 +1247,7 @@ func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, Session
 	artifact, ok := sessions[instance]
 	if !ok {
 		return nil, SessionArtifact{}, Resolved{}, failf(ExitAuth,
-			"no session for instance %q: run `wenv login <url> --local --as <user>`", instance)
+			"no session for instance %q: run `hikyo login <url> --local --as <user>`", instance)
 	}
 	if artifact.Origin != entry.Origin {
 		return nil, SessionArtifact{}, Resolved{}, failf(ExitRefused,

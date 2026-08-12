@@ -13,10 +13,10 @@
 -- with #50; the flat-model ADR's "a structure that must not be used is a bug
 -- that hasn't happened yet" forbids the dormant column as much as the live one.
 --
--- wenv:table key_groups class=key chain=org_id,project_id
--- wenv:table keys class=key chain=org_id,project_id
--- wenv:table key_presence_environments class=key chain=org_id,project_id
--- wenv:table project_schema_revisions class=key chain=org_id,project_id
+-- hikyo:table key_groups class=key chain=org_id,project_id
+-- hikyo:table keys class=key chain=org_id,project_id
+-- hikyo:table key_presence_environments class=key chain=org_id,project_id
+-- hikyo:table project_schema_revisions class=key chain=org_id,project_id
 
 -- A key group is a named, project-level set of keys; a key belongs to at most
 -- one, which is why the membership is a column on `keys` rather than a join

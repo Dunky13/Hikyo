@@ -1889,7 +1889,7 @@ export const zSamlAcsData = z.object({
 });
 
 /**
- * The minted or rotated ordinary Wenv session.
+ * The minted or rotated ordinary Hikyo session.
  */
 export const zSamlAcsResponse = zLoginResult;
 

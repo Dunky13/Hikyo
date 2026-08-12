@@ -6,8 +6,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // WebAuthn / passkey handlers (#54). Like every other authentication surface
@@ -20,7 +20,7 @@ import (
 //
 // WebAuthn is a browser-only ceremony (the CLI refuses it by name), so a
 // minted, reissued or rotated session is a browser session: its token is
-// delivered on the `__Host-wenv` cookie exactly as the OIDC callback delivers
+// delivered on the `__Host-hikyo` cookie exactly as the OIDC callback delivers
 // one, and the JSON body carries the same session for a fetch-based caller.
 
 // webauthnPrecondition reports a loud structural refusal on a caller acting on
@@ -57,7 +57,7 @@ func webauthnOptions(raw []byte) (apigen.WebauthnOptions, error) {
 	return m, nil
 }
 
-// browserSessionCookieFor builds the __Host-wenv session cookie for a minted or
+// browserSessionCookieFor builds the __Host-hikyo session cookie for a minted or
 // rotated browser session (identical attributes to the OIDC callback's).
 func browserSessionCookieFor(token string) *http.Cookie {
 	return &http.Cookie{
@@ -67,7 +67,7 @@ func browserSessionCookieFor(token string) *http.Cookie {
 }
 
 // webauthnSessionResponse writes a LoginResult body and, for a browser session,
-// the reissued token on the __Host-wenv cookie. One type satisfies every
+// the reissued token on the __Host-hikyo cookie. One type satisfies every
 // LoginResult-returning finish operation's response interface.
 type webauthnSessionResponse struct {
 	body   apigen.LoginResult

@@ -1,6 +1,6 @@
 # Handoff: #48 hierarchy CRUD — org / project / environment / folder via API + CLI
 
-Issue: https://github.com/Dunky13/wenv/issues/48 (parent #41, blocked by #47 — merged).
+Issue: https://github.com/Dunky13/hikyo/issues/48 (parent #41, blocked by #47 — merged).
 Specs, all on `wayfinder-docs`: `docs/spec/domain-model.md`, `docs/adr/flat-model.md`
 (supersedes the inheritance model in full), `docs/adr/api-cli-surface.md`,
 `docs/spec/api-cli-spellings.md`, `docs/adr/tenant-isolation.md`,
@@ -101,11 +101,11 @@ object) or `checkNoPositionals` (takes none), from a switch `subverb()` already
 made exhaustive — so `folder list stray` and `project create stray --name x`
 refuse instead of dropping the word. The contradiction is checked against the
 FLAG only, and *availability* of a target is deliberately NOT a syntax question:
-`--org`, `WENV_ORG`, a pin file and a context may each supply it, so all four
+`--org`, `HIKYO_ORG`, a pin file and a context may each supply it, so all four
 families ask that after resolution through `addressed()`. `conflict` and
 `limit_exceeded` map to exit 4 (refused), not 1.
 
-`wenv project delete` requires
+`hikyo project delete` requires
 `--confirm <project-name>` byte-matched against the server's copy of the name
 (permission-model's locked row: "explicit confirmation naming the project");
 absent → exit 4 **before any request at all**; mismatched → exit 4 after the
@@ -161,7 +161,7 @@ every count untouched.
 - **Rename/delete read the row in-transaction** so the audit trail records
   the actual transition (`previous_name` + `name`).
 - **Lists unpaged** (precedent `OrgList`), bounded by the 50-environment cap.
-- `x-wenv-min-revision: 1` on every new operation (`api.Revision` stays 1
+- `x-hikyo-min-revision: 1` on every new operation (`api.Revision` stays 1
   pre-freeze).
 
 ## Disposition items (human) — surfaced at merge gate
@@ -194,7 +194,7 @@ every count untouched.
 ## Verification record
 
 `go build/vet/gofmt` clean; `go test ./...` exit 0 on sqlite **and** postgres
-18 (`WENV_TEST_POSTGRES_DSN`, conformance + isolation both engines); sqlc +
+18 (`HIKYO_TEST_POSTGRES_DSN`, conformance + isolation both engines); sqlc +
 oapi-codegen regen idempotent; TS client regen idempotent + typecheck + 4/4
 contract fixtures (Node 24 per `.nvmrc`). Two-axis review (standards + spec)
 findings fixed in-slice; cross-model review record appended below.

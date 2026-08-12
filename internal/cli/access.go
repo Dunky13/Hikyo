@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
-// The access verbs (#55): `wenv access grant list|add|remove|template` and
-// `wenv access member list|remove`, plus `wenv project-settings get|set`.
+// The access verbs (#55): `hikyo access grant list|add|remove|template` and
+// `hikyo access member list|remove`, plus `hikyo project-settings get|set`.
 //
 // Spelling note, same shape as #48's. The api-cli-surface ADR's access group
 // is `grant list | add | remove`, `member list | invite | remove`,
@@ -69,7 +69,7 @@ func resolveAccessScope(resolved Resolved, flags commonFlags, instanceScope bool
 	if instanceScope {
 		if flags.Org != "" || flags.Project != "" || flags.Env != "" {
 			return accessScope{}, failf(ExitUsage,
-				"wenv %s: --instance-scope and --org/--project/--env name two different scopes; choose one", verb)
+				"hikyo %s: --instance-scope and --org/--project/--env name two different scopes; choose one", verb)
 		}
 		return accessScope{path: api.PathPrefix + "/instance/grants", label: "instance"}, nil
 	}
@@ -125,11 +125,11 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case sub != "list" && principal == "":
-		return failf(ExitUsage, "usage: wenv access grant %s --principal <id> ...", sub)
+		return failf(ExitUsage, "usage: hikyo access grant %s --principal <id> ...", sub)
 	case (sub == "add" || sub == "remove") && capability == "":
-		return failf(ExitUsage, "usage: wenv access grant %s --principal <id> --capability <atom>", sub)
+		return failf(ExitUsage, "usage: hikyo access grant %s --principal <id> --capability <atom>", sub)
 	case sub == "template" && template == "":
-		return failf(ExitUsage, "usage: wenv access grant template --principal <id> --template <name>")
+		return failf(ExitUsage, "usage: hikyo access grant template --principal <id> --template <name>")
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -219,7 +219,7 @@ func runAccessMember(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	if sub == "remove" && principal == "" {
-		return failf(ExitUsage, "usage: wenv access member remove --principal <id>")
+		return failf(ExitUsage, "usage: hikyo access member remove --principal <id>")
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -237,7 +237,7 @@ func runAccessMember(ctx context.Context, ios IO, args []string) error {
 	// not a narrower answer.
 	if strings.Contains(scope.path, "/environments/") {
 		return failf(ExitUsage,
-			"wenv access member %s lists at org or project scope: an environment-only membership view would omit the org- and project-scoped grants that reach it", sub)
+			"hikyo access member %s lists at org or project scope: an environment-only membership view would omit the org- and project-scoped grants that reach it", sub)
 	}
 
 	var list apigen.GrantList
@@ -347,7 +347,7 @@ func runProjectSettings(ctx context.Context, ios IO, args []string) error {
 
 	if protected == "" && window == "" {
 		return failf(ExitUsage,
-			"usage: wenv project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]")
+			"usage: hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]")
 	}
 	// Read-then-overlay: the route is a full replacement, so an unnamed knob
 	// has to be carried over rather than defaulted. The read runs under the

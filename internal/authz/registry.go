@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // Operation names one entry in the operation registry — the single table

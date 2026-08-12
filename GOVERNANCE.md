@@ -1,6 +1,6 @@
-# Wenv governance
+# Hikyo governance
 
-Wenv uses an honest BDFL model. The current maintainer set has one member,
+Hikyo uses an honest BDFL model. The current maintainer set has one member,
 Marc Went, who is the benevolent dictator for life (BDFL). If the maintainer
 set grows, the BDFL retains final decision authority.
 
@@ -46,16 +46,16 @@ the ADR itself. Amendments to this governance document follow that procedure.
 
 Repository branch and tag protections are enforced and auditable. Organization-wide
 2FA enforcement remains pending until the repository is transferred from its current
-personal owner to a dedicated organization. Wenv does not claim that control is
+personal owner to a dedicated organization. Hikyo does not claim that control is
 active before the transfer is complete and verified.
 
 ## Fully-open pledge
 
-Every capability required to run Wenv in production is and will remain open
+Every capability required to run Hikyo in production is and will remain open
 source; there is no `/ee` directory and there will never be one.
 
 This includes every functional and administrative outcome: running,
-configuring, backing up, restoring, upgrading, and operating Wenv, including
+configuring, backing up, restoring, upgrading, and operating Hikyo, including
 everything a hosted tenant could see or do. A future hosted service may schedule
 and operate released open-source artifacts through documented public
 interfaces. It may not contain an exclusive capability, policy engine, API,

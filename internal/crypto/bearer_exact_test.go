@@ -27,7 +27,7 @@ func TestParseArtifactAcceptsOnlyEmittableBodies(t *testing.T) {
 			raw[i] = byte(i + 1)
 		}
 		body := base62(raw)
-		v := "ew_" + artifactFormatVersion + "_" + string(ArtifactCLISession) + "_" + body + checksum(body)
+		v := "hik_" + artifactFormatVersion + "_" + string(ArtifactCLISession) + "_" + body + checksum(body)
 		if err := ParseArtifact(v, ArtifactCLISession); err == nil {
 			t.Fatalf("a %d-byte body was accepted, only %d is emittable", len(raw), bodyBytes)
 		}
@@ -37,7 +37,7 @@ func TestParseArtifactAcceptsOnlyEmittableBodies(t *testing.T) {
 	// it decodes to the right bytes.
 	v, _, _ := NewArtifact(ArtifactBootstrap)
 	// Splice an extra '0' into the body: same value, longer string.
-	prefix := "ew_" + artifactFormatVersion + "_" + string(ArtifactBootstrap) + "_"
+	prefix := "hik_" + artifactFormatVersion + "_" + string(ArtifactBootstrap) + "_"
 	payload := v[len(prefix):]
 	body, sum := payload[:len(payload)-checksumChars], payload[len(payload)-checksumChars:]
 	nonCanonical := prefix + "0" + body + sum

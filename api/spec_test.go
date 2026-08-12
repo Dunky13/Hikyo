@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/api"
+	"github.com/Dunky13/hikyo/api"
 )
 
 // The contract's own well-formedness. Cross-checks against the authorization
@@ -131,7 +131,7 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 			t.Errorf("%s: unknown probe class %q", id, op.Class)
 		}
 		if op.MinRevision < 1 || op.MinRevision > api.Revision {
-			t.Errorf("%s: x-wenv-min-revision %d is outside [1,%d] — an operation cannot require a revision this server does not serve",
+			t.Errorf("%s: x-hikyo-min-revision %d is outside [1,%d] — an operation cannot require a revision this server does not serve",
 				id, op.MinRevision, api.Revision)
 		}
 		if len(op.Artifacts) == 0 {
@@ -149,7 +149,7 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 		// and one that names none must not: the pair is the behavioural half
 		// of the freeze promise, recorded per operation.
 		if (op.AuthzOp == "") != (len(op.Formula) == 0) {
-			t.Errorf("%s: x-wenv-operation and x-wenv-formula must be present together (op=%q formula=%v)",
+			t.Errorf("%s: x-hikyo-operation and x-hikyo-formula must be present together (op=%q formula=%v)",
 				id, op.AuthzOp, op.Formula)
 		}
 		// A pre-authentication path takes no artifact, and an artifact-taking

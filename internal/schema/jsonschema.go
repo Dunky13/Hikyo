@@ -20,7 +20,7 @@ import (
 // profiled, budgeted subset:
 //
 //   - PINNED library and version — github.com/santhosh-tekuri/jsonschema/v6
-//     v6.0.2, pinned in go.mod. Two Wenv installations must accept and reject
+//     v6.0.2, pinned in go.mod. Two Hikyo installations must accept and reject
 //     the same schemas; "some 2020-12 validator" is not a contract. The
 //     conformance-suite baseline is the ops spec's to name (disposition item).
 //   - ONE pinned dialect — 2020-12, declared, no negotiation.
@@ -49,10 +49,10 @@ import (
 //     boundable), `$dynamicRef`/`$dynamicAnchor` (meaning not statically
 //     determinable at all).
 //
-// This pre-pass is Wenv's own, run over the parsed document BEFORE the library
+// This pre-pass is Hikyo's own, run over the parsed document BEFORE the library
 // ever sees it. Delegating the profile to the library would make the profile
 // whatever that library's next version decides.
-const schemaResourceURL = "https://schema.wenv.invalid/declaration"
+const schemaResourceURL = "https://schema.hikyo.invalid/declaration"
 
 // keywordKind says how a keyword's value is shaped, which is what the walk
 // needs in order to know where the subschemas are.

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/authn"
-	"github.com/Dunky13/wenv/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/authn"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
 func TestSAMLArtifactsAreSingleUseAndDurable(t *testing.T) {
@@ -37,7 +37,7 @@ func TestSAMLArtifactsAreSingleUseAndDurable(t *testing.T) {
 
 	provider := authn.NewSAMLProvider{
 		ID: "sp-1", Slug: "corp", DisplayName: "Corp SSO",
-		EntityID: "https://idp.example/saml", ACSURL: "https://wenv.example/saml/corp/acs",
+		EntityID: "https://idp.example/saml", ACSURL: "https://hikyo.example/saml/corp/acs",
 		SSORedirectURL: "https://idp.example/sso", SigningCertificates: []byte(`[{"fingerprint":"sha256:01"}]`),
 		MetadataSource: "file", Enabled: true, CreatedAt: now, UpdatedAt: now,
 	}

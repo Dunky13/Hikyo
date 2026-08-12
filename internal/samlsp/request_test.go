@@ -25,8 +25,8 @@ func TestBuildAuthnRequestBuildsSignedRedirectOverExactWireValues(t *testing.T) 
 	key, certificate := requestSigningFixture(t)
 	result, err := BuildAuthnRequest(AuthnRequestConfig{
 		IDPSSOURL:   "https://idp.example/sso?tenant=example",
-		SPEntityID:  "https://wenv.example/saml/metadata",
-		ACSURL:      "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID:  "https://hikyo.example/saml/metadata",
+		ACSURL:      "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RelayState:  "opaque state/+",
 		ForceAuthn:  true,
 		Sign:        true,
@@ -95,8 +95,8 @@ func TestBuildAuthnRequestBuildsUnsignedLoginRequest(t *testing.T) {
 
 	result, err := BuildAuthnRequest(AuthnRequestConfig{
 		IDPSSOURL:  "https://idp.example/sso",
-		SPEntityID: "https://wenv.example/saml/metadata",
-		ACSURL:     "https://wenv.example/api/v1/auth/saml/provider/acs",
+		SPEntityID: "https://hikyo.example/saml/metadata",
+		ACSURL:     "https://hikyo.example/api/v1/auth/saml/provider/acs",
 		RelayState: "opaque",
 		Now:        time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 	})

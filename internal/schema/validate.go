@@ -17,7 +17,7 @@ import (
 
 // The value-validation engine. One declaration, one string, one verdict.
 //
-// Everything Wenv delivers is a string on the wire, so a type is a
+// Everything Hikyo delivers is a string on the wire, so a type is a
 // parse-and-reject rule plus a UI affordance, never a storage format — which
 // is why this file parses and refuses, and never rewrites a value beyond the
 // one trim the ADR mandates.
@@ -96,7 +96,7 @@ func (c *Compiled) Validate(value string, cls Classification) Verdict {
 			Message: "value is not valid UTF-8"})
 	case strings.ContainsRune(trimmed, 0):
 		// NUL is not a fussy restriction: the Compose delivery path is an
-		// execve environment block, which cannot carry one, so a value Wenv
+		// execve environment block, which cannot carry one, so a value Hikyo
 		// called valid would be undeliverable.
 		return v.fail(Failure{Alternative: -1, Keyword: "lexical.nul",
 			Message: "value contains a NUL byte"})
@@ -113,7 +113,7 @@ func (c *Compiled) Validate(value string, cls Classification) Verdict {
 		if len(failures) == 0 {
 			// At least one alternative accepts, so the value is valid.
 			// Overlapping alternatives are explicitly fine and never an error;
-			// there is no XOR semantic anywhere in Wenv's own vocabulary.
+			// there is no XOR semantic anywhere in Hikyo's own vocabulary.
 			return Verdict{Valid: true}
 		}
 		all = append(all, failures...)
@@ -337,7 +337,7 @@ func (cr compiledRule) validate(value string, cls Classification, alt int) []Fai
 	case TypeBoolean:
 		if value != "true" && value != "false" {
 			// `1`, `yes`, `TRUE` are rejected loud, never coerced: coercion
-			// would make Wenv's truthiness differ from each consuming
+			// would make Hikyo's truthiness differ from each consuming
 			// language's, so a value that validated here could mean the
 			// opposite there.
 			return fail("type", "value is not the canonical `true` or `false`")

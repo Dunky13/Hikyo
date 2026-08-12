@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/schema"
+	"github.com/Dunky13/hikyo/internal/schema"
 )
 
 // The JSON Schema conformance baseline.
 //
 // The ADR requires "a pinned library and version, PLUS A CONFORMANCE-SUITE
-// BASELINE": two Wenv installations must accept and reject the same schemas,
+// BASELINE": two Hikyo installations must accept and reject the same schemas,
 // and "some 2020-12 validator" is not a contract. The library and version are
 // pinned in go.mod; this is the behavioural half.
 //
@@ -30,16 +30,16 @@ import (
 //     by construction. It is skipped and the profile's own refusal is the
 //     reason; the counts below assert the profile is neither refusing
 //     everything nor refusing nothing.
-//   - A group whose INSTANCE is not a thing Wenv can hold — the engine's
+//   - A group whose INSTANCE is not a thing Hikyo can hold — the engine's
 //     lexical rules refuse non-UTF-8, NUL bytes and duplicate object keys
 //     before any schema runs, and trims edge whitespace — is named in
 //     lexicalSkips with the rule that catches it.
 //
 // The suite's `data` is fed as its ORIGINAL BYTES, because a `json` value in
-// Wenv is a string on the wire and re-marshalling would hide exactly the
+// Hikyo is a string on the wire and re-marshalling would hide exactly the
 // duplicate-key and number-precision behaviour the ADR fixes.
 
-// lexicalSkips names every case where Wenv's own value rules — not the schema —
+// lexicalSkips names every case where Hikyo's own value rules — not the schema —
 // decide the outcome, so the suite's expectation cannot apply. Keyed
 // "file/group/test", each with the rule responsible.
 var lexicalSkips = map[string]string{}

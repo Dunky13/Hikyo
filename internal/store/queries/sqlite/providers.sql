@@ -5,7 +5,7 @@
 -- (OpProviderPut/Delete under instance-config) before these run; the write
 -- itself rides the resolution surface, like the session lifecycle.
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: CreateOIDCProvider :exec
 INSERT INTO oidc_providers
     (id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
@@ -13,14 +13,14 @@ INSERT INTO oidc_providers
      created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?);
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: GetOIDCProviderBySlug :one
 SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
        redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
        created_at, updated_at
 FROM oidc_providers WHERE slug = ?;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: ListOIDCProviders :many
 SELECT id, slug, display_name, kind, issuer, client_id, client_secret, scopes,
        redirect_uri, jit_policy, assurance_policy, enabled, dek_version, row_version,
@@ -30,7 +30,7 @@ FROM oidc_providers ORDER BY slug;
 -- The issuer is never in the SET list: it is immutable after create (A3), so a
 -- reconfiguration cannot silently move the identity space to a new authority.
 -- CAS on row_version so a concurrent reconfigure fails closed.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: UpdateOIDCProviderCAS :execrows
 UPDATE oidc_providers
 SET display_name = ?, client_id = ?, client_secret = ?, scopes = ?,
@@ -42,11 +42,11 @@ WHERE id = ? AND row_version = ?;
 -- database write lock for the whole delete tx, so a concurrent mint guard
 -- cannot interleave; this read confirms the row still exists (no-rows =>
 -- ErrProviderNotFound) and keeps the delete path identical across engines.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: LockOIDCProviderForDelete :one
 SELECT id FROM oidc_providers WHERE id = ?;
 
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: DeleteOIDCProvider :exec
 DELETE FROM oidc_providers WHERE id = ?;
 
@@ -58,7 +58,7 @@ DELETE FROM oidc_providers WHERE id = ?;
 -- serializes behind it (and vice-versa: whichever commits first, the other's
 -- guard sees the bumped row_version and fails). The no-op never bumps
 -- row_version, so it never spuriously fails an administrator's reconfigure CAS.
--- wenv:authn-resolution
+-- hikyo:authn-resolution
 -- name: GuardOIDCProviderForMint :execrows
 UPDATE oidc_providers SET row_version = row_version
 WHERE id = ? AND row_version = ? AND issuer = ? AND enabled = 1;

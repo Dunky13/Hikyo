@@ -14,7 +14,7 @@ const countGrantOrigins = `-- name: CountGrantOrigins :one
 SELECT COUNT(*) FROM grant_origins WHERE grant_id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) CountGrantOrigins(ctx context.Context, grantID string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countGrantOrigins, grantID)
 	var count int64
@@ -34,7 +34,7 @@ type DeleteGrantOriginParams struct {
 
 // Releasing one origin. The grant row survives while another origin holds it;
 // only the last release deletes the row (permission ADR, scim amendment (a)).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteGrantOrigin(ctx context.Context, arg DeleteGrantOriginParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteGrantOrigin, arg.GrantID, arg.Kind, arg.Subject)
 	if err != nil {
@@ -47,7 +47,7 @@ const deleteGrantRow = `-- name: DeleteGrantRow :execrows
 DELETE FROM grants WHERE id = ?
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteGrantRow(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteGrantRow, id)
 	if err != nil {
@@ -68,7 +68,7 @@ type EnvironmentReauthSettingsRow struct {
 // The reveal guard reads the environment's own protection state and window.
 // It is a resolution read, not a store read: the reauthentication machinery
 // runs beside session resolution, before any operation proof exists.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) EnvironmentReauthSettings(ctx context.Context, id string) (EnvironmentReauthSettingsRow, error) {
 	row := q.db.QueryRowContext(ctx, environmentReauthSettings, id)
 	var i EnvironmentReauthSettingsRow
@@ -87,7 +87,7 @@ type GetPrincipalClassRow struct {
 
 // The machine allowlists key on the principal's class; kind discriminates
 // human from machine. An unclassified machine principal fails closed in Go.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetPrincipalClass(ctx context.Context, id string) (GetPrincipalClassRow, error) {
 	row := q.db.QueryRowContext(ctx, getPrincipalClass, id)
 	var i GetPrincipalClassRow
@@ -108,7 +108,7 @@ type InsertGrantOriginParams struct {
 	CreatedAt string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertGrantOrigin(ctx context.Context, arg InsertGrantOriginParams) error {
 	_, err := q.db.ExecContext(ctx, insertGrantOrigin,
 		arg.ID,
@@ -131,7 +131,7 @@ type ListGrantOriginsForGrantRow struct {
 
 // The origins holding ONE grant row, for dedup (does this grantor already
 // hold it?) and for revocation (which origins may this surface release?).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantOriginsForGrant(ctx context.Context, grantID string) ([]ListGrantOriginsForGrantRow, error) {
 	rows, err := q.db.QueryContext(ctx, listGrantOriginsForGrant, grantID)
 	if err != nil {
@@ -174,7 +174,7 @@ type ListGrantRowsForPrincipalRow struct {
 // does: authorize() reads grants to mint a proof, so a grant write cannot be
 // gated behind one. Every query here is annotated and pinned.
 // ASCII only: multibyte characters shift sqlite statement offsets.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantRowsForPrincipal(ctx context.Context, principalID string) ([]ListGrantRowsForPrincipalRow, error) {
 	rows, err := q.db.QueryContext(ctx, listGrantRowsForPrincipal, principalID)
 	if err != nil {
@@ -225,7 +225,7 @@ type ListGrantsWithOriginsAtInstanceRow struct {
 	Subject     string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsAtInstance(ctx context.Context) ([]ListGrantsWithOriginsAtInstanceRow, error) {
 	rows, err := q.db.QueryContext(ctx, listGrantsWithOriginsAtInstance)
 	if err != nil {
@@ -283,7 +283,7 @@ type ListGrantsWithOriginsForOrgRow struct {
 // Membership inspection, per capability line with its origin chips. The JOIN
 // means a grant with no origin cannot appear at all, which is the invariant
 // stated as a query.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsForOrg(ctx context.Context, orgID sql.NullString) ([]ListGrantsWithOriginsForOrgRow, error) {
 	rows, err := q.db.QueryContext(ctx, listGrantsWithOriginsForOrg, orgID)
 	if err != nil {
@@ -348,7 +348,7 @@ type ListGrantsWithOriginsForProjectRow struct {
 // the org's rows in Go afterwards makes the work scale with sibling-project
 // membership, which is a structural oracle, and materializes administrative
 // data from projects the caller was never authorized to see.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListGrantsWithOriginsForProject(ctx context.Context, arg ListGrantsWithOriginsForProjectParams) ([]ListGrantsWithOriginsForProjectRow, error) {
 	rows, err := q.db.QueryContext(ctx, listGrantsWithOriginsForProject, arg.OrgID, arg.ProjectID)
 	if err != nil {
@@ -388,7 +388,7 @@ WHERE capability = 'manage-members' AND org_id IS NULL
 ORDER BY principal_id
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListManageMembersHoldersAtInstance(ctx context.Context) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listManageMembersHoldersAtInstance)
 	if err != nil {
@@ -429,7 +429,7 @@ ORDER BY principal_id
 // member manager would count toward the org census. The permission ADR draws
 // the lockout line at org and instance scope, so a project-scope holder is
 // not one of the org's holders.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListManageMembersHoldersForOrg(ctx context.Context, orgID sql.NullString) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listManageMembersHoldersForOrg, orgID)
 	if err != nil {

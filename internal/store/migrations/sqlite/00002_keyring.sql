@@ -15,9 +15,9 @@
 -- and no query here carries a tenant predicate. They are reachable only
 -- under a SystemProof minted at the boot mint site.
 --
--- wenv:table master_keys class=instance chain=-
--- wenv:table tier3_keys class=instance chain=-
--- wenv:table key_generations class=instance chain=-
+-- hikyo:table master_keys class=instance chain=-
+-- hikyo:table tier3_keys class=instance chain=-
+-- hikyo:table key_generations class=instance chain=-
 
 CREATE TABLE master_keys (
     version INTEGER NOT NULL,

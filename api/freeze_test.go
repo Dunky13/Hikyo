@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/api"
+	"github.com/Dunky13/hikyo/api"
 )
 
 // Negative fixtures for the freeze gate (mvp-boundary S1).

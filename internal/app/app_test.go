@@ -12,7 +12,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/Dunky13/wenv/internal/config"
+	"github.com/Dunky13/hikyo/internal/config"
 )
 
 func testLogger() *slog.Logger {
@@ -23,8 +23,8 @@ func devConfig(t *testing.T) *config.Config {
 	t.Helper()
 	cfg, _, err := config.Load("server", []string{"--dev", "--listen", "127.0.0.1:0"},
 		func(k string) string {
-			if k == "WENV_DB" {
-				return "sqlite:" + filepath.Join(t.TempDir(), "wenv.db")
+			if k == "HIKYO_DB" {
+				return "sqlite:" + filepath.Join(t.TempDir(), "hikyo.db")
 			}
 			return ""
 		}, nil)

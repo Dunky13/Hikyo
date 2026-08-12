@@ -5,7 +5,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$script_dir/../lib/release.sh"
 
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-installer-fixture.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-installer-fixture.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 printf '{"root":"fixture"}\n' >"$fixture_dir/root.json"
 printf '#!/bin/sh\nexit 0\n' >"$fixture_dir/verify.sh"

@@ -19,8 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
 
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 type Engine string
@@ -445,7 +445,7 @@ type pgSettingQuerier interface {
 // postgres gets the same no-silent-downgrade posture — a server with
 // fsync=off or synchronous_commit=off would make "denial durable before the
 // response" a fiction, so boot refuses. A deployment wanting async commit
-// for other workloads runs Wenv against a database configured for durable
+// for other workloads runs Hikyo against a database configured for durable
 // commits or does not run it. The store never issues SET synchronous_commit
 // at any level (lint-banned).
 func verifyPGDurability(ctx context.Context, q pgSettingQuerier) error {

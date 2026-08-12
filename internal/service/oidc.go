@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/audit"
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/oidcrp"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/oidcrp"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // Multi-provider OIDC (#54, human-auth ADR - Login methods, Identity linking,
@@ -70,7 +70,7 @@ const (
 	causeDowngrade       = "downgrade"
 )
 
-// possessionAMR is the closed set of RFC 8176 amr values wenv accepts as
+// possessionAMR is the closed set of RFC 8176 amr values hikyo accepts as
 // evidence of a possession factor for a reauth: a hardware key, a software key,
 // or a one-time password. "pwd"/"pin" (knowledge) and biometric-only values are
 // deliberately excluded, so a password-only token can never open a reveal reauth

@@ -119,7 +119,7 @@ func TestArtifactGrammarAndChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(value, "ew_1_cli_") {
+	if !strings.HasPrefix(value, "hik_1_cli_") {
 		t.Fatalf("artifact does not follow the locked grammar: %q", value)
 	}
 	if err := ParseArtifact(value, ArtifactCLISession); err != nil {
@@ -143,9 +143,10 @@ func TestArtifactChecksumRejectsCorruptionLocally(t *testing.T) {
 	}
 	mutations := map[string]string{
 		"truncated":      value[:len(value)-1],
-		"flipped body":   flip(value, len("ew_1_cli_")),
+		"flipped body":   flip(value, len("hik_1_cli_")),
 		"flipped suffix": flip(value, len(value)-1),
-		"no prefix":      strings.TrimPrefix(value, "ew_"),
+		"no prefix":      strings.TrimPrefix(value, "hik_"),
+		"legacy prefix":  strings.Replace(value, "hik_", "ew_", 1),
 		"empty":          "",
 	}
 	for name, bad := range mutations {

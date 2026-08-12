@@ -13,7 +13,7 @@ const countOrgs = `-- name: CountOrgs :one
 SELECT COUNT(*) FROM orgs
 `
 
-// wenv:instance-scoped
+// hikyo:instance-scoped
 func (q *Queries) CountOrgs(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countOrgs)
 	var count int64
@@ -45,7 +45,7 @@ type CreateOrgParams struct {
 // tenant statement and the binding layer takes `id` from the proof. That is
 // what makes an org nobody may reach indistinguishable from a missing one
 // (#48, mvp-boundary C1).
-// wenv:instance-scoped
+// hikyo:instance-scoped
 func (q *Queries) CreateOrg(ctx context.Context, arg CreateOrgParams) error {
 	_, err := q.db.ExecContext(ctx, createOrg,
 		arg.ID,
@@ -90,7 +90,7 @@ const listOrgs = `-- name: ListOrgs :many
 SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name
 `
 
-// wenv:instance-scoped
+// hikyo:instance-scoped
 func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 	rows, err := q.db.QueryContext(ctx, listOrgs)
 	if err != nil {

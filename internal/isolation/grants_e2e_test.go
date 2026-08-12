@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
+	"github.com/Dunky13/hikyo/api"
 
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // The permission model's own fixtures (#55): the grant-authority rules, the
@@ -662,7 +662,7 @@ func runGrantLifecycle(t *testing.T, db *store.DB) {
 // TestBreakGlassGrantHasNoNetworkRoute is the contract half of "break-glass is
 // local host authority only": the whole HTTP surface carries no path that
 // creates a grant under local authority, and `cli:admin` — the verb group
-// `wenv admin grant` belongs to — is ClassSystem, whose probe contract is
+// `hikyo admin grant` belongs to — is ClassSystem, whose probe contract is
 // network unreachability (invariant 1 asserts it by finding no route).
 func TestBreakGlassGrantHasNoNetworkRoute(t *testing.T) {
 	ops, err := api.Operations()

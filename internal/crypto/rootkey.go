@@ -12,7 +12,7 @@ import (
 
 // Root-key bootstrap, per the encryption ADR: the operator-held 256-bit root
 // key arrives as a file (`--root-key-file`, which also covers systemd
-// LoadCredential delivery) or the WENV_ROOT_KEY environment variable —
+// LoadCredential delivery) or the HIKYO_ROOT_KEY environment variable —
 // documented as the weakest tier, since an env value sits in process memory
 // for the whole lifetime and defeats the post-boot wipe.
 //
@@ -22,7 +22,7 @@ import (
 // Startup refusals — each is its own distinct error (CI invariant 6), all
 // hard failures with no override flag.
 var (
-	ErrNoRootKey = errors.New("crypto: no root key configured: set --root-key-file or WENV_ROOT_KEY")
+	ErrNoRootKey = errors.New("crypto: no root key configured: set --root-key-file or HIKYO_ROOT_KEY")
 	// ErrRootKeyPerms: a key file readable by group or other is refused.
 	ErrRootKeyPerms = errors.New("crypto: root key file is readable by group or other (chmod 600 it)")
 	// ErrRootKeyFormat: anything but 256 bits after hex decoding is refused.
@@ -79,7 +79,7 @@ func decodeRootKey(raw []byte) ([]byte, error) {
 }
 
 // EncodeRootKey renders a root key in the fixed on-disk encoding. It exists
-// for key generation (`wenv init`, dev bootstrap) so the format lives in one
+// for key generation (`hikyo init`, dev bootstrap) so the format lives in one
 // place.
 func EncodeRootKey(key []byte) string { return hex.EncodeToString(key) }
 

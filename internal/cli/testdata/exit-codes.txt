@@ -1,57 +1,57 @@
-wenv -> 2 usage
-wenv teleport -> 2 usage
-wenv context warp -> 2 usage
-wenv context show -> 2 usage
-wenv context show nope -> 5 not found
-wenv context delete --instance nope -> 5 not found
-wenv login --local -> 2 usage
-wenv login https://wenv.example -> 4 refused
-wenv login https://wenv.example --device -> 4 refused
-wenv login --local --as u unknown-ref -> 4 refused
-wenv context list -o yaml -> 2 usage
-wenv org -> 2 usage
-wenv org list --instance unknown-ref -> 4 refused
-wenv account -> 2 usage
-wenv project -> 2 usage
-wenv project warp -> 2 usage
-wenv env -> 2 usage
-wenv env warp -> 2 usage
-wenv folder -> 2 usage
-wenv folder warp -> 2 usage
-wenv project list --instance unknown-ref --org org_x -> 4 refused
-wenv env list --instance unknown-ref -> 4 refused
-wenv folder create --instance unknown-ref -> 2 usage
-wenv folder show --instance unknown-ref -> 2 usage
-wenv env rename env_x --instance unknown-ref -> 2 usage
-wenv env reorder --instance unknown-ref -> 2 usage
-wenv folder delete fld_x typo --instance unknown-ref -> 2 usage
-wenv folder list stray --instance unknown-ref -> 2 usage
-wenv project create stray --name p --instance unknown-ref -> 2 usage
-wenv env list stray --instance unknown-ref -> 2 usage
-wenv org list stray --instance unknown-ref -> 2 usage
-wenv org warp -> 2 usage
-wenv org create --instance unknown-ref -> 2 usage
-wenv org rename org_x --instance unknown-ref -> 2 usage
-wenv org show org_a --org org_b --instance unknown-ref -> 2 usage
-wenv project show prj_a --project prj_b --instance unknown-ref -> 2 usage
-wenv project delete prj_x --org org_x --instance unknown-ref -> 4 refused
-wenv account passkey enrol -> 4 refused
-wenv key -> 2 usage
-wenv key warp -> 2 usage
-wenv key group -> 2 usage
-wenv key group warp -> 2 usage
-wenv key create --instance unknown-ref -> 2 usage
-wenv key create --name A --instance unknown-ref -> 2 usage
-wenv key create --name A --classification config --instance unknown-ref -> 2 usage
-wenv key show --instance unknown-ref -> 2 usage
-wenv key declare key_x --instance unknown-ref -> 2 usage
-wenv key reclassify key_x --instance unknown-ref -> 2 usage
-wenv key create --name A --classification config --declaration {oops --instance unknown-ref -> 2 usage
-wenv key create --name A --classification config --declaration {"rule":{"type":"string"},"rules":{}} --instance unknown-ref -> 2 usage
-wenv key create --name A --classification config --declaration {"rule":{"type":"string","patern":"^A"}} --instance unknown-ref -> 2 usage
-wenv key declare key_x --declaration {"rule":{"type":"string"}} {"rule":{"type":"integer"}} --instance unknown-ref -> 2 usage
-wenv key declare key_x --declaration {} --required-in env_a,,env_b --instance unknown-ref -> 2 usage
-wenv key list stray --instance unknown-ref -> 2 usage
-wenv key delete key_x typo --instance unknown-ref -> 2 usage
-wenv key group list stray --instance unknown-ref -> 2 usage
-wenv key list --instance unknown-ref --org org_x --project prj_x -> 4 refused
+hikyo -> 2 usage
+hikyo teleport -> 2 usage
+hikyo context warp -> 2 usage
+hikyo context show -> 2 usage
+hikyo context show nope -> 5 not found
+hikyo context delete --instance nope -> 5 not found
+hikyo login --local -> 2 usage
+hikyo login https://hikyo.example -> 4 refused
+hikyo login https://hikyo.example --device -> 4 refused
+hikyo login --local --as u unknown-ref -> 4 refused
+hikyo context list -o yaml -> 2 usage
+hikyo org -> 2 usage
+hikyo org list --instance unknown-ref -> 4 refused
+hikyo account -> 2 usage
+hikyo project -> 2 usage
+hikyo project warp -> 2 usage
+hikyo env -> 2 usage
+hikyo env warp -> 2 usage
+hikyo folder -> 2 usage
+hikyo folder warp -> 2 usage
+hikyo project list --instance unknown-ref --org org_x -> 4 refused
+hikyo env list --instance unknown-ref -> 4 refused
+hikyo folder create --instance unknown-ref -> 2 usage
+hikyo folder show --instance unknown-ref -> 2 usage
+hikyo env rename env_x --instance unknown-ref -> 2 usage
+hikyo env reorder --instance unknown-ref -> 2 usage
+hikyo folder delete fld_x typo --instance unknown-ref -> 2 usage
+hikyo folder list stray --instance unknown-ref -> 2 usage
+hikyo project create stray --name p --instance unknown-ref -> 2 usage
+hikyo env list stray --instance unknown-ref -> 2 usage
+hikyo org list stray --instance unknown-ref -> 2 usage
+hikyo org warp -> 2 usage
+hikyo org create --instance unknown-ref -> 2 usage
+hikyo org rename org_x --instance unknown-ref -> 2 usage
+hikyo org show org_a --org org_b --instance unknown-ref -> 2 usage
+hikyo project show prj_a --project prj_b --instance unknown-ref -> 2 usage
+hikyo project delete prj_x --org org_x --instance unknown-ref -> 4 refused
+hikyo account passkey enrol -> 4 refused
+hikyo key -> 2 usage
+hikyo key warp -> 2 usage
+hikyo key group -> 2 usage
+hikyo key group warp -> 2 usage
+hikyo key create --instance unknown-ref -> 2 usage
+hikyo key create --name A --instance unknown-ref -> 2 usage
+hikyo key create --name A --classification config --instance unknown-ref -> 2 usage
+hikyo key show --instance unknown-ref -> 2 usage
+hikyo key declare key_x --instance unknown-ref -> 2 usage
+hikyo key reclassify key_x --instance unknown-ref -> 2 usage
+hikyo key create --name A --classification config --declaration {oops --instance unknown-ref -> 2 usage
+hikyo key create --name A --classification config --declaration {"rule":{"type":"string"},"rules":{}} --instance unknown-ref -> 2 usage
+hikyo key create --name A --classification config --declaration {"rule":{"type":"string","patern":"^A"}} --instance unknown-ref -> 2 usage
+hikyo key declare key_x --declaration {"rule":{"type":"string"}} {"rule":{"type":"integer"}} --instance unknown-ref -> 2 usage
+hikyo key declare key_x --declaration {} --required-in env_a,,env_b --instance unknown-ref -> 2 usage
+hikyo key list stray --instance unknown-ref -> 2 usage
+hikyo key delete key_x typo --instance unknown-ref -> 2 usage
+hikyo key group list stray --instance unknown-ref -> 2 usage
+hikyo key list --instance unknown-ref --org org_x --project prj_x -> 4 refused

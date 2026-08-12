@@ -1,10 +1,10 @@
 -- +goose Up
 -- SAML SP storage (#72, saml-sp ADR). Roll-forward only: no Down section.
 --
--- wenv:table saml_providers class=authn chain=-
--- wenv:table saml_transactions class=authn chain=-
--- wenv:table saml_replay class=authn chain=-
--- wenv:table saml_sp_keys class=authn chain=-
+-- hikyo:table saml_providers class=authn chain=-
+-- hikyo:table saml_transactions class=authn chain=-
+-- hikyo:table saml_replay class=authn chain=-
+-- hikyo:table saml_sp_keys class=authn chain=-
 
 -- SQLite cannot widen a CHECK in place. Rebuild the identity table and copy
 -- every pre-amendment OIDC row unchanged; the new discriminator admits SAML

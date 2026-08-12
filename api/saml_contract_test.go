@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/api"
+	"github.com/Dunky13/hikyo/api"
 )
 
 func TestSAMLContractSurfaceIsLocked(t *testing.T) {

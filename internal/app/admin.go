@@ -8,17 +8,17 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Dunky13/wenv/internal/config"
-	"github.com/Dunky13/wenv/internal/crypto"
-	"github.com/Dunky13/wenv/internal/disclose"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/keyring"
-	"github.com/Dunky13/wenv/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/config"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/disclose"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/keyring"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
-// `wenv admin create` — the first-administrator bootstrap.
+// `hikyo admin create` — the first-administrator bootstrap.
 //
 // It is a CLIENT VERB OF THE SAME BINARY EXECUTED ON THE SERVER HOST, not a
 // new mode and not a network endpoint. That siting is the decision: an open
@@ -36,13 +36,13 @@ import (
 
 // AdminUsage is the frozen help text for the local-admin group.
 func AdminUsage(w io.Writer) {
-	fmt.Fprint(w, `wenv admin - local host authority (server host only, never over the network)
+	fmt.Fprint(w, `hikyo admin - local host authority (server host only, never over the network)
 
-  wenv admin create --username USER [--display-name NAME]
+  hikyo admin create --username USER [--display-name NAME]
                     [--output-file PATH | --dangerously-print]
-  wenv admin reset-credential --principal ID
+  hikyo admin reset-credential --principal ID
                     [--output-file PATH | --dangerously-print]
-  wenv admin grant --principal ID --capability CAP
+  hikyo admin grant --principal ID --capability CAP
                     [--org ID [--project ID [--env ID]]]
 
 create mints the first administrator and a single-use credential-establishment
@@ -75,7 +75,7 @@ the root key, so 'kubectl logs' would hand a remote reader the authority.
 func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []string, stderr io.Writer) error {
 	if len(args) == 0 {
 		AdminUsage(stderr)
-		return errors.New("usage: wenv admin create --username USER | wenv admin reset-credential --principal ID | wenv admin grant --principal ID --capability CAP")
+		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 	switch args[0] {
 	case "create":
@@ -86,7 +86,7 @@ func RunAdmin(ctx context.Context, cfg *config.Config, log *slog.Logger, args []
 		return runAdminGrant(ctx, cfg, log, args, stderr)
 	default:
 		AdminUsage(stderr)
-		return errors.New("usage: wenv admin create --username USER | wenv admin reset-credential --principal ID | wenv admin grant --principal ID --capability CAP")
+		return errors.New("usage: hikyo admin create --username USER | hikyo admin reset-credential --principal ID | hikyo admin grant --principal ID --capability CAP")
 	}
 }
 
@@ -149,7 +149,7 @@ func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, a
 		// because the instance now has an account.
 		return fmt.Errorf(
 			"the administrator %q was created and its authority minted, but delivery failed and the value is now unrecoverable.\n"+
-				"Mint a replacement with `wenv admin reset --username %s` once that verb lands, or restore and retry.\n%w",
+				"Mint a replacement with `hikyo admin reset --username %s` once that verb lands, or restore and retry.\n%w",
 			result.Username, result.Username, err)
 	}
 
@@ -158,7 +158,7 @@ func runAdminCreate(ctx context.Context, cfg *config.Config, log *slog.Logger, a
 		result.Username, result.PrincipalID, dest, result.ExpiresAt.Format("2006-01-02 15:04 MST"))
 	fmt.Fprintf(stderr,
 		"next: on the administrator's own machine, run\n"+
-			"    wenv login <instance-url> --local --as %s\n"+
+			"    hikyo login <instance-url> --local --as %s\n"+
 			"after establishing the credential with the authority above.\n", result.Username)
 	return nil
 }
@@ -199,7 +199,7 @@ func adminAuth(ctx context.Context, cfg *config.Config, log *slog.Logger) (*serv
 	return &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log}, func() { db.Close() }, nil
 }
 
-// runAdminReset is the break-glass recovery verb: `wenv admin reset-credential
+// runAdminReset is the break-glass recovery verb: `hikyo admin reset-credential
 // --principal ID`. It mints a credential-establishment authority for any existing
 // principal — including an instance-capability holder no network reset can reach
 // — on the server's own host under local authority, with no network route. The
@@ -259,7 +259,7 @@ func runAdminReset(ctx context.Context, cfg *config.Config, log *slog.Logger, ar
 	return nil
 }
 
-// runAdminGrant is the break-glass recovery grant: `wenv admin grant
+// runAdminGrant is the break-glass recovery grant: `hikyo admin grant
 // --principal ID --capability CAP [--org ... --project ... --env ...]`.
 //
 // It is the ONLY authorization path in the system not evaluated against a

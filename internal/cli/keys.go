@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Dunky13/wenv/api/apigen"
+	"github.com/Dunky13/hikyo/api/apigen"
 )
 
-// The key-catalogue verbs (#49): `wenv key …`, with the group verbs under
-// `wenv key group …`.
+// The key-catalogue verbs (#49): `hikyo key …`, with the group verbs under
+// `hikyo key group …`.
 //
 // Spelling note, same disposition as #48's: the api-cli-surface ADR's closed
 // v1 taxonomy fixes `key add`; it spells no `key show|list|rename|declare|
@@ -34,7 +34,7 @@ import (
 
 // keyCreateUsage is the one spelling of `key create`'s required arguments.
 // Three copies of it is two chances for one to drift.
-const keyCreateUsage = "usage: wenv key create --name <NAME> --classification secret|config --declaration <json>"
+const keyCreateUsage = "usage: hikyo key create --name <NAME> --classification secret|config --declaration <json>"
 
 // runKey is the key family. `group` is a nested family rather than a sibling
 // verb because a group is a property of the catalogue, not a peer of it.
@@ -104,7 +104,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if flags.positional() == "" {
-			return failf(ExitUsage, "usage: wenv key %s <key>", sub)
+			return failf(ExitUsage, "usage: hikyo key %s <key>", sub)
 		}
 	default:
 		if err := flags.checkNoPositionals("key " + sub); err != nil {
@@ -115,11 +115,11 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 	case sub == "create" && (name == "" || classification == "" || declaration == ""):
 		return failf(ExitUsage, keyCreateUsage)
 	case sub == "rename" && name == "":
-		return failf(ExitUsage, "usage: wenv key rename <key> --name <NEW_NAME>")
+		return failf(ExitUsage, "usage: hikyo key rename <key> --name <NEW_NAME>")
 	case sub == "declare" && declaration == "":
-		return failf(ExitUsage, "usage: wenv key declare <key> --declaration <json> [--required-in ...] [--forbidden-in ...]")
+		return failf(ExitUsage, "usage: hikyo key declare <key> --declaration <json> [--required-in ...] [--forbidden-in ...]")
 	case sub == "reclassify" && classification == "":
-		return failf(ExitUsage, "usage: wenv key reclassify <key> --classification secret|config")
+		return failf(ExitUsage, "usage: hikyo key reclassify <key> --classification secret|config")
 	}
 
 	var decl apigen.KeyDeclaration
@@ -254,7 +254,7 @@ func runKey(ctx context.Context, ios IO, args []string) error {
 		return nil
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv key: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo key: unhandled subverb %q", sub)
 }
 
 // runKeyGroup is the nested group family.
@@ -283,7 +283,7 @@ func runKeyGroup(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		if flags.positional() == "" {
-			return failf(ExitUsage, "usage: wenv key group %s <group>", sub)
+			return failf(ExitUsage, "usage: hikyo key group %s <group>", sub)
 		}
 	default:
 		if err := flags.checkNoPositionals("key group " + sub); err != nil {
@@ -292,9 +292,9 @@ func runKeyGroup(ctx context.Context, ios IO, args []string) error {
 	}
 	switch {
 	case sub == "create" && name == "":
-		return failf(ExitUsage, "usage: wenv key group create --name <name>")
+		return failf(ExitUsage, "usage: hikyo key group create --name <name>")
 	case sub == "rename" && name == "":
-		return failf(ExitUsage, "usage: wenv key group rename <group> --name <new-name>")
+		return failf(ExitUsage, "usage: hikyo key group rename <group> --name <new-name>")
 	}
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
 	if err != nil {
@@ -348,7 +348,7 @@ func runKeyGroup(ctx context.Context, ios IO, args []string) error {
 		return nil
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
-	return failf(ExitInternal, "wenv key group: unhandled subverb %q", sub)
+	return failf(ExitInternal, "hikyo key group: unhandled subverb %q", sub)
 }
 
 // decodeDeclaration is STRICT, and that is the whole point of it.

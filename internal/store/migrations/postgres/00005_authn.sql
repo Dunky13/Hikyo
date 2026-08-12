@@ -9,11 +9,11 @@
 -- answer produces — which is the same bootstrap carve-out chain resolution
 -- and grant lookup already live in.
 --
--- wenv:table auth_instance_state class=authn chain=-
--- wenv:table accounts class=authn chain=-
--- wenv:table password_credentials class=authn chain=-
--- wenv:table sessions class=authn chain=-
--- wenv:table credential_authorities class=authn chain=-
+-- hikyo:table auth_instance_state class=authn chain=-
+-- hikyo:table accounts class=authn chain=-
+-- hikyo:table password_credentials class=authn chain=-
+-- hikyo:table sessions class=authn chain=-
+-- hikyo:table credential_authorities class=authn chain=-
 
 -- The instance credential epoch. Restore increments it, and every human
 -- authentication artifact records the epoch it was created under; an artifact

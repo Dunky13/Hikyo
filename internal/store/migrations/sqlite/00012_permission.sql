@@ -4,7 +4,7 @@
 -- `project-settings` capability governs, and the machine principal class the
 -- normative machine allowlists key on. Roll-forward only: no Down section.
 
--- wenv:table grant_origins class=authn chain=-
+-- hikyo:table grant_origins class=authn chain=-
 
 -- Grant origins (scim-provisioning amendment (a)): a grant row exists while
 -- at least one origin holds it, and is revoked — with the locked

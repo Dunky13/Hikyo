@@ -1,9 +1,9 @@
 {
-  "name": "@wenv/client",
+  "name": "@hikyo/client",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Generated TypeScript client and Zod schemas for the Wenv API. Generated from ../../api/openapi.yaml - never edited by hand.",
+  "description": "Generated TypeScript client and Zod schemas for the Hikyo API. Generated from ../../api/openapi.yaml - never edited by hand.",
   "scripts": {
     "generate": "openapi-ts",
     "typecheck": "tsc --noEmit",

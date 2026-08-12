@@ -8,7 +8,7 @@
 // there is no test-only mint hook.
 //
 // The suite runs on sqlite always and on postgres via
-// WENV_TEST_POSTGRES_DSN, failing loudly in CI when the DSN is unset — the
+// HIKYO_TEST_POSTGRES_DSN, failing loudly in CI when the DSN is unset — the
 // postgres leg cannot go vacuously green.
 package isolation
 
@@ -23,10 +23,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
 )
 
 // Fixture principals.
@@ -293,12 +293,12 @@ func openSQLite(t *testing.T) *store.DB {
 
 func openPostgres(t *testing.T) *store.DB {
 	t.Helper()
-	dsn := os.Getenv("WENV_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("HIKYO_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		if os.Getenv("CI") != "" {
-			t.Fatal("CI run without WENV_TEST_POSTGRES_DSN: the postgres isolation leg must not silently skip in CI")
+			t.Fatal("CI run without HIKYO_TEST_POSTGRES_DSN: the postgres isolation leg must not silently skip in CI")
 		}
-		t.Skip("WENV_TEST_POSTGRES_DSN not set")
+		t.Skip("HIKYO_TEST_POSTGRES_DSN not set")
 	}
 	// This harness derives its own database from the configured one:
 	// `go test ./...` runs package binaries in parallel, and sharing one

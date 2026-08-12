@@ -1,12 +1,12 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/dunky13/wenv
+  repository: ghcr.io/dunky13/hikyo
   # Release packaging replaces this value with the signed image index digest.
   digest: sha256:RELEASE_IMAGE_DIGEST
 
 database:
-  # Name of an existing Secret whose WENV_DB key contains the production DSN.
+  # Name of an existing Secret whose HIKYO_DB key contains the production DSN.
   existingSecret: ""
 
 service:
@@ -19,7 +19,7 @@ network:
 
 releaseTrust:
   admissionPolicy:
-    # Requires Kyverno. The policy verifies the exact Wenv image repository
+    # Requires Kyverno. The policy verifies the exact Hikyo image repository
     # with the offline primary key packaged into the release chart.
     enabled: false
 

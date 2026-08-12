@@ -9,7 +9,7 @@
 -- what makes an org nobody may reach indistinguishable from a missing one
 -- (#48, mvp-boundary C1).
 
--- wenv:instance-scoped
+-- hikyo:instance-scoped
 -- name: CreateOrg :exec
 INSERT INTO orgs (id, name, active, metadata, created_at)
 VALUES ($1, $2, $3, $4, $5);
@@ -17,11 +17,11 @@ VALUES ($1, $2, $3, $4, $5);
 -- name: GetOrg :one
 SELECT id, name, active, metadata, created_at FROM orgs WHERE id = sqlc.arg(chain_org_id);
 
--- wenv:instance-scoped
+-- hikyo:instance-scoped
 -- name: ListOrgs :many
 SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name;
 
--- wenv:instance-scoped
+-- hikyo:instance-scoped
 -- name: CountOrgs :one
 SELECT COUNT(*) FROM orgs;
 

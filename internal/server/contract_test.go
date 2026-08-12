@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api"
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/admission"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/server"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/admission"
+	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 // HTTP contract tests (mvp-boundary S1): the wire response is validated
@@ -357,7 +358,7 @@ func TestUnauthenticatedRefusalsAreByteIdentical(t *testing.T) {
 	srv := newTestServer(t, stubAuth{}, stubOrgs{})
 	var bodies [][]byte
 	var statuses []int
-	for _, bearer := range []string{"", "not-a-token", "ew_1_cli_totallyfabricated000000", "ew_9_xx_nonsense"} {
+	for _, bearer := range []string{"", "not-a-token", "hik_1_cli_totallyfabricated000000", "hik_9_xx_nonsense"} {
 		resp, payload := call(t, srv, http.MethodGet, api.PathPrefix+"/auth/whoami", bearer, nil)
 		statuses = append(statuses, resp.StatusCode)
 		bodies = append(bodies, payload)
@@ -391,8 +392,8 @@ func TestNotFoundAndUnauthorizedAreIndistinguishable(t *testing.T) {
 			return service.Org{}, domain.ErrNotFound
 		},
 	})
-	respA, bodyA := call(t, missing, http.MethodGet, api.PathPrefix+"/orgs/"+testOrgID, "ew_1_cli_x", nil)
-	respB, bodyB := call(t, forbidden, http.MethodGet, api.PathPrefix+"/orgs/"+testOrgID, "ew_1_cli_x", nil)
+	respA, bodyA := call(t, missing, http.MethodGet, api.PathPrefix+"/orgs/"+testOrgID, "hik_1_cli_x", nil)
+	respB, bodyB := call(t, forbidden, http.MethodGet, api.PathPrefix+"/orgs/"+testOrgID, "hik_1_cli_x", nil)
 	if respA.StatusCode != respB.StatusCode || respA.StatusCode != http.StatusNotFound {
 		t.Fatalf("statuses %d and %d, want both 404", respA.StatusCode, respB.StatusCode)
 	}
@@ -430,7 +431,7 @@ func TestUnknownRequestMembersAreRefused(t *testing.T) {
 	// silently dropping an unknown member hides a client that believes
 	// something untrue about this server.
 	srv := newTestServer(t, stubAuth{}, stubOrgs{})
-	resp, _ := call(t, srv, http.MethodPost, api.PathPrefix+"/orgs", "ew_1_cli_x",
+	resp, _ := call(t, srv, http.MethodPost, api.PathPrefix+"/orgs", "hik_1_cli_x",
 		map[string]any{"name": "acme", "tier": "gold"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400 — an unknown request member was accepted", resp.StatusCode)
@@ -441,7 +442,7 @@ func TestSuccessfulLoginMatchesTheContract(t *testing.T) {
 	srv := newTestServer(t, stubAuth{
 		login: func(context.Context, string, string) (service.LoginResult, error) {
 			return service.LoginResult{
-				SessionToken: "ew_1_cli_stub", SessionID: liveIdentity.SessionID,
+				SessionToken: "hik_1_cli_stub", SessionID: liveIdentity.SessionID,
 				Artifact: "cli", CreatedAt: liveIdentity.CreatedAt,
 				IdleExpires: liveIdentity.IdleExpiresAt, AbsExpires: liveIdentity.AbsoluteExpiresAt,
 				Principal: liveIdentity.Principal, DisplayName: "Admin",
@@ -487,7 +488,7 @@ func TestNullableMetadataRoundTripsAbsentNullAndValue(t *testing.T) {
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/orgs", "ew_1_cli_x", tc.body)
+			resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+"/orgs", "hik_1_cli_x", tc.body)
 			if resp.StatusCode != http.StatusCreated {
 				t.Fatalf("status %d: %s", resp.StatusCode, payload)
 			}
@@ -545,7 +546,7 @@ func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
 	// returns raw options bytes, the handler round-trips them through the
 	// free-form object, and the response satisfies the contract (validated by
 	// call()). The base64url fields the authenticator signs over must survive.
-	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"wenv.example","timeout":60000}}`)
+	opts := []byte(`{"publicKey":{"challenge":"Y2hhbGxlbmdl","rpId":"hikyo.example","timeout":60000}}`)
 	srv := newTestServer(t, stubAuth{
 		passkeyStart: func(context.Context) ([]byte, error) { return opts, nil },
 	}, stubOrgs{})
@@ -568,10 +569,13 @@ func TestPasskeyLoginStartBridgesOpaqueOptions(t *testing.T) {
 
 // TestBrowserPasskeyLoginTokenOnlyOnCookie is the B2 regression: a passkey login
 // mints a BROWSER session, whose token must reach the caller ONLY on the
-// __Host-wenv HttpOnly cookie — never echoed into the script-readable JSON body
+// __Host-hikyo HttpOnly cookie — never echoed into the script-readable JSON body
 // where injected same-origin script could exfiltrate the bearer.
 func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
-	const token = "ew_1_browser_stub"
+	token, _, err := crypto.NewArtifact(crypto.ArtifactBrowserSession)
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := newTestServer(t, stubAuth{
 		passkeyFinish: func(context.Context, []byte) (service.LoginResult, error) {
 			return service.LoginResult{
@@ -602,15 +606,15 @@ func TestBrowserPasskeyLoginTokenOnlyOnCookie(t *testing.T) {
 		t.Errorf("the session token leaked into the response body: %s", payload)
 	}
 
-	// The token is delivered on the __Host-wenv cookie, HttpOnly + Secure.
+	// The token is delivered on the __Host-hikyo cookie, HttpOnly + Secure.
 	var got *http.Cookie
 	for _, c := range resp.Cookies() {
-		if c.Name == "__Host-wenv" {
+		if c.Name == "__Host-hikyo" {
 			got = c
 		}
 	}
 	if got == nil {
-		t.Fatal("no __Host-wenv session cookie was set")
+		t.Fatal("no __Host-hikyo session cookie was set")
 	}
 	if got.Value != token {
 		t.Errorf("cookie token = %q, want %q", got.Value, token)
@@ -956,8 +960,8 @@ func TestUniformNonexistentAtEveryLevel(t *testing.T) {
 	missing := hierarchyServer(t, domain.ErrNotFound)
 	refused := hierarchyServer(t, fmt.Errorf("refused at the chokepoint: %w", domain.ErrNotFound))
 	for _, route := range hierarchyRoutes() {
-		respA, bodyA := call(t, missing, route.method, route.path, "ew_1_cli_x", route.body)
-		respB, bodyB := call(t, refused, route.method, route.path, "ew_1_cli_x", route.body)
+		respA, bodyA := call(t, missing, route.method, route.path, "hik_1_cli_x", route.body)
+		respB, bodyB := call(t, refused, route.method, route.path, "hik_1_cli_x", route.body)
 		if respA.StatusCode != http.StatusNotFound || respB.StatusCode != http.StatusNotFound {
 			t.Errorf("%s %s: statuses %d and %d, want both 404", route.method, route.path, respA.StatusCode, respB.StatusCode)
 			continue
@@ -1016,7 +1020,7 @@ func TestConflictAndLimitRenderUniformly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := hierarchyServer(t, fmt.Errorf("wrapped: %w", tc.err))
 			resp, payload := call(t, srv, http.MethodPost,
-				api.PathPrefix+"/orgs/"+testOrgID+"/projects", "ew_1_cli_x",
+				api.PathPrefix+"/orgs/"+testOrgID+"/projects", "hik_1_cli_x",
 				apigen.CreateProjectRequest{Name: "p"})
 			if resp.StatusCode != http.StatusConflict {
 				t.Fatalf("status %d, want 409", resp.StatusCode)
@@ -1062,7 +1066,7 @@ func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resp, payload := call(t, srv, http.MethodPatch, api.PathPrefix+"/orgs/"+testOrgID,
-		"ew_1_cli_x", apigen.RenameRequest{Name: "renamed"})
+		"hik_1_cli_x", apigen.RenameRequest{Name: "renamed"})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status %d, want 403 — an assurance refusal on a held grant is a grant-class refusal, not the nonexistent mask", resp.StatusCode)
 	}

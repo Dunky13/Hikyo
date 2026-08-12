@@ -51,7 +51,7 @@ export type Meta = {
     server_version: string;
     /**
      * This server's API revision. A client refuses an operation whose
-     * `x-wenv-min-revision` exceeds it, naming the server version — a
+     * `x-hikyo-min-revision` exceeds it, naming the server version — a
      * loud refusal, never a silent misbehave.
      *
      */
@@ -99,7 +99,7 @@ export type LoginResult = {
      * cookie attributes constrain browsers, not an attacker holding the
      * value, which is why lifetimes are short and revocation is a
      * delete. OMITTED for a browser-artifact session: that token is
-     * delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+     * delivered ONLY on the `__Host-hikyo` HttpOnly cookie so injected
      * same-origin script cannot read it. A CLI-artifact session, which has
      * no cookie channel, still carries it here.
      *
@@ -5360,7 +5360,7 @@ export type SamlAcsError = SamlAcsErrors[keyof SamlAcsErrors];
 
 export type SamlAcsResponses = {
     /**
-     * The minted or rotated ordinary Wenv session.
+     * The minted or rotated ordinary Hikyo session.
      */
     200: LoginResult;
 };

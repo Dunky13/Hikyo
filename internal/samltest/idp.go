@@ -1,4 +1,4 @@
-// Package samltest provides a deliberately small SAML IdP fixture for Wenv's
+// Package samltest provides a deliberately small SAML IdP fixture for Hikyo's
 // end-to-end tests. It produces real signed assertions; it is not a protocol
 // implementation and must not be used outside tests.
 package samltest
@@ -18,7 +18,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/samlsp"
+	"github.com/Dunky13/hikyo/internal/samlsp"
 	"github.com/beevik/etree"
 	dsig "github.com/russellhaering/goxmldsig"
 )
@@ -68,7 +68,7 @@ func New(now time.Time) (*IdP, error) {
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "Wenv SAML test IdP"},
+		Subject:      pkix.Name{CommonName: "Hikyo SAML test IdP"},
 		NotBefore:    now.Add(-time.Hour),
 		NotAfter:     now.AddDate(1, 0, 0),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

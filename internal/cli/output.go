@@ -78,7 +78,7 @@ func asCLIError(err error, out **Error) bool {
 // parseInterspersed parses a flag set that allows flags AFTER positional
 // arguments.
 //
-// Go's flag package stops at the first non-flag argument, so `wenv login
+// Go's flag package stops at the first non-flag argument, so `hikyo login
 // <url> --local` would silently treat --local as a positional and the verb
 // would refuse a spelling its own help advertises. The loop is the standard
 // idiom: parse, take one positional, parse the rest.

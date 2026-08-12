@@ -103,7 +103,7 @@ func New(rpID string, origins []string) (*RP, error) {
 	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:                  rpID,
-		RPDisplayName:         "wenv",
+		RPDisplayName:         "hikyo",
 		RPOrigins:             origins,
 		AttestationPreference: protocol.PreferNoAttestation,
 		AuthenticatorSelection: protocol.AuthenticatorSelection{

@@ -21,11 +21,11 @@ const pages = [
 ];
 
 const siteLinks = new Map([
-  ['./CONTRIBUTING.md', '/wenv/contributing/'],
-  ['./GOVERNANCE.md', '/wenv/governance/'],
-  ['./SECURITY.md', '/wenv/security/'],
-  ['./SUPPORT.md', '/wenv/support/'],
-  ['./TRADEMARK.md', '/wenv/trademark/'],
+  ['./CONTRIBUTING.md', '/hikyo/contributing/'],
+  ['./GOVERNANCE.md', '/hikyo/governance/'],
+  ['./SECURITY.md', '/hikyo/security/'],
+  ['./SUPPORT.md', '/hikyo/support/'],
+  ['./TRADEMARK.md', '/hikyo/trademark/'],
 ]);
 
 for (const page of pages) {
@@ -45,12 +45,12 @@ for (const page of pages) {
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(
     destination,
-    `---\ntitle: ${page.title}\neditUrl: https://github.com/Dunky13/wenv/edit/main/${page.source}\n---\n\n${body}`,
+    `---\ntitle: ${page.title}\neditUrl: https://github.com/Dunky13/hikyo/edit/main/${page.source}\n---\n\n${body}`,
   );
 }
 
 const license = await readFile(resolve(repositoryRoot, 'LICENSE'), 'utf8');
 await writeFile(
   resolve(docsRoot, 'license.md'),
-  `---\ntitle: Mozilla Public License 2.0\neditUrl: https://github.com/Dunky13/wenv/edit/main/LICENSE\n---\n\n\`\`\`text\n${license}\`\`\`\n`,
+  `---\ntitle: Mozilla Public License 2.0\neditUrl: https://github.com/Dunky13/hikyo/edit/main/LICENSE\n---\n\n\`\`\`text\n${license}\`\`\`\n`,
 );

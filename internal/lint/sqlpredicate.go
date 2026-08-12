@@ -25,8 +25,8 @@ import (
 // Two annotations exempt a query from the chain-predicate requirement, both
 // content-pinned (invariant 13) so drift is a reviewed diff:
 //
-//	-- wenv:instance-scoped    cross-tenant by definition (operator surface)
-//	-- wenv:authn-resolution   the authorization package's bootstrap reads
+//	-- hikyo:instance-scoped    cross-tenant by definition (operator surface)
+//	-- hikyo:authn-resolution   the authorization package's bootstrap reads
 type TableRule struct {
 	Class string   // org | project | environment | folder | key | instance | authn | system
 	Chain []string // chain columns required as top-level conjuncts ("-" = none)
@@ -36,7 +36,7 @@ type TableRule struct {
 type Query struct {
 	Name       string
 	Cmd        string
-	Annotation string // wenv annotation, "" if none
+	Annotation string // hikyo annotation, "" if none
 	SQL        string
 }
 
@@ -48,7 +48,7 @@ func (q Query) Hash() string {
 }
 
 var (
-	directiveRe = regexp.MustCompile(`(?m)^--\s*wenv:table\s+(\S+)\s+class=(\S+)\s+chain=(\S+)\s*$`)
+	directiveRe = regexp.MustCompile(`(?m)^--\s*hikyo:table\s+(\S+)\s+class=(\S+)\s+chain=(\S+)\s*$`)
 	// One alternation so create / drop / rename are replayed in source order;
 	// three separate scans would lose the ordering the final state depends on.
 	tableStatementRe = regexp.MustCompile(`(?im)^\s*(?:` +
@@ -57,7 +57,7 @@ var (
 		`|ALTER\s+TABLE\s+(\w+)\s+RENAME\s+TO\s+(\w+)` +
 		`)`)
 	nameRe  = regexp.MustCompile(`^--\s*name:\s+(\w+)\s+:(\w+)\s*$`)
-	annotRe = regexp.MustCompile(`^--\s*wenv:(instance-scoped|authn-resolution)\s*$`)
+	annotRe = regexp.MustCompile(`^--\s*hikyo:(instance-scoped|authn-resolution)\s*$`)
 	// A bindable parameter: sqlite positional, postgres positional, or the
 	// sqlc named form (the reserved chain_* parameters use it on postgres).
 	paramRe = `(\?|\$\d+|SQLCARG_\w+)`
@@ -71,7 +71,7 @@ func maskSQLCArgs(s string) string {
 	return sqlcArgRe.ReplaceAllString(s, "SQLCARG_$1")
 }
 
-// ParseScopeDirectives reads the wenv:table directives from every migration
+// ParseScopeDirectives reads the hikyo:table directives from every migration
 // file in dir.
 func ParseScopeDirectives(dir string) (map[string]TableRule, error) {
 	out := map[string]TableRule{}
@@ -145,7 +145,7 @@ func sortedSet(m map[string]bool) []string {
 	return out
 }
 
-// ParseQueries reads every sqlc query block in dir, with its wenv
+// ParseQueries reads every sqlc query block in dir, with its hikyo
 // annotation if the line directly above the name line carries one.
 func ParseQueries(dir string) ([]Query, error) {
 	var out []Query
@@ -208,7 +208,7 @@ func CheckSQLPredicates(repoRoot string) []string {
 		}
 		for _, t := range live {
 			if _, ok := rules[t]; !ok {
-				findings = append(findings, fmt.Sprintf("sqlpredicate(%s): table %q has no wenv:table scope directive — the derived registry must be total", engine, t))
+				findings = append(findings, fmt.Sprintf("sqlpredicate(%s): table %q has no hikyo:table scope directive — the derived registry must be total", engine, t))
 			}
 		}
 		everNamed := map[string]bool{}
@@ -268,7 +268,7 @@ func checkQuery(engine string, q Query, rules map[string]TableRule) []string {
 
 	switch rule.Class {
 	case "authn":
-		return []string{fmt.Sprintf("%s: table %q is the resolution surface — only wenv:authn-resolution annotated queries may touch it", label, tableName)}
+		return []string{fmt.Sprintf("%s: table %q is the resolution surface — only hikyo:authn-resolution annotated queries may touch it", label, tableName)}
 	case "system":
 		return []string{fmt.Sprintf("%s: table %q is system-owned — store queries may not touch it", label, tableName)}
 	case "instance":

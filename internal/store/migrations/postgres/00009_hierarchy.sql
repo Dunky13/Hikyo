@@ -8,7 +8,7 @@
 -- ADR's "a structure that must not be used is a bug that hasn't happened
 -- yet" forbids the dormant column as much as the live one.
 --
--- wenv:table folders class=folder chain=org_id,project_id
+-- hikyo:table folders class=folder chain=org_id,project_id
 
 -- display_order is the environment's user-defined display position within its
 -- project (domain-model: "user-defined per project, display-ordered"). It is a

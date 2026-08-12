@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/schema"
+	"github.com/Dunky13/hikyo/internal/schema"
 )
 
 // Declaration-time refusals. A rule may not be meaningless (schema-model ADR

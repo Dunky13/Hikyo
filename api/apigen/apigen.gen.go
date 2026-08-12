@@ -1030,7 +1030,7 @@ type LoginResult struct {
 	// cookie attributes constrain browsers, not an attacker holding the
 	// value, which is why lifetimes are short and revocation is a
 	// delete. OMITTED for a browser-artifact session: that token is
-	// delivered ONLY on the `__Host-wenv` HttpOnly cookie so injected
+	// delivered ONLY on the `__Host-hikyo` HttpOnly cookie so injected
 	// same-origin script cannot read it. A CLI-artifact session, which has
 	// no cookie channel, still carries it here.
 	SessionToken *string `json:"session_token,omitempty"`
@@ -1041,7 +1041,7 @@ type LoginResult struct {
 // quiet leak of instance configuration to unauthenticated callers.
 type Meta struct {
 	// ApiRevision This server's API revision. A client refuses an operation whose
-	// `x-wenv-min-revision` exceeds it, naming the server version — a
+	// `x-hikyo-min-revision` exceeds it, naming the server version — a
 	// loud refusal, never a silent misbehave.
 	ApiRevision int `json:"api_revision"`
 

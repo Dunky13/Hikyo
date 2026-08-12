@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/domain"
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // The limiter's two bounds, tested where they are deterministic: the window,

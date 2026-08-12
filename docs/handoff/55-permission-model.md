@@ -1,6 +1,6 @@
 # Handoff: #55 permission model, full — grants, role templates, protected environments
 
-Issue: https://github.com/Dunky13/wenv/issues/55 (parent #41, blocked by #48 and
+Issue: https://github.com/Dunky13/hikyo/issues/55 (parent #41, blocked by #48 and
 #54 — both merged). Governing spec: `docs/adr/permission-model.md` on
 `wayfinder-docs` (locked 2026-07-31, plus the SCIM, flat-model and
 multi-instance amendments), acceptance row A2 in `docs/adr/mvp-boundary.md`.
@@ -112,10 +112,10 @@ waiting for.
 
 ### CLI
 
-`wenv admin grant --principal ID --capability CAP [--org/--project/--env]` —
+`hikyo admin grant --principal ID --capability CAP [--org/--project/--env]` —
 host-local, root key required, no network route, naming its target and
 capability explicitly, writing a durable recovery record. It mirrors
-`wenv admin reset-credential`'s mechanism exactly (local authority through
+`hikyo admin reset-credential`'s mechanism exactly (local authority through
 `adminAuth`, riding the resolution surface, **no `SystemProof`**), following
 #54's precedent — so invariant 11's system-site sets are untouched and
 `SiteBreakGlass` stays empty.
@@ -125,7 +125,7 @@ capability explicitly, writing a durable recovery record. It mirrors
 **17 operations across 9 paths under the `access` tag**, one per addressed
 depth, because the authorization formula differs per depth and the ADR forbids
 "the capability for this endpoint" as a statement. Every operation carries all
-five `x-wenv-*` extensions, and the formula is documented on the endpoint AND
+five `x-hikyo-*` extensions, and the formula is documented on the endpoint AND
 on the verb:
 
 | Path | Verbs | Operations / formulas |
@@ -160,8 +160,8 @@ is in `authz.MFAMandatory`; the two settings routes do NOT, because
 `project-settings` and `read` are not. The iff is asserted against the registry
 by `isolation.TestTenantRoutesDeclareForbiddenOnlyForMFA`.
 
-**CLI** (`internal/cli/access.go`): `wenv access grant list|add|remove|template`,
-`wenv access member list|remove`, `wenv project-settings get|set`. Scope comes
+**CLI** (`internal/cli/access.go`): `hikyo access grant list|add|remove|template`,
+`hikyo access member list|remove`, `hikyo project-settings get|set`. Scope comes
 from the ordinary per-dimension precedence (`--org`/`--project`/`--env`), and
 the DEEPEST resolved dimension picks the route — `--instance-scope` is an
 explicit opt-in, because "no org resolved" must never silently mean "grant it to
@@ -292,7 +292,7 @@ increment and the wire slice added no formula.
    `manage-members` holder counts for every org. The instance-scope arm of the
    same invariant guarantees at least one such holder always exists, and
    bootstrap seeds exactly one. Therefore, on any instance that came up through
-   `wenv admin create`, the org-scope refusal can never fire: every org is
+   `hikyo admin create`, the org-scope refusal can never fire: every org is
    administrable by the instance holder.
 
    This is intent-defensible — an org with an instance member manager IS
@@ -376,9 +376,9 @@ increment and the wire slice added no formula.
    number; confirm or replace it.
 6. **Two spelling joins to the closed CLI verb set**, declared additively under
    the ADR's own grammar exactly as #48 declared `rename`/`show`/`reorder`/the
-   `folder` family: `wenv access grant template` (the ADR fixes no spelling for
+   `folder` family: `hikyo access grant template` (the ADR fixes no spelling for
    applying a role template, and the acceptance criteria require one) and
-   `wenv project-settings get|set` with a required `--env` (the ADR puts
+   `hikyo project-settings get|set` with a required `--env` (the ADR puts
    "project-settings get/set" in the org/project lifecycle group, but both knobs
    are per-environment). **#27/freeze must confirm or rename.**
 7. **Serializability of dedup and the lockout invariant is lock-argued, not
@@ -699,14 +699,14 @@ disconnected.
   `facts.FormulaPins()` and the `lint.ParseQueries` pin list.
 - **Adding an access route**: the path decides the scope, so a new depth needs
   a new path, a new operation and a row in `grantOpsByLevel` — not a body
-  member. All five `x-wenv-*` extensions, `wireRegistry` + `wireRoutes`, and a
+  member. All five `x-hikyo-*` extensions, `wireRegistry` + `wireRoutes`, and a
   row in `hierarchyRoutes()` (`internal/server/contract_test.go`) so the new
   route joins the byte-shape assertion rather than getting a weaker one.
 - **Postgres harness**: `grant_origins` drops BEFORE `grants` (RESTRICT FK) in
   BOTH `internal/isolation/harness_test.go` and
   `internal/conformance/conformance_test.go`. A missing entry fails only on
   postgres, with SQLSTATE 2BP01 on the NEXT run's re-migration.
-- **Run the postgres leg.** `WENV_TEST_POSTGRES_DSN=postgres://wenv:wenv@127.0.0.1:5432/wenv_test go test ./... -count=1`.
+- **Run the postgres leg.** `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/wenv_test go test ./... -count=1`.
   A sqlite-only run is structurally blind to drop-order, FK-restrict and
   isolation-level behaviour.
 - **`seedOrigins`** in the isolation harness attaches a `manual` origin to every
@@ -719,7 +719,7 @@ disconnected.
 - `gofmt -l .` clean; `go vet ./...` clean.
 - `go test ./... -count=1` on **sqlite**: **616 passed, 0 failed, 30 packages**.
 - `go test ./... -count=1` with
-  `WENV_TEST_POSTGRES_DSN=postgres://wenv:wenv@127.0.0.1:5432/wenv_test`
+  `HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/wenv_test`
   (**both engines**): **958 passed, 0 failed, 30 packages**.
 - The A2 matrix contributes 163 subtests per engine (one grant case plus one
   deny case per atom, per proof-minting operation).

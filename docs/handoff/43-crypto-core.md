@@ -1,6 +1,6 @@
 # Handoff: #43 crypto core
 
-Issue: https://github.com/Dunky13/wenv/issues/43 (parent #41). Specs:
+Issue: https://github.com/Dunky13/hikyo/issues/43 (parent #41). Specs:
 `docs/adr/encryption-model.md` (incl. secret-scanning + flat-model amendment
 banners) and `docs/adr/system-architecture.md` § Encryption boundary, both on
 `wayfinder-docs`.
@@ -56,7 +56,7 @@ banners) and `docs/adr/system-architecture.md` § Encryption boundary, both on
   otherwise (invariant 9's writer-race, structurally refused; unreachable
   until rotations land).
 - Wiring: `app.Boot` = harden → migrate → root key → store → keyring →
-  listen. `wenv migrate` and client verbs never touch any of it.
+  listen. `hikyo migrate` and client verbs never touch any of it.
 - `internal/boundary` — invariant 12: `golang.org/x/crypto/*`,
   `crypto/cipher`, `crypto/aes`, `crypto/hkdf`, `crypto/hmac` importable
   only by `internal/crypto`; `filippo.io/age` only by the future
@@ -78,14 +78,14 @@ structural + cross-domain test). Deferred with their tickets: 2 (auth), 7–9
 
 - Full suite green on sqlite + postgres 18 (local container), incl. the
   keyring conformance scenarios on both engines.
-- `wenv server --dev` clean dir: generates `wenv-dev.rootkey` (0600, warned
+- `hikyo server --dev` clean dir: generates `hikyo-dev.rootkey` (0600, warned
   loudly), healthz/readyz 200; reboot reuses the key.
-- `wenv server` with DB but no root key: refuses, names the fix.
-- `wenv migrate` with no root key anywhere: succeeds.
+- `hikyo server` with DB but no root key: refuses, names the fix.
+- `hikyo migrate` with no root key anywhere: succeeds.
 
 ## Deliberate deviations (for human disposition)
 
-1. **`--dev` generates a persisted root key** (`wenv-dev.rootkey` beside the
+1. **`--dev` generates a persisted root key** (`hikyo-dev.rootkey` beside the
    dev db, 0600, loud warning) — deviates from encryption-ADR refusal 1
    ("server never auto-generates a root key"), forced by the architecture
    ADR's zero-config `--dev`. Non-dev boots enforce refusal 1 verbatim, no
@@ -94,7 +94,7 @@ structural + cross-domain test). Deferred with their tickets: 2 (auth), 7–9
    AAD schemas" is stale text; the encryption ADR's normative table has six
    and the scanning amendment explicitly adds no new schema.
 3. Master key at first boot is minted by the server (root key present,
-   operator-held) — `wenv init` (#25) will front-run this later; refusal 1
+   operator-held) — `hikyo init` (#25) will front-run this later; refusal 1
    covers the *root* key only.
 
 ## Review trail
@@ -110,7 +110,7 @@ wrapper, refusal 5) — fixed; **R3: CLEAN**.
 
 ## Pickup notes
 
-- Root key encoding is fixed: 64 hex chars, whitespace-trimmed. `wenv init`
+- Root key encoding is fixed: 64 hex chars, whitespace-trimmed. `hikyo init`
   (#25) should use `crypto.GenerateRootKey`/`EncodeRootKey`.
 - Rotations ticket: `WrappedKey` has no state field on purpose — only
   'active' rows exist yet; add state transitions in store when retirement

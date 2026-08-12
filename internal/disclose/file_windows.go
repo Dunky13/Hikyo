@@ -15,7 +15,7 @@ import (
 // Stated limitation, not a silent one: the owner-only DACL and the
 // dirfd-relative create the unix path uses have no direct equivalent here,
 // so this leg gives exclusivity but not the parent-directory ownership check.
-// Windows is a CLIENT platform for Wenv — the server, and therefore every
+// Windows is a CLIENT platform for Hikyo — the server, and therefore every
 // bootstrap and reset disclosure, runs on unix — so the weaker leg is not on
 // the bootstrap path. Closing it needs the Windows security APIs and belongs
 // with the ticket that ships a supported Windows client.

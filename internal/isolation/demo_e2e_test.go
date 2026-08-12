@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/cli"
-	"github.com/Dunky13/wenv/internal/server"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
+	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
 )
 
 // The #47 demo criterion, end to end on both engines:
@@ -120,7 +120,7 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 			Stderr:  io.Discard,
 			Workdir: workDir,
 			Env: cli.Env{Getenv: func(k string) string {
-				if k == "WENV_STATE_DIR" {
+				if k == "HIKYO_STATE_DIR" {
 					return stateDir
 				}
 				return ""
@@ -410,7 +410,7 @@ func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequest
 		io := ios()
 		io.Stdout = out
 		if code := cli.Run(t.Context(), io, args); code != cli.ExitOK {
-			t.Fatalf("wenv %s exited %d\n%s", strings.Join(args, " "), code, out.String())
+			t.Fatalf("hikyo %s exited %d\n%s", strings.Join(args, " "), code, out.String())
 		}
 		return out.String()
 	}
@@ -681,7 +681,7 @@ func runAccessDemo(t *testing.T, db *store.DB, ios func() cli.IO, relogin func()
 		t.Helper()
 		out, code := run(args...)
 		if code != cli.ExitOK {
-			t.Fatalf("wenv %s exited %d\n%s", strings.Join(args, " "), code, out)
+			t.Fatalf("hikyo %s exited %d\n%s", strings.Join(args, " "), code, out)
 		}
 		return out
 	}

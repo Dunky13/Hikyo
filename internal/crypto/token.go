@@ -7,7 +7,8 @@ import (
 )
 
 // tokenInfoLabel domain-separates change-token derivation from any future
-// per-purpose derivation.
+// per-purpose derivation. The legacy product name is immutable cryptographic
+// protocol data; changing it would derive different keys for existing values.
 const tokenInfoLabel = "wenv/change-token/v1"
 
 // ScopedTokenKey derives the per-scope change-token key from the root token

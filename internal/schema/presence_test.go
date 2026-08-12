@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/wenv/internal/schema"
+	"github.com/Dunky13/hikyo/internal/schema"
 )
 
 // Presence conflicts that are statically decidable are rejected at

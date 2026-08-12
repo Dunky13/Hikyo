@@ -1,6 +1,6 @@
 # Handoff: #46 release and signing pipeline
 
-Issue: https://github.com/Dunky13/wenv/issues/46. Fixed-point commit before
+Issue: https://github.com/Dunky13/hikyo/issues/46. Fixed-point commit before
 this work: `8bfeef1`.
 
 ## What exists
@@ -50,7 +50,7 @@ this work: `8bfeef1`.
 - The release chart carries the pinned root, active primary key, and an optional
   Kyverno image-verification policy. Its non-loopback listener cannot render
   without explicit trusted proxy CIDRs.
-- `WENV_TRUSTED_PROXY_CIDRS` currently enforces the non-loopback startup gate;
+- `HIKYO_TRUSTED_PROXY_CIDRS` currently enforces the non-loopback startup gate;
   no handler trusts forwarded headers yet. The transport ticket must consume
   the parsed CIDRs before adding any forwarded-header behavior.
 

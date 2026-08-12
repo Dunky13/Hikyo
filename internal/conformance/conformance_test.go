@@ -2,7 +2,7 @@
 // (system-architecture ADR § Data layer): canonical cross-engine semantics
 // are asserted on sqlite and postgres, not just unit-tested per dialect.
 //
-// The sqlite leg always runs. The postgres leg needs WENV_TEST_POSTGRES_DSN;
+// The sqlite leg always runs. The postgres leg needs HIKYO_TEST_POSTGRES_DSN;
 // locally it skips without one, but in CI (CI=true) an unset DSN FAILS —
 // "harness green on postgres" must never be vacuously true.
 package conformance
@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/internal/authz"
-	"github.com/Dunky13/wenv/internal/domain"
-	"github.com/Dunky13/wenv/internal/service"
-	"github.com/Dunky13/wenv/internal/store"
-	"github.com/Dunky13/wenv/internal/store/migrate"
-	"github.com/Dunky13/wenv/internal/store/tx"
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Dunky13/hikyo/internal/store/tx"
 )
 
 // admin is the corpus's fixture principal: seeded at instance scope with
@@ -132,12 +132,12 @@ func TestSQLiteActiveDomainEnforced(t *testing.T) {
 }
 
 func TestConformancePostgres(t *testing.T) {
-	dsn := os.Getenv("WENV_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("HIKYO_TEST_POSTGRES_DSN")
 	if dsn == "" {
 		if os.Getenv("CI") != "" {
-			t.Fatal("CI run without WENV_TEST_POSTGRES_DSN: the postgres conformance leg must not silently skip in CI")
+			t.Fatal("CI run without HIKYO_TEST_POSTGRES_DSN: the postgres conformance leg must not silently skip in CI")
 		}
-		t.Skip("WENV_TEST_POSTGRES_DSN not set")
+		t.Skip("HIKYO_TEST_POSTGRES_DSN not set")
 	}
 	cfg := store.Config{Engine: store.EnginePostgres, DSN: dsn}
 	resetPostgres(t, cfg)

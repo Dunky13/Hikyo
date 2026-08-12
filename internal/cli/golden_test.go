@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/cli"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/cli"
 )
 
 // Golden snapshots (api-cli-surface ADR § The CLI is a frozen surface too).
@@ -58,7 +58,7 @@ func testIO(t *testing.T, env map[string]string) (cli.IO, *bytes.Buffer, *bytes.
 		if v, ok := env[k]; ok {
 			return v
 		}
-		if k == "WENV_STATE_DIR" {
+		if k == "HIKYO_STATE_DIR" {
 			return state
 		}
 		return ""
@@ -93,8 +93,8 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"context show unknown name", []string{"context", "show", "nope"}, cli.ExitNotFound},
 		{"context delete unknown trust entry", []string{"context", "delete", "--instance", "nope"}, cli.ExitNotFound},
 		{"login without a target", []string{"login", "--local"}, cli.ExitUsage},
-		{"login without --local refuses by name", []string{"login", "https://wenv.example"}, cli.ExitRefused},
-		{"device flow refuses by name", []string{"login", "https://wenv.example", "--device"}, cli.ExitRefused},
+		{"login without --local refuses by name", []string{"login", "https://hikyo.example"}, cli.ExitRefused},
+		{"device flow refuses by name", []string{"login", "https://hikyo.example", "--device"}, cli.ExitRefused},
 		{"login against an unestablished reference", []string{"login", "--local", "--as", "u", "unknown-ref"}, cli.ExitRefused},
 		{"unknown output format", []string{"context", "list", "-o", "yaml"}, cli.ExitUsage},
 		{"org without a subverb", []string{"org"}, cli.ExitUsage},
@@ -173,7 +173,7 @@ func TestExitCodeMatrix(t *testing.T) {
 	for _, tc := range cases {
 		ios, _, _ := testIO(t, nil)
 		got := cli.Run(t.Context(), ios, tc.args)
-		report.WriteString(strings.Join(append([]string{"wenv"}, tc.args...), " "))
+		report.WriteString(strings.Join(append([]string{"hikyo"}, tc.args...), " "))
 		report.WriteString(" -> ")
 		report.WriteString(exitName(got))
 		report.WriteString("\n")
@@ -227,7 +227,7 @@ func TestAnUnestablishedReferenceIsRefusedNotPrompted(t *testing.T) {
 		t.Fatalf("exit %d, want %d", code, cli.ExitRefused)
 	}
 	msg := stderr.String()
-	for _, want := range []string{"not in the local trust store", "--trust-file", "WENV_TRUST_BUNDLE"} {
+	for _, want := range []string{"not in the local trust store", "--trust-file", "HIKYO_TRUST_BUNDLE"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("refusal does not mention %q:\n%s", want, msg)
 		}
@@ -270,21 +270,21 @@ func TestPinFileCanDirectButNeverIntroducesAnOrigin(t *testing.T) {
 
 func TestCanonicalOriginRefusesWhatIsNotAnOrigin(t *testing.T) {
 	for _, bad := range []string{
-		"https://wenv.example/some/path",
-		"https://user:pass@wenv.example",
-		"ftp://wenv.example",
+		"https://hikyo.example/some/path",
+		"https://user:pass@hikyo.example",
+		"ftp://hikyo.example",
 		"https://",
-		"https://wenv.example?a=1",
+		"https://hikyo.example?a=1",
 	} {
 		if _, err := cli.CanonicalOrigin(bad); err == nil {
 			t.Errorf("%q was accepted as an origin", bad)
 		}
 	}
-	got, err := cli.CanonicalOrigin("HTTPS://Wenv.Example:8443/")
+	got, err := cli.CanonicalOrigin("HTTPS://Hikyo.Example:8443/")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "https://wenv.example:8443" {
+	if got != "https://hikyo.example:8443" {
 		t.Fatalf("canonical origin %q", got)
 	}
 }
@@ -293,7 +293,7 @@ func TestTargetResolutionPrecedence(t *testing.T) {
 	// Per dimension, first hit wins: flags, then environment, then the pin
 	// file, then the named context. Overriding ONE dimension is legitimate
 	// exactly because the others re-resolve within the same chain.
-	ios, _, _ := testIO(t, map[string]string{"WENV_PROJECT": "from-env"})
+	ios, _, _ := testIO(t, map[string]string{"HIKYO_PROJECT": "from-env"})
 	if err := os.WriteFile(filepath.Join(ios.Workdir, cli.PinFileName),
 		[]byte(`{"instance":"pinned","org":"pinned-org","project":"pinned-project","env":"pinned-env"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestMissingDimensionIsAHardErrorNamingWhereItLooked(t *testing.T) {
 	if err == nil {
 		t.Fatal("a missing dimension resolved to something")
 	}
-	for _, want := range []string{"--org", "WENV_ORG", cli.PinFileName, "context"} {
+	for _, want := range []string{"--org", "HIKYO_ORG", cli.PinFileName, "context"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not say it looked at %q: %v", want, err)
 		}

@@ -21,7 +21,7 @@ type BindSessionToSAMLProviderParams struct {
 	ID             string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) BindSessionToSAMLProvider(ctx context.Context, arg BindSessionToSAMLProviderParams) (int64, error) {
 	result, err := q.db.Exec(ctx, bindSessionToSAMLProvider, arg.SamlProviderID, arg.ID)
 	if err != nil {
@@ -40,7 +40,7 @@ type ConsumeSAMLTransactionParams struct {
 	ID         string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ConsumeSAMLTransaction(ctx context.Context, arg ConsumeSAMLTransactionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, consumeSAMLTransaction, arg.ConsumedAt, arg.ID)
 	if err != nil {
@@ -53,7 +53,7 @@ const deleteExpiredSAMLReplay = `-- name: DeleteExpiredSAMLReplay :execrows
 DELETE FROM saml_replay WHERE expires_at <= $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteExpiredSAMLReplay(ctx context.Context, expiresAt pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredSAMLReplay, expiresAt)
 	if err != nil {
@@ -66,7 +66,7 @@ const deleteRetiringSAMLSPKey = `-- name: DeleteRetiringSAMLSPKey :execrows
 DELETE FROM saml_sp_keys WHERE id = $1 AND state = 'retiring'
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteRetiringSAMLSPKey(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteRetiringSAMLSPKey, id)
 	if err != nil {
@@ -79,7 +79,7 @@ const deleteSAMLProvider = `-- name: DeleteSAMLProvider :exec
 DELETE FROM saml_providers WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSAMLProvider(ctx context.Context, id string) error {
 	_, err := q.db.Exec(ctx, deleteSAMLProvider, id)
 	return err
@@ -89,7 +89,7 @@ const deleteSessionsForSAMLProvider = `-- name: DeleteSessionsForSAMLProvider :e
 DELETE FROM sessions WHERE saml_provider_id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) DeleteSessionsForSAMLProvider(ctx context.Context, samlProviderID pgtype.Text) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSessionsForSAMLProvider, samlProviderID)
 	if err != nil {
@@ -104,7 +104,7 @@ SELECT id, state, encrypted_private_key, certificate_der, fingerprint,
 FROM saml_sp_keys WHERE state = 'active'
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetActiveSAMLSPKey(ctx context.Context) (SamlSpKey, error) {
 	row := q.db.QueryRow(ctx, getActiveSAMLSPKey)
 	var i SamlSpKey
@@ -130,7 +130,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers WHERE slug = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLProviderBySlug(ctx context.Context, slug string) (SamlProvider, error) {
 	row := q.db.QueryRow(ctx, getSAMLProviderBySlug, slug)
 	var i SamlProvider
@@ -169,7 +169,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers WHERE id = $1
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLProviderForCallback(ctx context.Context, id string) (SamlProvider, error) {
 	row := q.db.QueryRow(ctx, getSAMLProviderForCallback, id)
 	var i SamlProvider
@@ -209,7 +209,7 @@ FROM saml_transactions WHERE relay_state_verifier = $1
 
 // RelayState resolves the expected request/provider before the response's
 // single parse and signature-validation pass.
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GetSAMLTransactionByRelayState(ctx context.Context, relayStateVerifier []byte) (SamlTransaction, error) {
 	row := q.db.QueryRow(ctx, getSAMLTransactionByRelayState, relayStateVerifier)
 	var i SamlTransaction
@@ -245,7 +245,7 @@ type GuardSAMLProviderForMintParams struct {
 	EntityID   string
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) GuardSAMLProviderForMint(ctx context.Context, arg GuardSAMLProviderForMintParams) (int64, error) {
 	result, err := q.db.Exec(ctx, guardSAMLProviderForMint, arg.ID, arg.RowVersion, arg.EntityID)
 	if err != nil {
@@ -288,7 +288,7 @@ type InsertSAMLProviderParams struct {
 }
 
 // SAML SP resolution and lifecycle (#72, saml-sp ADR).
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLProvider(ctx context.Context, arg InsertSAMLProviderParams) error {
 	_, err := q.db.Exec(ctx, insertSAMLProvider,
 		arg.ID,
@@ -327,7 +327,7 @@ type InsertSAMLReplayParams struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLReplay(ctx context.Context, arg InsertSAMLReplayParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertSAMLReplay,
 		arg.Issuer,
@@ -358,7 +358,7 @@ type InsertSAMLSPKeyParams struct {
 	CreatedAt           pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLSPKey(ctx context.Context, arg InsertSAMLSPKeyParams) error {
 	_, err := q.db.Exec(ctx, insertSAMLSPKey,
 		arg.ID,
@@ -399,7 +399,7 @@ type InsertSAMLTransactionParams struct {
 	ExpiresAt           pgtype.Timestamptz
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) InsertSAMLTransaction(ctx context.Context, arg InsertSAMLTransactionParams) error {
 	_, err := q.db.Exec(ctx, insertSAMLTransaction,
 		arg.ID,
@@ -430,7 +430,7 @@ SELECT id, slug, display_name, kind, entity_id, acs_url, sso_redirect_url,
 FROM saml_providers ORDER BY slug
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListSAMLProviders(ctx context.Context) ([]SamlProvider, error) {
 	rows, err := q.db.Query(ctx, listSAMLProviders)
 	if err != nil {
@@ -479,7 +479,7 @@ SELECT id, state, encrypted_private_key, certificate_der, fingerprint,
 FROM saml_sp_keys ORDER BY created_at, id
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) ListSAMLSPKeys(ctx context.Context) ([]SamlSpKey, error) {
 	rows, err := q.db.Query(ctx, listSAMLSPKeys)
 	if err != nil {
@@ -513,7 +513,7 @@ const lockSAMLProviderForDelete = `-- name: LockSAMLProviderForDelete :one
 SELECT id FROM saml_providers WHERE id = $1 FOR UPDATE
 `
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) LockSAMLProviderForDelete(ctx context.Context, id string) (string, error) {
 	row := q.db.QueryRow(ctx, lockSAMLProviderForDelete, id)
 	var id_2 string
@@ -532,7 +532,7 @@ type MarkSAMLSPKeyRetiringCASParams struct {
 	RowVersion int64
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) MarkSAMLSPKeyRetiringCAS(ctx context.Context, arg MarkSAMLSPKeyRetiringCASParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markSAMLSPKeyRetiringCAS, arg.ID, arg.RowVersion)
 	if err != nil {
@@ -573,7 +573,7 @@ type UpdateSAMLProviderCASParams struct {
 	RowVersion                      int64
 }
 
-// wenv:authn-resolution
+// hikyo:authn-resolution
 func (q *Queries) UpdateSAMLProviderCAS(ctx context.Context, arg UpdateSAMLProviderCASParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSAMLProviderCAS,
 		arg.DisplayName,

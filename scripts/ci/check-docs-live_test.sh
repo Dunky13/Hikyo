@@ -3,7 +3,7 @@ set -eu
 
 CDPATH=
 repo_root=$(cd -- "$(dirname "$0")/../.." && pwd)
-fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/wenv-docs-live.XXXXXX")
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-docs-live.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
 cat >"$fixture_dir/curl" <<'EOF'
@@ -19,16 +19,16 @@ case "$url" in
 			expires=2099-08-09T00:00:00Z
 		fi
 		printf '%s\n' \
-			'Contact: https://github.com/Dunky13/wenv/security/advisories/new' \
+			'Contact: https://github.com/Dunky13/hikyo/security/advisories/new' \
 			'Contact: mailto:security@developwent.io' \
 			"Expires: $expires" \
-			'Canonical: https://dunky13.github.io/wenv/.well-known/security.txt'
+			'Canonical: https://dunky13.github.io/hikyo/.well-known/security.txt'
 		;;
 	*/security/)
 		printf '%s\n' 'The default embargo is 90 days from the report itself.'
 		;;
 	*/support/)
-		printf '%s\n' 'Wenv supports exactly one version: latest only.'
+		printf '%s\n' 'Hikyo supports exactly one version: latest only.'
 		;;
 	*/governance/)
 		if [ "${FAKE_STALE_GOVERNANCE:-0}" -eq 1 ]; then
@@ -65,25 +65,25 @@ chmod +x "$fixture_dir/curl"
 
 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/wenv security@developwent.io
+	https://dunky13.github.io/hikyo security@developwent.io
 
 if FAKE_NO_MX=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/wenv security@developwent.io >/dev/null 2>&1; then
+	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: fallback domain without MX was accepted\n' >&2
 	exit 1
 fi
 
 if FAKE_EXPIRED=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/wenv security@developwent.io >/dev/null 2>&1; then
+	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: elapsed security.txt expiry was accepted\n' >&2
 	exit 1
 fi
 
 if FAKE_STALE_GOVERNANCE=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/wenv security@developwent.io >/dev/null 2>&1; then
+	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: stale served governance was accepted\n' >&2
 	exit 1
 fi

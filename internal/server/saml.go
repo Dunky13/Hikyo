@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/Dunky13/wenv/api/apigen"
-	"github.com/Dunky13/wenv/internal/service"
+	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/service"
 )
 
 const samlInitiatorCookieTTL = 10 * time.Minute
@@ -168,7 +168,7 @@ func samlACSPath(provider string) string {
 
 func samlBindingCookieName(provider, relayState string) string {
 	digest := sha256.Sum256([]byte(relayState))
-	return "__Secure-wenv-saml-tx-" + provider + "-" + hex.EncodeToString(digest[:8])
+	return "__Secure-hikyo-saml-tx-" + provider + "-" + hex.EncodeToString(digest[:8])
 }
 
 func samlProviderWire(v service.SAMLProviderView) apigen.SamlProvider {
