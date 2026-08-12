@@ -281,7 +281,7 @@ name**, at org scope or below. Decisions, each argued rather than assumed:
 
 `.goreleaser.yaml`'s build carries `-tags=ui`, so a released binary serves the
 SPA. Both pipelines that invoke GoReleaser build the frontend first —
-`release.yml`'s `build-unsigned-draft` and `ci.yml`'s `supply-chain-fixtures`
+`release.yml`'s `build-unsigned-draft` and `ci.yml`'s `release-snapshot`
 (which runs the snapshot) each gain Node from `.nvmrc`, `corepack enable`, and
 `pnpm --dir web install --frozen-lockfile && pnpm --dir web build` before the
 GoReleaser step. `Dockerfile.release` needs no change: it copies the binary,

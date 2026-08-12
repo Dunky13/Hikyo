@@ -39,8 +39,8 @@ this work: `8bfeef1`.
   proves signed commits pass and unsigned commits block.
 - Live repository policy is active: ruleset `20539249` forbids `v*` update and
   deletion with no bypass; ruleset `20539250` restricts `v*` creation to the
-  admin repository role; main ruleset `20539346` requires an
-  up-to-date PR with `lint`, `dco`, `supply-chain-fixtures`, and `test`;
+  admin repository role; the checked-in desired state for main ruleset
+  `20539346` requires an up-to-date PR with the aggregate `ci-required` context;
   immutable releases and full-SHA-only Actions are enabled. The permanent
   `v-ruleset-probe` tag is pinned at `8bfeef1a80cceae0aea178cfda12bed1819e36c8`;
   a real changed-SHA update was refused by ruleset `20539249`.
