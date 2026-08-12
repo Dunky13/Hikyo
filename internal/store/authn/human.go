@@ -2,6 +2,7 @@ package authn
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"time"
@@ -267,6 +268,29 @@ func (r *Resolver) PrincipalGeneration(ctx context.Context, p domain.PrincipalID
 	return n, notFoundOr(err)
 }
 
+// verifierMatches is the constant-time comparison the machine-identities ADR
+// fixes for every bearer artifact: "Constant-time comparison is used on the
+// resolved row." The unique index is what FINDS the row; this is what accepts
+// it, and every *ByVerifier resolver below calls it before returning one.
+//
+// Honest about what it buys, because a compare sitting beside a secret invites
+// the larger claim: THIS FUNCTION satisfies the byte-comparison requirement
+// and nothing else. It does not by itself make a hit and a miss
+// indistinguishable — a length mismatch short-circuits, and the index probe is
+// not constant-time either.
+//
+// Indistinguishability is carried by the CALLER, and only the machine path
+// (machine.go) carries it in full today: the same number of queries whatever
+// the outcome, the same per-query row decode via the decoy rows, and this
+// compare. The human session path carries the query count and this compare but
+// not the decode symmetry — that is #16's shape, unchanged here.
+//
+// A mismatch answers domain.ErrNotFound, which is exactly what a miss already
+// answered, so adding this changed no caller's read count.
+func verifierMatches(stored, presented []byte) bool {
+	return subtle.ConstantTimeCompare(stored, presented) == 1
+}
+
 // SessionByVerifier resolves a presented artifact. Expiry, generation and
 // epoch are NOT evaluated here: the caller does that with the clock and the
 // live counters, so one place owns the liveness rule.
@@ -276,11 +300,17 @@ func (r *Resolver) SessionByVerifier(ctx context.Context, verifier []byte) (Sess
 		if err != nil {
 			return SessionRow{}, notFoundOr(err)
 		}
-		return sqliteSession(row)
+		if !verifierMatches(row.Verifier, verifier) {
+			return SessionRow{}, domain.ErrNotFound
+		}
+		return sqliteSession(sqlitegen.GetSessionByVerifierRow(row))
 	}
 	row, err := r.pg.GetSessionByVerifier(ctx, verifier)
 	if err != nil {
 		return SessionRow{}, notFoundOr(err)
+	}
+	if !verifierMatches(row.Verifier, verifier) {
+		return SessionRow{}, domain.ErrNotFound
 	}
 	return SessionRow{
 		ID: row.ID, PrincipalID: domain.PrincipalID(row.PrincipalID), Artifact: row.Artifact,
@@ -327,6 +357,9 @@ func (r *Resolver) CredentialAuthorityByVerifier(ctx context.Context, verifier [
 		if err != nil {
 			return CredentialAuthority{}, notFoundOr(err)
 		}
+		if !verifierMatches(row.Verifier, verifier) {
+			return CredentialAuthority{}, domain.ErrNotFound
+		}
 		expires, err := decodeTime(row.ExpiresAt)
 		if err != nil {
 			return CredentialAuthority{}, err
@@ -339,6 +372,9 @@ func (r *Resolver) CredentialAuthorityByVerifier(ctx context.Context, verifier [
 	row, err := r.pg.GetCredentialAuthorityByVerifier(ctx, verifier)
 	if err != nil {
 		return CredentialAuthority{}, notFoundOr(err)
+	}
+	if !verifierMatches(row.Verifier, verifier) {
+		return CredentialAuthority{}, domain.ErrNotFound
 	}
 	return CredentialAuthority{
 		ID: row.ID, AccountID: row.AccountID, Purpose: row.Purpose, IssuedBy: row.IssuedBy,

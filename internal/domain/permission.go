@@ -141,6 +141,46 @@ const (
 	ClassInstanceConn PrincipalClass = "instance-connection"
 )
 
+// ServiceAccountKinds returns the closed set of kinds a service account may
+// be created with (machine-identities ADR § The machine principal). It is a
+// STRICT SUBSET of the machine classes: the provisioning and instance
+// connections are separate principal classes created with their own bindings
+// (#73/#71), never through the service-account surface.
+func ServiceAccountKinds() []PrincipalClass {
+	return []PrincipalClass{ClassAutomation, ClassWorkload}
+}
+
+// IsServiceAccountKind reports whether c may be declared at service-account
+// creation. Kind is immutable afterwards, so this is the only gate.
+func IsServiceAccountKind(c PrincipalClass) bool {
+	return c == ClassWorkload || c == ClassAutomation
+}
+
+// CredentialKind discriminates HOW a credential authenticates its service
+// account. The ADR requires the discriminator to exist before a second kind
+// does: "the API and schema MUST NOT assume the bearer token is the only
+// kind". v1 implements one; `oidc-federation` is a later ticket's row, not a
+// later ticket's schema change.
+type CredentialKind string
+
+// CredentialHikyoToken is the hikyo-issued opaque bearer token.
+const CredentialHikyoToken CredentialKind = "hikyo-token"
+
+// CredentialLifetime is the ADR's typed lifetime. `indefinite` is a VALUE,
+// not a large number: it is unreachable by raising any ceiling, which is the
+// whole point of typing it rather than encoding it as a distant instant.
+type CredentialLifetime string
+
+const (
+	LifetimeFinite     CredentialLifetime = "finite"
+	LifetimeIndefinite CredentialLifetime = "indefinite"
+)
+
+// IsCredentialLifetime reports whether l is one of the two typed values.
+func IsCredentialLifetime(l CredentialLifetime) bool {
+	return l == LifetimeFinite || l == LifetimeIndefinite
+}
+
 // machineAllowlists is NORMATIVE, not convention (permission ADR § Machine
 // principals): the grant API refuses a capability outside its class's list.
 //

@@ -394,6 +394,9 @@ func (r *Resolver) SAMLTransactionByRelayState(ctx context.Context, verifier []b
 		if err != nil {
 			return SAMLTransaction{}, notFoundOr(err)
 		}
+		if !verifierMatches(row.RelayStateVerifier, verifier) {
+			return SAMLTransaction{}, domain.ErrNotFound
+		}
 		created, err := decodeTime(row.CreatedAt)
 		if err != nil {
 			return SAMLTransaction{}, err
@@ -415,6 +418,9 @@ func (r *Resolver) SAMLTransactionByRelayState(ctx context.Context, verifier []b
 	row, err := r.pg.GetSAMLTransactionByRelayState(ctx, verifier)
 	if err != nil {
 		return SAMLTransaction{}, notFoundOr(err)
+	}
+	if !verifierMatches(row.RelayStateVerifier, verifier) {
+		return SAMLTransaction{}, domain.ErrNotFound
 	}
 	return SAMLTransaction{
 		ID: row.ID, RequestID: row.RequestID, RelayStateVerifier: row.RelayStateVerifier,

@@ -77,6 +77,22 @@ var (
 	ErrNoSuchGrant = fmt.Errorf("%w: service: no such grant", domain.ErrNotFound)
 	// ErrUnknownPrincipal refuses a grant to a principal that does not exist.
 	ErrUnknownPrincipal = fmt.Errorf("%w: service: no such principal", domain.ErrInvalid)
+	// ErrDisclosureAuthority is the machine-identities ADR's mint/widen
+	// refusal: the actor holds `manage-identities` but not the disclosure
+	// capability over an environment the operation would make reachable.
+	//
+	// It is ErrConflict, exactly like ErrGrantorLacksCapability above and for
+	// the same reason: authorization for the OPERATION succeeded — the actor
+	// administers this project's identities and can list them — so the
+	// nonexistent mask would be a lie they could disprove with their next
+	// call, and 403 is reserved on tenant routes for the assurance refusal.
+	// What refuses is the resulting state, which is what `conflict` means
+	// everywhere else in this surface.
+	ErrDisclosureAuthority = fmt.Errorf("%w: service: this operation would make plaintext reachable in an environment you may not disclose", domain.ErrConflict)
+	// ErrReauthRequired is the reauthentication conjunct refusing. The
+	// underlying cause (no window, expired, spent, wrong unit) is deliberately
+	// not distinguished on the wire: the remedy is the same in every case.
+	ErrReauthRequired = fmt.Errorf("%w: service: reauthenticate over the environments this operation makes reachable, then retry", domain.ErrConflict)
 )
 
 // Grants owns the grant surface. Every method opens one transaction,
@@ -84,8 +100,13 @@ var (
 // session-generation advance and audit — before it commits. There is no
 // authorization cache to invalidate, and this ticket keeps it that way.
 type Grants struct {
-	DB  *store.DB
-	Now func() time.Time
+	DB *store.DB
+	// Auth supplies the reauthentication conjunct a WIDENING grant on a
+	// machine principal carries (#61). It is only consulted on that path: an
+	// ordinary human grant has never required reauthentication and does not
+	// start now.
+	Auth *Auth
+	Now  func() time.Time
 }
 
 func (s *Grants) now() time.Time {
@@ -170,12 +191,12 @@ func (s *Grants) Create(ctx context.Context, actor Actor, spec GrantSpec) (Grant
 		if err != nil {
 			return err
 		}
-		res, ev, err := s.grantOne(ctx, az, caller.Principal, spec, level, "")
+		res, evs, err := s.grantOne(ctx, az, caller, spec, level, "")
 		if err != nil {
 			return err
 		}
 		out = res
-		return insertGrantEvent(ctx, r, p, caller.Principal, level, ev)
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, evs...)
 	})
 	return out, err
 }
@@ -220,19 +241,20 @@ func insertGrantEvent(ctx context.Context, r store.Repos, p authz.Proof, actor d
 // template path calls it once per expanded capability, so a template can never
 // take a shortcut past a rule an individual grant must satisfy.
 func (s *Grants) grantOne(
-	ctx context.Context, az *authz.TxAuthorizer, grantor domain.PrincipalID,
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
 	spec GrantSpec, level domain.Level, template domain.Template,
-) (GrantResult, grantEventInput, error) {
+) (GrantResult, []grantEventInput, error) {
 	var zero GrantResult
+	grantor := caller.Principal
 	now := s.now()
 
 	if err := checkGrantable(spec.Capability, level); err != nil {
-		return zero, grantEventInput{}, err
+		return zero, nil, err
 	}
 
 	class, err := lockAndClassify(ctx, az, spec.Target, spec.Capability, spec.Scope)
 	if err != nil {
-		return zero, grantEventInput{}, err
+		return zero, nil, err
 	}
 
 	// The grant-authority rule. `manage-members` held at ORG or INSTANCE
@@ -242,17 +264,28 @@ func (s *Grants) grantOne(
 	// only what the grantor currently holds at or above the target scope.
 	grantorGrants, err := az.GrantRowsForPrincipal(ctx, grantor)
 	if err != nil {
-		return zero, grantEventInput{}, err
+		return zero, nil, err
 	}
 	unheld := !holds(grantorGrants, spec.Capability, spec.Scope)
 	if unheld && !mayGrantUnheld(grantorGrants, spec.Scope) {
-		return zero, grantEventInput{}, ErrGrantorLacksCapability
+		return zero, nil, ErrGrantorLacksCapability
+	}
+
+	// The machine-widening gate (#61). It runs BEFORE the write, in this same
+	// transaction, and the ADR is explicit that both authorizations apply and
+	// the stricter refuses: a grant landing on a machine principal is not an
+	// ordinary grant, because authority lives entirely in the grants and the
+	// mutation therefore re-scopes EVERY CREDENTIAL ALREADY IN CIRCULATION —
+	// instantly, with nobody re-presenting anything.
+	widening, err := s.checkMachineWidening(ctx, az, caller, grantorGrants, spec, class)
+	if err != nil {
+		return zero, nil, err
 	}
 
 	origin := authz.Origin{Kind: domain.OriginManual, Subject: string(grantor)}
 	out, err := writeGrantRow(ctx, az, spec, origin, now)
 	if err != nil {
-		return zero, grantEventInput{}, err
+		return zero, nil, err
 	}
 
 	// F5: the lifecycle event must match the state transition. A repeat that
@@ -260,7 +293,7 @@ func (s *Grants) grantOne(
 	// `grant.modified` for it would put a modification in the trail that never
 	// happened, and an investigator counting modifications would count polls.
 	if !out.Created && !out.OriginAdded {
-		return out, grantEventInput{}, nil
+		return out, nil, nil
 	}
 	typ := audit.EventGrantModified
 	if out.Created {
@@ -278,9 +311,209 @@ func (s *Grants) grantOne(
 	if template != "" {
 		payload["template"] = string(template)
 	}
-	return out, grantEventInput{
+	events := []grantEventInput{{
 		typ: typ, object: audit.Object{Type: "grant", ID: out.GrantID}, payload: payload,
+	}}
+	// A widening on a machine principal is a SECOND fact, not a nuance of the
+	// first: grant.created says a row appeared, identity.grant_widened says
+	// plaintext became newly reachable to credentials that are already out
+	// there. The audit ADR's propagation asks for the second by name.
+	if widening != nil {
+		widening.object = audit.Object{Type: "grant", ID: out.GrantID}
+		events = append(events, *widening)
+	}
+	return out, events, nil
+}
+
+// checkMachineWidening is the ADR's third authorization row — the one an
+// implementer misses. It answers: does this grant make plaintext NEWLY
+// reachable to the machine principal, and if so does the ACTOR hold the
+// matching disclosure right over the newly reachable environments?
+//
+// Three properties are load-bearing and each of them is a named ADR rule:
+//
+//  1. It is computed on the DELTA, never the post-state. A delegated project
+//     administrator who deliberately holds no production `reveal` must still
+//     be able to add a development-only grant to a service account that
+//     already reaches production. Requiring production `reveal` there would
+//     refuse a change that discloses nothing new and would pressure
+//     administrators into acquiring exactly the access least privilege
+//     withheld from them.
+//
+//  2. The delta is computed PER AUTHORITY CLASS, independently. Collapsing
+//     "current plaintext" and "historical plaintext" into one boolean is a
+//     named bypass: a service account already holding read(E) ∧ reveal(E)
+//     shows an EMPTY delta when granted reveal-history(E), so an actor with
+//     no historical access at all could hand a machine principal the power
+//     to read superseded secrets — which may still be live in an external
+//     service.
+//
+//  3. It carries the reauthentication conjunct too, over the same delta.
+//     Machines never reauthenticate; the human performing the widening does.
+//
+// It returns nil for every non-widening mutation — a human target, a machine
+// grant that reaches no new plaintext, a repeat — so narrowing and ordinary
+// least-privilege granting stay under the plain capability.
+func (s *Grants) checkMachineWidening(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	actorGrants []authz.GrantRow, spec GrantSpec, class domain.PrincipalClass,
+) (*grantEventInput, error) {
+	if !domain.IsMachineClass(class) {
+		return nil, nil
+	}
+	// Only the three disclosure-relevant atoms can move a reachable set:
+	// `read` gates delivery, `reveal` and `reveal-history` gate plaintext.
+	// Anything else on the allowlists (edit, publish, definitions-edit)
+	// cannot make plaintext reachable however it is scoped.
+	switch spec.Capability {
+	case domain.CapRead, domain.CapReveal, domain.CapRevealHistory:
+	default:
+		return nil, nil
+	}
+
+	project := domain.Scope{Org: spec.Scope.Org, Project: spec.Scope.Project}
+	if project.Org == "" || project.Project == "" {
+		// A machine grant is refused above project depth by checkMachineScope,
+		// so this is unreachable rather than a case to handle quietly.
+		return nil, fmt.Errorf("service: machine grant at scope %q has no project", renderScope(spec.Scope))
+	}
+	envs, err := az.EnvironmentsInProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	pre, err := az.GrantsOf(ctx, spec.Target)
+	if err != nil {
+		return nil, err
+	}
+	post := append(append([]domain.Grant{}, pre...), domain.Grant{
+		Capability: spec.Capability, Scope: spec.Scope,
+	})
+	before := authz.ReachableFrom(project, envs, pre)
+	after := authz.ReachableFrom(project, envs, post)
+
+	current := newlyReachable(before.Current, after.Current)
+	historical := newlyReachable(before.Historical, after.Historical)
+	if len(current) == 0 && len(historical) == 0 {
+		return nil, nil
+	}
+
+	if s.Auth == nil {
+		return nil, errors.New("service: the grant surface has no reauthentication seam wired")
+	}
+	// The full formula, not two thirds of it: the ADR's widening row is
+	// `manage-identities(project)` ∧ disclosure ∧ reauthentication, and the
+	// grant route's own chokepoint asked only the `manage-members` question.
+	// Where the two disagree the stricter refuses, so an org member manager
+	// who does not administer this project's identities cannot re-scope its
+	// credentials by granting.
+	if !holds(actorGrants, domain.CapManageIdentities, project) {
+		return nil, fmt.Errorf("%w: %s over %s", ErrDisclosureAuthority,
+			domain.CapManageIdentities, renderScope(project))
+	}
+	if err := s.Auth.RequireDisclosureAuthority(ctx, az, caller, actorGrants, project, current, historical, s.now()); err != nil {
+		return nil, err
+	}
+	return &grantEventInput{
+		typ: audit.EventMachineGrantWidened,
+		payload: audit.Payload{
+			"target_principal":           string(spec.Target),
+			"principal_class":            string(class),
+			"capability":                 string(spec.Capability),
+			"scope":                      renderScope(spec.Scope),
+			"newly_reachable_current":    envStrings(current),
+			"newly_reachable_historical": envStrings(historical),
+		},
 	}, nil
+}
+
+// RequireDisclosureAuthority is the shared conjunct of the MINT row and the
+// WIDEN row of the machine-identities ADR's authorization table: over the
+// environments handed to it, the actor must hold the matching disclosure
+// capability AND a live reauthentication window.
+//
+// It lives on *Auth because the reauthentication half is *Auth's machinery
+// and the two callers — the credential mint and the grant surface's widening
+// gate — must not be able to disagree about what the conjunct means.
+//
+// The two environment sets stay separate all the way down. Accepting
+// `reveal` over an environment where only HISTORICAL plaintext became
+// reachable would be the collapse the ADR names as a bypass, one function
+// later than where it was designed out.
+//
+// The reauthentication conjunct ranges over exactly the environments the
+// disclosure conjunct ranged over, and over nothing when that set is empty.
+// That is not a loophole: the ADR gates "every operation that creates,
+// replaces, or expands a working path from a machine credential to
+// plaintext", and an operation reaching no plaintext creates no such path —
+// the same reason its `reveal` conjunct is vacuous there. Machines never
+// reauthenticate; the human performing the act does.
+func (s *Auth) RequireDisclosureAuthority(
+	ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity,
+	actorGrants []authz.GrantRow, project domain.Scope, current, historical []domain.EnvID,
+	now time.Time,
+) error {
+	for _, env := range current {
+		at := domain.Scope{Org: project.Org, Project: project.Project, Env: env}
+		if !holds(actorGrants, domain.CapReveal, at) {
+			return fmt.Errorf("%w: %s over %s", ErrDisclosureAuthority, domain.CapReveal, renderScope(at))
+		}
+	}
+	for _, env := range historical {
+		at := domain.Scope{Org: project.Org, Project: project.Project, Env: env}
+		if !holds(actorGrants, domain.CapRevealHistory, at) {
+			return fmt.Errorf("%w: %s over %s", ErrDisclosureAuthority, domain.CapRevealHistory, renderScope(at))
+		}
+	}
+	for _, env := range union(current, historical) {
+		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, string(env), nil, now)
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired),
+			errors.Is(err, ErrReauthUnitMismatch), errors.Is(err, ErrReauthWindowSpent):
+			// One refusal for four causes. Which window predicate failed is
+			// the caller's own state, and the remedy — reauthenticate over
+			// this environment and retry — is identical for all of them.
+			return fmt.Errorf("%w (%s)", ErrReauthRequired, env)
+		default:
+			return err
+		}
+	}
+	return nil
+}
+
+// newlyReachable is the per-class delta: what the post-state reaches that the
+// pre-state did not. Sorted, so the audit payload and the refusal message are
+// stable.
+func newlyReachable(before, after map[domain.EnvID]bool) []domain.EnvID {
+	var out []domain.EnvID
+	for env := range after {
+		if !before[env] {
+			out = append(out, env)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func union(a, b []domain.EnvID) []domain.EnvID {
+	seen := map[domain.EnvID]bool{}
+	var out []domain.EnvID
+	for _, e := range append(append([]domain.EnvID{}, a...), b...) {
+		if !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func envStrings(envs []domain.EnvID) []string {
+	out := make([]string, 0, len(envs))
+	for _, e := range envs {
+		out = append(out, string(e))
+	}
+	return out
 }
 
 // hasOrigin reports whether this exact origin already holds the row, reading
@@ -336,13 +569,11 @@ func lockAndClassify(ctx context.Context, az *authz.TxAuthorizer, target domain.
 	if err := checkMachineScope(class, scope); err != nil {
 		return "", err
 	}
-	// One project, fixed by the first grant. Read under the row lock taken
-	// above, so two concurrent first grants cannot pick two projects.
-	rows, err := az.GrantRowsForPrincipal(ctx, target)
-	if err != nil {
-		return "", err
-	}
-	if err := checkMachineProject(rows, scope); err != nil {
+	// Subtree confinement. The owning project comes from the SERVICE ACCOUNT
+	// ROW, which exists precisely to record it (#61); the principal's prior
+	// grants are the fallback for a machine principal that is not a service
+	// account. Read under the row lock taken above.
+	if err := checkMachineProject(ctx, az, target, scope); err != nil {
 		return "", err
 	}
 	return class, nil
@@ -369,16 +600,42 @@ func checkMachineScope(class domain.PrincipalClass, scope domain.Scope) error {
 }
 
 // checkMachineProject holds the "one project" boundary the ADR draws around a
-// machine credential: the first grant fixes the project, every later one must
-// match it.
+// machine credential: "its grants are confined to its owning project's
+// subtree. A grant naming a scope outside that project is refused, regardless
+// of the granter's authority."
 //
-// This is the enforceable half of the rule TODAY. The machine-identities
-// ticket (#17) introduces the credential binding that names the project
-// authoritatively; until it lands there is no binding to check against, so the
-// principal's own existing grants are the record of which project it belongs
-// to. #17 replaces this with the binding, and the rule gets stricter, never
-// looser.
-func checkMachineProject(rows []authz.GrantRow, scope domain.Scope) error {
+// OWNERSHIP IS READ FROM THE SERVICE-ACCOUNT ROW, and that is the whole point
+// of this function. Deriving it from the principal's PRIOR GRANTS — what this
+// did before #61 shipped the row — is unenforceable at exactly the moment it
+// matters: a freshly created service account holds no grants, so an
+// inference has nothing to say, and its FIRST grant could name any project in
+// any org. A project-A service account would be handed project-B authority,
+// and the mint gate's post-state enumeration would never see the escape
+// because that enumeration ranges over the OWNING project's environments.
+//
+// The prior-grant rule survives as the fallback for a machine principal that
+// is not a service account: the provisioning and instance connections
+// (#73/#71) own no service_accounts row, and neither do machine principals
+// predating this table. For those the first grant still fixes the project,
+// which is strictly what they had before.
+func checkMachineProject(ctx context.Context, az *authz.TxAuthorizer, target domain.PrincipalID, scope domain.Scope) error {
+	sa, err := az.ServiceAccountByPrincipal(ctx, target)
+	switch {
+	case err == nil:
+		if sa.Org != scope.Org || sa.Project != scope.Project {
+			return fmt.Errorf("%w: owned by %s/%s, asked for %s/%s",
+				ErrMachineProject, sa.Org, sa.Project, scope.Org, scope.Project)
+		}
+		return nil
+	case errors.Is(err, domain.ErrNotFound):
+		// Not a service account. Fall through to the prior-grant rule.
+	default:
+		return err
+	}
+	rows, err := az.GrantRowsForPrincipal(ctx, target)
+	if err != nil {
+		return err
+	}
 	for _, row := range rows {
 		bound := row.Grant.Scope
 		if bound.Project == "" {
@@ -706,14 +963,14 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 		created, joined, unchanged := 0, 0, 0
 		names := make([]string, 0, len(caps))
 		for _, capability := range caps {
-			res, ev, err := s.grantOne(ctx, az, caller.Principal, GrantSpec{
+			res, evs, err := s.grantOne(ctx, az, caller, GrantSpec{
 				Target: target, Capability: capability, Scope: scope,
 			}, level, template)
 			if err != nil {
 				return err
 			}
 			results = append(results, res)
-			events = append(events, ev)
+			events = append(events, evs...)
 			names = append(names, string(capability))
 			switch {
 			case res.Created:

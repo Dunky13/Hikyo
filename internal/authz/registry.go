@@ -187,6 +187,27 @@ const (
 	// ceremony inexplicable.
 	OpEnvSettingsRead   Operation = "environment.settings-read"
 	OpEnvSettingsUpdate Operation = "environment.settings-update"
+
+	// Machine identities (#61). Every one of these asks
+	// `manage-identities(project)` and nothing more, because that is the
+	// whole of what the CHOKEPOINT decides here.
+	//
+	// The mint and widen formulas' reveal conjuncts are deliberately NOT in
+	// this table, and that is the load-bearing part: they range over a set
+	// computed from the RESULTING STATE — every environment reachable in the
+	// post-state for a mint, only the newly reachable set for a grant
+	// mutation — which no static (capability, level) atom can express. They
+	// are evaluated in service.Identities, in the same transaction, against
+	// the same grant rows, and refuse before any row is written. A formula
+	// atom here would have been a claim the registry could not keep.
+	OpServiceAccountCreate   Operation = "identity.service-account-create"
+	OpServiceAccountList     Operation = "identity.service-account-list"
+	OpServiceAccountDelete   Operation = "identity.service-account-delete"
+	OpCredentialMint         Operation = "identity.credential-mint"
+	OpCredentialList         Operation = "identity.credential-list"
+	OpCredentialRevoke       Operation = "identity.credential-revoke"
+	OpCredentialPolicyRead   Operation = "identity.credential-policy-read"
+	OpCredentialPolicyUpdate Operation = "identity.credential-policy-update"
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -1007,6 +1028,9 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
 		events: []audit.EventType{
 			audit.EventGrantCreated, audit.EventGrantModified,
+			// A widening on a MACHINE principal is a second, separate fact:
+			// the grant re-scopes every credential already in circulation.
+			audit.EventMachineGrantWidened,
 		},
 	},
 	// Env-addressed grants ask the PROJECT question: `manage-members` is not
@@ -1018,6 +1042,9 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
 		events: []audit.EventType{
 			audit.EventGrantCreated, audit.EventGrantModified,
+			// A widening on a MACHINE principal is a second, separate fact:
+			// the grant re-scopes every credential already in circulation.
+			audit.EventMachineGrantWidened,
 		},
 	},
 	OpGrantCreateInstance: {
@@ -1111,6 +1138,9 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
 		events: []audit.EventType{
 			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+			// A widening on a MACHINE principal is a second, separate fact:
+			// the grant re-scopes every credential already in circulation.
+			audit.EventMachineGrantWidened,
 		},
 	},
 	OpTemplateApplyEnv: {
@@ -1120,6 +1150,9 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
 		events: []audit.EventType{
 			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
+			// A widening on a MACHINE principal is a second, separate fact:
+			// the grant re-scopes every credential already in circulation.
+			audit.EventMachineGrantWidened,
 		},
 	},
 	OpTemplateApplyInstance: {
@@ -1153,6 +1186,85 @@ var operations = map[Operation]opSpec{
 		events: []audit.EventType{
 			audit.EventReauthWindowChanged, audit.EventProtectedFlagChange,
 			audit.EventAuthEffectiveWindowLowered,
+		},
+	},
+
+	// Machine identities (#61). The service-account and credential tables are
+	// class=authn, so their reads and writes ride the resolution surface for
+	// the same reason grants do; what IS a store op is the audit insert.
+	OpServiceAccountCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventServiceAccountCreated},
+	},
+	// Listing is not `audited: none`: the permit rule admits only
+	// tenant-class bare-`read` operations, and reading which credentials can
+	// reach production is not that.
+	OpServiceAccountList: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventCredentialsListed},
+	},
+	// Deletion is a NARROWING, so it stays under the plain capability with no
+	// reveal conjunct — the ADR's symmetric limit, so incident response is
+	// never gated on disclosure rights.
+	OpServiceAccountDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventServiceAccountDeleted, audit.EventCredentialRevoked,
+		},
+	},
+	// Minting is where the reveal conjunct and the reauthentication conjunct
+	// live, both evaluated in service.Identities over the resulting
+	// post-state. This row is only the capability half.
+	OpCredentialMint: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventCredentialMinted},
+	},
+	OpCredentialList: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventCredentialsListed},
+	},
+	OpCredentialRevoke: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventCredentialRevoked},
+	},
+	// Not `audited: none`: the default-deny permit rule admits only
+	// tenant-class bare-`read` operations, and reading the instance's
+	// credential governance is neither. Same shape as the OIDC provider read.
+	OpCredentialPolicyRead: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventCredentialPolicyRead},
+	},
+	OpCredentialPolicyUpdate: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		// Two events, because this operation has two outcomes. A TIGHTENING
+		// the actor has not confirmed changes no policy but enumerates every
+		// live credential in the instance to them, and an instance-wide
+		// credential enumeration with no record of who asked is the gap that
+		// event closes.
+		events: []audit.EventType{
+			audit.EventCredentialPolicyChanged, audit.EventCredentialPolicyRead,
 		},
 	},
 }

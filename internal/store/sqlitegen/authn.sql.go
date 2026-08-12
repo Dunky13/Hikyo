@@ -389,7 +389,7 @@ func (q *Queries) GetConfirmedTOTPForAccount(ctx context.Context, accountID stri
 }
 
 const getCredentialAuthorityByVerifier = `-- name: GetCredentialAuthorityByVerifier :one
-SELECT id, account_id, purpose, issued_by, credential_epoch, expires_at,
+SELECT id, account_id, verifier, purpose, issued_by, credential_epoch, expires_at,
        consumed_at, created_at
 FROM credential_authorities WHERE verifier = ?
 `
@@ -397,6 +397,7 @@ FROM credential_authorities WHERE verifier = ?
 type GetCredentialAuthorityByVerifierRow struct {
 	ID              string
 	AccountID       string
+	Verifier        []byte
 	Purpose         string
 	IssuedBy        string
 	CredentialEpoch int64
@@ -412,6 +413,7 @@ func (q *Queries) GetCredentialAuthorityByVerifier(ctx context.Context, verifier
 	err := row.Scan(
 		&i.ID,
 		&i.AccountID,
+		&i.Verifier,
 		&i.Purpose,
 		&i.IssuedBy,
 		&i.CredentialEpoch,
@@ -845,7 +847,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByID
 }
 
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
-SELECT id, principal_id, artifact, session_generation, credential_epoch,
+SELECT id, principal_id, verifier, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
        last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
 FROM sessions WHERE verifier = ?
@@ -854,6 +856,7 @@ FROM sessions WHERE verifier = ?
 type GetSessionByVerifierRow struct {
 	ID                string
 	PrincipalID       string
+	Verifier          []byte
 	Artifact          string
 	SessionGeneration int64
 	CredentialEpoch   int64
@@ -875,6 +878,7 @@ func (q *Queries) GetSessionByVerifier(ctx context.Context, verifier []byte) (Ge
 	err := row.Scan(
 		&i.ID,
 		&i.PrincipalID,
+		&i.Verifier,
 		&i.Artifact,
 		&i.SessionGeneration,
 		&i.CredentialEpoch,

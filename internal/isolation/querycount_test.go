@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -95,6 +96,40 @@ func countedAuthorize(t *testing.T, db *store.DB, principal domain.PrincipalID, 
 	}
 	_, err := authz.NewTxAuthorizer(r, tok).Authorize(ctx, authz.Identity{Principal: principal}, authz.OpEnvRead, scope)
 	return count, err
+}
+
+// countedMachineAuth resolves a presented machine credential through the real
+// chokepoint on a counting transaction, so the fixed-read discipline is
+// asserted rather than described.
+func countedMachineAuth(t *testing.T, db *store.DB, presented string) (int, authz.Identity) {
+	t.Helper()
+	ctx := t.Context()
+	count := 0
+	tok := authz.NewTxToken()
+	defer tok.Invalidate()
+	var r *authn.Resolver
+	if db.Engine() == store.EnginePostgres {
+		pgtx, err := db.PG().BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = pgtx.Rollback(ctx) }()
+		var dbtx pggen.DBTX = countingPGTx{tx: pgtx, n: &count}
+		r = authn.NewPG(dbtx)
+	} else {
+		sqtx, err := db.SQLiteRead().BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = sqtx.Rollback() }()
+		var dbtx sqlitegen.DBTX = countingSqliteTx{tx: sqtx, n: &count}
+		r = authn.NewSQLite(dbtx)
+	}
+	id, err := authz.NewTxAuthorizer(r, tok).AuthenticateCaller(ctx, presented, time.Now().UTC())
+	if err != nil && !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("machine authentication: %v", err)
+	}
+	return count, id
 }
 
 func runQueryCountChecks(t *testing.T, db *store.DB) {

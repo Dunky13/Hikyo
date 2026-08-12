@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store/pggen"
 	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
 )
@@ -311,11 +312,17 @@ func (r *Resolver) WebAuthnCeremonyByChallenge(ctx context.Context, challengeVer
 		if err != nil {
 			return WebAuthnCeremony{}, notFoundOr(err)
 		}
+		if !verifierMatches(row.ChallengeVerifier, challengeVerifier) {
+			return WebAuthnCeremony{}, domain.ErrNotFound
+		}
 		return sqliteWebAuthnCeremony(row)
 	}
 	row, err := r.pg.GetWebAuthnCeremonyByChallenge(ctx, challengeVerifier)
 	if err != nil {
 		return WebAuthnCeremony{}, notFoundOr(err)
+	}
+	if !verifierMatches(row.ChallengeVerifier, challengeVerifier) {
+		return WebAuthnCeremony{}, domain.ErrNotFound
 	}
 	return pgWebAuthnCeremony(row), nil
 }

@@ -17,6 +17,57 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AffectedCredentialReason.
+const (
+	Clamped             AffectedCredentialReason = "clamped"
+	IndefiniteWithdrawn AffectedCredentialReason = "indefinite-withdrawn"
+)
+
+// Valid indicates whether the value is a known member of the AffectedCredentialReason enum.
+func (e AffectedCredentialReason) Valid() bool {
+	switch e {
+	case Clamped:
+		return true
+	case IndefiniteWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CredentialKind.
+const (
+	HikyoToken CredentialKind = "hikyo-token"
+)
+
+// Valid indicates whether the value is a known member of the CredentialKind enum.
+func (e CredentialKind) Valid() bool {
+	switch e {
+	case HikyoToken:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CredentialLifetime.
+const (
+	Finite     CredentialLifetime = "finite"
+	Indefinite CredentialLifetime = "indefinite"
+)
+
+// Valid indicates whether the value is a known member of the CredentialLifetime enum.
+func (e CredentialLifetime) Valid() bool {
+	switch e {
+	case Finite:
+		return true
+	case Indefinite:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorCode.
 const (
 	ErrorCodeBadRequest      ErrorCode = "bad_request"
@@ -374,6 +425,40 @@ func (e SamlStartRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for ServiceAccountKind.
+const (
+	Automation ServiceAccountKind = "automation"
+	Workload   ServiceAccountKind = "workload"
+)
+
+// Valid indicates whether the value is a known member of the ServiceAccountKind enum.
+func (e ServiceAccountKind) Valid() bool {
+	switch e {
+	case Automation:
+		return true
+	case Workload:
+		return true
+	default:
+		return false
+	}
+}
+
+// AffectedCredential defines model for AffectedCredential.
+type AffectedCredential struct {
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt *Timestamp `json:"expires_at,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id     ID                       `json:"id"`
+	Reason AffectedCredentialReason `json:"reason"`
+
+	// ServiceAccountId A prefixed UUIDv7, e.g. `org_0198…`.
+	ServiceAccountId ID `json:"service_account_id"`
+}
+
+// AffectedCredentialReason defines model for AffectedCredential.Reason.
+type AffectedCredentialReason string
+
 // ApplyTemplateRequest defines model for ApplyTemplateRequest.
 type ApplyTemplateRequest struct {
 	// Principal A prefixed UUIDv7, e.g. `org_0198…`.
@@ -544,6 +629,51 @@ type CreateProjectRequest struct {
 	// and is still refused by the server with `bad_request`. Clients that want
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
+}
+
+// CreateServiceAccountRequest defines model for CreateServiceAccountRequest.
+type CreateServiceAccountRequest struct {
+	// Kind The closed set a service account may be created with. Declared at
+	// creation and IMMUTABLE afterwards.
+	Kind ServiceAccountKind `json:"kind"`
+	Name string             `json:"name"`
+}
+
+// CredentialKind How a credential authenticates its service account. The discriminator
+// exists before a second kind does, so adding one is a new row type
+// rather than a schema change.
+type CredentialKind string
+
+// CredentialLifetime `indefinite` is a VALUE, not a large number: it is unreachable by
+// raising the instance ceiling, and is admitted only under a separate,
+// default-off instance opt-in.
+type CredentialLifetime string
+
+// CredentialPolicy defines model for CredentialPolicy.
+type CredentialPolicy struct {
+	AllowIndefinite          bool `json:"allow_indefinite"`
+	MaxFiniteLifetimeSeconds int  `json:"max_finite_lifetime_seconds"`
+	MaxLiveCredentials       int  `json:"max_live_credentials"`
+
+	// UpdatedAt RFC 3339 UTC, microsecond precision.
+	UpdatedAt *Timestamp `json:"updated_at,omitempty"`
+
+	// UpdatedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	UpdatedBy *ID `json:"updated_by,omitempty"`
+}
+
+// CredentialPolicyResult defines model for CredentialPolicyResult.
+type CredentialPolicyResult struct {
+	Affected []AffectedCredential `json:"affected"`
+
+	// Applied False when the request was a PREVIEW: a tightening whose affected
+	// credentials the caller has not acknowledged with `confirm`.
+	// Nothing was written, and `affected` is the enumeration the caller
+	// must see before asking again. A settings change never silently
+	// kills a live credential.
+	Applied      bool             `json:"applied"`
+	ClampedCount int              `json:"clamped_count"`
+	Policy       CredentialPolicy `json:"policy"`
 }
 
 // CredentialResetResult defines model for CredentialResetResult.
@@ -1073,6 +1203,54 @@ type LoginResult struct {
 	SessionToken *string `json:"session_token,omitempty"`
 }
 
+// MachineCredential Metadata only. There is deliberately no value property: a credential
+// value is displayed exactly once, at mint, and is never retrievable
+// afterwards.
+type MachineCredential struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// CreatedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	CreatedBy ID `json:"created_by"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt *Timestamp `json:"expires_at,omitempty"`
+
+	// ExpiringSoon The in-product expiry warning, computed rather than stored - a
+	// stored flag would be stale the moment the clock moved past it.
+	ExpiringSoon bool `json:"expiring_soon"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Kind How a credential authenticates its service account. The discriminator
+	// exists before a second kind does, so adding one is a new row type
+	// rather than a schema change.
+	Kind CredentialKind `json:"kind"`
+
+	// LastUsedAt RFC 3339 UTC, microsecond precision.
+	LastUsedAt *Timestamp `json:"last_used_at,omitempty"`
+
+	// Lifetime `indefinite` is a VALUE, not a large number: it is unreachable by
+	// raising the instance ceiling, and is admitted only under a separate,
+	// default-off instance opt-in.
+	Lifetime CredentialLifetime `json:"lifetime"`
+
+	// PrefixHint The non-secret leading slice of the minted value - the grammar
+	// prefix plus a few body characters, enough to tell two live
+	// credentials apart and far short of anything a search can narrow.
+	PrefixHint string `json:"prefix_hint"`
+
+	// RevokedAt RFC 3339 UTC, microsecond precision.
+	RevokedAt *Timestamp `json:"revoked_at,omitempty"`
+}
+
+// MachineCredentialList defines model for MachineCredentialList.
+type MachineCredentialList struct {
+	Count int                 `json:"count"`
+	Items []MachineCredential `json:"items"`
+}
+
 // Meta An exact closed allowlist. `additionalProperties: false` is the
 // allowlist's teeth: a field added here is a visible spec change, not a
 // quiet leak of instance configuration to unauthenticated callers.
@@ -1088,6 +1266,39 @@ type Meta struct {
 
 	// ServerVersion The build's version string; `dev` for unreleased builds.
 	ServerVersion string `json:"server_version"`
+}
+
+// MintCredentialRequest The zero request asks for the finite default, which is the rule that
+// the easy path is bounded and a long-lived credential is a typed choice
+// someone made.
+type MintCredentialRequest struct {
+	// Indefinite Selects the distinct typed lifetime. A separate property rather
+	// than a sentinel duration, because `indefinite` must be
+	// unreachable by raising any ceiling. Naming it together with
+	// `lifetime_seconds` is refused rather than resolved by precedence:
+	// a silent precedence rule on a credential is exactly the quiet
+	// ambiguity fail-loud exists to prevent.
+	Indefinite *bool `json:"indefinite,omitempty"`
+
+	// LifetimeSeconds Requested finite lifetime; absent means the instance default.
+	LifetimeSeconds *int `json:"lifetime_seconds,omitempty"`
+}
+
+// MintCredentialResult defines model for MintCredentialResult.
+type MintCredentialResult struct {
+	// Clamped True when the instance ceiling shortened what was asked for, so
+	// the caller can say so rather than let the operator discover it
+	// when the credential dies early.
+	Clamped bool `json:"clamped"`
+
+	// Credential Metadata only. There is deliberately no value property: a credential
+	// value is displayed exactly once, at mint, and is never retrievable
+	// afterwards.
+	Credential MachineCredential `json:"credential"`
+
+	// Value The credential value, returned EXACTLY ONCE to exactly one caller.
+	// No other route in this contract returns it.
+	Value string `json:"value"`
 }
 
 // MyOrg An organisation as a navigation destination: what the caller needs to
@@ -1520,6 +1731,39 @@ type SamlStartResult struct {
 	RedirectUrl string `json:"redirect_url"`
 }
 
+// ServiceAccount defines model for ServiceAccount.
+type ServiceAccount struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// CreatedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	CreatedBy ID `json:"created_by"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Kind The closed set a service account may be created with. Declared at
+	// creation and IMMUTABLE afterwards.
+	Kind ServiceAccountKind `json:"kind"`
+
+	// LiveCredentials How many of its credentials currently authenticate.
+	LiveCredentials int    `json:"live_credentials"`
+	Name            string `json:"name"`
+
+	// PrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	PrincipalId ID `json:"principal_id"`
+}
+
+// ServiceAccountKind The closed set a service account may be created with. Declared at
+// creation and IMMUTABLE afterwards.
+type ServiceAccountKind string
+
+// ServiceAccountList defines model for ServiceAccountList.
+type ServiceAccountList struct {
+	Count int              `json:"count"`
+	Items []ServiceAccount `json:"items"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	// AbsoluteExpiresAt RFC 3339 UTC, microsecond precision.
@@ -1552,6 +1796,18 @@ type Session struct {
 // a non-browser client, and conflating the two hides which artifact was
 // actually used.
 type SessionArtifact = string
+
+// SetCredentialPolicyRequest defines model for SetCredentialPolicyRequest.
+type SetCredentialPolicyRequest struct {
+	AllowIndefinite bool `json:"allow_indefinite"`
+
+	// Confirm Acknowledges the enumerated affected credentials. A tightening
+	// refuses with 409 until this is true, so a settings change never
+	// silently kills a live credential.
+	Confirm                  *bool `json:"confirm,omitempty"`
+	MaxFiniteLifetimeSeconds int   `json:"max_finite_lifetime_seconds"`
+	MaxLiveCredentials       int   `json:"max_live_credentials"`
+}
 
 // SetKeyGroupRequest defines model for SetKeyGroupRequest.
 type SetKeyGroupRequest struct {
@@ -1677,6 +1933,9 @@ type WhoAmI struct {
 	Session   Session   `json:"session"`
 }
 
+// CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
+type CredentialID = ID
+
 // EnvironmentID A prefixed UUIDv7, e.g. `org_0198…`.
 type EnvironmentID = ID
 
@@ -1715,6 +1974,9 @@ type ProviderSlugPath = string
 
 // ResetTargetPrincipal A prefixed UUIDv7, e.g. `org_0198…`.
 type ResetTargetPrincipal = ID
+
+// ServiceAccountID A prefixed UUIDv7, e.g. `org_0198…`.
+type ServiceAccountID = ID
 
 // WebauthnCredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type WebauthnCredentialID = ID
@@ -1844,6 +2106,9 @@ type ReauthPasskeyStartJSONRequestBody = WebauthnReauthStartRequest
 // StepUpPasskeyFinishJSONRequestBody defines body for StepUpPasskeyFinish for application/json ContentType.
 type StepUpPasskeyFinishJSONRequestBody = WebauthnResponse
 
+// SetCredentialPolicyJSONRequestBody defines body for SetCredentialPolicy for application/json ContentType.
+type SetCredentialPolicyJSONRequestBody = SetCredentialPolicyRequest
+
 // CreateInstanceGrantJSONRequestBody defines body for CreateInstanceGrant for application/json ContentType.
 type CreateInstanceGrantJSONRequestBody = CreateGrantRequest
 
@@ -1933,6 +2198,12 @@ type SetKeyGroupJSONRequestBody = SetKeyGroupRequest
 
 // RenameKeyJSONRequestBody defines body for RenameKey for application/json ContentType.
 type RenameKeyJSONRequestBody = RenameKeyRequest
+
+// CreateServiceAccountJSONRequestBody defines body for CreateServiceAccount for application/json ContentType.
+type CreateServiceAccountJSONRequestBody = CreateServiceAccountRequest
+
+// MintMachineCredentialJSONRequestBody defines body for MintMachineCredential for application/json ContentType.
+type MintMachineCredentialJSONRequestBody = MintCredentialRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -2026,6 +2297,12 @@ type ServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(w http.ResponseWriter, r *http.Request)
+	// GetCredentialPolicy Read the instance credential lifetime controls.
+	// (GET /api/v1/instance/credential-policy)
+	GetCredentialPolicy(w http.ResponseWriter, r *http.Request)
+	// SetCredentialPolicy Move the instance credential lifetime controls.
+	// (PUT /api/v1/instance/credential-policy)
+	SetCredentialPolicy(w http.ResponseWriter, r *http.Request)
 	// RevokeInstanceGrant Revoke one capability at instance scope.
 	// (DELETE /api/v1/instance/grants)
 	RevokeInstanceGrant(w http.ResponseWriter, r *http.Request, params RevokeInstanceGrantParams)
@@ -2230,6 +2507,24 @@ type ServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// ListServiceAccounts List the project's service accounts.
+	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
+	ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateServiceAccount Create a project-owned machine principal.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts)
+	CreateServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteServiceAccount Delete a service account, revoking every credential and grant.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
+	DeleteServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
+	// ListMachineCredentials List a service account's credentials, metadata only.
+	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+	ListMachineCredentials(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
+	// MintMachineCredential Mint a bearer credential, returned exactly once.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+	MintMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
+	// RevokeMachineCredential Revoke one credential.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential})
+	RevokeMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID, credential CredentialID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -2413,6 +2708,18 @@ func (_ Unimplemented) StepUpPasskeyStart(w http.ResponseWriter, r *http.Request
 // Whoami Describe the presented session.
 // (GET /api/v1/auth/whoami)
 func (_ Unimplemented) Whoami(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCredentialPolicy Read the instance credential lifetime controls.
+// (GET /api/v1/instance/credential-policy)
+func (_ Unimplemented) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetCredentialPolicy Move the instance credential lifetime controls.
+// (PUT /api/v1/instance/credential-policy)
+func (_ Unimplemented) SetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2821,6 +3128,42 @@ func (_ Unimplemented) SetKeyGroup(w http.ResponseWriter, r *http.Request, org O
 // RenameKey Rename a key.
 // (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListServiceAccounts List the project's service accounts.
+// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
+func (_ Unimplemented) ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateServiceAccount Create a project-owned machine principal.
+// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts)
+func (_ Unimplemented) CreateServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteServiceAccount Delete a service account, revoking every credential and grant.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
+func (_ Unimplemented) DeleteServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMachineCredentials List a service account's credentials, metadata only.
+// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+func (_ Unimplemented) ListMachineCredentials(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// MintMachineCredential Mint a bearer credential, returned exactly once.
+// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+func (_ Unimplemented) MintMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeMachineCredential Revoke one credential.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential})
+func (_ Unimplemented) RevokeMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID, credential CredentialID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3395,6 +3738,34 @@ func (siw *ServerInterfaceWrapper) Whoami(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Whoami(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCredentialPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCredentialPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetCredentialPolicy operation middleware
+func (siw *ServerInterfaceWrapper) SetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCredentialPolicy(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5669,6 +6040,261 @@ func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListServiceAccounts operation middleware
+func (siw *ServerInterfaceWrapper) ListServiceAccounts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServiceAccounts(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) CreateServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateServiceAccount(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteServiceAccount operation middleware
+func (siw *ServerInterfaceWrapper) DeleteServiceAccount(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "serviceAccount" -------------
+	var serviceAccount ServiceAccountID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceAccount", chi.URLParam(r, "serviceAccount"), &serviceAccount, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceAccount", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteServiceAccount(w, r, org, project, serviceAccount)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMachineCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListMachineCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "serviceAccount" -------------
+	var serviceAccount ServiceAccountID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceAccount", chi.URLParam(r, "serviceAccount"), &serviceAccount, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceAccount", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMachineCredentials(w, r, org, project, serviceAccount)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MintMachineCredential operation middleware
+func (siw *ServerInterfaceWrapper) MintMachineCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "serviceAccount" -------------
+	var serviceAccount ServiceAccountID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceAccount", chi.URLParam(r, "serviceAccount"), &serviceAccount, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceAccount", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MintMachineCredential(w, r, org, project, serviceAccount)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMachineCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMachineCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "serviceAccount" -------------
+	var serviceAccount ServiceAccountID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceAccount", chi.URLParam(r, "serviceAccount"), &serviceAccount, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceAccount", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "credential" -------------
+	var credential CredentialID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "credential", chi.URLParam(r, "credential"), &credential, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "credential", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMachineCredential(w, r, org, project, serviceAccount, credential)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -6075,6 +6701,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire", wrapper.CompromiseRetireSamlSpKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts", wrapper.ListServiceAccounts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts", wrapper.CreateServiceAccount)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}", wrapper.DeleteServiceAccount)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials", wrapper.ListMachineCredentials)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials", wrapper.MintMachineCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}", wrapper.RevokeMachineCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/credential-policy", wrapper.GetCredentialPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/instance/credential-policy", wrapper.SetCredentialPolicy)
 	})
 
 	return r
@@ -8327,6 +8977,177 @@ func (response Whoami429JSONResponse) VisitWhoamiResponse(w http.ResponseWriter)
 type Whoami500JSONResponse struct{ InternalJSONResponse }
 
 func (response Whoami500JSONResponse) VisitWhoamiResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCredentialPolicyRequestObject struct {
+}
+
+type GetCredentialPolicyResponseObject interface {
+	VisitGetCredentialPolicyResponse(w http.ResponseWriter) error
+}
+
+type GetCredentialPolicy200JSONResponse CredentialPolicy
+
+func (response GetCredentialPolicy200JSONResponse) VisitGetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCredentialPolicy401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetCredentialPolicy401JSONResponse) VisitGetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCredentialPolicy403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetCredentialPolicy403JSONResponse) VisitGetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCredentialPolicy429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetCredentialPolicy429JSONResponse) VisitGetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCredentialPolicy500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetCredentialPolicy500JSONResponse) VisitGetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicyRequestObject struct {
+	Body *SetCredentialPolicyJSONRequestBody
+}
+
+type SetCredentialPolicyResponseObject interface {
+	VisitSetCredentialPolicyResponse(w http.ResponseWriter) error
+}
+
+type SetCredentialPolicy200JSONResponse CredentialPolicyResult
+
+func (response SetCredentialPolicy200JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicy400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetCredentialPolicy400JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicy401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetCredentialPolicy401JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicy403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetCredentialPolicy403JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicy429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetCredentialPolicy429JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetCredentialPolicy500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetCredentialPolicy500JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -14888,6 +15709,537 @@ func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseW
 	return err
 }
 
+type ListServiceAccountsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListServiceAccountsResponseObject interface {
+	VisitListServiceAccountsResponse(w http.ResponseWriter) error
+}
+
+type ListServiceAccounts200JSONResponse ServiceAccountList
+
+func (response ListServiceAccounts200JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListServiceAccounts401JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListServiceAccounts404JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListServiceAccounts429JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServiceAccounts500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListServiceAccounts500JSONResponse) VisitListServiceAccountsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccountRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateServiceAccountJSONRequestBody
+}
+
+type CreateServiceAccountResponseObject interface {
+	VisitCreateServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type CreateServiceAccount201JSONResponse ServiceAccount
+
+func (response CreateServiceAccount201JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateServiceAccount400JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateServiceAccount401JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateServiceAccount404JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateServiceAccount409JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateServiceAccount429JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateServiceAccount500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateServiceAccount500JSONResponse) VisitCreateServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccountRequestObject struct {
+	Org            OrgID            `json:"org"`
+	Project        ProjectID        `json:"project"`
+	ServiceAccount ServiceAccountID `json:"serviceAccount"`
+}
+
+type DeleteServiceAccountResponseObject interface {
+	VisitDeleteServiceAccountResponse(w http.ResponseWriter) error
+}
+
+type DeleteServiceAccount204Response struct {
+}
+
+func (response DeleteServiceAccount204Response) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteServiceAccount401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteServiceAccount401JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteServiceAccount404JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteServiceAccount429JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceAccount500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteServiceAccount500JSONResponse) VisitDeleteServiceAccountResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMachineCredentialsRequestObject struct {
+	Org            OrgID            `json:"org"`
+	Project        ProjectID        `json:"project"`
+	ServiceAccount ServiceAccountID `json:"serviceAccount"`
+}
+
+type ListMachineCredentialsResponseObject interface {
+	VisitListMachineCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListMachineCredentials200JSONResponse MachineCredentialList
+
+func (response ListMachineCredentials200JSONResponse) VisitListMachineCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMachineCredentials401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMachineCredentials401JSONResponse) VisitListMachineCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMachineCredentials404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListMachineCredentials404JSONResponse) VisitListMachineCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMachineCredentials429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListMachineCredentials429JSONResponse) VisitListMachineCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMachineCredentials500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListMachineCredentials500JSONResponse) VisitListMachineCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredentialRequestObject struct {
+	Org            OrgID            `json:"org"`
+	Project        ProjectID        `json:"project"`
+	ServiceAccount ServiceAccountID `json:"serviceAccount"`
+	Body           *MintMachineCredentialJSONRequestBody
+}
+
+type MintMachineCredentialResponseObject interface {
+	VisitMintMachineCredentialResponse(w http.ResponseWriter) error
+}
+
+type MintMachineCredential200JSONResponse MintCredentialResult
+
+func (response MintMachineCredential200JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response MintMachineCredential400JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MintMachineCredential401JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response MintMachineCredential404JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response MintMachineCredential409JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response MintMachineCredential429JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintMachineCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response MintMachineCredential500JSONResponse) VisitMintMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMachineCredentialRequestObject struct {
+	Org            OrgID            `json:"org"`
+	Project        ProjectID        `json:"project"`
+	ServiceAccount ServiceAccountID `json:"serviceAccount"`
+	Credential     CredentialID     `json:"credential"`
+}
+
+type RevokeMachineCredentialResponseObject interface {
+	VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeMachineCredential204Response struct {
+}
+
+func (response RevokeMachineCredential204Response) VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMachineCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMachineCredential401JSONResponse) VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMachineCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMachineCredential404JSONResponse) VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMachineCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeMachineCredential429JSONResponse) VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMachineCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeMachineCredential500JSONResponse) VisitRevokeMachineCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
@@ -14980,6 +16332,12 @@ type StrictServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(ctx context.Context, request WhoamiRequestObject) (WhoamiResponseObject, error)
+	// GetCredentialPolicy Read the instance credential lifetime controls.
+	// (GET /api/v1/instance/credential-policy)
+	GetCredentialPolicy(ctx context.Context, request GetCredentialPolicyRequestObject) (GetCredentialPolicyResponseObject, error)
+	// SetCredentialPolicy Move the instance credential lifetime controls.
+	// (PUT /api/v1/instance/credential-policy)
+	SetCredentialPolicy(ctx context.Context, request SetCredentialPolicyRequestObject) (SetCredentialPolicyResponseObject, error)
 	// RevokeInstanceGrant Revoke one capability at instance scope.
 	// (DELETE /api/v1/instance/grants)
 	RevokeInstanceGrant(ctx context.Context, request RevokeInstanceGrantRequestObject) (RevokeInstanceGrantResponseObject, error)
@@ -15184,6 +16542,24 @@ type StrictServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
+	// ListServiceAccounts List the project's service accounts.
+	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
+	ListServiceAccounts(ctx context.Context, request ListServiceAccountsRequestObject) (ListServiceAccountsResponseObject, error)
+	// CreateServiceAccount Create a project-owned machine principal.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts)
+	CreateServiceAccount(ctx context.Context, request CreateServiceAccountRequestObject) (CreateServiceAccountResponseObject, error)
+	// DeleteServiceAccount Delete a service account, revoking every credential and grant.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
+	DeleteServiceAccount(ctx context.Context, request DeleteServiceAccountRequestObject) (DeleteServiceAccountResponseObject, error)
+	// ListMachineCredentials List a service account's credentials, metadata only.
+	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+	ListMachineCredentials(ctx context.Context, request ListMachineCredentialsRequestObject) (ListMachineCredentialsResponseObject, error)
+	// MintMachineCredential Mint a bearer credential, returned exactly once.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
+	MintMachineCredential(ctx context.Context, request MintMachineCredentialRequestObject) (MintMachineCredentialResponseObject, error)
+	// RevokeMachineCredential Revoke one credential.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential})
+	RevokeMachineCredential(ctx context.Context, request RevokeMachineCredentialRequestObject) (RevokeMachineCredentialResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -16099,6 +17475,61 @@ func (sh *strictHandler) Whoami(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(WhoamiResponseObject); ok {
 		if err := validResponse.VisitWhoamiResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCredentialPolicy operation middleware
+func (sh *strictHandler) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+	var request GetCredentialPolicyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCredentialPolicy(ctx, request.(GetCredentialPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCredentialPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCredentialPolicyResponseObject); ok {
+		if err := validResponse.VisitGetCredentialPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetCredentialPolicy operation middleware
+func (sh *strictHandler) SetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+	var request SetCredentialPolicyRequestObject
+
+	var body SetCredentialPolicyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetCredentialPolicy(ctx, request.(SetCredentialPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetCredentialPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetCredentialPolicyResponseObject); ok {
+		if err := validResponse.VisitSetCredentialPolicyResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -18116,6 +19547,187 @@ func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org O
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameKeyResponseObject); ok {
 		if err := validResponse.VisitRenameKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServiceAccounts operation middleware
+func (sh *strictHandler) ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListServiceAccountsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServiceAccounts(ctx, request.(ListServiceAccountsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServiceAccounts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServiceAccountsResponseObject); ok {
+		if err := validResponse.VisitListServiceAccountsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateServiceAccount operation middleware
+func (sh *strictHandler) CreateServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateServiceAccountRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateServiceAccountJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateServiceAccount(ctx, request.(CreateServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateServiceAccountResponseObject); ok {
+		if err := validResponse.VisitCreateServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteServiceAccount operation middleware
+func (sh *strictHandler) DeleteServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	var request DeleteServiceAccountRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.ServiceAccount = serviceAccount
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteServiceAccount(ctx, request.(DeleteServiceAccountRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteServiceAccount")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteServiceAccountResponseObject); ok {
+		if err := validResponse.VisitDeleteServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMachineCredentials operation middleware
+func (sh *strictHandler) ListMachineCredentials(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	var request ListMachineCredentialsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.ServiceAccount = serviceAccount
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMachineCredentials(ctx, request.(ListMachineCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMachineCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMachineCredentialsResponseObject); ok {
+		if err := validResponse.VisitListMachineCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MintMachineCredential operation middleware
+func (sh *strictHandler) MintMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	var request MintMachineCredentialRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.ServiceAccount = serviceAccount
+
+	var body MintMachineCredentialJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MintMachineCredential(ctx, request.(MintMachineCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MintMachineCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MintMachineCredentialResponseObject); ok {
+		if err := validResponse.VisitMintMachineCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMachineCredential operation middleware
+func (sh *strictHandler) RevokeMachineCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID, credential CredentialID) {
+	var request RevokeMachineCredentialRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.ServiceAccount = serviceAccount
+	request.Credential = credential
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMachineCredential(ctx, request.(RevokeMachineCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMachineCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMachineCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeMachineCredentialResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -213,8 +213,30 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"DeleteWebAuthnCredential":            true,
 	"DeleteSessionsForWebAuthnCredential": true,
 	"CreateWebAuthnCeremony":              true,
-	"ConsumeWebAuthnCeremony":             true,
-	"SetWebAuthnUserHandle":               true,
+	// Machine identities (#61): the service-account and credential lifecycle.
+	// None can hold a proof for the same reason the session writers cannot —
+	// they mutate the artifacts that decide WHO a machine caller is, and a
+	// machine credential resolves at the same chokepoint as authorize().
+	// DeleteMachinePrincipal additionally releases the principal's grants, so
+	// deprovisioning is one transaction; it takes the principal-row lock like
+	// every other grant writer.
+	"CreateMachinePrincipal":      true,
+	"DeleteMachinePrincipal":      true,
+	"CreateServiceAccount":        true,
+	"DeleteServiceAccount":        true,
+	"CreateMachineCredential":     true,
+	"RevokeMachineCredential":     true,
+	"RevokeAllMachineCredentials": true,
+	"DeleteMachineCredentials":    true,
+	"TouchMachineCredential":      true,
+	// The instance lifetime controls and the clamp they apply. Both are
+	// authorized at the chokepoint under `instance-config` before they run;
+	// the write rides this surface because credential_policy is class=authn.
+	"SetCredentialPolicy":        true,
+	"ClampCredentialExpiry":      true,
+	"ClampIndefiniteCredentials": true,
+	"ConsumeWebAuthnCeremony":    true,
+	"SetWebAuthnUserHandle":      true,
 	// Reauth-window consumption at disclosure and the effective-window transition
 	// (#54): slide the sliding clock, claim a single-decision window once, and
 	// invalidate every window on an environment when its effective window is

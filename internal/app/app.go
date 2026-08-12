@@ -205,7 +205,12 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Folders:      &service.Folders{DB: db},
 		Keys:         &service.Keys{DB: db},
 		KeyGroups:    &service.KeyGroups{DB: db},
-		Grants:       &service.Grants{DB: db},
+		// One Auth across the grant surface, the settings knob and the machine
+		// identity surface: the reauthentication conjunct a machine widening
+		// carries is the SAME window machinery human disclosure consumes, so
+		// they cannot come from two configurations.
+		Grants:     &service.Grants{DB: db, Auth: authSvc},
+		Identities: &service.Identities{DB: db, Auth: authSvc},
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the
 		// window the reveal guard reads cannot come from two configurations.

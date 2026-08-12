@@ -979,9 +979,11 @@ func (s *Auth) Logout(ctx context.Context, presented string) error {
 // that no longer has a subject.
 func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 	now := s.now()
-	var sessionID string
+	var sessionID, credentialID string
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
-		id, err := az.Authenticate(ctx, presented, now)
+		// Both classes: this path stamps a session's idle clock OR a machine
+		// credential's last-used, and it runs for every request.
+		id, err := az.AuthenticateCaller(ctx, presented, now)
 		if errors.Is(err, domain.ErrUnauthenticated) {
 			return nil
 		}
@@ -991,22 +993,36 @@ func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 		if now.Sub(id.LastSeenAt) < SlideGranularity {
 			return nil
 		}
-		sessionID = id.SessionID
+		sessionID, credentialID = id.SessionID, id.CredentialID
 		return nil
 	})
-	if err != nil || sessionID == "" {
+	if err != nil || (sessionID == "" && credentialID == "") {
 		return err
 	}
 	return tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		// Re-authenticate inside the write transaction: the session may have
 		// been revoked between the two, and sliding a dead session's clock
 		// would resurrect nothing but would write to a row logout deleted.
-		id, err := az.Authenticate(ctx, presented, now)
+		id, err := az.AuthenticateCaller(ctx, presented, now)
 		if errors.Is(err, domain.ErrUnauthenticated) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		// A MACHINE credential has no clock to slide — its lifetime is fixed
+		// at mint and no activity extends it (#61). What it has is a
+		// last-used stamp, which is observability and never an authorization
+		// input: nothing reads it to decide anything. It rides the same
+		// post-response path for the same reason the session touch does — a
+		// write between authorization and the answer is a write the caller
+		// waits for.
+		//
+		// It is checked FIRST because a machine identity's Artifact is a
+		// credential kind, not a session artifact: handing it to the
+		// per-artifact idle window below would ask a nonsense question.
+		if id.CredentialID != "" {
+			return az.TouchMachineCredential(ctx, id.CredentialID, now)
 		}
 		return az.SlideSession(ctx, id.SessionID, now, now.Add(Artifact(id.Artifact).idle()))
 	})

@@ -443,6 +443,170 @@ export type FolderList = {
 };
 
 /**
+ * The closed set a service account may be created with. Declared at
+ * creation and IMMUTABLE afterwards.
+ *
+ */
+export type ServiceAccountKind = 'workload' | 'automation';
+
+/**
+ * How a credential authenticates its service account. The discriminator
+ * exists before a second kind does, so adding one is a new row type
+ * rather than a schema change.
+ *
+ */
+export type CredentialKind = 'hikyo-token';
+
+/**
+ * `indefinite` is a VALUE, not a large number: it is unreachable by
+ * raising the instance ceiling, and is admitted only under a separate,
+ * default-off instance opt-in.
+ *
+ */
+export type CredentialLifetime = 'finite' | 'indefinite';
+
+export type CreateServiceAccountRequest = {
+    name: string;
+    kind: ServiceAccountKind;
+};
+
+export type ServiceAccount = {
+    id: Id;
+    principal_id: Id;
+    name: string;
+    kind: ServiceAccountKind;
+    created_at: Timestamp;
+    created_by: Id;
+    /**
+     * How many of its credentials currently authenticate.
+     */
+    live_credentials: number;
+};
+
+export type ServiceAccountList = {
+    items: Array<ServiceAccount>;
+    count: number;
+};
+
+/**
+ * Metadata only. There is deliberately no value property: a credential
+ * value is displayed exactly once, at mint, and is never retrievable
+ * afterwards.
+ *
+ */
+export type MachineCredential = {
+    id: Id;
+    kind: CredentialKind;
+    /**
+     * The non-secret leading slice of the minted value - the grammar
+     * prefix plus a few body characters, enough to tell two live
+     * credentials apart and far short of anything a search can narrow.
+     *
+     */
+    prefix_hint: string;
+    lifetime: CredentialLifetime;
+    expires_at?: Timestamp;
+    created_at: Timestamp;
+    created_by: Id;
+    revoked_at?: Timestamp;
+    last_used_at?: Timestamp;
+    /**
+     * The in-product expiry warning, computed rather than stored - a
+     * stored flag would be stale the moment the clock moved past it.
+     *
+     */
+    expiring_soon: boolean;
+};
+
+export type MachineCredentialList = {
+    items: Array<MachineCredential>;
+    count: number;
+};
+
+/**
+ * The zero request asks for the finite default, which is the rule that
+ * the easy path is bounded and a long-lived credential is a typed choice
+ * someone made.
+ *
+ */
+export type MintCredentialRequest = {
+    /**
+     * Selects the distinct typed lifetime. A separate property rather
+     * than a sentinel duration, because `indefinite` must be
+     * unreachable by raising any ceiling. Naming it together with
+     * `lifetime_seconds` is refused rather than resolved by precedence:
+     * a silent precedence rule on a credential is exactly the quiet
+     * ambiguity fail-loud exists to prevent.
+     *
+     */
+    indefinite?: boolean;
+    /**
+     * Requested finite lifetime; absent means the instance default.
+     */
+    lifetime_seconds?: number;
+};
+
+export type MintCredentialResult = {
+    /**
+     * The credential value, returned EXACTLY ONCE to exactly one caller.
+     * No other route in this contract returns it.
+     *
+     */
+    value: string;
+    credential: MachineCredential;
+    /**
+     * True when the instance ceiling shortened what was asked for, so
+     * the caller can say so rather than let the operator discover it
+     * when the credential dies early.
+     *
+     */
+    clamped: boolean;
+};
+
+export type CredentialPolicy = {
+    max_finite_lifetime_seconds: number;
+    allow_indefinite: boolean;
+    max_live_credentials: number;
+    updated_at?: Timestamp;
+    updated_by?: Id;
+};
+
+export type SetCredentialPolicyRequest = {
+    max_finite_lifetime_seconds: number;
+    allow_indefinite: boolean;
+    max_live_credentials: number;
+    /**
+     * Acknowledges the enumerated affected credentials. A tightening
+     * refuses with 409 until this is true, so a settings change never
+     * silently kills a live credential.
+     *
+     */
+    confirm?: boolean;
+};
+
+export type AffectedCredential = {
+    id: Id;
+    service_account_id: Id;
+    expires_at?: Timestamp;
+    reason: 'clamped' | 'indefinite-withdrawn';
+};
+
+export type CredentialPolicyResult = {
+    /**
+     * False when the request was a PREVIEW: a tightening whose affected
+     * credentials the caller has not acknowledged with `confirm`.
+     * Nothing was written, and `affected` is the enumeration the caller
+     * must see before asking again. A settings change never silently
+     * kills a live credential.
+     *
+     */
+    applied: boolean;
+    policy: CredentialPolicy;
+    affected: Array<AffectedCredential>;
+    clamped_count: number;
+};
+
+/**
  * One atom from the permission ADR's CLOSED capability set. The server
  * refuses anything outside it rather than storing a row nothing can ever
  * evaluate, so this is a bounded string rather than an enum only to keep
@@ -1156,6 +1320,16 @@ export type EnvironmentId = Id;
  * Folder identifier.
  */
 export type FolderId = Id;
+
+/**
+ * Service-account identifier.
+ */
+export type ServiceAccountId = Id;
+
+/**
+ * Machine-credential identifier.
+ */
+export type CredentialId = Id;
 
 /**
  * The principal whose grant is being revoked.
@@ -7064,3 +7238,492 @@ export type CompromiseRetireSamlSpKeyResponses = {
 };
 
 export type CompromiseRetireSamlSpKeyResponse = CompromiseRetireSamlSpKeyResponses[keyof CompromiseRetireSamlSpKeyResponses];
+
+export type ListServiceAccountsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts';
+};
+
+export type ListServiceAccountsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListServiceAccountsError = ListServiceAccountsErrors[keyof ListServiceAccountsErrors];
+
+export type ListServiceAccountsResponses = {
+    /**
+     * The project's service accounts.
+     */
+    200: ServiceAccountList;
+};
+
+export type ListServiceAccountsResponse = ListServiceAccountsResponses[keyof ListServiceAccountsResponses];
+
+export type CreateServiceAccountData = {
+    body: CreateServiceAccountRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts';
+};
+
+export type CreateServiceAccountErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateServiceAccountError = CreateServiceAccountErrors[keyof CreateServiceAccountErrors];
+
+export type CreateServiceAccountResponses = {
+    /**
+     * The created service account.
+     */
+    201: ServiceAccount;
+};
+
+export type CreateServiceAccountResponse = CreateServiceAccountResponses[keyof CreateServiceAccountResponses];
+
+export type DeleteServiceAccountData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Service-account identifier.
+         */
+        serviceAccount: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}';
+};
+
+export type DeleteServiceAccountErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteServiceAccountError = DeleteServiceAccountErrors[keyof DeleteServiceAccountErrors];
+
+export type DeleteServiceAccountResponses = {
+    /**
+     * Deleted.
+     */
+    204: void;
+};
+
+export type DeleteServiceAccountResponse = DeleteServiceAccountResponses[keyof DeleteServiceAccountResponses];
+
+export type ListMachineCredentialsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Service-account identifier.
+         */
+        serviceAccount: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials';
+};
+
+export type ListMachineCredentialsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListMachineCredentialsError = ListMachineCredentialsErrors[keyof ListMachineCredentialsErrors];
+
+export type ListMachineCredentialsResponses = {
+    /**
+     * The credentials' metadata.
+     */
+    200: MachineCredentialList;
+};
+
+export type ListMachineCredentialsResponse = ListMachineCredentialsResponses[keyof ListMachineCredentialsResponses];
+
+export type MintMachineCredentialData = {
+    body: MintCredentialRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Service-account identifier.
+         */
+        serviceAccount: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials';
+};
+
+export type MintMachineCredentialErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type MintMachineCredentialError = MintMachineCredentialErrors[keyof MintMachineCredentialErrors];
+
+export type MintMachineCredentialResponses = {
+    /**
+     * The credential value, returned EXACTLY ONCE. Nothing in the system
+     * can return it again.
+     *
+     */
+    200: MintCredentialResult;
+};
+
+export type MintMachineCredentialResponse = MintMachineCredentialResponses[keyof MintMachineCredentialResponses];
+
+export type RevokeMachineCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Service-account identifier.
+         */
+        serviceAccount: Id;
+        /**
+         * Machine-credential identifier.
+         */
+        credential: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}';
+};
+
+export type RevokeMachineCredentialErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevokeMachineCredentialError = RevokeMachineCredentialErrors[keyof RevokeMachineCredentialErrors];
+
+export type RevokeMachineCredentialResponses = {
+    /**
+     * Revoked.
+     */
+    204: void;
+};
+
+export type RevokeMachineCredentialResponse = RevokeMachineCredentialResponses[keyof RevokeMachineCredentialResponses];
+
+export type GetCredentialPolicyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/credential-policy';
+};
+
+export type GetCredentialPolicyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetCredentialPolicyError = GetCredentialPolicyErrors[keyof GetCredentialPolicyErrors];
+
+export type GetCredentialPolicyResponses = {
+    /**
+     * The instance credential policy.
+     */
+    200: CredentialPolicy;
+};
+
+export type GetCredentialPolicyResponse = GetCredentialPolicyResponses[keyof GetCredentialPolicyResponses];
+
+export type SetCredentialPolicyData = {
+    body: SetCredentialPolicyRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/credential-policy';
+};
+
+export type SetCredentialPolicyErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetCredentialPolicyError = SetCredentialPolicyErrors[keyof SetCredentialPolicyErrors];
+
+export type SetCredentialPolicyResponses = {
+    /**
+     * The policy as written, with what the clamp touched.
+     */
+    200: CredentialPolicyResult;
+};
+
+export type SetCredentialPolicyResponse = SetCredentialPolicyResponses[keyof SetCredentialPolicyResponses];

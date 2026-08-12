@@ -120,6 +120,7 @@ type API struct {
 	Keys          KeyService
 	KeyGroups     KeyGroupService
 	Grants        GrantService
+	Identities    IdentityService
 	Settings      SettingsService
 	Providers     ProviderService
 	SAMLProviders SAMLProviderService

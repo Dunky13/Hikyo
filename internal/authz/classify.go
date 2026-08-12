@@ -179,6 +179,19 @@ var wireRegistry = map[string]Class{
 	"http:DELETE /api/v1/orgs/{org}/grants":        ClassTenant,
 	"http:POST /api/v1/orgs/{org}/grants/template": ClassTenant,
 
+	// Machine identities (#61). Tenant-class at project depth: an identity
+	// surface a caller may not administer answers exactly like a project
+	// that is not there. The instance lifetime controls are instance-class
+	// under `instance-config`, like every other instance knob.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts":                                              ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts":                                             ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}":                          ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                 ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}": ClassTenant,
+	"http:GET /api/v1/instance/credential-policy":                                                                  ClassInstance,
+	"http:PUT /api/v1/instance/credential-policy":                                                                  ClassInstance,
+
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/grants":                                   ClassTenant,
@@ -260,6 +273,11 @@ var wireRegistry = map[string]Class{
 	"cli:access": ClassInstance,
 	// `project-settings` reaches only the two environment-scoped routes.
 	"cli:project-settings": ClassTenant,
+	// `sa` reaches the project-scoped identity routes, all tenant-class:
+	// a project whose identities the caller may not administer answers
+	// exactly like a project that is not there. The instance credential
+	// policy rides `instance-config`, not this verb.
+	"cli:sa": ClassTenant,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
@@ -476,6 +494,17 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/orgs/{org}/grants":          {OpGrantCreateOrg},
 	"http:DELETE /api/v1/orgs/{org}/grants":        {OpGrantRevokeOrg},
 	"http:POST /api/v1/orgs/{org}/grants/template": {OpTemplateApplyOrg},
+
+	// Machine identities (#61). One route, one operation: the depth is in the
+	// path, so there is no runtime dispatch between formulas.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts":                                              {OpServiceAccountList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts":                                             {OpServiceAccountCreate},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}":                          {OpServiceAccountDelete},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                 {OpCredentialList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                {OpCredentialMint},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}": {OpCredentialRevoke},
+	"http:GET /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyRead},
+	"http:PUT /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyUpdate},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      {OpGrantListProject},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     {OpGrantCreateProject},

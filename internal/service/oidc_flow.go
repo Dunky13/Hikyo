@@ -1,8 +1,8 @@
 package service
 
 import (
-	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"time"
@@ -351,7 +351,10 @@ func (s *Auth) OIDCCallback(ctx context.Context, slug, code, stateValue, issPara
 func (s *Auth) checkBinding(ctx context.Context, az *authz.TxAuthorizer, t authz.OIDCTransaction, bindingCookie, presented string, now time.Time) string {
 	switch t.BindingKind {
 	case bindingBrowserCookie:
-		if bindingCookie == "" || !bytes.Equal(crypto.ArtifactVerifier(bindingCookie), t.BrowserBindingVerifier) {
+		// Constant-time: the browser-binding cookie is a bearer secret, and
+		// bytes.Equal is not the primitive for comparing one.
+		if bindingCookie == "" ||
+			subtle.ConstantTimeCompare(crypto.ArtifactVerifier(bindingCookie), t.BrowserBindingVerifier) != 1 {
 			return causeBinding
 		}
 		return ""
@@ -396,7 +399,10 @@ func (s *Auth) exchangeAndVerify(ctx context.Context, prov authz.OIDCProvider, t
 			return oidcrp.Claims{}, causeSignature
 		}
 	}
-	if !bytes.Equal(crypto.ArtifactVerifier(claims.Nonce), txn.Nonce) {
+	// Constant-time: the nonce is a bearer-class secret stored as its
+	// artifact verifier, and the ID token replays it. Same primitive as every
+	// other verifier comparison in this codebase.
+	if subtle.ConstantTimeCompare(crypto.ArtifactVerifier(claims.Nonce), txn.Nonce) != 1 {
 		return oidcrp.Claims{}, causeNonce
 	}
 	return claims, ""

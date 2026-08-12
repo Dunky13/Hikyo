@@ -80,6 +80,8 @@ func Run(ctx context.Context, io IO, args []string) int {
 		err = runAccess(ctx, io, rest)
 	case "project-settings":
 		err = runProjectSettings(ctx, io, rest)
+	case "sa":
+		err = runServiceAccount(ctx, io, rest)
 	default:
 		fmt.Fprintf(io.Stderr, "hikyo: unknown command %q\n\n", verb)
 		Usage(io.Stderr)
@@ -160,6 +162,24 @@ access:
   hikyo access member remove --principal <id>
   hikyo project-settings get --env E [-o table|json]
   hikyo project-settings set --env E [--protected true|false] [--reauth-window-seconds N|inherit]
+
+machine identities:
+  hikyo sa list [-o table|json]
+  hikyo sa create --name <name> --kind workload|automation
+  hikyo sa delete --id <id>
+  hikyo sa credential list --sa <id> [-o table|json]
+  hikyo sa credential mint --sa <id> [--lifetime 720h | --indefinite]
+      [--output-file PATH | --dangerously-print]
+  hikyo sa credential rotate --sa <id> --id <credential-id> [--lifetime 720h]
+      [--output-file PATH | --dangerously-print]
+  hikyo sa credential revoke --sa <id> --id <credential-id>
+  hikyo instance-config credential-policy get [-o table|json]
+  hikyo instance-config credential-policy set [--max-lifetime 2160h]
+      [--allow-indefinite true|false] [--max-live-credentials N] [--confirm]
+
+  a minted credential is shown ONCE. It reaches a workload through
+  --token-file <path> or HIKYO_TOKEN, never a --token flag: a secret in argv
+  is visible in ps, in /proc, and in shell history.
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
@@ -1121,6 +1141,12 @@ func runOrg(ctx context.Context, ios IO, args []string) error {
 
 type commonFlags struct {
 	Flags
+	// TokenFile is the machine-credential channel (#61). There is
+	// deliberately no `--token` flag beside it: a secret in argv is visible
+	// in `ps`, in /proc/<pid>/cmdline and in shell history, and the property
+	// that shell history stays free of secret material holds only if the flag
+	// does not exist to be misused.
+	TokenFile string
 	// positionals is EVERY positional argument, not just the first. Keeping only
 	// the first is how `folder delete fld_real typo` silently acts on fld_real:
 	// the extra word is a mistake the caller wants to hear about, and a delete
@@ -1180,6 +1206,7 @@ func parseCommon(name string, ios IO, args []string, extra func(*flag.FlagSet)) 
 	fs.StringVar(&c.Org, "org", "", "organisation")
 	fs.StringVar(&c.Project, "project", "", "project")
 	fs.StringVar(&c.Env, "env", "", "environment")
+	fs.StringVar(&c.TokenFile, "token-file", "", "read a machine credential from this file (never --token: argv is public)")
 	if extra != nil {
 		extra(fs)
 	}
@@ -1243,6 +1270,24 @@ func authenticatedTarget(st *State, ios IO, flags commonFlags) (*Client, Session
 	sessions, err := st.Sessions()
 	if err != nil {
 		return nil, SessionArtifact{}, Resolved{}, err
+	}
+	// A MACHINE credential, when one is presented, is used INSTEAD of the
+	// stored human session — it is a distinct artifact type with its own
+	// lifetime and revocation surface, and a workload host has no session
+	// file at all. It reaches this process through exactly two channels
+	// (`--token-file` and HIKYO_TOKEN) and never through a flag that would put
+	// it in argv.
+	if token, err := machineToken(ios, flags.TokenFile); err != nil {
+		return nil, SessionArtifact{}, Resolved{}, err
+	} else if token != "" {
+		client, err := NewClient(entry, token)
+		if err != nil {
+			return nil, SessionArtifact{}, Resolved{}, err
+		}
+		if echo := resolved.Echo(); echo != "" {
+			fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact machine-credential]\n", echo, entry.Origin)
+		}
+		return client, SessionArtifact{Origin: entry.Origin}, resolved, nil
 	}
 	artifact, ok := sessions[instance]
 	if !ok {

@@ -326,12 +326,15 @@ func openPostgres(t *testing.T) *store.DB {
 		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
 		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
 		"saml_providers", "oidc_providers", "accounts",
-		"auth_instance_state",
+		"auth_instance_state", "credential_policy",
 		// The key catalogue (#49) sits between projects and environments:
 		// presence rows reference both keys and environments, keys reference
 		// key_groups, and the schema-revision row references projects — so all
 		// four drop before the hierarchy they hang from.
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
+		// Machine identities (#61, migration 00014): machine_credentials
+		// references service_accounts, which references projects/principals.
+		"machine_credentials", "service_accounts",
 		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
 		// goes first of the pair.
 		"grant_origins", "grants", "folders", "environments", "projects", "principals",

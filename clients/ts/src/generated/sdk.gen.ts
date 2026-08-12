@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -1603,4 +1603,135 @@ export const compromiseRetireSamlSpKey = <ThrowOnError extends boolean = false>(
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire',
     ...options
+});
+
+/**
+ * List the project's service accounts.
+ *
+ * Metadata only, and listing is a narrowing-class operation: plain
+ * `manage-identities`, no disclosure gate, because incident response
+ * must never be gated on disclosure rights.
+ *
+ */
+export const listServiceAccounts = <ThrowOnError extends boolean = false>(options: Options<ListServiceAccountsData, ThrowOnError>) => (options.client ?? client).get<ListServiceAccountsResponses, ListServiceAccountsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts',
+    ...options
+});
+
+/**
+ * Create a project-owned machine principal.
+ *
+ * `kind` is declared here and is IMMUTABLE. A project that guessed wrong
+ * creates a second service account; there is no in-place widening of a
+ * credential class that N workloads already hold.
+ *
+ */
+export const createServiceAccount = <ThrowOnError extends boolean = false>(options: Options<CreateServiceAccountData, ThrowOnError>) => (options.client ?? client).post<CreateServiceAccountResponses, CreateServiceAccountErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete a service account, revoking every credential and grant.
+ *
+ * One transaction: every credential is revoked and every grant released.
+ * Plain `manage-identities`, no disclosure gate — requiring `reveal` to
+ * deprovision a compromised workload would be a self-inflicted
+ * incident-response delay.
+ *
+ */
+export const deleteServiceAccount = <ThrowOnError extends boolean = false>(options: Options<DeleteServiceAccountData, ThrowOnError>) => (options.client ?? client).delete<DeleteServiceAccountResponses, DeleteServiceAccountErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}',
+    ...options
+});
+
+/**
+ * List a service account's credentials, metadata only.
+ *
+ * Never the value. A credential value is displayed exactly once, at
+ * mint, and no route in this contract returns one afterwards.
+ *
+ */
+export const listMachineCredentials = <ThrowOnError extends boolean = false>(options: Options<ListMachineCredentialsData, ThrowOnError>) => (options.client ?? client).get<ListMachineCredentialsResponses, ListMachineCredentialsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials',
+    ...options
+});
+
+/**
+ * Mint a bearer credential, returned exactly once.
+ *
+ * The full authorization formula is `manage-identities(project)` AND a
+ * disclosure capability over EVERY environment reachable in the
+ * resulting post-state AND reauthentication. The post-state phrasing is
+ * load-bearing: a replacement credential adds no environment, so an
+ * "added environments" reading would let a principal holding
+ * `manage-identities` and no `reveal` rotate a production credential and
+ * walk away with a live production-reading token. The two disclosure
+ * classes are evaluated independently — `reveal` over newly reachable
+ * current plaintext, `reveal-history` over historical.
+ *
+ * Rotation is this call followed by a revoke of the predecessor:
+ * overlap is the intended steady state, so a mint that succeeds and a
+ * revoke that fails leaves two live credentials rather than none.
+ *
+ */
+export const mintMachineCredential = <ThrowOnError extends boolean = false>(options: Options<MintMachineCredentialData, ThrowOnError>) => (options.client ?? client).post<MintMachineCredentialResponses, MintMachineCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke one credential.
+ *
+ * Bites at the next request: the liveness predicate is read in the
+ * authenticating transaction, uncached. Revoking one credential is not
+ * deprovisioning — grants are untouched and siblings keep working.
+ *
+ */
+export const revokeMachineCredential = <ThrowOnError extends boolean = false>(options: Options<RevokeMachineCredentialData, ThrowOnError>) => (options.client ?? client).delete<RevokeMachineCredentialResponses, RevokeMachineCredentialErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}',
+    ...options
+});
+
+/**
+ * Read the instance credential lifetime controls.
+ */
+export const getCredentialPolicy = <ThrowOnError extends boolean = false>(options?: Options<GetCredentialPolicyData, ThrowOnError>) => (options?.client ?? client).get<GetCredentialPolicyResponses, GetCredentialPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/credential-policy',
+    ...options
+});
+
+/**
+ * Move the instance credential lifetime controls.
+ *
+ * The two controls are separate on purpose: raising
+ * `max_finite_lifetime_seconds` can never manufacture an indefinite
+ * credential. A TIGHTENING enumerates every affected live credential and
+ * refuses with 409 until the caller re-sends with `confirm: true`, so a
+ * settings change never silently kills a live credential.
+ *
+ */
+export const setCredentialPolicy = <ThrowOnError extends boolean = false>(options: Options<SetCredentialPolicyData, ThrowOnError>) => (options.client ?? client).put<SetCredentialPolicyResponses, SetCredentialPolicyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/credential-policy',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });

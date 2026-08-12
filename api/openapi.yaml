@@ -76,6 +76,13 @@ tags:
       separate schema object: every constraint is declared inline on the Key,
       so the catalogue revision IS the schema revision. Tenant-scoped
       throughout, at project depth.
+  - name: identities
+    description: |
+      Machine identities: project-owned service accounts and the credentials
+      that authenticate them. A service account is a principal in the grant
+      table; a credential is an authenticator for it, and every credential of
+      one confers identical authority.
+
 paths:
   /api/v1/meta:
     get:
@@ -3497,6 +3504,286 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/service-accounts:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listServiceAccounts
+      tags: [identities]
+      summary: List the project's service accounts.
+      description: |
+        Metadata only, and listing is a narrowing-class operation: plain
+        `manage-identities`, no disclosure gate, because incident response
+        must never be gated on disclosure rights.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.service-account-list
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The project's service accounts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceAccountList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createServiceAccount
+      tags: [identities]
+      summary: Create a project-owned machine principal.
+      description: |
+        `kind` is declared here and is IMMUTABLE. A project that guessed wrong
+        creates a second service account; there is no in-place widening of a
+        credential class that N workloads already hold.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.service-account-create
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceAccountRequest"
+      responses:
+        "201":
+          description: The created service account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceAccount"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/ServiceAccountID"
+    delete:
+      operationId: deleteServiceAccount
+      tags: [identities]
+      summary: Delete a service account, revoking every credential and grant.
+      description: |
+        One transaction: every credential is revoked and every grant released.
+        Plain `manage-identities`, no disclosure gate — requiring `reveal` to
+        deprovision a compromised workload would be a self-inflicted
+        incident-response delay.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.service-account-delete
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/ServiceAccountID"
+    get:
+      operationId: listMachineCredentials
+      tags: [identities]
+      summary: List a service account's credentials, metadata only.
+      description: |
+        Never the value. A credential value is displayed exactly once, at
+        mint, and no route in this contract returns one afterwards.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.credential-list
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The credentials' metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MachineCredentialList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: mintMachineCredential
+      tags: [identities]
+      summary: Mint a bearer credential, returned exactly once.
+      description: |
+        The full authorization formula is `manage-identities(project)` AND a
+        disclosure capability over EVERY environment reachable in the
+        resulting post-state AND reauthentication. The post-state phrasing is
+        load-bearing: a replacement credential adds no environment, so an
+        "added environments" reading would let a principal holding
+        `manage-identities` and no `reveal` rotate a production credential and
+        walk away with a live production-reading token. The two disclosure
+        classes are evaluated independently — `reveal` over newly reachable
+        current plaintext, `reveal-history` over historical.
+
+        Rotation is this call followed by a revoke of the predecessor:
+        overlap is the intended steady state, so a mint that succeeds and a
+        revoke that fails leaves two live credentials rather than none.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.credential-mint
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintCredentialRequest"
+      responses:
+        "200":
+          description: |
+            The credential value, returned EXACTLY ONCE. Nothing in the system
+            can return it again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintCredentialResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/ServiceAccountID"
+      - $ref: "#/components/parameters/CredentialID"
+    delete:
+      operationId: revokeMachineCredential
+      tags: [identities]
+      summary: Revoke one credential.
+      description: |
+        Bites at the next request: the liveness predicate is read in the
+        authenticating transaction, uncached. Revoking one credential is not
+        deprovisioning — grants are untouched and siblings keep working.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.credential-revoke
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/credential-policy:
+    get:
+      operationId: getCredentialPolicy
+      tags: [instance]
+      summary: Read the instance credential lifetime controls.
+      x-hikyo-class: instance
+      x-hikyo-operation: identity.credential-policy-read
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The instance credential policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: setCredentialPolicy
+      tags: [instance]
+      summary: Move the instance credential lifetime controls.
+      description: |
+        The two controls are separate on purpose: raising
+        `max_finite_lifetime_seconds` can never manufacture an indefinite
+        credential. A TIGHTENING enumerates every affected live credential and
+        refuses with 409 until the caller re-sends with `confirm: true`, so a
+        settings change never silently kills a live credential.
+      x-hikyo-class: instance
+      x-hikyo-operation: identity.credential-policy-update
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetCredentialPolicyRequest"
+      responses:
+        "200":
+          description: The policy as written, with what the clamp touched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialPolicyResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     hikyoSession:
@@ -3535,6 +3822,20 @@ components:
       in: path
       required: true
       description: Folder identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    ServiceAccountID:
+      name: serviceAccount
+      in: path
+      required: true
+      description: Service-account identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    CredentialID:
+      name: credential
+      in: path
+      required: true
+      description: Machine-credential identifier.
       schema:
         $ref: "#/components/schemas/ID"
     GrantPrincipal:
@@ -4314,6 +4615,245 @@ components:
           type: integer
           minimum: 0
           description: Total rows matching, which for an unpaged list equals `items` length.
+
+    ServiceAccountKind:
+      type: string
+      description: |
+        The closed set a service account may be created with. Declared at
+        creation and IMMUTABLE afterwards.
+      enum: [workload, automation]
+
+    CredentialKind:
+      type: string
+      description: |
+        How a credential authenticates its service account. The discriminator
+        exists before a second kind does, so adding one is a new row type
+        rather than a schema change.
+      enum: [hikyo-token]
+
+    CredentialLifetime:
+      type: string
+      description: |
+        `indefinite` is a VALUE, not a large number: it is unreachable by
+        raising the instance ceiling, and is admitted only under a separate,
+        default-off instance opt-in.
+      enum: [finite, indefinite]
+
+    CreateServiceAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [name, kind]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          $ref: "#/components/schemas/ServiceAccountKind"
+
+    ServiceAccount:
+      type: object
+      additionalProperties: false
+      required: [id, principal_id, name, kind, created_at, created_by, live_credentials]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        principal_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+          maxLength: 64
+        kind:
+          $ref: "#/components/schemas/ServiceAccountKind"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          $ref: "#/components/schemas/ID"
+        live_credentials:
+          type: integer
+          minimum: 0
+          description: How many of its credentials currently authenticate.
+
+    ServiceAccountList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceAccount"
+        count:
+          type: integer
+          minimum: 0
+
+    MachineCredential:
+      type: object
+      additionalProperties: false
+      required: [id, kind, prefix_hint, lifetime, created_at, created_by, expiring_soon]
+      description: |
+        Metadata only. There is deliberately no value property: a credential
+        value is displayed exactly once, at mint, and is never retrievable
+        afterwards.
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        kind:
+          $ref: "#/components/schemas/CredentialKind"
+        prefix_hint:
+          type: string
+          maxLength: 32
+          description: |
+            The non-secret leading slice of the minted value - the grammar
+            prefix plus a few body characters, enough to tell two live
+            credentials apart and far short of anything a search can narrow.
+        lifetime:
+          $ref: "#/components/schemas/CredentialLifetime"
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          $ref: "#/components/schemas/ID"
+        revoked_at:
+          $ref: "#/components/schemas/Timestamp"
+        last_used_at:
+          $ref: "#/components/schemas/Timestamp"
+        expiring_soon:
+          type: boolean
+          description: |
+            The in-product expiry warning, computed rather than stored - a
+            stored flag would be stale the moment the clock moved past it.
+
+    MachineCredentialList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MachineCredential"
+        count:
+          type: integer
+          minimum: 0
+
+    MintCredentialRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        The zero request asks for the finite default, which is the rule that
+        the easy path is bounded and a long-lived credential is a typed choice
+        someone made.
+      properties:
+        indefinite:
+          type: boolean
+          description: |
+            Selects the distinct typed lifetime. A separate property rather
+            than a sentinel duration, because `indefinite` must be
+            unreachable by raising any ceiling. Naming it together with
+            `lifetime_seconds` is refused rather than resolved by precedence:
+            a silent precedence rule on a credential is exactly the quiet
+            ambiguity fail-loud exists to prevent.
+        lifetime_seconds:
+          type: integer
+          minimum: 1
+          description: Requested finite lifetime; absent means the instance default.
+
+    MintCredentialResult:
+      type: object
+      additionalProperties: false
+      required: [value, credential, clamped]
+      properties:
+        value:
+          type: string
+          description: |
+            The credential value, returned EXACTLY ONCE to exactly one caller.
+            No other route in this contract returns it.
+        credential:
+          $ref: "#/components/schemas/MachineCredential"
+        clamped:
+          type: boolean
+          description: |
+            True when the instance ceiling shortened what was asked for, so
+            the caller can say so rather than let the operator discover it
+            when the credential dies early.
+
+    CredentialPolicy:
+      type: object
+      additionalProperties: false
+      required: [max_finite_lifetime_seconds, allow_indefinite, max_live_credentials]
+      properties:
+        max_finite_lifetime_seconds:
+          type: integer
+          minimum: 1
+        allow_indefinite:
+          type: boolean
+        max_live_credentials:
+          type: integer
+          minimum: 1
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_by:
+          $ref: "#/components/schemas/ID"
+
+    SetCredentialPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [max_finite_lifetime_seconds, allow_indefinite, max_live_credentials]
+      properties:
+        max_finite_lifetime_seconds:
+          type: integer
+          minimum: 1
+        allow_indefinite:
+          type: boolean
+        max_live_credentials:
+          type: integer
+          minimum: 1
+        confirm:
+          type: boolean
+          description: |
+            Acknowledges the enumerated affected credentials. A tightening
+            refuses with 409 until this is true, so a settings change never
+            silently kills a live credential.
+
+    AffectedCredential:
+      type: object
+      additionalProperties: false
+      required: [id, service_account_id, reason]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        service_account_id:
+          $ref: "#/components/schemas/ID"
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        reason:
+          type: string
+          enum: [clamped, indefinite-withdrawn]
+
+    CredentialPolicyResult:
+      type: object
+      additionalProperties: false
+      required: [applied, policy, affected, clamped_count]
+      properties:
+        applied:
+          type: boolean
+          description: |
+            False when the request was a PREVIEW: a tightening whose affected
+            credentials the caller has not acknowledged with `confirm`.
+            Nothing was written, and `affected` is the enumeration the caller
+            must see before asking again. A settings change never silently
+            kills a live credential.
+        policy:
+          $ref: "#/components/schemas/CredentialPolicy"
+        affected:
+          type: array
+          items:
+            $ref: "#/components/schemas/AffectedCredential"
+        clamped_count:
+          type: integer
+          minimum: 0
 
     Capability:
       type: string
