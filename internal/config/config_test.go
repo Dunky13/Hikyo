@@ -230,3 +230,49 @@ func TestNonLoopbackListenRequiresTrustedProxyCIDRs(t *testing.T) {
 		t.Fatalf("invalid trusted proxy CIDR must refuse, got %v", err)
 	}
 }
+
+// The per-IP pre-auth allowance is a security ceiling. It is overridable for
+// exactly one traffic shape — a test harness driving every login of every flow
+// from one loopback address — and the override is fail-closed twice: a
+// production server refuses to start when it is set at all, and a malformed
+// value is an error rather than a quiet fallback to the default.
+func TestDevAdmissionOverrideIsRefusedOutsideDevMode(t *testing.T) {
+	_, _, err := Load("server", nil,
+		env("HIKYO_DB", "sqlite:x.db", "HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE", "200"), nil)
+	if err == nil {
+		t.Fatal("a production server accepted a development-only admission override")
+	}
+	if !strings.Contains(err.Error(), "development-mode override") {
+		t.Fatalf("error should say why it is refused, got: %v", err)
+	}
+}
+
+func TestDevAdmissionOverrideAppliesInDevMode(t *testing.T) {
+	cfg, _, err := Load("server", []string{"--dev"},
+		env("HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE", "200"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DevAdmissionPerIPPerMinute != 200 {
+		t.Fatalf("override = %d, want 200", cfg.DevAdmissionPerIPPerMinute)
+	}
+}
+
+func TestDevAdmissionOverrideRefusesNonsense(t *testing.T) {
+	for _, raw := range []string{"0", "-1", "lots", "10.5"} {
+		if _, _, err := Load("server", []string{"--dev"},
+			env("HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE", raw), nil); err == nil {
+			t.Fatalf("%q was accepted as an allowance", raw)
+		}
+	}
+}
+
+func TestAdmissionOverrideUnsetLeavesTheDefault(t *testing.T) {
+	cfg, _, err := Load("server", []string{"--dev"}, env(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DevAdmissionPerIPPerMinute != 0 {
+		t.Fatalf("override = %d, want 0 (meaning: the locked default)", cfg.DevAdmissionPerIPPerMinute)
+	}
+}

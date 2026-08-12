@@ -77,14 +77,14 @@ SELECT session_generation FROM principals WHERE id = ?;
 -- name: GetSessionByVerifier :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
 FROM sessions WHERE verifier = ?;
 
 -- hikyo:authn-resolution
 -- name: GetSessionByID :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
 FROM sessions WHERE id = ?;
 
 -- hikyo:authn-resolution
@@ -435,3 +435,15 @@ SELECT id FROM principals WHERE id = ?;
 -- hikyo:authn-resolution
 -- name: EnvironmentChainByID :one
 SELECT org_id, project_id, id FROM environments WHERE id = ?;
+
+-- The org rail's identity lookup (#56). The caller's own org set is projected
+-- from their own grant rows, so there is no scope to authorize against and no
+-- proof to bind: the projection IS the authorization, and it can name only
+-- organisations the caller already holds a grant in. Identity only - an org's
+-- metadata and active flag are operator-set state and are read through the
+-- proof-gated GetOrg.
+--
+-- Not annotated, and it does not need to be: orgs is class=org chain=id, and
+-- the id equality is that chain as a top-level conjunct.
+-- name: GetOrgIdentity :one
+SELECT id, name FROM orgs WHERE id = ?;

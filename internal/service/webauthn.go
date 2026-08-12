@@ -64,7 +64,12 @@ type PasskeyView struct {
 // ReauthResult reports a reauthentication that opened (or single-decision-armed)
 // a window, plus the rotated session token.
 type ReauthResult struct {
-	SessionToken   string
+	SessionToken string
+	// CSRFToken is the rotated synchronizer token that travels with a rotated
+	// browser session. Without it the caller's next state-changing request
+	// would present a stale token against a freshly minted verifier and be
+	// refused (#56).
+	CSRFToken      string
 	SessionID      string
 	EnvironmentID  string
 	SingleDecision bool
@@ -314,7 +319,7 @@ func (s *Auth) EnrolPasskeyFinish(ctx context.Context, presented string, respons
 		if err := s.assertPasskeyOnlyInvariant(ctx, az, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, ceremony.OperationBinding, MethodLocalPassword, acting.Artifact, now)
+		result, err = s.reissueSession(ctx, az, account, ceremony.OperationBinding, MethodLocalPassword, Artifact(acting.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -621,7 +626,7 @@ func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, a
 	wire := audit.FromContext(ctx)
 	sess := authz.NewSession{
 		ID: sessionID, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: ArtifactBrowser, SessionGeneration: generation, CredentialEpoch: epoch,
+		Artifact: ArtifactBrowser.String(), SessionGeneration: generation, CredentialEpoch: epoch,
 		AuthMethod: MethodLocalPasskey, Factors: string(factors),
 		AuthenticatedAt: now, CeremonyID: ceremonyID, CreatedAt: now,
 		IdleExpiresAt: now.Add(BrowserSessionIdle), AbsoluteExpiresAt: now.Add(BrowserSessionAbsolute),
@@ -635,11 +640,11 @@ func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, a
 		payload audit.Payload
 	}{
 		{audit.EventAuthLogin, audit.Payload{
-			"method": MethodLocalPasskey, "artifact": ArtifactBrowser,
+			"method": MethodLocalPasskey, "artifact": ArtifactBrowser.String(),
 			"subject_resolved": true, "account_id": account.ID, "assurance": "multi-factor",
 		}},
 		{audit.EventAuthSessionCreated, audit.Payload{
-			"session_id": sessionID, "artifact": ArtifactBrowser,
+			"session_id": sessionID, "artifact": ArtifactBrowser.String(),
 			"method": MethodLocalPasskey, "assurance": "multi-factor",
 		}},
 	} {
@@ -742,6 +747,7 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 	// The reauth rotates the acting session token (every reauth rotates); carry
 	// the new token and session id back beside the window it opened.
 	out.SessionToken = rotated.SessionToken
+	out.CSRFToken = rotated.CSRFToken
 	out.SessionID = rotated.SessionID
 	return out, nil
 }
@@ -876,7 +882,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 	}
 
 	factors := stepUpFactors(acting.Assurance.Factors, "webauthn")
-	value, verifier, err := s.newSessionArtifact(acting.Artifact)
+	value, verifier, err := s.newSessionArtifact(Artifact(acting.Artifact))
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -977,7 +983,7 @@ func (s *Auth) finishAssertionElevation(ctx context.Context, presented string, r
 			return err
 		}
 		result = LoginResult{
-			SessionToken: value, SessionID: acting.SessionID, Artifact: acting.Artifact,
+			SessionToken: value, SessionID: acting.SessionID, Artifact: Artifact(acting.Artifact),
 			CreatedAt: acting.CreatedAt, IdleExpires: acting.IdleExpiresAt, AbsExpires: acting.AbsoluteExpiresAt,
 			Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
 			Assurance: Assurance{
@@ -1091,7 +1097,7 @@ func (s *Auth) RemovePasskey(ctx context.Context, presented, credentialID, passw
 		if err := s.assertPasskeyOnlyInvariant(ctx, az, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, live.Artifact, now)
+		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}

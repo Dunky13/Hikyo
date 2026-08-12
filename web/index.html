@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Hikyo</title>
+    <!--
+      No inline script and no inline style anywhere in this document: the
+      server ships a CSP with `script-src 'self'` and no `unsafe-inline`, so
+      an inline theme-flash guard would simply not run. The dark default is a
+      CSS default instead (src/styles/tokens.css), which cannot flash because
+      it needs no JavaScript.
+    -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

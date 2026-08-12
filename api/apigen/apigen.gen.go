@@ -167,6 +167,24 @@ func (e KeyRuleType) Valid() bool {
 	}
 }
 
+// Defines values for LocalLoginRequestArtifact.
+const (
+	Browser LocalLoginRequestArtifact = "browser"
+	Cli     LocalLoginRequestArtifact = "cli"
+)
+
+// Valid indicates whether the value is a known member of the LocalLoginRequestArtifact enum.
+func (e LocalLoginRequestArtifact) Valid() bool {
+	switch e {
+	case Browser:
+		return true
+	case Cli:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OidcStartRequestPurpose.
 const (
 	OidcStartRequestPurposeLink   OidcStartRequestPurpose = "link"
@@ -1017,9 +1035,28 @@ type KeyRuleType string
 
 // LocalLoginRequest defines model for LocalLoginRequest.
 type LocalLoginRequest struct {
-	Password string `json:"password"`
-	Username string `json:"username"`
+	// Artifact Which session artifact to mint. Omitted or `cli` mints a CLI
+	// session whose token is returned in the body. `browser` mints a
+	// browser session delivered ONLY on the `__Host-hikyo` cookie, with
+	// its synchronizer token on the `__Host-hikyo-csrf` cookie; the body
+	// then carries no token at all. The two artifacts have distinct
+	// lifetimes, distinct CSRF contracts and distinct revocation
+	// surfaces, so the caller states which one it is asking for rather
+	// than the server guessing from a header.
+	Artifact *LocalLoginRequestArtifact `json:"artifact,omitempty"`
+	Password string                     `json:"password"`
+	Username string                     `json:"username"`
 }
+
+// LocalLoginRequestArtifact Which session artifact to mint. Omitted or `cli` mints a CLI
+// session whose token is returned in the body. `browser` mints a
+// browser session delivered ONLY on the `__Host-hikyo` cookie, with
+// its synchronizer token on the `__Host-hikyo-csrf` cookie; the body
+// then carries no token at all. The two artifacts have distinct
+// lifetimes, distinct CSRF contracts and distinct revocation
+// surfaces, so the caller states which one it is asking for rather
+// than the server guessing from a header.
+type LocalLoginRequestArtifact string
 
 // LoginResult defines model for LoginResult.
 type LoginResult struct {
@@ -1051,6 +1088,23 @@ type Meta struct {
 
 	// ServerVersion The build's version string; `dev` for unreleased builds.
 	ServerVersion string `json:"server_version"`
+}
+
+// MyOrg An organisation as a navigation destination: what the caller needs to
+// show it and route to it, and nothing else. Deliberately narrower than
+// `Org` — `metadata` and `active` are operator-set state that belongs to
+// `getOrg`, which authorizes; a member listing does not.
+type MyOrg struct {
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id   ID     `json:"id"`
+	Name string `json:"name"`
+}
+
+// MyOrgList defines model for MyOrgList.
+type MyOrgList struct {
+	// Count Total rows matching, which for an unpaged list equals `items` length.
+	Count int     `json:"count"`
+	Items []MyOrg `json:"items"`
 }
 
 // OidcProvider defines model for OidcProvider.
@@ -1897,7 +1951,7 @@ type ServerInterface interface {
 	// UnlinkIdentity Unlink an external identity.
 	// (DELETE /api/v1/auth/identities/{id})
 	UnlinkIdentity(w http.ResponseWriter, r *http.Request, id IdentityID)
-	// LocalLogin Terminal-native local login; mints a CLI session artifact.
+	// LocalLogin Local password login; mints a CLI or browser session artifact.
 	// (POST /api/v1/auth/local/login)
 	LocalLogin(w http.ResponseWriter, r *http.Request)
 	// Logout Revoke the presented session.
@@ -2026,6 +2080,9 @@ type ServerInterface interface {
 	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
 	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
 	CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string)
+	// ListMyOrgs The organisations the caller's own grants name.
+	// (GET /api/v1/me/orgs)
+	ListMyOrgs(w http.ResponseWriter, r *http.Request)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
@@ -2209,7 +2266,7 @@ func (_ Unimplemented) UnlinkIdentity(w http.ResponseWriter, r *http.Request, id
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// LocalLogin Terminal-native local login; mints a CLI session artifact.
+// LocalLogin Local password login; mints a CLI or browser session artifact.
 // (POST /api/v1/auth/local/login)
 func (_ Unimplemented) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2464,6 +2521,12 @@ func (_ Unimplemented) RetireSamlSpKey(w http.ResponseWriter, r *http.Request, f
 // CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
 // (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
 func (_ Unimplemented) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMyOrgs The organisations the caller's own grants name.
+// (GET /api/v1/me/orgs)
+func (_ Unimplemented) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3736,6 +3799,20 @@ func (siw *ServerInterfaceWrapper) CompromiseRetireSamlSpKey(w http.ResponseWrit
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompromiseRetireSamlSpKey(w, r, fingerprint)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMyOrgs operation middleware
+func (siw *ServerInterfaceWrapper) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyOrgs(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5911,6 +5988,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/saml/{provider}/metadata", wrapper.SamlMetadata)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/me/orgs", wrapper.ListMyOrgs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/auth/identities", wrapper.ListIdentities)
@@ -9966,6 +10046,70 @@ func (response CompromiseRetireSamlSpKey429JSONResponse) VisitCompromiseRetireSa
 type CompromiseRetireSamlSpKey500JSONResponse struct{ InternalJSONResponse }
 
 func (response CompromiseRetireSamlSpKey500JSONResponse) VisitCompromiseRetireSamlSpKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgsRequestObject struct {
+}
+
+type ListMyOrgsResponseObject interface {
+	VisitListMyOrgsResponse(w http.ResponseWriter) error
+}
+
+type ListMyOrgs200JSONResponse MyOrgList
+
+func (response ListMyOrgs200JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgs401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMyOrgs401JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgs429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListMyOrgs429JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyOrgs500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListMyOrgs500JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -14761,7 +14905,7 @@ type StrictServerInterface interface {
 	// UnlinkIdentity Unlink an external identity.
 	// (DELETE /api/v1/auth/identities/{id})
 	UnlinkIdentity(ctx context.Context, request UnlinkIdentityRequestObject) (UnlinkIdentityResponseObject, error)
-	// LocalLogin Terminal-native local login; mints a CLI session artifact.
+	// LocalLogin Local password login; mints a CLI or browser session artifact.
 	// (POST /api/v1/auth/local/login)
 	LocalLogin(ctx context.Context, request LocalLoginRequestObject) (LocalLoginResponseObject, error)
 	// Logout Revoke the presented session.
@@ -14890,6 +15034,9 @@ type StrictServerInterface interface {
 	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
 	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
 	CompromiseRetireSamlSpKey(ctx context.Context, request CompromiseRetireSamlSpKeyRequestObject) (CompromiseRetireSamlSpKeyResponseObject, error)
+	// ListMyOrgs The organisations the caller's own grants name.
+	// (GET /api/v1/me/orgs)
+	ListMyOrgs(ctx context.Context, request ListMyOrgsRequestObject) (ListMyOrgsResponseObject, error)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
@@ -16448,6 +16595,30 @@ func (sh *strictHandler) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *htt
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CompromiseRetireSamlSpKeyResponseObject); ok {
 		if err := validResponse.VisitCompromiseRetireSamlSpKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyOrgs operation middleware
+func (sh *strictHandler) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+	var request ListMyOrgsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyOrgs(ctx, request.(ListMyOrgsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyOrgs")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyOrgsResponseObject); ok {
+		if err := validResponse.VisitListMyOrgsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

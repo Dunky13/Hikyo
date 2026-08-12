@@ -147,7 +147,7 @@ func (s *Auth) recordFactorThrottleCrossing(ctx context.Context, principal domai
 // mutations run on a browser session, so the acting artifact and the proof's
 // method/class are threaded in rather than assumed (a browser reissue also mints
 // a fresh CSRF verifier). The assurance is built solely from the proof (B3).
-func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, factorClass, method, artifact string, now time.Time) (LoginResult, error) {
+func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, account authz.Account, factorClass, method string, artifact Artifact, now time.Time) (LoginResult, error) {
 	if err := az.AdvanceGeneration(ctx, account.PrincipalID); err != nil {
 		return LoginResult{}, err
 	}
@@ -162,13 +162,7 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	if err != nil {
 		return LoginResult{}, err
 	}
-	artifactKind := crypto.ArtifactCLISession
-	idleFor, absFor := CLISessionIdle, CLISessionAbsolute
-	if artifact == ArtifactBrowser {
-		artifactKind = crypto.ArtifactBrowserSession
-		idleFor, absFor = BrowserSessionIdle, BrowserSessionAbsolute
-	}
-	value, verifier, err := crypto.NewArtifact(artifactKind)
+	value, verifier, err := crypto.NewArtifact(artifact.bearerKind())
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -191,10 +185,10 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	wire := audit.FromContext(ctx)
 	sess := authz.NewSession{
 		ID: id, PrincipalID: account.PrincipalID, Verifier: verifier,
-		Artifact: artifact, SessionGeneration: generation, CredentialEpoch: epoch,
+		Artifact: artifact.String(), SessionGeneration: generation, CredentialEpoch: epoch,
 		AuthMethod: method, Factors: string(factors),
 		AuthenticatedAt: now, CreatedAt: now,
-		IdleExpiresAt: now.Add(idleFor), AbsoluteExpiresAt: now.Add(absFor),
+		IdleExpiresAt: now.Add(artifact.idle()), AbsoluteExpiresAt: now.Add(artifact.absolute()),
 		SourceIP: wire.SourceIP, UserAgent: wire.UserAgent,
 		CSRFVerifier: csrfVerifier,
 	}
@@ -208,7 +202,7 @@ func (s *Auth) reissueSession(ctx context.Context, az *authz.TxAuthorizer, accou
 	e, err := newAuditEvent(ctx, audit.EventAuthSessionCreated, account.PrincipalID,
 		audit.Object{Type: "session", ID: id}, audit.OutcomeSuccess, "",
 		audit.Payload{
-			"session_id": id, "artifact": artifact,
+			"session_id": id, "artifact": artifact.String(),
 			"method": method, "assurance": assuranceLabel,
 		})
 	if err != nil {
@@ -427,7 +421,7 @@ func (s *Auth) EnrolTOTPConfirm(ctx context.Context, presented, code string) (Lo
 			// The row moved or the step was already consumed: single-use holds.
 			return domain.ErrUnauthenticated
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
+		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -524,7 +518,7 @@ func (s *Auth) RemoveTOTP(ctx context.Context, presented, password string) (Logi
 		if err := az.RemoveTOTPForAccount(ctx, account.ID); err != nil {
 			return err
 		}
-		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, ArtifactCLI, now)
+		result, err = s.reissueSession(ctx, az, account, "password", MethodLocalPassword, Artifact(live.Artifact), now)
 		if err != nil {
 			return err
 		}
@@ -598,7 +592,16 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 	s.Admission.RecordSuccess(account.ID)
 
 	// Phase 3 — consume the step and rotate the acting session.
-	value, verifier, err := crypto.NewArtifact(crypto.ArtifactCLISession)
+	//
+	// The replacement token must be the SAME artifact kind the acting session
+	// is: a browser session handed a `cli` token would have that token echoed
+	// into a script-readable body (the cookie leg omits it), and the cookie
+	// it still holds would point at a rotated verifier — an instant logout
+	// plus a long-lived credential in the DOM. `RotateSessionFactors` leaves
+	// `csrf_verifier` alone, so the synchronizer token stays valid and only
+	// the session cookie needs re-delivery.
+	actingArtifact := Artifact(acting.Artifact)
+	value, verifier, err := crypto.NewArtifact(actingArtifact.bearerKind())
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -646,7 +649,7 @@ func (s *Auth) StepUpTOTP(ctx context.Context, presented, code string) (LoginRes
 		return LoginResult{}, err
 	}
 	return LoginResult{
-		SessionToken: value, SessionID: acting.SessionID, Artifact: acting.Artifact,
+		SessionToken: value, SessionID: acting.SessionID, Artifact: actingArtifact,
 		CreatedAt: acting.CreatedAt, IdleExpires: acting.IdleExpiresAt, AbsExpires: acting.AbsoluteExpiresAt,
 		Principal: account.PrincipalID, AccountID: account.ID, DisplayName: account.DisplayName,
 		Assurance: Assurance{
@@ -841,7 +844,7 @@ func (s *Auth) GenerateRecoveryCodes(ctx context.Context, presented, proof strin
 				return err
 			}
 		}
-		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, ArtifactCLI, now)
+		result, err = s.reissueSession(ctx, az, account, proofClass, MethodLocalPassword, Artifact(liveID.Artifact), now)
 		if err != nil {
 			return err
 		}

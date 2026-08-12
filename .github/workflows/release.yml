@@ -30,6 +30,17 @@ jobs:
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
           node-version-file: .nvmrc
+      - name: Enable pnpm
+        run: corepack enable
+      # working-directory matters: corepack resolves the packageManager pin
+      # from the CWD's package.json — from the repo root (which has none) it
+      # falls back to its default pnpm and the pinned project refuses it.
+      - name: Build the SPA (the `ui` build tag embeds it)
+        working-directory: web
+        run: |
+          pnpm --dir ../clients/ts install --frozen-lockfile
+          pnpm install --frozen-lockfile
+          pnpm build
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3

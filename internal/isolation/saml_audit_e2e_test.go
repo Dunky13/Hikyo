@@ -67,7 +67,7 @@ func runSAMLAuditLifecycle(t *testing.T, auth *service.Auth, principal domain.Pr
 		t.Fatal("malformed SAML login response succeeded")
 	}
 
-	session, err := auth.LocalLogin(ctx, "e2e-admin", password)
+	session, err := auth.LocalLogin(ctx, "e2e-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -91,6 +91,18 @@ export type EstablishCredentialRequest = {
 export type LocalLoginRequest = {
     username: string;
     password: string;
+    /**
+     * Which session artifact to mint. Omitted or `cli` mints a CLI
+     * session whose token is returned in the body. `browser` mints a
+     * browser session delivered ONLY on the `__Host-hikyo` cookie, with
+     * its synchronizer token on the `__Host-hikyo-csrf` cookie; the body
+     * then carries no token at all. The two artifacts have distinct
+     * lifetimes, distinct CSRF contracts and distinct revocation
+     * surfaces, so the caller states which one it is asking for rather
+     * than the server guessing from a header.
+     *
+     */
+    artifact?: 'cli' | 'browser';
 };
 
 export type LoginResult = {
@@ -281,6 +293,26 @@ export type Org = {
 
 export type OrgList = {
     items: Array<Org>;
+    /**
+     * Total rows matching, which for an unpaged list equals `items` length.
+     */
+    count: number;
+};
+
+/**
+ * An organisation as a navigation destination: what the caller needs to
+ * show it and route to it, and nothing else. Deliberately narrower than
+ * `Org` — `metadata` and `active` are operator-set state that belongs to
+ * `getOrg`, which authorizes; a member listing does not.
+ *
+ */
+export type MyOrg = {
+    id: Id;
+    name: string;
+};
+
+export type MyOrgList = {
+    items: Array<MyOrg>;
     /**
      * Total rows matching, which for an unpaged list equals `items` length.
      */
@@ -5408,6 +5440,44 @@ export type SamlMetadataResponses = {
 };
 
 export type SamlMetadataResponse = SamlMetadataResponses[keyof SamlMetadataResponses];
+
+export type ListMyOrgsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/me/orgs';
+};
+
+export type ListMyOrgsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListMyOrgsError = ListMyOrgsErrors[keyof ListMyOrgsErrors];
+
+export type ListMyOrgsResponses = {
+    /**
+     * The caller's organisations, empty when their grants name none.
+     */
+    200: MyOrgList;
+};
+
+export type ListMyOrgsResponse = ListMyOrgsResponses[keyof ListMyOrgsResponses];
 
 export type ListIdentitiesData = {
     body?: never;

@@ -54,7 +54,7 @@ func bootstrapWebAuthnAdmin(t *testing.T, db *store.DB) (*service.Auth, string, 
 	if err := auth.EstablishCredential(ctx, boot.Authority, waPassword); err != nil {
 		t.Fatal(err)
 	}
-	login, err := auth.LocalLogin(ctx, waAdmin, waPassword)
+	login, err := auth.LocalLogin(ctx, waAdmin, waPassword, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -685,7 +685,7 @@ func runWebAuthnLifecycle(t *testing.T, auth *service.Auth, ctx context.Context,
 	if err := auth.ConfigureWebAuthnRP(); err != nil {
 		t.Fatal(err)
 	}
-	login, err := auth.LocalLogin(ctx, username, password)
+	login, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("lifecycle login: %v", err)
 	}
@@ -706,7 +706,7 @@ func runWebAuthnLifecycle(t *testing.T, auth *service.Auth, ctx context.Context,
 	}
 	// The clone advanced the generation, so re-login for a fresh session, then
 	// remove the surviving passkey with the password proof.
-	relog, err := auth.LocalLogin(ctx, username, password)
+	relog, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("lifecycle re-login: %v", err)
 	}

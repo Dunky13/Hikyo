@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
@@ -236,6 +237,81 @@ func (r *Resolver) Grants(ctx context.Context, p domain.PrincipalID) ([]domain.G
 		out = append(out, g)
 	}
 	return out, nil
+}
+
+// OrgIdentity is an organisation as a navigation destination: enough to name
+// it and route to it, and nothing else. Metadata and the active flag are
+// operator-set state, read through the proof-gated org repository.
+type OrgIdentity struct {
+	ID   domain.OrgID
+	Name string
+}
+
+// OrgsForPrincipal projects the principal's own grant rows onto the set of
+// organisations those grants name, at org scope or below.
+//
+// This is the navigation surface, and it deliberately is NOT an enumeration:
+// it can only ever return organisations the caller already holds a grant in,
+// which is why it needs no capability and authorizes nothing. Two consequences
+// follow from the scope lattice and both are correct:
+//
+//   - a grant at project or environment depth still names its org, so the
+//     developer who holds `read` on one environment sees the org that
+//     environment lives in — without it the rail would be empty for exactly
+//     the persona the permission ADR says drives the product;
+//   - an INSTANCE-scoped grant names no org, so a principal holding only
+//     instance capabilities gets an empty set. Instance scope inherits
+//     downward, so expanding it here would silently reproduce the operator's
+//     org enumeration — which is MFA-mandatory — on a surface that is not.
+//
+// The result is ordered by name so the rail is stable between loads.
+func (r *Resolver) OrgsForPrincipal(ctx context.Context, p domain.PrincipalID) ([]OrgIdentity, error) {
+	grants, err := r.Grants(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[domain.OrgID]bool{}
+	ids := make([]domain.OrgID, 0, len(grants))
+	for _, g := range grants {
+		if g.Scope.Org == "" || seen[g.Scope.Org] {
+			continue
+		}
+		seen[g.Scope.Org] = true
+		ids = append(ids, g.Scope.Org)
+	}
+	// ponytail: one read per org. A human belongs to a handful; if machine
+	// principals ever need this, batch it with an IN-list query.
+	out := make([]OrgIdentity, 0, len(ids))
+	for _, id := range ids {
+		row, err := r.orgIdentity(ctx, id)
+		if errors.Is(err, domain.ErrNotFound) {
+			// A grant whose org has been deleted names nothing to navigate to.
+			// The grant row is #55's to reap; the rail simply does not show a
+			// destination that is not there.
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (r *Resolver) orgIdentity(ctx context.Context, id domain.OrgID) (OrgIdentity, error) {
+	if r.sq != nil {
+		row, err := r.sq.GetOrgIdentity(ctx, string(id))
+		if err != nil {
+			return OrgIdentity{}, notFoundOr(err)
+		}
+		return OrgIdentity{ID: domain.OrgID(row.ID), Name: row.Name}, nil
+	}
+	row, err := r.pg.GetOrgIdentity(ctx, string(id))
+	if err != nil {
+		return OrgIdentity{}, notFoundOr(err)
+	}
+	return OrgIdentity{ID: domain.OrgID(row.ID), Name: row.Name}, nil
 }
 
 // grantFrom parses a grant row, re-validating the no-gaps chain rule the

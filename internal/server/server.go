@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -32,9 +33,14 @@ type ReadyChecker interface {
 //     audit trail, and renders refusals through one uniform writer.
 //
 // Anything not matching either is a 404 in the contract's own error shape,
-// so a probe cannot tell an unrouted path from a path it may not reach.
-func New(ready ReadyChecker, a *API) http.Handler {
+// so a probe cannot tell an unrouted path from a path it may not reach —
+// unless `ui` carries an embedded single-page application, in which case the
+// rules in spa.go decide, and only for an HTML navigation to a non-reserved
+// path. A nil `ui` is an API-only binary, which is what a plain `go build`
+// produces.
+func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 	r := chi.NewRouter()
+	r.Use(securityHeaders)
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -67,9 +73,18 @@ func New(ready ReadyChecker, a *API) http.Handler {
 		})
 	}
 
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, apigen.ErrorCodeNotFound, "")
-	})
+	if ui != nil {
+		r.Handle(assetPrefix+"*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			serveAsset(ui, w, req)
+		}))
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			serveSPA(ui, w, req)
+		})
+	} else {
+		r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
+			writeError(w, apigen.ErrorCodeNotFound, "")
+		})
+	}
 	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 		// A method the contract does not describe on a path it does is,
 		// from outside, the same fact as a path that is not there.

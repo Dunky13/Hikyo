@@ -68,7 +68,7 @@ func runFactorLifecycle(t *testing.T, auth *service.Auth, ctx context.Context, u
 	auth.Now = func() time.Time { return clk }
 	defer func() { auth.Now = orig }()
 
-	login, err := auth.LocalLogin(ctx, username, password)
+	login, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -81,7 +81,7 @@ func runFactorLifecycle(t *testing.T, auth *service.Auth, ctx context.Context, u
 		t.Fatalf("consume recovery code: %v", err)
 	}
 	// Consuming revoked every session; log in afresh to enrol.
-	relog, err := auth.LocalLogin(ctx, username, password)
+	relog, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("re-login after recovery: %v", err)
 	}
@@ -118,7 +118,7 @@ func runRecoveryFlow(t *testing.T, db *store.DB) {
 	ctx := t.Context()
 	orgs := &service.Orgs{DB: db}
 
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func runRecoveryFlow(t *testing.T, db *store.DB) {
 	if err := auth.EstablishCredential(ctx, rec.Authority, newPassword); err != nil {
 		t.Fatalf("establishing a credential from the recovery authority: %v", err)
 	}
-	if _, err := auth.LocalLogin(ctx, "factor-admin", newPassword); err != nil {
+	if _, err := auth.LocalLogin(ctx, "factor-admin", newPassword, service.ArtifactCLI); err != nil {
 		t.Fatalf("login with the re-established password: %v", err)
 	}
 }
@@ -183,7 +183,7 @@ func runSelfAuthorize(t *testing.T, db *store.DB) {
 	auth.Now = func() time.Time { return clk }
 	ctx := t.Context()
 
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func runStepUpElevates(t *testing.T, db *store.DB) {
 	ctx := t.Context()
 	orgs := &service.Orgs{DB: db}
 
-	login, err := auth.LocalLogin(ctx, "factor-admin", password)
+	login, err := auth.LocalLogin(ctx, "factor-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

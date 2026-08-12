@@ -581,7 +581,7 @@ func runRevokeKillsSession(t *testing.T, db *store.DB) {
 		}
 	}
 
-	login, err := auth.LocalLogin(ctx, boot.Username, password)
+	login, err := auth.LocalLogin(ctx, boot.Username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -1003,7 +1003,7 @@ func runOriginAddKeepsSessionAlive(t *testing.T, db *store.DB) {
 		t.Fatalf("first grant: %v", err)
 	}
 
-	login, err := auth.LocalLogin(ctx, boot.Username, password)
+	login, err := auth.LocalLogin(ctx, boot.Username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

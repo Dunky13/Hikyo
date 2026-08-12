@@ -26,10 +26,11 @@ import (
 
 // AuthService is the human-authentication surface this transport needs.
 type AuthService interface {
-	LocalLogin(ctx context.Context, username, password string) (service.LoginResult, error)
+	LocalLogin(ctx context.Context, username, password string, artifact service.Artifact) (service.LoginResult, error)
 	EstablishCredential(ctx context.Context, authority, password string) error
 	Identity(ctx context.Context, presented string) (service.Identity, error)
 	Logout(ctx context.Context, presented string) error
+	VerifyBrowserCSRF(ctx context.Context, presented, csrfToken string) error
 	SlideIdleClock(ctx context.Context, presented string) error
 	EnrolTOTPStart(ctx context.Context, presented, password string) (string, error)
 	EnrolTOTPConfirm(ctx context.Context, presented, code string) (service.LoginResult, error)
@@ -103,6 +104,7 @@ type OrgService interface {
 	Create(ctx context.Context, actor service.Actor, name string, active bool, metadata json.RawMessage) (org service.Org, err error)
 	Get(ctx context.Context, actor service.Actor, org domain.OrgID) (service.Org, error)
 	List(ctx context.Context, actor service.Actor) ([]service.Org, error)
+	ListMine(ctx context.Context, actor service.Actor) ([]service.MyOrg, error)
 	Rename(ctx context.Context, actor service.Actor, org domain.OrgID, name string) (service.Org, error)
 	Delete(ctx context.Context, actor service.Actor, org domain.OrgID) error
 }
@@ -184,26 +186,15 @@ func (a *API) GetMeta(ctx context.Context, _ apigen.GetMetaRequestObject) (apige
 // ---------------------------------------------------------------------------
 
 func (a *API) LocalLogin(ctx context.Context, req apigen.LocalLoginRequestObject) (apigen.LocalLoginResponseObject, error) {
-	result, err := a.Auth.LocalLogin(ctx, req.Body.Username, req.Body.Password)
+	artifact := service.ArtifactCLI
+	if req.Body.Artifact != nil {
+		artifact = service.Artifact(*req.Body.Artifact)
+	}
+	result, err := a.Auth.LocalLogin(ctx, req.Body.Username, req.Body.Password, artifact)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.LocalLogin200JSONResponse{
-		SessionToken: optional(result.SessionToken),
-		Session: apigen.Session{
-			Id:                result.SessionID,
-			Artifact:          result.Artifact,
-			CreatedAt:         result.CreatedAt,
-			IdleExpiresAt:     result.IdleExpires,
-			AbsoluteExpiresAt: result.AbsExpires,
-			Assurance:         assuranceOf(result.Assurance),
-		},
-		Principal: apigen.Principal{
-			Id:          string(result.Principal),
-			Kind:        apigen.Human,
-			DisplayName: optional(result.DisplayName),
-		},
-	}, nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) EstablishCredential(ctx context.Context, req apigen.EstablishCredentialRequestObject) (apigen.EstablishCredentialResponseObject, error) {
@@ -230,7 +221,7 @@ func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.
 	return apigen.Whoami200JSONResponse{
 		Session: apigen.Session{
 			Id:                id.SessionID,
-			Artifact:          id.Artifact,
+			Artifact:          id.Artifact.String(),
 			CreatedAt:         id.CreatedAt,
 			IdleExpiresAt:     id.IdleExpiresAt,
 			AbsoluteExpiresAt: id.AbsoluteExpiresAt,
@@ -240,9 +231,24 @@ func (a *API) Whoami(ctx context.Context, _ apigen.WhoamiRequestObject) (apigen.
 	}, nil
 }
 
+// logoutResponse clears the browser cookies alongside the 204. The row is
+// already gone — that is what revokes — but leaving the cookies would make
+// every subsequent request present a value that can only be refused, and the
+// SPA would look logged in until it asked.
+type logoutResponse struct{ cookies []*http.Cookie }
+
+func (r logoutResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+	return writeJSONWithCookies(w, r.cookies, http.StatusNoContent, nil)
+}
+
 func (a *API) Logout(ctx context.Context, _ apigen.LogoutRequestObject) (apigen.LogoutResponseObject, error) {
 	if err := a.Auth.Logout(ctx, bearer(ctx)); err != nil {
 		return nil, err
+	}
+	if r := requestFrom(ctx); r != nil {
+		if c, cerr := r.Cookie(browserSessionCookie); cerr == nil && c.Value != "" {
+			return logoutResponse{cookies: expiredBrowserCookies()}, nil
+		}
 	}
 	return apigen.Logout204Response{}, nil
 }
@@ -290,7 +296,7 @@ func (a *API) EnrolTotpConfirm(ctx context.Context, req apigen.EnrolTotpConfirmR
 		}
 		return nil, err
 	}
-	return apigen.EnrolTotpConfirm200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject) (apigen.StepUpTotpResponseObject, error) {
@@ -303,7 +309,7 @@ func (a *API) StepUpTotp(ctx context.Context, req apigen.StepUpTotpRequestObject
 		}
 		return nil, err
 	}
-	return apigen.StepUpTotp200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject) (apigen.RemoveTotpResponseObject, error) {
@@ -316,7 +322,7 @@ func (a *API) RemoveTotp(ctx context.Context, req apigen.RemoveTotpRequestObject
 		}
 		return nil, err
 	}
-	return apigen.RemoveTotp200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.RegenerateRecoveryCodesRequestObject) (apigen.RegenerateRecoveryCodesResponseObject, error) {
@@ -329,10 +335,14 @@ func (a *API) RegenerateRecoveryCodes(ctx context.Context, req apigen.Regenerate
 		}
 		return nil, err
 	}
-	return apigen.RegenerateRecoveryCodes200JSONResponse{
+	resp := recoveryCodesResponse{body: apigen.RecoveryCodesResult{
 		RecoveryCodes: codes,
 		Login:         loginResultOf(result),
-	}, nil
+	}}
+	if result.Artifact == service.ArtifactBrowser && result.SessionToken != "" {
+		resp.cookies = browserCookiesFor(result.SessionToken, result.CSRFToken)
+	}
+	return resp, nil
 }
 
 func (a *API) BeginRecovery(ctx context.Context, req apigen.BeginRecoveryRequestObject) (apigen.BeginRecoveryResponseObject, error) {
@@ -366,7 +376,7 @@ func loginResultOf(r service.LoginResult) apigen.LoginResult {
 		SessionToken: token,
 		Session: apigen.Session{
 			Id:                r.SessionID,
-			Artifact:          r.Artifact,
+			Artifact:          r.Artifact.String(),
 			CreatedAt:         r.CreatedAt,
 			IdleExpiresAt:     r.IdleExpires,
 			AbsoluteExpiresAt: r.AbsExpires,
@@ -405,6 +415,25 @@ func (a *API) CreateOrg(ctx context.Context, req apigen.CreateOrgRequestObject) 
 	return apigen.CreateOrg201JSONResponse(wireOrg(org)), nil
 }
 
+// ListMyOrgs is the navigation surface: the organisations the caller's own
+// grants name. Distinct from ListOrgs, which is the operator's enumeration of
+// every org and is MFA-mandatory — see the contract and service for why the
+// sidebar must not go through it.
+func (a *API) ListMyOrgs(ctx context.Context, _ apigen.ListMyOrgsRequestObject) (apigen.ListMyOrgsResponseObject, error) {
+	orgs, err := a.Orgs.ListMine(ctx, service.Bearer(bearer(ctx)))
+	if err != nil {
+		if classify(err) == apigen.ErrorCodeUnauthenticated {
+			return apigen.ListMyOrgs401JSONResponse{UnauthenticatedJSONResponse: apigen.UnauthenticatedJSONResponse(errorBody(apigen.ErrorCodeUnauthenticated, ""))}, nil
+		}
+		return nil, err
+	}
+	items := make([]apigen.MyOrg, 0, len(orgs))
+	for _, o := range orgs {
+		items = append(items, apigen.MyOrg{Id: o.ID, Name: o.Name})
+	}
+	return apigen.ListMyOrgs200JSONResponse{Items: items, Count: len(items)}, nil
+}
+
 func (a *API) ListOrgs(ctx context.Context, _ apigen.ListOrgsRequestObject) (apigen.ListOrgsResponseObject, error) {
 	orgs, err := a.Orgs.List(ctx, service.Bearer(bearer(ctx)))
 	if err != nil {
@@ -440,6 +469,7 @@ func (a *API) Middleware() []func(http.Handler) http.Handler {
 		a.wireContext,
 		a.stashRequest,
 		a.extractBearer,
+		a.requireCSRF,
 		a.validateAgainstContract,
 	}
 }

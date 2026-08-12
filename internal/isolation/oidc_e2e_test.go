@@ -78,7 +78,7 @@ func runOIDCLifecycle(t *testing.T, auth *service.Auth, ctx context.Context, adm
 	}
 
 	// Link an identity to the admin account (identity_linked + session_created).
-	login, err := auth.LocalLogin(ctx, username, password)
+	login, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("local login: %v", err)
 	}
@@ -102,7 +102,7 @@ func runOIDCLifecycle(t *testing.T, auth *service.Auth, ctx context.Context, adm
 	}
 
 	// Unlink (identity_unlinked + session_created).
-	relogin, err := auth.LocalLogin(ctx, username, password)
+	relogin, err := auth.LocalLogin(ctx, username, password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("re-login for unlink: %v", err)
 	}
@@ -152,7 +152,7 @@ func oidcAdmin(t *testing.T, db *store.DB) (*service.Auth, domain.PrincipalID, s
 	if err := auth.EstablishCredential(t.Context(), boot.Authority, password); err != nil {
 		t.Fatal(err)
 	}
-	acc, err := auth.LocalLogin(t.Context(), "oidc-admin", password)
+	acc, err := auth.LocalLogin(t.Context(), "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func runOIDCBinding(t *testing.T, db *store.DB) {
 
 	// A link transaction is session-bound: a callback with no session fails the
 	// binding, audited cause=binding.
-	login, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	login, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func runOIDCReauthRefusals(t *testing.T, db *store.DB) {
 		AssurancePolicy: strptr(`{"amr_sets":[["mfa"]]}`), Enabled: true,
 	})
 	// Link an identity on the strict provider.
-	login, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	login, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func runOIDCReauthRefusals(t *testing.T, db *store.DB) {
 	}
 
 	// reauth with no environment is refused loudly (would violate the tx CHECK).
-	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestOIDCProviderChangeSweepsPostgres(t *testing.T) {
 // slug, using the admin's password as the account-security proof.
 func linkOn(t *testing.T, auth *service.Auth, ctx context.Context, slug, subject, password string) {
 	t.Helper()
-	login, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	login, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatalf("login for link: %v", err)
 	}
@@ -492,7 +492,7 @@ func runOIDCReauthPossession(t *testing.T, db *store.DB) {
 	linkOn(t, auth, ctx, "pwd-amr", "pwd-user", password)
 	amrIdP.AuthTime = time.Now()
 	amrIdP.AMR = []string{"pwd"}
-	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +514,7 @@ func runOIDCReauthPossession(t *testing.T, db *store.DB) {
 	acrIdP.AuthTime = time.Now()
 	acrIdP.ACR = "urn:strong"
 	acrIdP.AMR = []string{"pwd"}
-	relogin2, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin2, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func runOIDCReauthPossession(t *testing.T, db *store.DB) {
 	linkOn(t, auth, ctx, "mfa-only", "mfa-user", password)
 	mfaIdP.AuthTime = time.Now()
 	mfaIdP.AMR = []string{"mfa"}
-	relogin3, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin3, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,7 +575,7 @@ func runOIDCReauthEpochInert(t *testing.T, db *store.DB) {
 	execRaw(t, db, "UPDATE external_identities SET credential_epoch = credential_epoch - 1 WHERE subject = 'epoch-user'")
 	idp.AuthTime = time.Now()
 	idp.AMR = []string{"mfa"}
-	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func runOIDCReauthProviderRebind(t *testing.T, db *store.DB) {
 	}
 	idp.AuthTime = time.Now()
 	idp.AMR = []string{"mfa"}
-	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +670,7 @@ func runOIDCReauthDowngrade(t *testing.T, db *store.DB) {
 	// A rank-2 (WebAuthn) session: OIDC evidence is rank 1, so this is a
 	// downgrade. Forge the factor set directly — the rank comparison is under
 	// test, not the WebAuthn ceremony.
-	strong, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	strong, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,7 +684,7 @@ func runOIDCReauthDowngrade(t *testing.T, db *store.DB) {
 	}
 
 	// Positive control: a single-factor (password) session is re-authorized.
-	weak, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	weak, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func runOIDCReauthProviderRace(t *testing.T, db *store.DB) {
 	// The acting session is a LOCAL login (provider_id NULL) so the mid-exchange
 	// sweep does not delete it — the point is the Phase-C revalidation, not the
 	// sweep reaching this session.
-	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	relogin, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

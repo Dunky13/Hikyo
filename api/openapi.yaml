@@ -152,7 +152,7 @@ paths:
     post:
       operationId: localLogin
       tags: [auth]
-      summary: Terminal-native local login; mints a CLI session artifact.
+      summary: Local password login; mints a CLI or browser session artifact.
       description: |
         The local floor (human-auth ADR § Lockout and the local floor), which
         an installation may never remove. Verifies an Argon2id password
@@ -161,14 +161,20 @@ paths:
         pre-authentication path distinguishes an existing account from a
         missing one.
 
-        Mints a **CLI session** — a distinct artifact type with its own
-        storage, lifetime, audit identity and revocation surface. The value is
-        returned in the response body and is a replayable bearer credential;
-        it is never re-retrievable.
+        Mints the artifact the request asks for. Both are distinct types with
+        their own storage, lifetime, audit identity and revocation surface,
+        and neither value is ever re-retrievable:
 
-        Browser sessions are a different artifact minted through the browser
-        login page, which this slice does not serve — see `/api/v1/meta` for
-        which protocol flows an instance actually offers.
+        - **CLI session** (default): a replayable bearer credential returned
+          in the response body, presented on `Authorization: Bearer`.
+        - **Browser session**: delivered ONLY on the `__Host-hikyo` HttpOnly
+          cookie, never in the body, so injected same-origin script cannot
+          read it. Its synchronizer token rides the `__Host-hikyo-csrf`
+          companion cookie and must be echoed on the `X-Hikyo-CSRF` header for
+          every state-changing cookie-authenticated request.
+
+        See `/api/v1/meta` for which protocol flows an instance actually
+        offers.
       security: []
       x-hikyo-class: unauthenticated
       x-hikyo-artifacts: [none]
@@ -2532,6 +2538,48 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/me/orgs:
+    get:
+      operationId: listMyOrgs
+      tags: [auth]
+      summary: The organisations the caller's own grants name.
+      description: |
+        The navigation surface: exactly the organisations in which the calling
+        principal holds at least one grant, at org scope or below.
+
+        This is **not** `listOrgs`. That one enumerates every organisation on
+        the instance and is operator work under `instance-config`, which the
+        human-auth ADR makes MFA-mandatory; using it for navigation would put
+        a second-factor wall in front of a sidebar. This one is a projection
+        of the caller's *own* grant rows — disclosure of one's own grants is
+        already presupposed by the grant views — so it needs no capability and
+        can leak nothing the caller does not already hold.
+
+        A principal whose only grant is **instance-scoped** gets an EMPTY
+        list, and that is correct rather than a gap. Instance scope inherits
+        downward, so expanding it here would reproduce `listOrgs` without its
+        gate. An operator who wants the whole instance asks for the whole
+        instance, and steps up to do it.
+
+        Identity only — id and name. An organisation's `metadata` is
+        operator-set and is read through `getOrg`, which authorizes.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The caller's organisations, empty when their grants name none.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyOrgList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/identities:
     get:
       operationId: listIdentities
@@ -3761,6 +3809,19 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+        artifact:
+          type: string
+          enum: [cli, browser]
+          default: cli
+          description: |
+            Which session artifact to mint. Omitted or `cli` mints a CLI
+            session whose token is returned in the body. `browser` mints a
+            browser session delivered ONLY on the `__Host-hikyo` cookie, with
+            its synchronizer token on the `__Host-hikyo-csrf` cookie; the body
+            then carries no token at all. The two artifacts have distinct
+            lifetimes, distinct CSRF contracts and distinct revocation
+            surfaces, so the caller states which one it is asking for rather
+            than the server guessing from a header.
 
     LoginResult:
       type: object
@@ -4031,6 +4092,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Org"
+        count:
+          type: integer
+          minimum: 0
+          description: Total rows matching, which for an unpaged list equals `items` length.
+
+    MyOrg:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      description: |
+        An organisation as a navigation destination: what the caller needs to
+        show it and route to it, and nothing else. Deliberately narrower than
+        `Org` — `metadata` and `active` are operator-set state that belongs to
+        `getOrg`, which authorizes; a member listing does not.
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        name:
+          type: string
+
+    MyOrgList:
+      type: object
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MyOrg"
         count:
           type: integer
           minimum: 0

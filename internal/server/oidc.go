@@ -102,22 +102,6 @@ func oidcStartError(a *API, ctx context.Context, err error) apigen.OidcStartResp
 	}
 }
 
-// oidcCallbackResponse sets the __Host-hikyo session cookie for a minted browser
-// session before writing the JSON body.
-type oidcCallbackResponse struct {
-	body   apigen.LoginResult
-	cookie *http.Cookie
-}
-
-func (r oidcCallbackResponse) VisitOidcCallbackResponse(w http.ResponseWriter) error {
-	if r.cookie != nil {
-		http.SetCookie(w, r.cookie)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	return json.NewEncoder(w).Encode(r.body)
-}
-
 func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestObject) (apigen.OidcCallbackResponseObject, error) {
 	code, state, iss, idpErr := strDeref(req.Params.Code), strDeref(req.Params.State), strDeref(req.Params.Iss), strDeref(req.Params.Error)
 	bindingCookie := ""
@@ -147,15 +131,7 @@ func (a *API) OidcCallback(ctx context.Context, req apigen.OidcCallbackRequestOb
 			return apigen.OidcCallback500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 		}
 	}
-	body := loginResultOf(result.Login)
-	resp := oidcCallbackResponse{body: body}
-	if result.Login.Artifact == service.ArtifactBrowser && result.Login.SessionToken != "" {
-		resp.cookie = &http.Cookie{
-			Name: browserSessionCookie, Value: result.Login.SessionToken,
-			Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		}
-	}
-	return resp, nil
+	return sessionResponse(result.Login), nil
 }
 
 func (a *API) ListIdentities(ctx context.Context, _ apigen.ListIdentitiesRequestObject) (apigen.ListIdentitiesResponseObject, error) {
@@ -222,7 +198,7 @@ func (a *API) UnlinkIdentity(ctx context.Context, req apigen.UnlinkIdentityReque
 			return apigen.UnlinkIdentity500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 		}
 	}
-	return apigen.UnlinkIdentity200JSONResponse(loginResultOf(result)), nil
+	return sessionResponse(result), nil
 }
 
 // ---------------------------------------------------------------------------

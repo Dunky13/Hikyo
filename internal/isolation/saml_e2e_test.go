@@ -97,7 +97,7 @@ func runSAMLLoginReplay(t *testing.T, db *store.DB) {
 		t.Fatalf("duplicate active entityID = %v, want conflict", err)
 	}
 
-	local, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	local, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func runSAMLProviderRecreation(t *testing.T, db *store.DB) {
 	idp := configureSAMLProvider(t, auth, admin)
 	providers := &service.SAMLProviders{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 
-	local, err := auth.LocalLogin(ctx, "oidc-admin", password)
+	local, err := auth.LocalLogin(ctx, "oidc-admin", password, service.ArtifactCLI)
 	if err != nil {
 		t.Fatal(err)
 	}

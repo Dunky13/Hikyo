@@ -64,7 +64,8 @@ export const zEstablishCredentialRequest = z.object({
 
 export const zLocalLoginRequest = z.object({
     username: z.string().min(1).max(256),
-    password: z.string().min(1).max(1024)
+    password: z.string().min(1).max(1024),
+    artifact: z.optional(z.enum(['cli', 'browser']))
 });
 
 export const zTotpEnrolStartRequest = z.object({
@@ -201,6 +202,23 @@ export const zOrg = z.object({
 
 export const zOrgList = z.object({
     items: z.array(zOrg),
+    count: z.int().gte(0)
+});
+
+/**
+ * An organisation as a navigation destination: what the caller needs to
+ * show it and route to it, and nothing else. Deliberately narrower than
+ * `Org` — `metadata` and `active` are operator-set state that belongs to
+ * `getOrg`, which authorizes; a member listing does not.
+ *
+ */
+export const zMyOrg = z.object({
+    id: zId,
+    name: z.string()
+});
+
+export const zMyOrgList = z.object({
+    items: z.array(zMyOrg),
     count: z.int().gte(0)
 });
 
@@ -1905,6 +1923,17 @@ export const zSamlMetadataData = z.object({
  * SAML 2.0 SP metadata XML.
  */
 export const zSamlMetadataResponse = z.string();
+
+export const zListMyOrgsData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The caller's organisations, empty when their grants name none.
+ */
+export const zListMyOrgsResponse = zMyOrgList;
 
 export const zListIdentitiesData = z.object({
     body: z.optional(z.never()),

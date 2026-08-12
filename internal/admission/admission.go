@@ -81,6 +81,13 @@ var ErrOverloaded = errors.New("admission: instance-wide budget exhausted")
 type Config struct {
 	BudgetMiB      int
 	ArgonMemoryKiB uint32
+	// PerIPPerMinute overrides the per-source-IP attempt allowance. Zero means
+	// the locked default. It exists for one caller: a test harness driving many
+	// authentications from one loopback address, which is not the traffic shape
+	// the default is sized for. The server refuses the override outside
+	// development mode, so a production instance cannot be handed a raised
+	// ceiling by an environment variable.
+	PerIPPerMinute int
 	// Now is injectable so the backoff and rate-limit curves are testable
 	// without sleeping. Nil means time.Now.
 	Now func() time.Time
@@ -89,6 +96,7 @@ type Config struct {
 // Limiter is one instance's admission state.
 type Limiter struct {
 	concurrency int
+	perIP       int
 	slots       chan struct{}
 	now         func() time.Time
 
@@ -127,8 +135,13 @@ func New(cfg Config) (*Limiter, error) {
 	if now == nil {
 		now = time.Now
 	}
+	perIP := cfg.PerIPPerMinute
+	if perIP <= 0 {
+		perIP = PerIPPerMinute
+	}
 	l := &Limiter{
 		concurrency: concurrency,
+		perIP:       perIP,
 		slots:       make(chan struct{}, concurrency),
 		now:         now,
 		ipHits:      map[string][]time.Time{},
@@ -193,7 +206,7 @@ func (l *Limiter) AllowDiscovery(ip string) bool {
 }
 
 func (l *Limiter) allowIP(ip string) bool {
-	return l.allowIPIn(l.ipHits, ip, PerIPPerMinute)
+	return l.allowIPIn(l.ipHits, ip, l.perIP)
 }
 
 func (l *Limiter) allowIPIn(bucket map[string][]time.Time, ip string, allowance int) bool {

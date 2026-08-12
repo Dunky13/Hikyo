@@ -363,13 +363,13 @@
     "engine": "postgres",
     "name": "GetSessionByID",
     "annotation": "authn-resolution",
-    "hash": "69dc4c2bc6adcb20ee6d2335466a7899b50bfa54c4a4c85be0e5531a5cd94457"
+    "hash": "efbaea85b10b67b36e346b410ed52a5a3817e7b2f899f937c77359c08d55c1e8"
   },
   {
     "engine": "postgres",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
-    "hash": "4bd8c86ddb49353001338e51d22434a29cb2f900d0433f1e4ed58e78c485b342"
+    "hash": "cbdbfb06a7007e122b1c0dcc31d89270a544e35125ab2dd703042dae2ab6eae7"
   },
   {
     "engine": "postgres",
@@ -1077,13 +1077,13 @@
     "engine": "sqlite",
     "name": "GetSessionByID",
     "annotation": "authn-resolution",
-    "hash": "1f1b4d1c6d96b6f69b5bb12367ec852686b7d8f9fa5448ad40e8979dbbf8e833"
+    "hash": "699845a05ac030b01272bbee81e8ff3ffc7b64b97150a137b698bdc4d9428d39"
   },
   {
     "engine": "sqlite",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
-    "hash": "1741b6bd0bb2fbccb016346d83588d5aec8782b1ec6c433a3687105e508060ed"
+    "hash": "23feb089cb4e2e73dbeb9b8aee8b0f64f113dca8fc9af8258cc90e1bcee8a85f"
   },
   {
     "engine": "sqlite",
