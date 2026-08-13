@@ -55,3 +55,17 @@ hikyo key list stray --instance unknown-ref -> 2 usage
 hikyo key delete key_x typo --instance unknown-ref -> 2 usage
 hikyo key group list stray --instance unknown-ref -> 2 usage
 hikyo key list --instance unknown-ref --org org_x --project prj_x -> 4 refused
+hikyo import -> 2 usage
+hikyo import --from k8s --mapping m.json -> 2 usage
+hikyo import --from k8s --project prj_x --environment env_x -> 2 usage
+hikyo import --from vault --file x.yaml -> 2 usage
+hikyo import --from k8s --environment env_x --file x.yaml -> 4 refused
+hikyo import --from k8s --project prj_x --file x.yaml -> 4 refused
+hikyo import --from k8s --project prj_x --environment env_x --file nope.yaml -> 2 usage
+hikyo import --from k8s --file x.yaml stray -> 2 usage
+hikyo values import --instance unknown-ref -> 2 usage
+hikyo values import --file nope.json --instance unknown-ref -> 2 usage
+hikyo values import stray --instance unknown-ref -> 2 usage
+hikyo import --mapping m.json --file x.yaml --project prj_x -> 2 usage
+hikyo import --mapping m.json --file x.yaml --environment env_x -> 2 usage
+hikyo values import --file v.json -o yaml --instance unknown-ref -> 2 usage

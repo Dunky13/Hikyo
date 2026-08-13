@@ -295,7 +295,7 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatalf("remote.renamed: %v", err)
 	}
-	if renamed.State != after.State || !renamed.LastAttemptAt.Equal(after.LastAttemptAt) ||
+	if renamed.State != after.State || !renamed.LastAttemptAt.Equal(store.CanonTime(after.LastAttemptAt)) ||
 		renamed.Identity != after.Identity || renamed.OrgCount != after.OrgCount || !renamed.Stale {
 		t.Errorf("rename discarded the last-known snapshot: before=%+v after=%+v", after, renamed)
 	}

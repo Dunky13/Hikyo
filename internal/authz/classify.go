@@ -318,6 +318,12 @@ var wireRegistry = map[string]Class{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/values/diff":                                     ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal":                             ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone":                             ClassTenant,
+	// The import path (#68). Tenant-class like every other value route: an
+	// environment the caller may not read answers exactly like one that is not
+	// there, and phase 1's presence read is precisely a read of that
+	// environment.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences": ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import":      ClassTenant,
 
 	// Drafts, publishing and revisions (#51). Every one is tenant-class: an
 	// environment the caller may not reach answers byte-identically to one that
@@ -432,7 +438,12 @@ var wireRegistry = map[string]Class{
 	"cli:sync":        ClassStub,
 	"cli:adopt":       ClassStub,
 	"cli:definitions": ClassStub,
-	"cli:import":      ClassStub,
+	// `import` (#68) reaches the tenant-scoped phase-1 presence route and the
+	// tenant-scoped phase-2 import route, and nothing else. Its class flipped
+	// off ClassStub in the same change that registered its operations — the
+	// totality invariant refuses a stub verb that already has operations, which
+	// is exactly the "implementation rides in on a stale class" case.
+	"cli:import": ClassTenant,
 
 	// Outbox job types and SSE emit sites: none exist. Their registries are
 	// this table's "job:" and "sse:" key spaces; the first entry of each
@@ -816,6 +827,13 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone": {
 		OpEnvCreate, OpValueList, OpValueCopySource, OpValueCopyDestination,
 		OpValueCopyDestinationConfig, OpValuePublish,
+	},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences": {OpImportPresence},
+	// A manifest-carrying import re-evaluates phase 1's read op for every
+	// environment the manifest names, inside its own transaction, so this route
+	// genuinely reaches both operations at runtime.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import": {
+		OpValueImport, OpImportPresence,
 	},
 
 	// Drafts, publishing and revisions (#51). A publish authorizes

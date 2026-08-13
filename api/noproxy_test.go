@@ -308,6 +308,8 @@ var pinnedContractSurface = map[string]bool{
 	"POST /api/v1/orgs/{org}/projects/{project}/environments":                                                 true,
 	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants":                            true,
 	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template":                   true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import":                     true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences":                true,
 	"POST /api/v1/orgs/{org}/projects/{project}/folders":                                                      true,
 	"POST /api/v1/orgs/{org}/projects/{project}/grants":                                                       true,
 	"POST /api/v1/orgs/{org}/projects/{project}/grants/template":                                              true,

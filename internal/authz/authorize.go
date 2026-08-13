@@ -104,6 +104,25 @@ func (a *TxAuthorizer) assuranceInadequate(caller Identity, op Operation) bool {
 	return AssuranceEnforced && caller.SessionID != "" && FormulaDemandsMFA(op) && !AdequateAssurance(caller.Assurance)
 }
 
+// machineRefused reports whether a human-only operation must be refused because
+// the caller is a machine (api-cli-surface ADR § human-only list; import ADR's
+// declared amendment adds `import` to it).
+//
+// The test is the identity's CLASS, which every resolution path sets — never
+// the absence of a session id. Local host authority (bootstrap, break-glass,
+// `hikyo admin`) presents no class at all and is not a machine principal; it is
+// the one caller a human-only rule must not lock out, since it is how an
+// instance without any human yet gets one.
+//
+// Evaluated after the grant check, like the assurance floor, so a machine that
+// does not hold the capability learns nothing about which of the two it lacked.
+func (a *TxAuthorizer) machineRefused(caller Identity, op Operation) bool {
+	if !HumanOnly(op) {
+		return false
+	}
+	return caller.Class != "" && caller.Class != domain.ClassHuman
+}
+
 func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op Operation, spec opSpec, scope domain.Scope) (Proof, error) {
 	principal := caller.Principal
 	level, err := scope.Level()
@@ -146,6 +165,13 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op 
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}
+	if a.machineRefused(caller, op) {
+		// Same shape and the same reasoning as the assurance refusal: the grant
+		// is held, so the object's existence is not a secret from this caller —
+		// what they lack is the artifact class the verb requires.
+		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
+		return nil, domain.ErrUnauthorized
+	}
 	return &proof{kind: kindTenant, op: op, chain: chain, tok: a.tok}, nil
 }
 
@@ -161,7 +187,7 @@ func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, o
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}
-	if a.assuranceInadequate(caller, op) {
+	if a.assuranceInadequate(caller, op) || a.machineRefused(caller, op) {
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}

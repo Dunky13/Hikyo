@@ -152,6 +152,28 @@ const (
 	// under `read`.
 	OpValueCopyDestinationConfig Operation = "value.copy-destination-config"
 
+	// The import path (#68, import-paths ADR). Two operations, one per phase.
+	//
+	// `import.presence` is phase 1's ONLY server-side contact: it reads the
+	// project's declared keys and, per key, the two-state presence in ONE
+	// environment plus the server-minted occurrence token naming the exact
+	// resolved state. The ADR's formula, exactly: structure reads carry the
+	// project-scoped `read` the member already holds, and PRESENCE READS
+	// REQUIRE `read(E)` for every environment whose presence is consulted —
+	// which for an environment-depth operation is this environment. The
+	// operation therefore carries both atoms: read@project for structure and
+	// read@environment for presence. It never
+	// requires `reveal`, never compares values and never writes; it is
+	// audited-none like every other proof-scoped pure read.
+	//
+	// `value.import` is phase 2's batch write: one transaction, one
+	// environment, the manifest precondition, and then ordinary value writes.
+	// Its formula is `value.set`'s, unchanged — the writes it lands ARE
+	// ordinary value writes, and an import that could write where `values set`
+	// cannot would be a second write path with a weaker gate.
+	OpImportPresence Operation = "import.presence"
+	OpValueImport    Operation = "value.import"
+
 	// Drafts, publishing and revisions (#51, revision-model ADR).
 	OpValueStage   Operation = "value.stage"
 	OpValuePublish Operation = "value.publish"
@@ -768,11 +790,26 @@ type opSpec struct {
 	// exactly one of the two — auditedNone declares a proof-scoped pure read
 	// whose result the trail would only duplicate. auditedNone is
 	// default-deny (audit-model ADR CI invariant 2): the completeness
-	// invariant permits it only for tenant-class, formula-bare-`read`,
+	// invariant permits it only for tenant-class, non-empty read-only formulas,
 	// non-mutating operations, and refuses it everywhere else.
 	events      []audit.EventType
 	auditedNone bool
+
+	// humanOnly marks an operation on the api-cli-surface ADR's HUMAN-ONLY
+	// list: `adopt`, `scaffold`, `values import`, `login`, and — under the
+	// import ADR's declared amendment — `import`. A machine principal is
+	// refused, after the grant check, exactly like an inadequate assurance is.
+	//
+	// It lives on the registry row rather than in a service-layer `if` for the
+	// reason every other authorization property does: the chokepoint is the one
+	// place the decision cannot diverge from the grant table, and a hand-rolled
+	// check in one handler is a check the next handler forgets.
+	humanOnly bool
 }
+
+// HumanOnly reports whether an operation refuses machine principals. Exported
+// for the isolation harness, which asserts the list rather than restating it.
+func HumanOnly(op Operation) bool { return operations[op].humanOnly }
 
 // operations is the operation registry. Every formula is built from capability
 // atoms the permission ADR already fixes — this ticket adds no atom and
@@ -1436,6 +1473,64 @@ var operations = map[Operation]opSpec{
 			StoreValuesPut: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventValueCopied},
+	},
+
+	// Phase 1's read. HUMAN-ONLY: `import` joins `adopt`, `scaffold`,
+	// `values import` and `login` on the human-only list, so a machine
+	// credential is refused here rather than being allowed to author a
+	// migration's artifacts.
+	OpImportPresence: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		// The import ADR's split formula is project-scoped structure read ∧
+		// read(E) per consulted environment. Grants inherit downward, so
+		// read@project subsumes read@environment on the same chain — the env
+		// conjunct is never independently deniable and the registry carries
+		// the minimal equivalent: read@project alone. An environment-only
+		// reader still fails it, which is what keeps the response's
+		// project-schema facts (declared types, catalogue revision, token
+		// movement) off the environment-scoped read surface.
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelProject},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StoreValuesList: true,
+			// The catalogue revision is the definitions revision the run
+			// manifest pins: phase 2 refuses a run whose declarations moved.
+			StoreCatalogueRevisionGet: true,
+		},
+		humanOnly:   true,
+		auditedNone: true,
+	},
+	// Phase 2's write. Same formula as `value.set`, same store surface, plus
+	// the catalogue revision the precondition compares. Human-only and strict.
+	OpValueImport: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		// read@project on top of value.set's formula: strict import's response
+		// (imported / skipped / rejected-by-name) is a presence-and-catalogue
+		// read even without a manifest, and presence is read-gated everywhere
+		// else — a write-only editor (edit ∧ publish, no read) must not be
+		// able to enumerate declarations or set/absent state by probing the
+		// import verb. Write-only rotation keeps `values set`, which answers
+		// nothing about prior state.
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelProject},
+			{Cap: domain.CapEdit, At: domain.LevelEnv},
+			{Cap: domain.CapPublish, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreCatalogueRevisionGet: true,
+			StoreValuesList: true, StoreValuesPut: true,
+			StoreAuditTenantInsert: true,
+		},
+		humanOnly: true,
+		// The writes land as ordinary value writes, so they emit the ordinary
+		// event: a trail that spelled an imported write differently would make
+		// "which principal set this value" answerable only by knowing how it
+		// arrived. The import as a RUN is recorded by its own event beside it.
+		events: []audit.EventType{audit.EventValueSet, audit.EventValueImported},
 	},
 
 	// DRAFTS AND PUBLISHING (#51).

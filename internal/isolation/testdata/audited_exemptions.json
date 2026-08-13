@@ -9,6 +9,7 @@
     "cli:folder": "client transport for the tenant-scoped folder routes, whose operations carry the audit mapping",
     "cli:instance-config": "client transport for the instance-scoped provider routes, whose operations carry the audit mapping",
     "cli:key": "client transport for the tenant-scoped key-catalogue routes, whose operations carry the audit mapping",
+    "cli:import": "client transport for the tenant-scoped import routes (#68): phase 1 is a proof-scoped pure read (import.presence, audited-none like every other read of the same shape) and phase 2 is `hikyo values import`, which rides cli:values and whose operation carries the mapping (value.set per key plus value.imported per run). The verb itself authors local artifacts and adds transport, not an auditable act",
     "cli:login": "client transport for POST /api/v1/auth/local/login: the server audits the login it performs (auth.login, auth.session_created); the verb itself adds transport, not an auditable act",
     "cli:logout": "client transport for POST /api/v1/auth/logout, audited server-side as auth.logout",
     "cli:org": "client transport for the /api/v1/orgs routes, whose operations carry the audit mapping",

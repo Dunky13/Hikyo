@@ -1982,3 +1982,19 @@ timing checks alongside both multi-instance tiers.
   retains TLS/CONNECT sockets, and PKCE is closed at both boundaries to
   canonical base64url verifiers (43-128 characters) plus an exact 43-character
   S256 challenge. Short, padded, non-base64url, and overlong values are tested.
+
+## Import-framework update and conflict resolution (2026-08-13, PR #115)
+
+Merged `main` at `ffe5720` without rebasing or rewriting the PR branch. The
+combined tree keeps #111's import framework and file-source surfaces alongside
+the revision, remote-directory, and workspace tiers.
+
+- The CLI dispatcher and audit exemption pin contain the union of import,
+  revision, remote, and remote-credential verbs.
+- Go and TypeScript API clients were regenerated from the merged OpenAPI source
+  so import and multi-instance request/model families remain present together.
+- The API no-proxy closure pin includes both import routes; each serves this
+  instance's own catalogue/value state and never fetches or forwards remotely.
+- The remote-rename snapshot regression compares the reloaded timestamp against
+  its canonical store precision, avoiding nanosecond-versus-microsecond CI
+  failures without weakening the persisted-state assertion.

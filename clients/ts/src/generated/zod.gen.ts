@@ -777,6 +777,37 @@ export const zCopyValuesResult = z.object({
 });
 
 /**
+ * The run manifest's expected-state half - the one declared additive
+ * input `values import` gained. Verified inside the import's own
+ * authorized transaction, after `read@project AND read@environment` is
+ * re-evaluated for every environment named here.
+ *
+ */
+export const zImportPrecondition = z.object({
+    definitions_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    environment_ids: z.array(zId).min(1),
+    occurrences: z.array(z.object({
+        key: zKeyName,
+        environment_id: zId,
+        token: z.string()
+    }))
+});
+
+export const zImportValuesRequest = z.object({
+    entries: z.array(z.object({
+        key: zKeyName,
+        value: z.string()
+    })).min(1).max(5000),
+    overwrite: z.optional(z.array(zKeyName)),
+    precondition: z.optional(zImportPrecondition)
+});
+
+export const zImportValuesResult = z.object({
+    imported: z.array(zKeyName),
+    skipped: z.array(zKeyName)
+});
+
+/**
  * Classification IS the sensitivity boundary. A matrix row is uniformly
  * secret or config; it changes only through the reclassification
  * ceremony. Closed, deliberately: a third value would be a third
@@ -873,6 +904,39 @@ export const zValueCell = z.object({
 export const zValueList = z.object({
     items: z.array(zValueCell),
     count: z.int().gte(0)
+});
+
+export const zValueOccurrenceCandidate = z.object({
+    name: zKeyName,
+    intended_classification: zKeyClassification,
+    intended_type: z.enum([
+        'string',
+        'integer',
+        'boolean',
+        'enum',
+        'url',
+        'json'
+    ])
+});
+
+export const zValueOccurrencesRequest = z.object({
+    candidates: z.array(zValueOccurrenceCandidate).max(5000)
+});
+
+export const zValueOccurrence = z.object({
+    key_id: z.optional(zId),
+    name: zKeyName,
+    declared: z.boolean(),
+    classification: z.optional(zKeyClassification),
+    declared_type: z.optional(z.string()),
+    set: z.boolean(),
+    token: z.string()
+});
+
+export const zValueOccurrenceList = z.object({
+    environment_id: zId,
+    definitions_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    items: z.array(zValueOccurrence)
 });
 
 export const zValueDiffRow = z.object({
@@ -2985,6 +3049,36 @@ export const zGetRevealWindowData = z.object({
  * The guard's state.
  */
 export const zGetRevealWindowResponse = zRevealWindow;
+
+export const zListValueOccurrencesData = z.object({
+    body: zValueOccurrencesRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment's keys, presence and occurrence tokens.
+ */
+export const zListValueOccurrencesResponse = zValueOccurrenceList;
+
+export const zImportValuesData = z.object({
+    body: zImportValuesRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * What landed and what was skipped by name.
+ */
+export const zImportValuesResponse = zImportValuesResult;
 
 export const zRevealValuesData = z.object({
     body: z.optional(z.never()),

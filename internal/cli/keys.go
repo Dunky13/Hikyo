@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/schema"
 )
 
 // The key-catalogue verbs (#49): `hikyo key …`, with the group verbs under
@@ -436,16 +437,16 @@ func keyRow(k apigen.Key) []string {
 // the alternatives joined, so an operator sees the shape without reading JSON.
 func declarationType(d apigen.KeyDeclaration) string {
 	if d.Rule != nil {
-		return string(d.Rule.Type)
+		return schema.TypeExpression([]schema.Type{schema.Type(d.Rule.Type)})
 	}
 	if d.AnyOf == nil {
 		return ""
 	}
-	types := make([]string, 0, len(*d.AnyOf))
+	types := make([]schema.Type, 0, len(*d.AnyOf))
 	for _, alt := range *d.AnyOf {
-		types = append(types, string(alt.Type))
+		types = append(types, schema.Type(alt.Type))
 	}
-	return "any_of(" + strings.Join(types, "|") + ")"
+	return schema.TypeExpression(types)
 }
 
 func keyGroupRow(g apigen.KeyGroup) []string {
