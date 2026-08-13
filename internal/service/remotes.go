@@ -135,6 +135,9 @@ type RemoteOrg struct {
 // stored state are re-done inside the transaction, so the window between the
 // two cannot produce a self-connected or duplicated entry.
 func (s *Remotes) AddRemote(ctx context.Context, actor Actor, name, rawURL, pin, credential string) (RemoteView, error) {
+	if err := checkName("remote name", name); err != nil {
+		return RemoteView{}, err
+	}
 	// ONE spelling from here down. `https://peer.example/` and
 	// `https://peer.example` are the same origin and a human types either, but
 	// only the slash-free one concatenates correctly onto the directory path —
@@ -147,8 +150,8 @@ func (s *Remotes) AddRemote(ctx context.Context, actor Actor, name, rawURL, pin,
 	if err := remotefetch.ValidateRemoteURL(rawURL); err != nil {
 		return RemoteView{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err.Error())
 	}
-	if name == "" || pin == "" || credential == "" {
-		return RemoteView{}, fmt.Errorf("%w: name, pin and credential are all required", domain.ErrInvalid)
+	if pin == "" || credential == "" {
+		return RemoteView{}, fmt.Errorf("%w: pin and credential are both required", domain.ErrInvalid)
 	}
 	if s.Fetch == nil {
 		return RemoteView{}, errors.New("service: the directory surface has no outbound client wired")
@@ -589,8 +592,8 @@ func (s *Remotes) settle(
 // credential at a different host is the credential-redirect attack, so
 // re-pointing is remove + add, which re-runs the full human ceremony.
 func (s *Remotes) RenameRemote(ctx context.Context, actor Actor, name, newName string) (RemoteView, error) {
-	if newName == "" {
-		return RemoteView{}, fmt.Errorf("%w: a display name is required", domain.ErrInvalid)
+	if err := checkName("remote name", newName); err != nil {
+		return RemoteView{}, err
 	}
 	now := s.now()
 	var out RemoteView
@@ -611,7 +614,11 @@ func (s *Remotes) RenameRemote(ctx context.Context, actor Actor, name, newName s
 			return err
 		}
 		entry.Name = newName
-		out, err = viewOf(entry, store.RemoteSnapshot{}, now)
+		snapshot, err := r.Remotes().Snapshot(ctx, p, entry.ID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		out, err = viewOf(entry, snapshot, now)
 		if err != nil {
 			return err
 		}

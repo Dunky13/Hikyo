@@ -141,3 +141,58 @@ func (q *Queries) InsertTier3Key(ctx context.Context, arg InsertTier3KeyParams) 
 	)
 	return err
 }
+
+const retireTier3Key = `-- name: RetireTier3Key :execrows
+UPDATE tier3_keys SET state = 'retired'
+WHERE purpose = $1 AND org_id = $2
+  AND project_id = $3 AND state = 'active'
+`
+
+type RetireTier3KeyParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+}
+
+// RetireTier3Key retires the active key for one scope so a rotation can put a
+// new version in its place. It is an UPDATE rather than a delete: the
+// superseded row's blob is what still opens material written under it, and the
+// one-active-per-scope index is what makes the swap unambiguous.
+func (q *Queries) RetireTier3Key(ctx context.Context, arg RetireTier3KeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireTier3Key, arg.Purpose, arg.OrgID, arg.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireTier3KeyAtVersion = `-- name: RetireTier3KeyAtVersion :execrows
+UPDATE tier3_keys SET state = 'retired'
+WHERE purpose = $1 AND org_id = $2
+  AND project_id = $3 AND state = 'active'
+  AND version = $4
+`
+
+type RetireTier3KeyAtVersionParams struct {
+	Purpose   string
+	OrgID     string
+	ProjectID string
+	Version   int64
+}
+
+// RetireTier3KeyAtVersion is RetireTier3Key as a compare-and-swap: it retires
+// the active key only when it is still the version the caller prepared its
+// successor against. Zero rows means a concurrent rotation won -- the caller
+// must refuse, not stack a second successor on the wrong predecessor.
+func (q *Queries) RetireTier3KeyAtVersion(ctx context.Context, arg RetireTier3KeyAtVersionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retireTier3KeyAtVersion,
+		arg.Purpose,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

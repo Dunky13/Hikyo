@@ -1,7 +1,10 @@
 package remotefetch
 
 import (
+	"bufio"
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +12,48 @@ import (
 	"testing"
 	"time"
 )
+
+func TestCONNECTCancellationClosesAStalledProxyConnection(t *testing.T) {
+	client, proxy := net.Pipe()
+	requestRead := make(chan struct{})
+	peerDone := make(chan error, 1)
+	go func() {
+		defer proxy.Close()
+		if _, err := http.ReadRequest(bufio.NewReader(proxy)); err != nil {
+			peerDone <- err
+			return
+		}
+		close(requestRead)
+		var oneByte [1]byte
+		_, err := proxy.Read(oneByte[:])
+		peerDone <- err
+	}()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		result <- establishCONNECT(ctx, client, "remote.example:443", time.Minute)
+	}()
+
+	<-requestRead
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("CONNECT cancellation = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled CONNECT remained blocked on the proxy response")
+	}
+	select {
+	case err := <-peerDone:
+		if err == nil {
+			t.Fatal("the proxy connection remained open after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the stalled proxy retained its connection after cancellation")
+	}
+}
 
 func testClient(t *testing.T) *Client {
 	t.Helper()

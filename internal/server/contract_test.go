@@ -738,12 +738,12 @@ func (s stubValues) List(context.Context, service.Actor, domain.Scope, bool) ([]
 	return nil, s.outcome()
 }
 
-func (s stubValues) Set(context.Context, service.Actor, domain.Scope, string, string) (service.ValueCell, error) {
-	return service.ValueCell{}, s.outcome()
+func (s stubValues) Set(context.Context, service.Actor, domain.Scope, string, string) (service.StagedChange, error) {
+	return service.StagedChange{}, s.outcome()
 }
 
-func (s stubValues) Clear(context.Context, service.Actor, domain.Scope, string) error {
-	return s.outcome()
+func (s stubValues) Unset(context.Context, service.Actor, domain.Scope, string) (service.StagedChange, error) {
+	return service.StagedChange{}, s.outcome()
 }
 
 func (s stubValues) Declare(context.Context, service.Actor, domain.Scope, []string, string, string) ([]service.ValueCell, error) {

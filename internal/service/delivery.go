@@ -13,7 +13,6 @@ import (
 	"github.com/Dunky13/hikyo/internal/delivery"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/oidcfed"
-	"github.com/Dunky13/hikyo/internal/schema"
 	"github.com/Dunky13/hikyo/internal/store"
 	"github.com/Dunky13/hikyo/internal/store/tx"
 )
@@ -78,11 +77,11 @@ var (
 	// change token is KEYED; computing one without a key is not a degraded
 	// answer, it is a forgeable one.
 	ErrDeliveryKeyring = errors.New("service: the delivery surface has no keyring wired")
-	// ErrPresenceConflict refuses a key declared both required and forbidden in
-	// the addressed environment. The catalogue refuses that at declaration
-	// time, so reaching it here means the stored declaration is inconsistent —
-	// which is a fault to hear about, not a precedence rule to invent.
-	ErrPresenceConflict = errors.New("service: a key is declared both required and forbidden in this environment")
+	// ErrNotMaterialized refuses a fetch against an environment that has no
+	// committed snapshot. Delivery reads only committed, valid snapshots or
+	// FAILS CLOSED (flat-model ADR) — it never falls back to live state, which
+	// is exactly the unvalidated read the snapshot exists to replace.
+	ErrNotMaterialized = errors.New("service: this environment has no published revision yet")
 )
 
 // Delivery owns the machine fetch surface.
@@ -142,11 +141,29 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 	if s.Keyring == nil {
 		return FetchResult{}, ErrDeliveryKeyring
 	}
-	now := s.now()
+	// The project sealer is resolved BEFORE the transaction, under this
+	// operation's own formula, for the reason #50 recorded: minting a project
+	// DEK opens transactions of its own, and sqlite serves writes on a single
+	// connection. The window carries a key handle and no state; the transaction
+	// re-authorizes and re-reads everything.
+	// A refusal HERE takes the same recorded path a refusal inside the
+	// transaction does. Without that, moving the sealer ahead of the
+	// transaction would silently move every federated refusal off the audited
+	// path: the pre-transaction window authorizes the same operation, so it
+	// refuses the same callers, and a refusal that is not recorded is exactly
+	// what fail-closed forbids.
+	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpDeliveryFetch, scope)
+	if err != nil {
+		return FetchResult{}, s.recordUnbound(ctx, actor, err)
+	}
 
 	var out FetchResult
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, now)
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		// The clock is read INSIDE the transaction: the sealer preflight above
+		// can take real time, and a credential whose idle, absolute or expiry
+		// deadline passes during it must be refused by the authentication this
+		// delivery actually rides, not admitted on a stale instant.
+		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
 		}
@@ -160,12 +177,11 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 
-		rows, revision, err := deliveryRows(ctx, r, p, scope.Env)
+		rows, manifest, revision, err := deliveryRows(ctx, r, p, sealer, scope)
 		if err != nil {
 			return err
 		}
-		manifest := delivery.Manifest(manifestRows(rows))
-		changeToken, err := s.Keyring.ChangeToken(string(scope.Org), string(scope.Project), string(scope.Env), manifest)
+		changeToken, err := s.Keyring.ChangeToken(string(scope.Org), string(scope.Project), string(scope.Env), delivery.Manifest(manifest))
 		if err != nil {
 			return err
 		}
@@ -287,87 +303,64 @@ func (s *Delivery) recordUnbound(ctx context.Context, actor Actor, cause error) 
 	if !errors.Is(cause, domain.ErrUnauthenticated) {
 		return cause
 	}
-	if auditErr := s.Federation.RecordBindingRefusal(ctx, actor.federated.IssuerID); auditErr != nil {
+	refusalCause := ""
+	if actor.federated.refusalCause != nil {
+		refusalCause = actor.federated.refusalCause.load()
+	}
+	if auditErr := s.Federation.RecordBindingRefusal(ctx, actor.federated.IssuerID, refusalCause); auditErr != nil {
 		return auditErr
 	}
 	return cause
 }
 
-// deliveryRows reads the authorized projection: the project's keys and each
-// one's declared presence for the addressed environment.
+// deliveryRows reads what the environment's LATEST COMMITTED SNAPSHOT
+// delivers, and builds the manifest the change token is computed over.
 //
-// This is THE SEAM. When #50/#51 land, the value read joins it and Presence
-// gains `set`; nothing above it changes, because everything above it consumes
-// []DeliveredKey. The change token then starts moving with values, and every
-// outstanding cursor mismatches exactly once.
-func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, env domain.EnvID) ([]DeliveredKey, int64, error) {
-	keys, err := r.Catalogue().List(ctx, p)
+// It reads the snapshot rather than live values, which is the flat-model ADR's
+// "delivery reads only committed, valid snapshots" made structural: an
+// environment with no published revision fails closed here rather than serving
+// a state no publish ever validated.
+//
+// The manifest carries PLAINTEXT and the projection does not, and the split is
+// the whole design. The token must move when a value moves, or a consumer never
+// rolls out a rotated credential; the token is keyed, so it discloses nothing
+// about the values it covers. What the CALLER receives is the same value-free
+// projection #62 shipped -- names, classifications and presence -- because
+// delivering plaintext to a workload is the Compose/Kubernetes render path's
+// act, with its own formula and its own per-key disclosure records.
+func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
+	scope domain.Scope) ([]DeliveredKey, []delivery.Row, int64, error) {
+	snapshot, err := r.Snapshots().Latest(ctx, p)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, 0, ErrNotMaterialized
+	}
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	presence, err := r.Catalogue().ListPresence(ctx, p)
+	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	revision, err := r.Catalogue().SchemaRevision(ctx, p)
-	if err != nil {
-		return nil, 0, err
-	}
-	// Index the explicit sets once. `mode: all` produces no rows at all — it is
-	// SYMBOLIC and must keep covering environments created later — so the mode
-	// is consulted before the set.
-	// Only the rows naming THIS environment are indexed. Writing every row's
-	// match into the map would let a later row for another environment overwrite
-	// an earlier `true` with `false`, which is a silent "this key is not required
-	// here" for a key that is.
-	explicit := map[[2]string]bool{}
-	for _, row := range presence {
-		if row.EnvironmentID == string(env) {
-			explicit[[2]string{row.KeyID, row.Rule}] = true
+	keys := make([]DeliveredKey, 0, len(entries))
+	rows := make([]delivery.Row, 0, len(entries))
+	for _, entry := range entries {
+		plain, err := sealer.OpenField(snapshotAAD(
+			entry.OrgID, entry.ProjectID, entry.EnvironmentID, entry.KeyID, entry.SnapshotID, entry.ID), entry.Ciphertext)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("service: snapshot entry %s: %w", entry.ID, err)
 		}
-	}
-	out := make([]DeliveredKey, 0, len(keys))
-	for _, key := range keys {
-		required := presenceHolds(key.RequiredMode, explicit[[2]string{key.ID, store.PresenceRuleRequired}])
-		forbidden := presenceHolds(key.ForbiddenMode, explicit[[2]string{key.ID, store.PresenceRuleForbidden}])
-		if required && forbidden {
-			return nil, 0, fmt.Errorf("%w: %s", ErrPresenceConflict, key.Name)
-		}
-		mode := delivery.PresenceOptional
-		switch {
-		case required:
-			mode = delivery.PresenceRequired
-		case forbidden:
-			mode = delivery.PresenceForbidden
-		}
-		out = append(out, DeliveredKey{
-			Name: key.Name, Classification: key.Classification, Presence: mode,
+		keys = append(keys, DeliveredKey{
+			Name: entry.KeyName, Classification: entry.Classification,
+			Presence: delivery.PresenceSet,
+		})
+		rows = append(rows, delivery.Row{
+			Key: entry.KeyName, Classification: entry.Classification, Value: string(plain),
 		})
 	}
-	return out, revision, nil
-}
-
-// presenceHolds answers one rule for one environment. `all` is symbolic and
-// covers everything; `explicit` consults the set; `none` holds nowhere.
-func presenceHolds(mode string, inExplicitSet bool) bool {
-	switch schema.PresenceMode(mode) {
-	case schema.PresenceAll:
-		return true
-	case schema.PresenceExplicit:
-		return inExplicitSet
-	default:
-		return false
-	}
-}
-
-func manifestRows(keys []DeliveredKey) []delivery.Row {
-	out := make([]delivery.Row, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, delivery.Row{
-			Key: k.Name, Classification: k.Classification, Presence: k.Presence,
-		})
-	}
-	return out
+	// The PINNED schema revision, not the live one: what this snapshot was
+	// validated against is a property of the snapshot, and a schema that has
+	// moved since must not make history claim it was validated at the new one.
+	return keys, rows, snapshot.SchemaRevision, nil
 }
 
 // projectionOf is the caller's AUTHORIZED DELIVERY PROJECTION: which of the

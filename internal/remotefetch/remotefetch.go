@@ -304,6 +304,33 @@ func (c *Client) dialThroughProxy(ctx context.Context, addr string) (net.Conn, e
 	if err != nil {
 		return nil, err
 	}
+	if err := establishCONNECT(ctx, conn, addr, c.cfg.Deadline); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+// establishCONNECT owns conn until a tunnel is established. Both blocking
+// writes and reads are bounded by the smaller of the request context and the
+// configured remote deadline; cancellation actively wakes either syscall.
+// Any failure closes the connection before returning, so a stalled proxy
+// cannot retain a goroutine and file descriptor past the request budget.
+func establishCONNECT(ctx context.Context, conn net.Conn, addr string, deadline time.Duration) error {
+	closeWithError := func(err error) error {
+		_ = conn.Close()
+		return err
+	}
+	ioDeadline := time.Now().Add(deadline)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(ioDeadline) {
+		ioDeadline = contextDeadline
+	}
+	if err := conn.SetDeadline(ioDeadline); err != nil {
+		return closeWithError(err)
+	}
+	stopCancellation := context.AfterFunc(ctx, func() {
+		_ = conn.SetDeadline(time.Now())
+	})
+
 	req := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Opaque: addr},
@@ -311,20 +338,29 @@ func (c *Client) dialThroughProxy(ctx context.Context, addr string) (net.Conn, e
 		Header: http.Header{},
 	}
 	if err := req.Write(conn); err != nil {
-		conn.Close()
-		return nil, err
+		stopCancellation()
+		return closeWithError(err)
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		conn.Close()
-		return nil, err
+		stopCancellation()
+		if ctx.Err() != nil {
+			return closeWithError(ctx.Err())
+		}
+		return closeWithError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		conn.Close()
-		return nil, fmt.Errorf("remotefetch: the forward proxy refused CONNECT with %s", resp.Status)
+		stopCancellation()
+		return closeWithError(fmt.Errorf("remotefetch: the forward proxy refused CONNECT with %s", resp.Status))
 	}
-	return conn, nil
+	if !stopCancellation() {
+		return closeWithError(ctx.Err())
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return closeWithError(err)
+	}
+	return nil
 }
 
 // ClassifyError maps a transport or status failure to its outcome. It is

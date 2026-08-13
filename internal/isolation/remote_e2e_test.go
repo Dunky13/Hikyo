@@ -289,8 +289,18 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 	}
 	peer.reject = false
 
-	if _, err := remotes.RenameRemote(ctx, admin, "peer-b", "peer-b-renamed"); err != nil {
+	renamed, err := remotes.RenameRemote(ctx, admin, "peer-b", "peer-b-renamed")
+	if err != nil {
 		t.Fatalf("remote.renamed: %v", err)
+	}
+	if renamed.State != after.State || !renamed.LastAttemptAt.Equal(after.LastAttemptAt) ||
+		renamed.Identity != after.Identity || renamed.OrgCount != after.OrgCount || !renamed.Stale {
+		t.Errorf("rename discarded the last-known snapshot: before=%+v after=%+v", after, renamed)
+	}
+	for _, invalidName := range []string{" leading", "trailing ", "line\nbreak", string([]byte{0xff})} {
+		if _, err := remotes.RenameRemote(ctx, admin, "peer-b-renamed", invalidName); err == nil {
+			t.Errorf("remote rename accepted invalid name %q", invalidName)
+		}
 	}
 	if err := remotes.RemoveRemote(ctx, admin, "peer-b-renamed"); err != nil {
 		t.Fatalf("remote.removed: %v", err)

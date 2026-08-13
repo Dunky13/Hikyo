@@ -307,6 +307,20 @@ type PasswordCredential struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type PendingChange struct {
+	ID                 string
+	OrgID              string
+	ProjectID          string
+	EnvironmentID      string
+	KeyID              string
+	OwnerID            string
+	Operation          string
+	Ciphertext         []byte
+	StagedFromRevision int64
+	StagedFromEntry    string
+	CreatedAt          pgtype.Timestamptz
+}
+
 type PinGeneration struct {
 	PrincipalID   string
 	EnvironmentID string
@@ -381,6 +395,16 @@ type RemoteSnapshot struct {
 	OrgCount         pgtype.Int8
 	ProjectCount     pgtype.Int8
 	Listing          pgtype.Text
+}
+
+type RevisionKeyChange struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	Revision      int64
+	KeyID         string
+	KeyName       string
+	Change        string
 }
 
 type SamlProvider struct {
@@ -565,6 +589,30 @@ type Session struct {
 	SamlProviderID    pgtype.Text
 	RequestingOrigin  pgtype.Text
 	HandoffID         pgtype.Text
+}
+
+type Snapshot struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	Revision       int64
+	SchemaRevision int64
+	PublishedBy    string
+	PublishedAt    pgtype.Timestamptz
+}
+
+type SnapshotEntry struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	SnapshotID     string
+	KeyID          string
+	KeyName        string
+	Classification string
+	Ciphertext     []byte
+	ValueEntryID   string
 }
 
 type Tier3Key struct {

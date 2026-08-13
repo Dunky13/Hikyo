@@ -97,7 +97,7 @@ func newAccessWireEnv(t *testing.T, db *store.DB) accessWireEnv {
 		Auth:         auth,
 		Orgs:         orgs,
 		Projects:     &service.Projects{DB: db},
-		Environments: &service.Environments{DB: db},
+		Environments: &service.Environments{DB: db, Keyring: probeKeyring(t, db)},
 		Folders:      &service.Folders{DB: db},
 		Grants:       &service.Grants{DB: db},
 		Settings:     &service.ProjectSettings{DB: db, Auth: auth},

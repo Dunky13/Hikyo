@@ -305,6 +305,20 @@ type PasswordCredential struct {
 	UpdatedAt       string
 }
 
+type PendingChange struct {
+	ID                 string
+	OrgID              string
+	ProjectID          string
+	EnvironmentID      string
+	KeyID              string
+	OwnerID            string
+	Operation          string
+	Ciphertext         []byte
+	StagedFromRevision int64
+	StagedFromEntry    string
+	CreatedAt          string
+}
+
 type PinGeneration struct {
 	PrincipalID   string
 	EnvironmentID string
@@ -379,6 +393,16 @@ type RemoteSnapshot struct {
 	OrgCount         sql.NullInt64
 	ProjectCount     sql.NullInt64
 	Listing          sql.NullString
+}
+
+type RevisionKeyChange struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	Revision      int64
+	KeyID         string
+	KeyName       string
+	Change        string
 }
 
 type SamlProvider struct {
@@ -563,6 +587,30 @@ type Session struct {
 	SamlProviderID    sql.NullString
 	RequestingOrigin  sql.NullString
 	HandoffID         sql.NullString
+}
+
+type Snapshot struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	Revision       int64
+	SchemaRevision int64
+	PublishedBy    string
+	PublishedAt    string
+}
+
+type SnapshotEntry struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	SnapshotID     string
+	KeyID          string
+	KeyName        string
+	Classification string
+	Ciphertext     []byte
+	ValueEntryID   string
 }
 
 type Tier3Key struct {

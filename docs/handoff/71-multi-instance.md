@@ -33,7 +33,7 @@ surface.
 So half of the ADR's #15 amendment is already law. What #71 adds is everything
 that *uses* it.
 
-### Schema (migration 00019, both engines)
+### Schema (migration 00020, both engines)
 
 | Table | Side | Why |
 |---|---|---|
@@ -185,7 +185,7 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
 
 ## Decisions taken (review these)
 
-1. **Workspace sessions reuse the `sessions` table.** Migration 00019 rebuilds
+1. **Workspace sessions reuse the `sessions` table.** Migration 00020 rebuilds
    it on BOTH engines to widen the `artifact` CHECK to
    `('cli','browser','workspace')` and add `requesting_origin` + `handoff_id`
    with a CHECK tying them to the workspace artifact.
@@ -196,7 +196,7 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
      (`csrf_verifier` from 00006, `provider_id` from 00007, `saml_provider_id`
      + the singular-provenance CHECK from 00010). A rebuild copying only
      00005's columns silently drops three. This is a one-time frozen cost:
-     migrations are immutable, so 00020 alters the post-00019 table normally.
+     migrations are immutable, so 00021 alters the post-00020 table normally.
    - **In-flight `reauth_windows` rows do not survive the migration**, on both
      engines, explicitly (`DELETE FROM reauth_windows`) rather than as an
      incidental cascade only sqlite would perform.
@@ -229,8 +229,8 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
   (instance connection), `ws` (workspace session), `hs`/`hc` (the two
   front-channel handoff values). The `hik_` audit redaction filter covers them
   for free.
-- **DONE — migration 00019, both engines.**
-  `internal/store/migrations/{sqlite,postgres}/00019_multi_instance.sql`.
+- **DONE — migration 00020, both engines.**
+  `internal/store/migrations/{sqlite,postgres}/00020_multi_instance.sql`.
   Tables: `instance_identity`, `remotes`, `remote_snapshots`,
   `instance_connections`, `workspace_origins`, `workspace_handoffs`, plus the
   `sessions` rebuild. `go tool sqlc generate` is clean; models regenerated in
@@ -506,11 +506,11 @@ HIKYO_TEST_POSTGRES_DSN=postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_71 \
 # 1620 passed, 35 packages -- BOTH ENGINES
 ```
 
-The postgres leg is verified, including migration 00019 (the `sessions` rebuild
+The postgres leg is verified, including migration 00020 (the `sessions` rebuild
 with its FK drop/restore on `reauth_windows`, and `gen_random_uuid()`).
 
 Note: `resetPostgres` drop lists in `internal/conformance/conformance_test.go`
-and `internal/isolation/harness_test.go` already teach the six 00019 tables.
+and `internal/isolation/harness_test.go` already teach the six 00020 tables.
 **Any table a further migration adds must go into both lists** or the next PG
 run fails with SQLSTATE 2BP01.
 
@@ -744,7 +744,7 @@ this is a real gap, not a simplification.
 
 The correct fix and why it was not taken now: the factors belong to the session
 that APPROVED the handoff, and `workspace_handoffs` has no column to carry them
-from approval to redemption. Closing it is **migration 00020** (`factors TEXT`
+from approval to redemption. Closing it is **migration 00021** (`factors TEXT`
 on `workspace_handoffs`, written by `ApproveWorkspaceHandoff`, read by
 `RedeemHandoff`) plus both PG reset drop lists. That is a schema change on a
 branch that may be renumbered against parallel ticket sessions, so it is
@@ -847,7 +847,7 @@ What remains, in order:
    already in flight. ~15 lines; take it first next session.
 
 **C. The two gaps that need Marc** (see "NEEDS MARC" above and decision 13):
-   the workspace session's assurance record (migration 00020) and the step-up
+   the workspace session's assurance record (migration 00021) and the step-up
    elevation path. Criterion 3 cannot fully close without them.
 
 Original plan, kept for its reasoning. Status against the six locked criteria, AS OF THE END OF SESSION 2:
@@ -856,7 +856,7 @@ Original plan, kept for its reasoning. Status against the six locked criteria, A
 |---|---|
 | 1 | **MET.** Proven twice: `remote_e2e_test.go` on BOTH engines against a real pinned TLS peer, and `two_instance_test.go` across two real instances with two datastores and two routers — add with the full ceremony, stop/reject the peer -> last-known + age, revoke on B -> credential-rejected as its own loud state on A, and self-connect refused BY INSTANCE IDENTITY at the authenticated fetch. The remaining gap is presentational: no UI shows it yet. |
 | 2 | **Met at the service+API level.** The directory read is `instance-directory`-gated and returns names+counts only; the workspace popup lands on B's own login BY CONSTRUCTION — there is no code path by which A's server authenticates to B, and `two_instance_test.go` asserts A's server originates nothing during the workspace arc. Needs the UI to be observable. |
-| 3 | **PARTLY MET, two named blockers.** Built and E2E-tested across two instances: handoff transaction (single-use, PKCE S256, origin-bound), workspace session issuance, CORS, CSP, and the atomic origin-removal kill switch (de-allowlisting killed exactly the bound session, and a new handoff then got 403 AT THE TRANSACTION). **NOT met:** (a) the UI popup ceremony; (b) "reveal under B's ceremony" — blocked on the step-up elevation path (decision 13) and the workspace session's assurance record (NEEDS MARC / migration 00020). Both are named, neither is hidden. |
+| 3 | **PARTLY MET, two named blockers.** Built and E2E-tested across two instances: handoff transaction (single-use, PKCE S256, origin-bound), workspace session issuance, CORS, CSP, and the atomic origin-removal kill switch (de-allowlisting killed exactly the bound session, and a new handoff then got 403 AT THE TRANSACTION). **NOT met:** (a) the UI popup ceremony; (b) "reveal under B's ceremony" — blocked on the step-up elevation path (decision 13) and the workspace session's assurance record (NEEDS MARC / migration 00021). Both are named, neither is hidden. |
 | 4 | **MET.** Unchanged, and now additionally exercised by a real serve through the chokepoint in the lifecycle test. |
 | 5 | **Met at the service+API level, both engines.** `GET/DELETE /api/v1/me/sessions`; a workspace session lists as its own artifact type carrying its requesting origin; revoke bites at the next request because the row is re-resolved in its own transaction. Needs the UI to be observable. |
 | 6 | **MET, with one scoping caveat stated plainly.** CI half: no-proxy closure over 16 pinned paths, each with a written confirmation of what it returns, plus the wire-registry half and the live dial instrumentation. Harness half: `two_instance_test.go` asserts `remotefetch.Dials()` is UNCHANGED across a full workspace arc driven by a client that is neither server, and `TestZeroRemotesOriginateZeroConnections` measures the air-gap statement. **Caveat:** two instances in ONE PROCESS (two datastores, two routers, two TLS servers, real pins), not two OS processes — see the scoping note above for why that is the stronger test for this criterion, and for Marc's disposition. |
@@ -977,8 +977,8 @@ flake remains in the full Playwright run and is characterised below.
 builds its 201 body from it. No second authorization, no spurious
 `remote.origin_allowlist_read` per add. `canonicalOrEmpty` deleted with it.
 
-### 2. The workspace session's assurance record — CLOSED (migration 00020)
-`internal/store/migrations/{sqlite,postgres}/00020_workspace_assurance.sql`:
+### 2. The workspace session's assurance record — CLOSED (migration 00021)
+`internal/store/migrations/{sqlite,postgres}/00021_workspace_assurance.sql`:
 `ALTER TABLE workspace_handoffs ADD COLUMN factors TEXT NOT NULL DEFAULT '[]'`.
 No new table, so no `hikyo:table` directive and no PG reset drop-list change.
 
@@ -1165,7 +1165,7 @@ go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml  # clean
 (cd web && pnpm run e2e --project=desktop --grep "kill switches")   # PASSES
 ```
 
-Note: the PG database was recreated as `hikyo_71d` for migration 00020.
+Note: the PG database was recreated as `hikyo_71d` for migration 00021.
 
 ## The full-run crash, found and fixed
 
@@ -1195,7 +1195,7 @@ cause: read the instance's stderr for a panic first.
 |---|---|
 | 1 | **MET**, and now visible: the directory card renders state, identity, version, org/project names and counts, the `credential-rejected` loud state and the "showing the last known directory, N old" sentence, asserted by a Playwright flow against a real second instance. |
 | 2 | **MET.** The popup lands on B's own origin — asserted by comparing the popup's origin against B's in the flow — and A's server originates nothing during the arc (`two_instance_test.go` measures `remotefetch.Dials()` across it). |
-| 3 | **MET at every layer this ticket owns, with one caveat stated inline.** The handoff transaction, the popup ceremony, the workspace session, CORS, CSP and the atomic origin-removal kill switch are exercised end to end in a browser; the assurance record now travels (00020) and a step-up ELEVATES the bound session under a real reauthentication window instead of being refused by name, proven on BOTH engines in `workspace_stepup_test.go`. **Caveat: the elevation has no UI consumer yet** — the reveal surface that would call it is #50/#58's ticket, so "reveals under B's ceremony" is proven at the service layer and not in the browser. |
+| 3 | **MET at every layer this ticket owns, with one caveat stated inline.** The handoff transaction, the popup ceremony, the workspace session, CORS, CSP and the atomic origin-removal kill switch are exercised end to end in a browser; the assurance record now travels (00021) and a step-up ELEVATES the bound session under a real reauthentication window instead of being refused by name, proven on BOTH engines in `workspace_stepup_test.go`. **Caveat: the elevation has no UI consumer yet** — the reveal surface that would call it is #50/#58's ticket, so "reveals under B's ceremony" is proven at the service layer and not in the browser. |
 | 4 | **MET.** Unchanged. |
 | 5 | **MET**, and now visible: the settings panel lists a workspace session as its own artifact type carrying its requesting origin, and revoking it there ends the workspace in the other instance's shell within one liveness poll — asserted in the flow. |
 | 6 | **MET.** CI half (no-proxy closure over the pinned surface + the wire-registry half + live dial instrumentation) and harness half (`two_instance_test.go`) unchanged. The browser leg adds a third observation: the workspace ceremony completes while the viewing server cannot reach the serving one at all. |
@@ -1330,7 +1330,7 @@ disabling the fix and re-running (recorded per finding below).
 | # | Finding | Disposition |
 |---|---|---|
 | p1a-1 | ws bearer's origin binding not enforced at authn | FIXED |
-| p1a-2 | 00020 fabricates `[]` assurance for live handoffs | FIXED |
+| p1a-2 | 00021 fabricates `[]` assurance for live handoffs | FIXED |
 | p1a-3 | `ic` decoy not work-uniform with revoked credentials | FIXED |
 | p1a-4 | snapshot CHECK admits impossible rows; `ok` on the failure path | FIXED |
 | p1b-1 | step-up does not require a fresh ceremony | FIXED |
@@ -1367,7 +1367,7 @@ satisfied by a real factor verification through the product's own ceremonies
 and by nothing else.
 
 The ceremony's factor class is persisted on the transaction
-(`workspace_handoffs.factor_class`, migration 00020) and `elevate` reads THAT
+(`workspace_handoffs.factor_class`, migration 00021) and `elevate` reads THAT
 rather than re-deriving a class from `h.Factors` — deriving from the assurance
 record is precisely the inheritance being refused. The class also JOINS the
 assurance record written onto the elevated session (`withFactor`), because a
@@ -1385,7 +1385,7 @@ wrong-environment refusals. **Red verified:** with `freshCeremonyClass` bypassed
 fresh ceremony approved a step-up".
 
 **The binding is consumed (p1b-2 / p2-1).** `reauth_windows` gained
-`bound_operation` and `bound_key_set` (00020, both engines, `NOT NULL DEFAULT
+`bound_operation` and `bound_key_set` (00021, both engines, `NOT NULL DEFAULT
 ''` = unbound, which is what every pre-#71 opener writes, so #54's
 environment-wide semantics are untouched). `elevate` writes the transaction's
 operation and canonical key set onto the window it opens;
@@ -1541,7 +1541,7 @@ three waves).
 
 ## MEDIUMs
 
-- **p1a-2.** 00020 no longer back-fills live rows with a default that would be
+- **p1a-2.** 00021 no longer back-fills live rows with a default that would be
   false twice over. It adds `factor_class`, then `DELETE FROM
   workspace_handoffs` — handoffs live ten minutes, so the cost is that a popup
   opened across the upgrade is reopened. The redeem path additionally refuses an
@@ -1629,13 +1629,13 @@ three waves).
 
 ## Two deliberate deviations from the brief
 
-1. **No migration 00021.** The reauth-window binding, the handoff factor class,
-   the handoff invalidation and the snapshot CHECK all landed in 00019/00020,
+1. **No migration 00022.** The reauth-window binding, the handoff factor class,
+   the handoff invalidation and the snapshot CHECK all landed in 00020/00021,
    which are NEW IN THIS UNMERGED BRANCH and have never shipped. The immutability
    rule protects released migrations; tightening a CHECK this branch itself wrote
    would otherwise cost a full sqlite table rebuild to undo a mistake nobody has
    ever run. No new tables, so no PG reset drop-list change. Dev databases on
-   00020 must be recreated — the PG leg below used a fresh `hikyo_71e`.
+   00021 must be recreated — the PG leg below used a fresh `hikyo_71e`.
 2. **`ws` is confined at `/me/sessions`, not refused.** See HIGH cluster B.
 
 ## Ratification table addendum (owner-ratified 2026-08-13)
@@ -1662,7 +1662,7 @@ go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml   # clean
 (cd web && pnpm run e2e)                              # 54 passed, desktop and mobile
 ```
 
-The postgres database was recreated as `hikyo_71e`: migrations 00019 and 00020
+The postgres database was recreated as `hikyo_71e`: migrations 00020 and 00021
 changed (see deviation 1), so a database carrying the previous shape of them
 fails with SQLSTATE 2BP01.
 
@@ -1803,10 +1803,10 @@ needed. Nothing was deferred and no test was weakened.
 
 ## Migrations renumbered
 
-`00015_multi_instance` -> **00019**, `00016_workspace_assurance` -> **00020**,
+`00015_multi_instance` -> **00020**, `00016_workspace_assurance` -> **00021**,
 both engines. Upstream took 00015-00018. Every in-tree reference updated
 (queries, service comments, this document). Verified: upstream's 00015-00018 do
-NOT touch `sessions` or `reauth_windows`, so 00019's `sessions` rebuild still
+NOT touch `sessions` or `reauth_windows`, so 00020's `sessions` rebuild still
 restates the correct shape — the comment now says "the shape reached by 00018,
 which is the 00014 shape" rather than leaving a reader to check.
 
@@ -1959,3 +1959,21 @@ binding branch is covered by TestStepUpBindingIsConsumed{SQLite,Postgres}.
 **R2: both WITHDRAWN, FINAL VERDICT CLEAN.** Full matrix green on the final
 tree: sqlite 1562 / postgres 2329 (fresh DB) / web 29 unit / e2e 82, ports
 45801-45803 per the parallel-session port scheme.
+
+## Main update and conflict resolution (2026-08-13, PR #115)
+
+Merged `main` at `91cedcb` without rewriting #71's commit. The combined tree
+keeps #109's revisions/publish surface and #117's in-transaction federation
+timing checks alongside both multi-instance tiers.
+
+- #109 owns migration `00019`; multi-instance and workspace-assurance moved to
+  `00020` and `00021` on both engines. Generated SQL, Go API, and TypeScript
+  clients were rebuilt from the merged sources.
+- Semantic merge collisions were resolved: revision snapshot conversion
+  helpers have domain-specific names, #109 routes are included in the
+  no-proxy closure pin, and workspace reveal tests publish their staged value
+  before exercising #71's step-up consent.
+- Live PR findings were fixed in this head: workspace start/redeem enter the
+  shared pre-auth admission budget; remote names use the entity-name grammar;
+  rename reloads the persisted last-known snapshot; proxy CONNECT writes and
+  reads are deadline- and cancellation-bounded with failure-path close.

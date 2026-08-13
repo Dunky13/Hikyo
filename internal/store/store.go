@@ -361,6 +361,8 @@ type Repos interface {
 	Keys() KeyRepo
 	Catalogue() CatalogueRepo
 	Values() ValueRepo
+	Pending() PendingRepo
+	Snapshots() SnapshotRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -383,6 +385,8 @@ type ReadRepos interface {
 	Keys() KeyReader
 	Catalogue() CatalogueReader
 	Values() ValueReader
+	Pending() PendingReader
+	Snapshots() SnapshotReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader

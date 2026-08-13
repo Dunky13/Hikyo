@@ -349,7 +349,12 @@ func buildInstance(t *testing.T, target drillTarget, c custody) (*store.DB, arti
 		t.Fatal(err)
 	}
 	valueActor := service.LocalPrincipal(custodian)
-	if _, err := (&service.Keys{DB: db}).Create(ctx, valueActor, prjScope(), service.KeySpec{
+	// The drill's datastore is minted under the custody root, so every service
+	// that seals here shares THAT keyring. probeKeyring would hand back a
+	// hierarchy under a freshly generated root, which the store refuses — and a
+	// key create now seals too, because a semantic schema change materializes
+	// every environment in the project (#51).
+	if _, err := (&service.Keys{DB: db, Keyring: kr}).Create(ctx, valueActor, prjScope(), service.KeySpec{
 		Name: "DRILL_PLANTED_SECRET", Classification: string(schema.Secret),
 		Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
 		Presence:    schema.DefaultPresenceRules(),
@@ -359,9 +364,10 @@ func buildInstance(t *testing.T, target drillTarget, c custody) (*store.DB, arti
 	a.secretValue = "the-drill-planted-secret-material-7f3a9c"
 	envScope := prjScope()
 	envScope.Env = "env_a1"
-	if _, err := (&service.Values{DB: db, Keyring: kr}).Set(ctx, valueActor, envScope, "DRILL_PLANTED_SECRET", a.secretValue); err != nil {
-		t.Fatalf("plant secret value: %v", err)
-	}
+	// Staged and PUBLISHED: a pending change is not a delivered value, and the
+	// headline guarantee is about material the instance actually serves.
+	publishValue(t, &service.Values{DB: db, Keyring: kr}, valueActor, envScope,
+		"DRILL_PLANTED_SECRET", a.secretValue)
 
 	// Everything must be live BEFORE the backup, or the post-restore
 	// assertions would pass against artifacts that never worked.

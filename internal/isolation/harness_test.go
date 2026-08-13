@@ -116,6 +116,12 @@ var fixtureSQL = []string{
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_edit', 'usr_alice', 'edit', 'org_a', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_def', 'usr_alice', 'definitions-edit', 'org_a', NULL, NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_mp', 'usr_alice', 'manage-projects', 'org_a', NULL, NULL, ` + ts + `)`,
+	// `publish` joined with #51: an environment is validated and materialized
+	// at creation, and every semantic schema change materializes every
+	// environment in the project. Alice is the full tenant-editor fixture, so
+	// she holds it; the capability-denial probes use their own narrower
+	// principals and are unaffected.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_al_pub', 'usr_alice', 'publish', 'org_a', NULL, NULL, ` + ts + `)`,
 
 	// bob: the same authority, in org B.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_bo_read', 'usr_bob', 'read', 'org_b', NULL, NULL, ` + ts + `)`,
@@ -151,10 +157,21 @@ var fixtureSQL = []string{
 	// root additionally holds instance-scope audit-read (#45): the instance
 	// trail is grant-evaluated, never route-implied.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ar', 'usr_root', 'audit-read', NULL, NULL, NULL, ` + ts + `)`,
+	// `rotate-dek` is the tier-3 rotation authority, and `rotate-token-key`
+	// rides it: the permission ADR's capability set is closed and names four
+	// rotation atoms for five rotation verbs, and the root token key is a
+	// tier-3 key alongside the DEKs.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_rd', 'usr_root', 'rotate-dek', NULL, NULL, NULL, ` + ts + `)`,
 	// mch_a1: machine authority confined to project A1.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_read', 'mch_a1', 'read', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_edit', 'mch_a1', 'edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_def', 'mch_a1', 'definitions-edit', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
+	// `publish` joined with #51: creating an environment MATERIALIZES its
+	// revision 1 before it becomes fetchable, and every semantic schema change
+	// materializes every environment in the project. Both are publishes, and
+	// both are authorized on the environment they touch. `publish` is on the
+	// automation allowlist, so this widens no class boundary.
+	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_m1_pub', 'mch_a1', 'publish', 'org_a', 'prj_a1', NULL, ` + ts + `)`,
 
 	// The permission-model fixtures (#55). Two member managers at different
 	// depths, because the grant-authority rule turns on WHERE the grantor
@@ -287,6 +304,9 @@ var fixtureTables = []string{
 	"keys", "key_groups", "key_presence_environments", "project_schema_revisions",
 	// The value model (#50).
 	"value_entries",
+	// Revisions and drafts (#51): a rolled-back mutation must leave no draft,
+	// no snapshot, no payload row and no lineage row behind.
+	"pending_changes", "snapshots", "snapshot_entries", "revision_key_changes",
 }
 
 // rowCounts is the row-diff half of the no-side-effect assertion.
@@ -431,15 +451,21 @@ func assertUniformNotFound(t *testing.T, probe, missing error) {
 	}
 }
 
-func services(db *store.DB) (*service.Orgs, *service.Projects, *service.Environments) {
-	return &service.Orgs{DB: db}, &service.Projects{DB: db}, &service.Environments{DB: db}
+func services(t *testing.T, db *store.DB) (*service.Orgs, *service.Projects, *service.Environments) {
+	// Environments carries a keyring now: creating one MATERIALIZES its
+	// revision 1 (#51), and a materialization seals what it publishes.
+	return &service.Orgs{DB: db}, &service.Projects{DB: db}, &service.Environments{DB: db, Keyring: probeKeyring(t, db)}
 }
 
 // folderSvc is the fourth hierarchy service; it is separate from services()
 // only so the existing three-value call sites stay untouched.
 func folderSvc(db *store.DB) *service.Folders { return &service.Folders{DB: db} }
 
-func keySvc(db *store.DB) *service.Keys { return &service.Keys{DB: db} }
+// keySvc carries a keyring because a SEMANTIC schema change fans out and
+// materializes every environment in the project (#51).
+func keySvc(t *testing.T, db *store.DB) *service.Keys {
+	return &service.Keys{DB: db, Keyring: probeKeyring(t, db)}
+}
 
 // valueSvc is the value surface (#50). The keyring is cached per datastore:
 // the hierarchy is minted ONCE per store under one root, so a second loader
@@ -483,7 +509,9 @@ func probeKeyring(t *testing.T, db *store.DB) *crypto.Keyring {
 	probeKeyrings[db] = kr
 	return kr
 }
-func keyGroupSvc(db *store.DB) *service.KeyGroups { return &service.KeyGroups{DB: db} }
+func keyGroupSvc(t *testing.T, db *store.DB) *service.KeyGroups {
+	return &service.KeyGroups{DB: db, Keyring: probeKeyring(t, db)}
+}
 
 // Fixture scopes, so a probe reads as "who, addressing what" rather than as a
 // struct literal repeated forty times.

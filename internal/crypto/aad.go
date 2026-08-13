@@ -103,16 +103,27 @@ func (a WrappedTokenKeyAAD) fields() [][]byte {
 
 // ProjectFieldAAD covers project-scoped sensitive fields outside the value
 // table: fields org_id, project_id, owner_table, owner_row_id, field_tag.
+//
+// EnvironmentID, KeyID and SnapshotID are the optional owner coordinates used
+// by value-bearing project-field rows whose identity is wider than their row
+// id. They are appended only when at least one is present, preserving the AAD
+// of every pre-existing project-field record while binding new draft and
+// snapshot rows against same-id metadata relocation.
 type ProjectFieldAAD struct {
 	OrgID, ProjectID, OwnerTable, OwnerRowID, FieldTag string
+	EnvironmentID, KeyID, SnapshotID                   string
 }
 
 func (a ProjectFieldAAD) kind() Kind { return KindProjectField }
 func (a ProjectFieldAAD) fields() [][]byte {
-	return [][]byte{
+	fields := [][]byte{
 		[]byte(a.OrgID), []byte(a.ProjectID),
 		[]byte(a.OwnerTable), []byte(a.OwnerRowID), []byte(a.FieldTag),
 	}
+	if a.EnvironmentID == "" && a.KeyID == "" && a.SnapshotID == "" {
+		return fields
+	}
+	return append(fields, []byte(a.EnvironmentID), []byte(a.KeyID), []byte(a.SnapshotID))
 }
 
 // InstanceFieldAAD covers instance-scoped sensitive fields (MFA seeds,

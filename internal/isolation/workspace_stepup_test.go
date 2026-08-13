@@ -491,9 +491,15 @@ func runStepUpRevealIsSpentByValuePath(t *testing.T, db *store.DB) {
 		`group_id, created_at) VALUES ('`+keyID+`', 'org_a', 'prj_a1', '`+keyName+`', '', 'secret', `+
 		`'', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, `+ts+`)`)
 	values := &service.Values{DB: db, Keyring: probeKeyring(t, db), Auth: ws.Reauth}
-	if _, err := values.Set(ctx, service.LocalPrincipal(custodian),
-		scopeEnv(orgA, prjA1, envA1), keyName, "workspace-secret"); err != nil {
+	valueScope := scopeEnv(orgA, prjA1, envA1)
+	staged, err := values.Set(ctx, service.LocalPrincipal(custodian),
+		valueScope, keyName, "workspace-secret")
+	if err != nil {
 		t.Fatalf("seed workspace reveal value: %v", err)
+	}
+	if _, err := revisionSvc(t, db).Publish(ctx, service.LocalPrincipal(custodian),
+		valueScope, []string{staged.VersionID}); err != nil {
+		t.Fatalf("publish workspace reveal value: %v", err)
 	}
 
 	fresh := freshCeremony(db, string(envA1), "totp")

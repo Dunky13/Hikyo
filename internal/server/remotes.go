@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/remotefetch"
 	"github.com/Dunky13/hikyo/internal/service"
 )
@@ -141,6 +142,12 @@ func (a *API) RemoveWorkspaceOrigin(ctx context.Context, req apigen.RemoveWorksp
 // ---------------------------------------------------------------------------
 
 func (a *API) StartWorkspaceHandoff(ctx context.Context, req apigen.StartWorkspaceHandoffRequestObject) (apigen.StartWorkspaceHandoffResponseObject, error) {
+	release, err := a.enterWorkspaceAdmission(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	r := service.HandoffRequest{
 		Origin:        req.Body.Origin,
 		RedirectURI:   req.Body.RedirectUri,
@@ -180,6 +187,12 @@ func (a *API) ApproveWorkspaceHandoff(ctx context.Context, req apigen.ApproveWor
 }
 
 func (a *API) RedeemWorkspaceHandoff(ctx context.Context, req apigen.RedeemWorkspaceHandoffRequestObject) (apigen.RedeemWorkspaceHandoffResponseObject, error) {
+	release, err := a.enterWorkspaceAdmission(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	ws, err := a.Workspace.RedeemHandoff(ctx, req.Body.Code, req.Body.PkceVerifier, req.Body.Origin)
 	if err != nil {
 		return nil, err
@@ -193,6 +206,16 @@ func (a *API) RedeemWorkspaceHandoff(ctx context.Context, req apigen.RedeemWorks
 		out.Elevated, out.Environment, out.WindowExpiresAt = &elevated, &env, &window
 	}
 	return out, nil
+}
+
+// enterWorkspaceAdmission keeps both unauthenticated transaction-writing
+// handoff endpoints inside the shared pre-authentication resource budget.
+// Nil remains the test-only unlimited mode used by API seam tests.
+func (a *API) enterWorkspaceAdmission(ctx context.Context) (func(), error) {
+	if a.Admission == nil {
+		return func() {}, nil
+	}
+	return a.Admission.Enter(ctx, audit.FromContext(ctx).SourceIP)
 }
 
 // ---------------------------------------------------------------------------

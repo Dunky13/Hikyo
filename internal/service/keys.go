@@ -11,6 +11,7 @@ import (
 
 	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/schema"
 	"github.com/Dunky13/hikyo/internal/store"
@@ -109,11 +110,63 @@ type KeyGroupView struct {
 // declared once per project, and the scope lattice has no key level.
 type Keys struct {
 	DB *store.DB
+	// Keyring materializes the semantic schema fan-out's snapshots. Nil
+	// refuses any semantic change in a project that has environments, which is
+	// the fail-closed answer: a schema change that cannot materialize is a
+	// schema change whose environments would keep delivering under a revision
+	// they were never validated at.
+	Keyring  *crypto.Keyring
+	Advisory *Advisory
 }
 
 // KeyGroups owns the group surface, likewise at project depth.
 type KeyGroups struct {
-	DB *store.DB
+	DB       *store.DB
+	Keyring  *crypto.Keyring
+	Advisory *Advisory
+}
+
+type schemaPublisher struct {
+	sealer   *crypto.ProjectSealer
+	keyring  *crypto.Keyring
+	advisory *Advisory
+	advanced []PublishedEnvironment
+}
+
+// prepareSchemaPublish resolves the project sealer a semantic schema change
+// needs to materialize with, BEFORE the transaction opens.
+//
+// The placement is not a style choice. Resolving a sealer MINTS the project
+// data key on first use, and minting opens a write transaction of its own —
+// which, on sqlite's single write connection, would wait forever on the
+// transaction that asked for it. It is resolved after authorization for the
+// reason #50 recorded: an unauthorized caller must not leave a wrapped-key row
+// behind for an arbitrary (org, project).
+func prepareSchemaPublish(ctx context.Context, db *store.DB, keyring *crypto.Keyring, advisory *Advisory,
+	actor Actor, op authz.Operation, scope domain.Scope) (*schemaPublisher, error) {
+	sealer, err := sealerFor(ctx, db, keyring, actor, op, scope)
+	if err != nil {
+		return nil, err
+	}
+	return &schemaPublisher{sealer: sealer, keyring: keyring, advisory: advisory}, nil
+}
+
+// fanOut is the single semantic-schema publish path: every environment gets a
+// new pinned-schema revision, each publish authorization is re-evaluated in
+// the transaction, and the committed results are retained for post-commit SSE.
+func (p *schemaPublisher) fanOut(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
+	caller authz.Identity, proof authz.Proof, scope domain.Scope, trigger string) error {
+	advanced, err := fanOutSchemaPublish(ctx, r, az, caller, proof, p.sealer, p.keyring, scope,
+		store.CanonTime(time.Now()), trigger)
+	if err != nil {
+		return err
+	}
+	p.advanced = advanced
+	return nil
+}
+
+func (p *schemaPublisher) announce(scope domain.Scope) {
+	p.advisory.published(scope, p.advanced)
 }
 
 // checkKeyFolderPath allows the empty path — a key at the catalogue root is
@@ -501,6 +554,10 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 		GroupID:       spec.GroupID,
 		CreatedAt:     store.CanonTime(time.Now()),
 	}
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyCreate, scope)
+	if err != nil {
+		return Key{}, err
+	}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
@@ -548,11 +605,15 @@ func (s *Keys) Create(ctx context.Context, actor Actor, scope domain.Scope, spec
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-create")
 	})
 	if err != nil {
 		return Key{}, err
 	}
+	publisher.announce(scope)
 	return Key{
 		ID: id, OrgID: string(scope.Org), ProjectID: string(scope.Project),
 		Name: spec.Name, FolderPath: spec.FolderPath,
@@ -660,7 +721,11 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		return Key{}, fmt.Errorf("%w: %s", domain.ErrInvalid, err)
 	}
 	var out Key
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyRename, scope)
+	if err != nil {
+		return Key{}, err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -695,8 +760,14 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-rename")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
 	return out, err
 }
 
@@ -815,7 +886,11 @@ func readKey(ctx context.Context, r store.Repos, p authz.Proof, row store.Catalo
 // would be dead until #50 and then wrong.
 func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.Scope, id string, u KeyDeclarationUpdate) (Key, error) {
 	var out Key
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyUpdateDeclaration, scope)
+	if err != nil {
+		return Key{}, err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -914,8 +989,14 @@ func (s *Keys) UpdateDeclaration(ctx context.Context, actor Actor, scope domain.
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-declaration")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
 	return out, err
 }
 
@@ -945,7 +1026,11 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		return Key{}, fmt.Errorf("%w: classification must be `secret` or `config`", domain.ErrInvalid)
 	}
 	var out Key
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyReclassify, scope)
+	if err != nil {
+		return Key{}, err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1004,8 +1089,14 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-reclassify")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
 	return out, err
 }
 
@@ -1016,7 +1107,11 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 // previewed.
 func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id, groupID string) (Key, error) {
 	var out Key
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeySetGroup, scope)
+	if err != nil {
+		return Key{}, err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1070,15 +1165,25 @@ func (s *Keys) SetGroup(ctx context.Context, actor Actor, scope domain.Scope, id
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-group-membership")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
 	return out, err
 }
 
 // Delete removes a key from the catalogue. Its explicit presence rows go with
 // it and it drops out of its group; the group itself survives, possibly inert.
 func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id string) error {
-	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyDelete, scope)
+	if err != nil {
+		return err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1115,6 +1220,14 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		if err := r.Catalogue().ReplacePresence(ctx, p, id, nil); err != nil {
 			return err
 		}
+		// Deleting a key INVALIDATES every pending change referencing it
+		// (schema ADR § Key identity). Without this, Alice's staged edit to K
+		// stays publishable after Bob deletes K, and the publish resurrects a
+		// key the schema no longer declares. The rows are collected here and a
+		// publish naming one of those version ids is refused loudly by name.
+		if _, err := r.Pending().DiscardKey(ctx, p, id); err != nil {
+			return err
+		}
 		if err := r.Catalogue().Delete(ctx, p, id); err != nil {
 			return err
 		}
@@ -1127,8 +1240,15 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-delete")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,7 +1433,11 @@ func (s *KeyGroups) Rename(ctx context.Context, actor Actor, scope domain.Scope,
 // it coupled: a group is a coupling, and removing a coupling is not removing
 // what it coupled.
 func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope, id string) error {
-	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+	publisher, err := prepareSchemaPublish(ctx, s.DB, s.Keyring, s.Advisory, actor, authz.OpKeyGroupDelete, scope)
+	if err != nil {
+		return err
+	}
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -1356,8 +1480,15 @@ func (s *KeyGroups) Delete(ctx context.Context, actor Actor, scope domain.Scope,
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		return publisher.fanOut(ctx, r, az, caller, p, scope, "key-group-delete")
 	})
+	if err == nil {
+		publisher.announce(scope)
+	}
+	return err
 }
 
 // ErrClassificationInUpdate is the ordinary-update refusal (mvp-boundary C1:

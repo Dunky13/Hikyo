@@ -281,6 +281,19 @@ export const zCloneEnvironmentRequest = z.object({
     source_environment_id: zId
 });
 
+export const zPublishRequest = z.object({
+    version_ids: z.array(zId).min(1)
+});
+
+export const zExportValuesRequest = z.object({
+    revision: z.optional(z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })),
+    reveal: z.optional(z.boolean())
+});
+
+export const zTokenKeyRotation = z.object({
+    token_key_version: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
 export const zSetValueRequest = z.object({
     value: z.string().max(65536)
 });
@@ -701,6 +714,48 @@ export const zClonedEnvironment = z.object({
     uncopied_secrets: z.array(zKeyName)
 });
 
+/**
+ * One lineage row. It carries a key id, the key's name at that revision
+ * and the transition - and nothing derived from a value.
+ *
+ */
+export const zChangedKey = z.object({
+    key_id: zId,
+    name: zKeyName,
+    change: z.enum([
+        'added',
+        'edited',
+        'removed'
+    ])
+});
+
+export const zPublishedEnvironment = z.object({
+    environment_id: zId,
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    schema_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    change_token: z.string(),
+    changed_keys: z.array(zChangedKey)
+});
+
+export const zPublishResult = z.object({
+    published: z.array(zId),
+    closed_in: z.array(zId),
+    environments: z.array(zPublishedEnvironment)
+});
+
+export const zRevision = z.object({
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    schema_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    published_by: zId,
+    published_at: z.iso.datetime(),
+    changed_keys: z.array(zChangedKey)
+});
+
+export const zRevisionList = z.object({
+    items: z.array(zRevision),
+    count: z.int()
+});
+
 export const zDeclareValuesRequest = z.object({
     key: zKeyName,
     environment_ids: z.array(zId).min(1).max(50),
@@ -729,6 +784,70 @@ export const zCopyValuesResult = z.object({
  *
  */
 export const zKeyClassification = z.enum(['secret', 'config']);
+
+/**
+ * One draft in the caller's own working state. `version_id` is the
+ * IMMUTABLE id a selective publish names; editing the same cell mints a
+ * new one and collects this row rather than mutating it.
+ *
+ * It never carries the staged value. A draft holds real material and that
+ * material is reveal-gated exactly as a published one is.
+ *
+ */
+export const zPendingChange = z.object({
+    version_id: zId,
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    operation: z.enum(['set', 'unset']),
+    staged_from_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    created_at: z.iso.datetime()
+});
+
+export const zSnapshotKey = z.object({
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification
+});
+
+export const zRevisionDetail = z.object({
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    schema_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    published_by: zId,
+    published_at: z.iso.datetime(),
+    changed_keys: z.array(zChangedKey),
+    change_token: z.string(),
+    keys: z.array(zSnapshotKey)
+});
+
+export const zCellSignal = z.object({
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    pending_version_id: z.optional(zId),
+    pending_operation: z.optional(z.enum(['set', 'unset'])),
+    pending_by_others: z.boolean(),
+    changed_in_revision: z.optional(z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }))
+});
+
+export const zEnvironmentSignals = z.object({
+    environment_id: zId,
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    cells: z.array(zCellSignal)
+});
+
+export const zExportedValue = z.object({
+    name: zKeyName,
+    classification: zKeyClassification,
+    revealed: z.boolean(),
+    value: z.optional(z.string())
+});
+
+export const zExportedValues = z.object({
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    items: z.array(zExportedValue),
+    count: z.int()
+});
 
 /**
  * One `(key, environment)` cell.
@@ -784,7 +903,8 @@ export const zDeliveredKey = z.object({
     presence: z.enum([
         'required',
         'forbidden',
-        'optional'
+        'optional',
+        'set'
     ])
 });
 
@@ -2770,9 +2890,9 @@ export const zClearValueData = z.object({
 });
 
 /**
- * The cell is absent. Clearing an already-absent cell says the same thing.
+ * The staged pending change.
  */
-export const zClearValueResponse = z.void();
+export const zClearValueResponse = zPendingChange;
 
 export const zGetValueData = z.object({
     body: z.optional(z.never()),
@@ -2802,9 +2922,9 @@ export const zSetValueData = z.object({
 });
 
 /**
- * The cell as stored. It never echoes the value back.
+ * The staged pending change. It never echoes the value back.
  */
-export const zSetValueResponse = zValueCell;
+export const zSetValueResponse = zPendingChange;
 
 export const zDeclareValuesData = z.object({
     body: zDeclareValuesRequest,
@@ -4205,3 +4325,104 @@ export const zRevokeMySessionData = z.object({
  * Revoked.
  */
 export const zRevokeMySessionResponse = z.void();
+
+export const zPublishPendingChangesData = z.object({
+    body: zPublishRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * What committed, and which environments advanced.
+ */
+export const zPublishPendingChangesResponse = zPublishResult;
+
+export const zGetEnvironmentSignalsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment's signals.
+ */
+export const zGetEnvironmentSignalsResponse = zEnvironmentSignals;
+
+export const zListRevisionsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The history.
+ */
+export const zListRevisionsResponse = zRevisionList;
+
+export const zGetRevisionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        revision: z.string().regex(/^(latest|[1-9][0-9]{0,18})$/)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The revision.
+ */
+export const zGetRevisionResponse = zRevisionDetail;
+
+export const zExportValuesData = z.object({
+    body: zExportValuesRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The resolved snapshot.
+ */
+export const zExportValuesResponse = zExportedValues;
+
+export const zWatchProjectEventsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * An event stream.
+ */
+export const zWatchProjectEventsResponse = z.string();
+
+export const zRotateTokenKeyData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The rotation.
+ */
+export const zRotateTokenKeyResponse = zTokenKeyRotation;

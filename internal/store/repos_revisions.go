@@ -1,0 +1,858 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/store/pggen"
+	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
+)
+
+// The revision model's binding layer (#51). Same discipline as repos.go and
+// repos_values.go: every method verifies the proof at the boundary against its
+// own registered store operation and binds every chain parameter exclusively
+// from the verified proof's resolved chain.
+//
+// `environment_id` is not a chain column of these tables (see the migration),
+// so every environment-addressed method binds it through envOf — a proof of
+// project depth is refused loudly rather than binding the empty string. The
+// project-scoped methods take no environment parameter at all.
+//
+// A publish addresses a PROJECT but writes per ENVIRONMENT. It does not
+// smuggle an environment id past this boundary to do so: it authorizes
+// `publish` on each affected environment and writes under the environment-depth
+// proof that authorization mints, exactly as the copy path authorizes each
+// destination.
+
+func pendingOperation(raw string) (PendingOperation, error) {
+	switch PendingOperation(raw) {
+	case PendingSet:
+		return PendingSet, nil
+	case PendingUnset:
+		return PendingUnset, nil
+	}
+	return "", fmt.Errorf("store: pending change carries unknown operation %q", raw)
+}
+
+func revisionChange(raw string) (RevisionChange, error) {
+	switch RevisionChange(raw) {
+	case RevisionChangeAdded:
+		return RevisionChangeAdded, nil
+	case RevisionChangeEdited:
+		return RevisionChangeEdited, nil
+	case RevisionChangeRemoved:
+		return RevisionChangeRemoved, nil
+	}
+	return "", fmt.Errorf("store: revision lineage row carries unknown change %q", raw)
+}
+
+// --- sqlite ---
+
+type sqlitePending struct {
+	q   *sqlitegen.Queries
+	tok *authz.TxToken
+}
+
+func (r sqlitePending) ListForOwner(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForOwner, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingChangesForOwner(ctx, sqlitegen.ListPendingChangesForOwnerParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		OwnerID:   ownerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingChange, 0, len(rows))
+	for _, row := range rows {
+		change, err := pendingFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, change)
+	}
+	return out, nil
+}
+
+func (r sqlitePending) ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMarker, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListMarkers, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingMarkers(ctx, sqlitegen.ListPendingMarkersParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingMarker, 0, len(rows))
+	for _, row := range rows {
+		op, err := pendingOperation(row.Operation)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PendingMarker{
+			ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID,
+			OwnerID: row.OwnerID, Operation: op,
+		})
+	}
+	return out, nil
+}
+
+func (r sqlitePending) Stage(ctx context.Context, p authz.Proof, change NewPendingChange) error {
+	chain, err := authz.Verify(p, authz.StorePendingStage, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePendingStage)
+	if err != nil {
+		return err
+	}
+	if _, err := r.q.DeletePendingChangeForCell(ctx, sqlitegen.DeletePendingChangeForCellParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		KeyID:         change.KeyID,
+		OwnerID:       change.OwnerID,
+	}); err != nil {
+		return constraint(err)
+	}
+	return constraint(r.q.InsertPendingChange(ctx, sqlitegen.InsertPendingChangeParams{
+		ID:                 change.ID,
+		OrgID:              string(chain.Org),
+		ProjectID:          string(chain.Project),
+		EnvironmentID:      env,
+		KeyID:              change.KeyID,
+		OwnerID:            change.OwnerID,
+		Operation:          string(change.Operation),
+		Ciphertext:         change.Ciphertext,
+		StagedFromRevision: change.StagedFromRevision,
+		StagedFromEntry:    change.StagedFromEntry,
+		CreatedAt:          CanonTime(change.CreatedAt).Format(timeFormat),
+	}))
+}
+
+func (r sqlitePending) Discard(ctx context.Context, p authz.Proof, id string) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePendingDiscard, r.tok)
+	if err != nil {
+		return false, err
+	}
+	env, err := envOf(chain, authz.StorePendingDiscard)
+	if err != nil {
+		return false, err
+	}
+	rows, err := r.q.DeletePendingChangeByID(ctx, sqlitegen.DeletePendingChangeByIDParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		ID:            id,
+	})
+	if err != nil {
+		return false, constraint(err)
+	}
+	return rows > 0, nil
+}
+
+func (r sqlitePending) DiscardEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StorePendingDiscardEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePendingDiscardEnvironment)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.DeletePendingChangesForEnvironment(ctx, sqlitegen.DeletePendingChangesForEnvironmentParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	})
+	return constraint(err)
+}
+
+func (r sqlitePending) DiscardKey(ctx context.Context, p authz.Proof, keyID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StorePendingDiscardKey, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := r.q.DeletePendingChangesForKey(ctx, sqlitegen.DeletePendingChangesForKeyParams{
+		OrgID:     string(chain.Org),
+		ProjectID: string(chain.Project),
+		KeyID:     keyID,
+	})
+	if err != nil {
+		return 0, constraint(err)
+	}
+	return rows, nil
+}
+
+func pendingFromSQLite(row sqlitegen.PendingChange) (PendingChange, error) {
+	op, err := pendingOperation(row.Operation)
+	if err != nil {
+		return PendingChange{}, err
+	}
+	created, err := parseTime("pending change", row.ID, row.CreatedAt)
+	if err != nil {
+		return PendingChange{}, err
+	}
+	return PendingChange{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+		EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
+		Operation: op, Ciphertext: row.Ciphertext,
+		StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
+		CreatedAt: created,
+	}, nil
+}
+
+type sqliteSnapshots struct {
+	q   *sqlitegen.Queries
+	tok *authz.TxToken
+}
+
+func (r sqliteSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsLatest, r.tok)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsLatest)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	row, err := r.q.GetLatestSnapshot(ctx, sqlitegen.GetLatestSnapshotParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return revisionSnapshotFromSQLite(row)
+}
+
+func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsAtRevision, r.tok)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsAtRevision)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	row, err := r.q.GetSnapshotByRevision(ctx, sqlitegen.GetSnapshotByRevisionParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		Revision:      revision,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return revisionSnapshotFromSQLite(row)
+}
+
+func (r sqliteSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsList)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshots(ctx, sqlitegen.ListSnapshotsParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Snapshot, 0, len(rows))
+	for _, row := range rows {
+		snap, err := revisionSnapshotFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, snap)
+	}
+	return out, nil
+}
+
+func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsEntries, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsEntries)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshotEntries(ctx, sqlitegen.ListSnapshotEntriesParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		SnapshotID:    snapshotID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SnapshotEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, SnapshotEntry{
+			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+			EnvironmentID: row.EnvironmentID, SnapshotID: row.SnapshotID,
+			KeyID: row.KeyID, KeyName: row.KeyName, Classification: row.Classification,
+			Ciphertext: row.Ciphertext, ValueEntryID: row.ValueEntryID,
+		})
+	}
+	return out, nil
+}
+
+func (r sqliteSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsChanges)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListRevisionKeyChanges(ctx, sqlitegen.ListRevisionKeyChangesParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		Revision:      revision,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RevisionKeyChange, 0, len(rows))
+	for _, row := range rows {
+		change, err := revisionChange(row.Change)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, RevisionKeyChange{
+			EnvironmentID: row.EnvironmentID, Revision: row.Revision,
+			KeyID: row.KeyID, KeyName: row.KeyName, Change: change,
+		})
+	}
+	return out, nil
+}
+
+func (r sqliteSnapshots) Insert(ctx context.Context, p authz.Proof, snapshot NewSnapshot) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsert, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsert)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertSnapshot(ctx, sqlitegen.InsertSnapshotParams{
+		ID:             snapshot.ID,
+		OrgID:          string(chain.Org),
+		ProjectID:      string(chain.Project),
+		EnvironmentID:  env,
+		Revision:       snapshot.Revision,
+		SchemaRevision: snapshot.SchemaRevision,
+		PublishedBy:    snapshot.PublishedBy,
+		PublishedAt:    CanonTime(snapshot.PublishedAt).Format(timeFormat),
+	}))
+}
+
+func (r sqliteSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry NewSnapshotEntry) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertEntry, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsertEntry)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertSnapshotEntry(ctx, sqlitegen.InsertSnapshotEntryParams{
+		ID:             entry.ID,
+		OrgID:          string(chain.Org),
+		ProjectID:      string(chain.Project),
+		EnvironmentID:  env,
+		SnapshotID:     entry.SnapshotID,
+		KeyID:          entry.KeyID,
+		KeyName:        entry.KeyName,
+		Classification: entry.Classification,
+		Ciphertext:     entry.Ciphertext,
+		ValueEntryID:   entry.ValueEntryID,
+	}))
+}
+
+func (r sqliteSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsertChange)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertRevisionKeyChange(ctx, sqlitegen.InsertRevisionKeyChangeParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+		Revision:      revision,
+		KeyID:         keyID,
+		KeyName:       keyName,
+		Change:        string(change),
+	}))
+}
+
+func (r sqliteSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsDeleteEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsDeleteEnvironment)
+	if err != nil {
+		return err
+	}
+	// Entries first: they reference the snapshot rows.
+	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, sqlitegen.DeleteSnapshotEntriesForEnvironmentParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	}); err != nil {
+		return constraint(err)
+	}
+	if _, err := r.q.DeleteRevisionKeyChangesForEnvironment(ctx, sqlitegen.DeleteRevisionKeyChangesForEnvironmentParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	}); err != nil {
+		return constraint(err)
+	}
+	_, err = r.q.DeleteSnapshotsForEnvironment(ctx, sqlitegen.DeleteSnapshotsForEnvironmentParams{
+		OrgID:         string(chain.Org),
+		ProjectID:     string(chain.Project),
+		EnvironmentID: env,
+	})
+	return constraint(err)
+}
+
+func revisionSnapshotFromSQLite(row sqlitegen.Snapshot) (Snapshot, error) {
+	published, err := parseTime("snapshot", row.ID, row.PublishedAt)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
+		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
+		PublishedAt: published,
+	}, nil
+}
+
+// --- postgres ---
+
+type pgPending struct {
+	q   *pggen.Queries
+	tok *authz.TxToken
+}
+
+func (r pgPending) ListForOwner(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForOwner, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingChangesForOwner(ctx, pggen.ListPendingChangesForOwnerParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		OwnerID:        ownerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingChange, 0, len(rows))
+	for _, row := range rows {
+		op, err := pendingOperation(row.Operation)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PendingChange{
+			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+			EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
+			Operation: op, Ciphertext: row.Ciphertext,
+			StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
+			CreatedAt: row.CreatedAt.Time.UTC(),
+		})
+	}
+	return out, nil
+}
+
+func (r pgPending) ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMarker, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListMarkers, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingMarkers(ctx, pggen.ListPendingMarkersParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingMarker, 0, len(rows))
+	for _, row := range rows {
+		op, err := pendingOperation(row.Operation)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PendingMarker{
+			ID: row.ID, EnvironmentID: row.EnvironmentID, KeyID: row.KeyID,
+			OwnerID: row.OwnerID, Operation: op,
+		})
+	}
+	return out, nil
+}
+
+func (r pgPending) Stage(ctx context.Context, p authz.Proof, change NewPendingChange) error {
+	chain, err := authz.Verify(p, authz.StorePendingStage, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePendingStage)
+	if err != nil {
+		return err
+	}
+	if _, err := r.q.DeletePendingChangeForCell(ctx, pggen.DeletePendingChangeForCellParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		KeyID:          change.KeyID,
+		OwnerID:        change.OwnerID,
+	}); err != nil {
+		return constraint(err)
+	}
+	return constraint(r.q.InsertPendingChange(ctx, pggen.InsertPendingChangeParams{
+		ID:                 change.ID,
+		ChainOrgID:         string(chain.Org),
+		ChainProjectID:     string(chain.Project),
+		ChainEnvID:         env,
+		KeyID:              change.KeyID,
+		OwnerID:            change.OwnerID,
+		Operation:          string(change.Operation),
+		Ciphertext:         change.Ciphertext,
+		StagedFromRevision: change.StagedFromRevision,
+		StagedFromEntry:    change.StagedFromEntry,
+		CreatedAt:          pgtype.Timestamptz{Time: CanonTime(change.CreatedAt), Valid: true},
+	}))
+}
+
+func (r pgPending) Discard(ctx context.Context, p authz.Proof, id string) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePendingDiscard, r.tok)
+	if err != nil {
+		return false, err
+	}
+	env, err := envOf(chain, authz.StorePendingDiscard)
+	if err != nil {
+		return false, err
+	}
+	rows, err := r.q.DeletePendingChangeByID(ctx, pggen.DeletePendingChangeByIDParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		ID:             id,
+	})
+	if err != nil {
+		return false, constraint(err)
+	}
+	return rows > 0, nil
+}
+
+func (r pgPending) DiscardEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StorePendingDiscardEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePendingDiscardEnvironment)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.DeletePendingChangesForEnvironment(ctx, pggen.DeletePendingChangesForEnvironmentParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	})
+	return constraint(err)
+}
+
+func (r pgPending) DiscardKey(ctx context.Context, p authz.Proof, keyID string) (int64, error) {
+	chain, err := authz.Verify(p, authz.StorePendingDiscardKey, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := r.q.DeletePendingChangesForKey(ctx, pggen.DeletePendingChangesForKeyParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		KeyID:          keyID,
+	})
+	if err != nil {
+		return 0, constraint(err)
+	}
+	return rows, nil
+}
+
+type pgSnapshots struct {
+	q   *pggen.Queries
+	tok *authz.TxToken
+}
+
+func (r pgSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsLatest, r.tok)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsLatest)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	row, err := r.q.GetLatestSnapshot(ctx, pggen.GetLatestSnapshotParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return revisionSnapshotFromPG(row), nil
+}
+
+func (r pgSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsAtRevision, r.tok)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsAtRevision)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	row, err := r.q.GetSnapshotByRevision(ctx, pggen.GetSnapshotByRevisionParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		Revision:       revision,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Snapshot{}, ErrNotFound
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return revisionSnapshotFromPG(row), nil
+}
+
+func (r pgSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsList)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshots(ctx, pggen.ListSnapshotsParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Snapshot, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, revisionSnapshotFromPG(row))
+	}
+	return out, nil
+}
+
+func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsEntries, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsEntries)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListSnapshotEntries(ctx, pggen.ListSnapshotEntriesParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		SnapshotID:     snapshotID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SnapshotEntry, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, SnapshotEntry{
+			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+			EnvironmentID: row.EnvironmentID, SnapshotID: row.SnapshotID,
+			KeyID: row.KeyID, KeyName: row.KeyName, Classification: row.Classification,
+			Ciphertext: row.Ciphertext, ValueEntryID: row.ValueEntryID,
+		})
+	}
+	return out, nil
+}
+
+func (r pgSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsChanges)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListRevisionKeyChanges(ctx, pggen.ListRevisionKeyChangesParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		Revision:       revision,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RevisionKeyChange, 0, len(rows))
+	for _, row := range rows {
+		change, err := revisionChange(row.Change)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, RevisionKeyChange{
+			EnvironmentID: row.EnvironmentID, Revision: row.Revision,
+			KeyID: row.KeyID, KeyName: row.KeyName, Change: change,
+		})
+	}
+	return out, nil
+}
+
+func (r pgSnapshots) Insert(ctx context.Context, p authz.Proof, snapshot NewSnapshot) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsert, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsert)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertSnapshot(ctx, pggen.InsertSnapshotParams{
+		ID:             snapshot.ID,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		Revision:       snapshot.Revision,
+		SchemaRevision: snapshot.SchemaRevision,
+		PublishedBy:    snapshot.PublishedBy,
+		PublishedAt:    pgtype.Timestamptz{Time: CanonTime(snapshot.PublishedAt), Valid: true},
+	}))
+}
+
+func (r pgSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry NewSnapshotEntry) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertEntry, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsertEntry)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertSnapshotEntry(ctx, pggen.InsertSnapshotEntryParams{
+		ID:             entry.ID,
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		SnapshotID:     entry.SnapshotID,
+		KeyID:          entry.KeyID,
+		KeyName:        entry.KeyName,
+		Classification: entry.Classification,
+		Ciphertext:     entry.Ciphertext,
+		ValueEntryID:   entry.ValueEntryID,
+	}))
+}
+
+func (r pgSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsInsertChange)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertRevisionKeyChange(ctx, pggen.InsertRevisionKeyChangeParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+		Revision:       revision,
+		KeyID:          keyID,
+		KeyName:        keyName,
+		Change:         string(change),
+	}))
+}
+
+func (r pgSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsDeleteEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsDeleteEnvironment)
+	if err != nil {
+		return err
+	}
+	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, pggen.DeleteSnapshotEntriesForEnvironmentParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	}); err != nil {
+		return constraint(err)
+	}
+	if _, err := r.q.DeleteRevisionKeyChangesForEnvironment(ctx, pggen.DeleteRevisionKeyChangesForEnvironmentParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	}); err != nil {
+		return constraint(err)
+	}
+	_, err = r.q.DeleteSnapshotsForEnvironment(ctx, pggen.DeleteSnapshotsForEnvironmentParams{
+		ChainOrgID:     string(chain.Org),
+		ChainProjectID: string(chain.Project),
+		ChainEnvID:     env,
+	})
+	return constraint(err)
+}
+
+func revisionSnapshotFromPG(row pggen.Snapshot) Snapshot {
+	return Snapshot{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
+		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
+		PublishedAt: row.PublishedAt.Time.UTC(),
+	}
+}

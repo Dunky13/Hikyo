@@ -13,6 +13,7 @@ import {
 import {
   zCopyValuesResult,
   zEnvironmentList,
+  zPendingChange,
   zRevealWindow,
   zValueCell,
   zValueList,
@@ -368,7 +369,15 @@ export function useRevealAll(env: EnvRef) {
   });
 }
 
-/** useSetValue is the write path, including write-only replacement. */
+/**
+ * useSetValue is the write path, including write-only replacement.
+ *
+ * It STAGES (#51): the edit lands in the caller's own working state and the
+ * environment keeps delivering what it delivered, so what comes back is the
+ * immutable version id a later publish names — not a cell. The value cache is
+ * still invalidated, because the matrix's pending marker moved even though the
+ * delivered value did not.
+ */
 export function useSetValue(env: EnvRef) {
   const queries = useQueryClient();
   return useMutation({
@@ -383,7 +392,7 @@ export function useSetValue(env: EnvRef) {
           },
           body: { value: input.value },
         }),
-        zValueCell,
+        zPendingChange,
       ),
     onSuccess: () => queries.invalidateQueries({ queryKey: valuesKey(env) }),
   });
