@@ -85,14 +85,16 @@ SELECT session_generation FROM principals WHERE id = ?;
 -- name: GetSessionByVerifier :one
 SELECT id, principal_id, verifier, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier,
+       requesting_origin
 FROM sessions WHERE verifier = ?;
 
 -- hikyo:authn-resolution
 -- name: GetSessionByID :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier,
+       requesting_origin
 FROM sessions WHERE id = ?;
 
 -- hikyo:authn-resolution
@@ -153,14 +155,47 @@ SET verifier = ?, kdf_memory_kib = ?, kdf_time = ?, kdf_parallelism = ?,
     updated_at = ?
 WHERE account_id = ? AND row_version = ?;
 
+-- One insert for every session artifact, including the workspace session
+-- (#71). requesting_origin and handoff_id are NULL for cli and browser rows
+-- and NOT NULL for a workspace row; the table CHECK ties them to the artifact,
+-- so a second insert statement for the workspace case would buy nothing but a
+-- second place for the pairing to drift.
 -- hikyo:authn-resolution
 -- name: InsertSession :exec
 INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
      last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
-     provider_id, csrf_verifier)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+     provider_id, csrf_verifier, requesting_origin, handoff_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- The active-session listing (#71 criterion 5). A workspace session appears
+-- here as its own artifact type, beside the cli and browser rows, which is the
+-- ADR's requirement and the reason it is a `sessions` row at all. Metadata
+-- only: no verifier is selected, here or anywhere.
+-- hikyo:authn-resolution
+-- name: ListSessionsForPrincipal :many
+SELECT id, artifact, auth_method, factors, authenticated_at, created_at,
+       last_seen_at, idle_expires_at, absolute_expires_at, source_ip,
+       user_agent, requesting_origin, handoff_id
+FROM sessions WHERE principal_id = ? ORDER BY created_at, id;
+
+-- Self-scoped revocation: the principal conjunct is what makes one caller
+-- unable to revoke another's session by guessing an id, and it is why the
+-- statement reports rows affected rather than succeeding silently.
+-- hikyo:authn-resolution
+-- name: DeleteSessionForPrincipal :execrows
+DELETE FROM sessions WHERE id = ? AND principal_id = ?;
+
+-- The origin kill switch (#71). Removing an origin from the allowlist
+-- atomically revokes every workspace session bound to it -- ONE statement over
+-- one indexed column, in the same transaction as the allowlist delete, which
+-- is what makes de-allowlisting a real kill switch rather than a headers
+-- change. Only workspace rows carry a requesting_origin, so no cli or browser
+-- session can be caught by it.
+-- hikyo:authn-resolution
+-- name: DeleteSessionsForOrigin :execrows
+DELETE FROM sessions WHERE requesting_origin = ?;
 
 -- hikyo:authn-resolution
 -- name: TouchSession :exec
@@ -360,6 +395,8 @@ DELETE FROM sessions WHERE provider_id = ?;
 -- reveal guard's own headline case: a protected environment is capped at 0, so
 -- its disclosures are "a passkey ceremony per disclosure" (ceremony, disclose,
 -- ceremony again) and the second ceremony hit the first window's spent row.
+-- The same fault bit every opener, including a workspace step-up (#71)
+-- repeated on one environment, so the fix is shared by all of them.
 --
 -- It is ONE atomic statement rather than a delete followed by an insert,
 -- because two tabs finishing ceremonies at the same time are a real shape: on
@@ -369,14 +406,15 @@ DELETE FROM sessions WHERE provider_id = ?;
 -- loser update instead of fail.
 --
 -- consumed_at resets to NULL because the row now describes the NEW ceremony,
--- which nothing has spent.
+-- which nothing has spent. bound_operation and bound_key_set (#71) carry a
+-- workspace step-up's exact-consent binding; the human openers write NULLs.
 -- hikyo:authn-resolution
 -- name: InsertReauthWindow :exec
 INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-     consumed_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+     consumed_at, created_at, bound_operation, bound_key_set)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 ON CONFLICT (session_id, environment_id) DO UPDATE SET
     id = excluded.id,
     ceremony_id = excluded.ceremony_id,
@@ -387,9 +425,9 @@ ON CONFLICT (session_id, environment_id) DO UPDATE SET
     hard_expires_at = excluded.hard_expires_at,
     credential_epoch = excluded.credential_epoch,
     consumed_at = NULL,
-    created_at = excluded.created_at;
-
-
+    created_at = excluded.created_at,
+    bound_operation = excluded.bound_operation,
+    bound_key_set = excluded.bound_key_set;
 
 -- Start resolves the provider by slug for an enabled provider only: a login,
 -- link or reauth may only begin against a provider that is currently serving.
@@ -410,7 +448,7 @@ FROM oidc_providers WHERE slug = ? AND enabled = 1;
 -- name: GetReauthWindow :one
 SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
        authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-       consumed_at, created_at
+       consumed_at, created_at, bound_operation, bound_key_set
 FROM reauth_windows WHERE session_id = ? AND environment_id = ?;
 
 -- Slide the idle window clock on a sliding (non single-decision) window. The hard
@@ -510,6 +548,7 @@ SELECT MAX(e) AS max_epoch FROM (
     UNION ALL SELECT restore_epoch FROM auth_instance_state WHERE id = 1
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM credential_authorities
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM external_identities
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM instance_connections
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM machine_credentials
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM oidc_transactions
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM password_credentials

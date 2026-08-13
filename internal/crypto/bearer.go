@@ -73,6 +73,25 @@ const (
 	// credential epoch, restored verifiers permanently dead) inherits unchanged
 	// from the locked machine-credential mechanics.
 	ArtifactSCIM ArtifactType = "scim"
+	// ArtifactInstanceConn is the directory credential of an instance
+	// connection (#71): the multi-instance ADR's amendment to the closed type
+	// list, so the credential scans as what it is. Mechanically an ordinary
+	// machine bearer; what makes it different is not the grammar but the
+	// artifact-eligibility confinement in internal/authz, which admits it to
+	// exactly one operation.
+	ArtifactInstanceConn ArtifactType = "ic"
+	// ArtifactWorkspaceSession is a workspace session (#71) — a session row in
+	// every locked mechanical respect, differing from a browser session only in
+	// transport: presented in an Authorization header, never a cookie.
+	ArtifactWorkspaceSession ArtifactType = "ws"
+	// ArtifactHandoffState and ArtifactHandoffCode are the two front-channel
+	// values of the cross-origin UI handoff (#71), the browser edition of the
+	// RFC 8252 shape the API/CLI ADR already fixed for the CLI. They carry full
+	// artifact entropy for the same reason `st` does: they cross a redirect, so
+	// they redact like any other bearer value and a truncated one is refused
+	// with zero server calls.
+	ArtifactHandoffState ArtifactType = "hs"
+	ArtifactHandoffCode  ArtifactType = "hc"
 )
 
 // artifactFormatVersion is the grammar's `version` field. It exists so a

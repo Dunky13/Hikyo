@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store/authn"
@@ -70,6 +71,17 @@ var MFAMandatory = map[domain.Capability]bool{
 	domain.CapManageMembers:   true,
 	domain.CapCredentialReset: true,
 	domain.CapInstanceConfig:  true,
+	// The multi-instance ADR's amendment to #16 (#71). Its restatement of the
+	// "every instance capability is MFA-mandatory" rule binds HUMAN SESSIONS,
+	// and names the instance-connection machine principal as its single
+	// exemption — which needs no code here, because assuranceInadequate already
+	// requires a non-empty SessionID and a machine has none.
+	//
+	// So this row costs the connection principal nothing and gains the human
+	// side the gate the ADR requires: the directory listing carries another
+	// instance's org and project NAMES, which is foreign structure, and reading
+	// is power that #24's precedent says is never bundled.
+	domain.CapInstanceDirector: true,
 }
 
 // AssuranceEnforced reports whether the chokepoint refuses an MFA-mandatory
@@ -88,6 +100,13 @@ var MFAMandatory = map[domain.Capability]bool{
 // registration of the first factor audit event, which has now happened. See
 // docs/handoff/54-human-auth-full.md.
 const AssuranceEnforced = true
+
+// WorkspaceArtifact is the value a WORKSPACE session's `artifact` column
+// stores. It is NOT crypto.ArtifactWorkspaceSession ("ws"), which is the bearer
+// grammar's type: the two are different strings on purpose, and a rule keyed on
+// the wrong one silently matches nothing. It lives here rather than in the
+// service because the authentication leg is the first consumer.
+const WorkspaceArtifact = "workspace"
 
 // AdequateAssurance reports whether a session's assurance record satisfies the
 // MFA-mandatory rule: two distinct factor classes, or a WebAuthn assertion
@@ -153,11 +172,37 @@ func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now t
 	// mutate, and a machine has none. AuthenticateCaller below is the single
 	// entry point that admits both, and it is what the operation chokepoint
 	// uses.
+	return a.authenticateSession(ctx, presented, now,
+		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession)
+}
+
+// authenticateSession is Authenticate's body, parameterised by the artifact
+// types the caller admits. The parameter exists for exactly one reason: a
+// WORKSPACE session (#71) resolves through identical machinery — same verifier
+// scheme, same three reads, same clocks, generation and epoch predicates — but
+// must NOT be admitted by Authenticate itself, because Authenticate is the
+// account-security surface (logout, factor enrolment, passkeys, identity
+// linking, step-up) and a workspace bearer is a cross-origin credential held in
+// another origin's JavaScript. Letting it mutate the account's own credentials
+// would hand the viewing origin's XSS surface the human's authentication
+// factors, which is precisely the blast radius the ADR bounds.
+//
+// So the admitting set is a parameter rather than a constant, and the broad
+// set is named only by AuthenticateCaller — the same structural trick #61 used
+// to keep machine tokens out of the human session surface. A new
+// session-surface verb is workspace-proof unless someone opts it in.
+func (a *TxAuthorizer) authenticateSession(ctx context.Context, presented string, now time.Time, admits ...crypto.ArtifactType) (Identity, error) {
 	if presented == "" {
 		return Identity{}, domain.ErrUnauthenticated
 	}
-	if crypto.ParseArtifact(presented, crypto.ArtifactCLISession) != nil &&
-		crypto.ParseArtifact(presented, crypto.ArtifactBrowserSession) != nil {
+	grammatical := false
+	for _, t := range admits {
+		if crypto.ParseArtifact(presented, t) == nil {
+			grammatical = true
+			break
+		}
+	}
+	if !grammatical {
 		return Identity{}, domain.ErrUnauthenticated
 	}
 
@@ -197,7 +242,47 @@ func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string,
 		crypto.ParseArtifact(presented, crypto.ArtifactAutomation) == nil {
 		return a.authenticateMachine(ctx, presented, now)
 	}
-	return a.Authenticate(ctx, presented, now)
+	// The instance-connection credential (#71). It is a machine artifact with
+	// its own table and its own resolution leg, and it is admitted HERE rather
+	// than in Authenticate for the same reason the service-account credentials
+	// are: it has no session row to mutate, so every account-security verb
+	// refuses it by construction.
+	//
+	// Admission is not authorization. What this credential may actually reach
+	// is decided at the chokepoint by the artifact-eligibility table, which
+	// confines it to the directory-serve operation and nothing else.
+	if crypto.ParseArtifact(presented, crypto.ArtifactInstanceConn) == nil {
+		return a.authenticateInstanceConnection(ctx, presented, now)
+	}
+	// The session leg, admitting the WORKSPACE artifact (#71) alongside the two
+	// same-origin ones. This is the ONLY entry point that admits it: see
+	// authenticateSession for why Authenticate must not.
+	return a.authenticateSession(ctx, presented, now,
+		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession, crypto.ArtifactWorkspaceSession)
+}
+
+// AuthenticateSelfSurface is the door for the SELF-SCOPED surface — the
+// caller's own active-session listing and its revoke. It admits the three
+// SESSION artifacts and nothing else.
+//
+// It is a third named entry rather than a flag on AuthenticateCaller because
+// the admitting set is the enforcement, exactly as it is for Authenticate: an
+// instance-connection credential (and every service-account token) is refused
+// HERE, by construction, before any handler logic runs, so no future
+// self-scoped verb can accidentally admit one. That closes the endpoint-level
+// half of acceptance criterion 4 — the artifact-eligibility table confines `ic`
+// at the operation chokepoint, and these routes deliberately call no operation,
+// so without this they were the one door it never passed through.
+//
+// A workspace bearer IS admitted, and must be: the shell's liveness poll is
+// this endpoint, and it is how both kill switches become visible to a foreign
+// origin. What a workspace bearer may SEE and REVOKE here is narrowed to its
+// own row by the service, because enumerating and ending the human's CLI and
+// browser sessions is not a power a credential living in another origin's
+// JavaScript may hold.
+func (a *TxAuthorizer) AuthenticateSelfSurface(ctx context.Context, presented string, now time.Time) (Identity, error) {
+	return a.authenticateSession(ctx, presented, now,
+		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession, crypto.ArtifactWorkspaceSession)
 }
 
 // AuthenticateSessionByID revalidates the session recorded in a server-side
@@ -254,6 +339,22 @@ func (a *TxAuthorizer) authenticateResolvedSession(ctx context.Context, row auth
 		live = false
 	// A session row we cannot read is not a session we may trust.
 	case !factorsOK:
+		live = false
+	// THE WORKSPACE SESSION'S ORIGIN BINDING (#71). A `ws` bearer is bound to
+	// exactly one requesting origin at issuance, and this is where that binding
+	// becomes an authentication predicate rather than a revocation key. Without
+	// it, a bearer exfiltrated from allowlisted origin A authenticates happily
+	// from allowlisted origin B — the allowlist would be the only gate, and it
+	// admits every consented shell rather than the one this session belongs to.
+	//
+	// ABSENCE IS MISMATCH. A workspace bearer only ever legitimately lives in
+	// browser JavaScript making cross-origin requests, and those always carry
+	// an Origin header; a presentation without one is a presentation from
+	// somewhere that is not the shell it was issued to. Non-workspace artifacts
+	// are untouched — a CLI or same-origin browser session has no bound origin
+	// and this predicate never looks at them.
+	case row.Artifact == WorkspaceArtifact &&
+		row.RequestingOrigin != audit.FromContext(ctx).RequestOrigin:
 		live = false
 	}
 	if !live {

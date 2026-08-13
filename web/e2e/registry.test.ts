@@ -101,40 +101,29 @@ describe('surfacesForFlow', () => {
 describe('the execution half of closure', () => {
   const log = (...lines: string[]) => lines.map((l) => `${l}\n`).join('');
 
+  // The expectations below are DERIVED from FLOWS rather than restated beside
+  // it. A hard-coded count is a second place to remember, and the person who
+  // adds a flow is exactly the person who will not: the rule under test is
+  // "every claim ran", so the arithmetic has to be the registry's own.
+  const claims = FLOWS.flatMap((flow) => flow.surfaces.map((surface) => [flow.id, surface]));
+
   it('is satisfied when every claim ran', () => {
-    expect(
-      unexecutedClaims(
-        log(
-          'login\tlogin\tdark',
-          'shell\toverview\tdark',
-          'shell\tprojects\tlight',
-          'shell\tsettings\tdark',
-          'reveal\tvalues\tdark',
-          'machine-access\tmachine-access\tdark',
-        ),
-      ),
-    ).toEqual([]);
+    expect(unexecutedClaims(log(...claims.map(([f, s]) => `${f}\t${s}\tdark`)))).toEqual([]);
   });
 
   it('fails a surface that was claimed but never asserted', () => {
-    const problems = unexecutedClaims(
-      log(
-        'login\tlogin\tdark',
-        'shell\toverview\tdark',
-        'reveal\tvalues\tdark',
-        'machine-access\tmachine-access\tdark',
-      ),
-    );
-    expect(problems).toHaveLength(2);
-    expect(problems.join(' ')).toContain('claims surface "projects" but the pinned assertion set never ran');
-    expect(problems.join(' ')).toContain('claims surface "settings" but the pinned assertion set never ran');
+    const [first = ['', '']] = claims;
+    const problems = unexecutedClaims(log(`${first[0]}\t${first[1]}\tdark`));
+    expect(problems).toHaveLength(claims.length - 1);
+    for (const [, surface] of claims.slice(1)) {
+      expect(problems.join(' ')).toContain(
+        `claims surface "${surface}" but the pinned assertion set never ran`,
+      );
+    }
   });
 
   it('fails everything when nothing ran at all', () => {
-    // One line per (flow, surface) pair in the registry.
-    expect(unexecutedClaims('')).toHaveLength(
-      FLOWS.reduce((total, flow) => total + flow.surfaces.length, 0),
-    );
+    expect(unexecutedClaims('')).toHaveLength(claims.length);
   });
 
   it('does not accept another flow\'s execution as this one\'s', () => {

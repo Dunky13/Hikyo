@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/config"
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/oidcfed"
+	"github.com/Dunky13/hikyo/internal/remotefetch"
 	"github.com/Dunky13/hikyo/internal/server"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
@@ -236,6 +238,25 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Cache: &oidcfed.Cache{Limiter: limiter},
 	}
 	scimSvc := &service.SCIM{DB: db, Auth: authSvc}
+	fetchCfg := remotefetch.DefaultConfig()
+	if cfg.DirectoryProxy != "" {
+		// Explicit configuration is the ONLY way egress traverses a forward
+		// proxy. config.Load has already refused a non-https or hostless value,
+		// so a parse failure here would be an internal inconsistency rather
+		// than operator input — it still fails the boot loudly rather than
+		// silently reverting to direct egress, because "the proxy I configured
+		// is being bypassed" is exactly the surprise this control exists to
+		// prevent.
+		proxy, err := url.Parse(cfg.DirectoryProxy)
+		if err != nil {
+			return nil, fmt.Errorf("boot: directory proxy: %w", err)
+		}
+		fetchCfg.Proxy = proxy
+	}
+	fetcher, err := remotefetch.New(fetchCfg)
+	if err != nil {
+		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
+	}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -287,8 +308,14 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// table and the same bounds. Two instances would let the wire clamp a
 		// page against a different number than the one the discovery document
 		// advertises.
-		SCIM:           scimSvc,
-		SCIMWire:       scimSvc,
+		SCIM:     scimSvc,
+		SCIMWire: scimSvc,
+		// Multi-instance (#71). The outbound client is built from the
+		// owner-ratified bounds table (2026-08-13) and is the ONLY door to a
+		// foreign instance: with zero configured remotes it originates zero
+		// connections, which is what leaves the air-gap posture unchanged.
+		Remotes:        &service.Remotes{DB: db, Keyring: kr, Fetch: fetcher},
+		Workspace:      &service.Workspace{DB: db, Version: Version, Reauth: authSvc},
 		Admission:      limiter,
 		Version:        Version,
 		Log:            log,

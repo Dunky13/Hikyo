@@ -530,6 +530,100 @@ const (
 	// audited. The RESPONSE is the uniform 401 either way; the trail is where
 	// the distinction lives, which is the whole point of auditing it.
 	EventSCIMCredentialRefused EventType = "scim.credential_refused"
+	// remote.* — multi-instance (#71, multi-instance ADR § Audit). Both sides
+	// of the relationship land in the INSTANCE trail: a remote entry, a
+	// connection credential and an origin allowlist are all instance
+	// configuration, and the directory listing addresses no tenant.
+	//
+	// Viewing side. remote.added carries the pin digest because the pin IS the
+	// trust decision a human made interactively, and an audit trail that
+	// recorded the URL but not the key the operator confirmed would record the
+	// wrong half.
+	EventRemoteAdded   EventType = "remote.added"
+	EventRemoteRemoved EventType = "remote.removed"
+	EventRemoteRenamed EventType = "remote.renamed"
+	// remote.fetch_failed carries the closed outcome enum, never a raw
+	// transport error: unreachable / credential-rejected / pin-mismatch /
+	// redirect-refused / identity-conflict / self-connected. The operator's fix
+	// differs per outcome, which is the whole reason the enum is closed rather
+	// than a message.
+	EventRemoteFetchFailed EventType = "remote.fetch_failed"
+	// remote.directory_viewed is the listing read, audited because it is
+	// FOREIGN STRUCTURE and `instance-directory` is a read-is-power grant — the
+	// audit ADR's own argument applied to this ADR's own data. Successful
+	// fetches ride this event: the fetch happens because of the view, so they
+	// are not separately per-remote evented.
+	EventRemoteDirectoryViewed EventType = "remote.directory_viewed"
+
+	// Serving side.
+	EventRemoteCredentialMinted  EventType = "remote.credential_minted"
+	EventRemoteCredentialRevoked EventType = "remote.credential_revoked"
+	// remote.directory_served is one event per authenticated listing serve,
+	// actor = the instance-connection principal, in the ACCESS retention class
+	// because it is the machine-fetch stream shape.
+	EventRemoteDirectoryServed EventType = "remote.directory_served"
+	// remote.origin_allowlist_changed brackets the consent list, and the
+	// removal event carries the count of workspace sessions the same
+	// transaction killed — de-allowlisting is a kill switch, and a trail that
+	// recorded the config change but not its blast radius would understate it.
+	EventRemoteOriginAllowlistChanged EventType = "remote.origin_allowlist_changed"
+	// Workspace lifecycle. Each carries the normalized requesting origin and
+	// the handoff transaction id; the session artifact id is present where a
+	// session exists. A FAILED handoff predates any session, so its session
+	// field is explicitly nullable and the transaction id is the correlating
+	// key.
+	EventRemoteWorkspaceSessionIssued  EventType = "remote.workspace_session_issued"
+	EventRemoteWorkspaceSessionRevoked EventType = "remote.workspace_session_revoked"
+	EventRemoteHandoffFailed           EventType = "remote.handoff_failed"
+
+	// The two read events below are NOT in the multi-instance ADR's § Audit
+	// enumeration, and they are here anyway because the AUDIT ADR forces them:
+	// its default-deny permit rule admits `audited: none` only for tenant-class
+	// bare-`read` operations, and both of these are instance-class reads of
+	// custody state. Registering them is the same disposition #54 took when it
+	// added auth.provider_read for exactly this collision, and #61 repeated for
+	// identity.lifetime_policy_read. Flagged for review as a #71 addition
+	// rather than smuggled in as if the ADR had named them.
+	EventRemoteCredentialsListed   EventType = "remote.credentials_listed"
+	EventRemoteOriginAllowlistRead EventType = "remote.origin_allowlist_read"
+
+	// NOT REGISTERED HERE, deliberately: `identity.disclosure`, the per-key
+	// disclosure event on a machine fetch. #15's locked cardinality — one
+	// immutable event per disclosed key, never collapsed, never counted — is
+	// unchanged and binding, but there is no fetch path in this repository
+	// yet (no secret values, no delivery manifest, no cursor), so there is no
+	// key for a per-key event to name. This registry's closure invariant
+	// refuses a type with no emitter, and it is right to: registering it now
+	// would be dead catalogue asserting a guarantee nothing upholds.
+	//
+	// remote.* — the multi-instance categories (#71, multi-instance ADR §
+	// Audit) ARE registered above, every one of them that has an honest
+	// emitter, including remote.directory_served; its audited_exemptions.json
+	// pin is gone with the serving surface that now emits it, and
+	// remote_e2e_test.go asserts on both engines that no registered remote.*
+	// type is declared without being emitted.
+	//
+	// TWO of that category are deliberately unregistered, because neither has a
+	// moment at which this build could truthfully emit it.
+	//
+	// The first is remote.auth_failed, the AUTHENTICATION failure of a
+	// directory credential. A failed machine presentation today rides the SAME
+	// silent path a failed human session does at the chokepoint; giving machines
+	// a failure event humans do not have would claim an asymmetry the system
+	// does not implement. (An authenticated authorization DENIAL is a different
+	// thing and is already durable, per the locked catalogue's own split.) It
+	// lands with the pre-authentication admission wiring.
+	//
+	// The second, and this is the one acceptance
+	// criterion #71 does not meet: remote.workspace_session_expired. Expiry is
+	// passive — no scheduler or ticker exists in the binary, and a session
+	// authentication miss is deliberately silent at the chokepoint (a workspace
+	// bearer that has expired must be indistinguishable from one that never
+	// existed). There is therefore no moment at which this instance could
+	// truthfully emit it, and the closure invariant below refuses a type with
+	// no emitter — rightly, because registering it would be dead catalogue
+	// asserting a guarantee nothing upholds. It lands with a scheduler, exactly
+	// as #61's per-key disclosure event lands with the fetch surface.
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -1611,6 +1705,208 @@ var registry = map[EventType]TypeSpec{
 			"served_stale":       {Kind: KindBool, Required: true},
 			"staleness_breached": {Kind: KindBool, Required: true},
 			"refresh_throttled":  {Kind: KindBool, Required: true},
+		},
+	},
+	// remote.* (#71). Every row lands in the instance trail only: nothing here
+	// addresses a tenant, and the directory listing crosses org boundaries by
+	// design.
+	EventRemoteAdded: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"remote_id": {Kind: KindString, Required: true},
+			"name":      {Kind: KindFreeText, Required: true},
+			"url":       {Kind: KindString, Required: true},
+			// The pin the human confirmed interactively. Recording the URL
+			// without it would record the wrong half of the trust decision.
+			"spki_pin": {Kind: KindString, Required: true},
+			// The remote's own opaque identity, as returned by the verifying
+			// fetch `remote add` performs before committing the entry.
+			"remote_identity": {Kind: KindString, Required: true},
+		},
+	},
+	EventRemoteRemoved: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"remote_id": {Kind: KindString, Required: true},
+			"name":      {Kind: KindFreeText, Required: true},
+			"url":       {Kind: KindString, Required: true},
+		},
+	},
+	EventRemoteRenamed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"remote_id": {Kind: KindString, Required: true},
+			"old_name":  {Kind: KindFreeText, Required: true},
+			"new_name":  {Kind: KindFreeText, Required: true},
+		},
+	},
+	EventRemoteFetchFailed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"remote_id": {Kind: KindString, Required: true},
+			"name":      {Kind: KindFreeText, Required: true},
+			// The closed FETCH outcome enum, by name and never by detail: a
+			// raw transport error here would be foreign bytes on the trail.
+			// Named `fetch_outcome` and not `outcome` because the envelope
+			// already carries an Outcome and a payload field may not shadow
+			// it — these are different facts (the envelope says the operation
+			// failed, this says HOW the connection failed).
+			"fetch_outcome": {Kind: KindString, Required: true},
+		},
+	},
+	EventRemoteDirectoryViewed: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"remote_count": {Kind: KindInt, Required: true},
+			// How many of the listed entries were served from a snapshot
+			// rather than a live fetch — the freshness question an
+			// investigation actually asks of a directory read.
+			"stale_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteCredentialMinted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"connection_id":    {Kind: KindString, Required: true},
+			"target_principal": {Kind: KindString, Required: true},
+			// Free text: the label names the INTENDED peer and is descriptive,
+			// not enforced — the serving instance cannot verify who holds the
+			// token and does not pretend to.
+			"label":           {Kind: KindFreeText, Required: true},
+			"credential_kind": {Kind: KindString, Required: true},
+			"lifetime":        {Kind: KindString, Required: true},
+			"expires_at":      {Kind: KindString},
+			"clamped":         {Kind: KindBool, Required: true},
+		},
+	},
+	EventRemoteCredentialRevoked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"connection_id":    {Kind: KindString, Required: true},
+			"target_principal": {Kind: KindString, Required: true},
+			"label":            {Kind: KindFreeText, Required: true},
+		},
+	},
+	EventRemoteCredentialsListed: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteDirectoryServed: {
+		SchemaVersion: 1,
+		// Access, not security: this is the machine-fetch stream shape, one
+		// event per authenticated serve.
+		//
+		// THE ACTOR IS THE AUTHENTICATED PRINCIPAL, WHICH IS NOT ALWAYS A
+		// CONNECTION. `instance-directory` is a grantable atom on the HUMAN
+		// side — the ADR grants "the hop to exactly the humans who work across
+		// instances" — so a human reading this listing through the UI reaches
+		// the same operation and produces the same event, with no connection
+		// row behind them. Declaring the actor as "the connection principal"
+		// described only half the emitters and left the other half looking like
+		// a bug.
+		//
+		// `principal_class` is what keeps the two legible in one stream:
+		// `instance-connection` for a foreign installation's credential,
+		// `human` for a person. `connection_id` and `label` are empty exactly
+		// in the human case, which is why they are not the answer to "who".
+		Retention: RetentionAccess,
+		Outcomes:  map[Outcome]bool{OutcomeSuccess: true},
+		Trails:    map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"connection_id":   {Kind: KindString, Required: true},
+			"label":           {Kind: KindFreeText, Required: true},
+			"principal_class": {Kind: KindString, Required: true},
+			"org_count":       {Kind: KindInt, Required: true},
+			"project_count":   {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteOriginAllowlistChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"origin": {Kind: KindString, Required: true},
+			"change": {Kind: KindString, Required: true}, // added | removed
+			// Removal only: the workspace sessions the SAME transaction
+			// killed. A trail recording the config change without its blast
+			// radius would understate a kill switch.
+			"sessions_revoked": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteOriginAllowlistRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRemoteWorkspaceSessionIssued: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"origin":     {Kind: KindString, Required: true},
+			"handoff_id": {Kind: KindString, Required: true},
+			"purpose":    {Kind: KindString, Required: true},
+		},
+	},
+	EventRemoteWorkspaceSessionRevoked: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"session_id": {Kind: KindString, Required: true},
+			"origin":     {Kind: KindString, Required: true},
+			// explicit | origin-removed. The two are the same fact with
+			// different causes, and an incident review needs the cause.
+			"cause": {Kind: KindString, Required: true},
+		},
+	},
+	EventRemoteHandoffFailed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// The transaction id is the CORRELATING KEY: a failed handoff
+			// predates any session, so there is no session field at all here
+			// rather than a nullable one nobody fills.
+			"handoff_id": {Kind: KindString, Required: true},
+			"origin":     {Kind: KindString, Required: true},
+			"stage":      {Kind: KindString, Required: true}, // start | callback | redeem
+			"cause":      {Kind: KindString, Required: true}, // by class, never by detail
 		},
 	},
 	EventDeliveryFetched: {

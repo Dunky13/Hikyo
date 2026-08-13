@@ -157,6 +157,28 @@ type GrantOrigin struct {
 	CreatedAt string
 }
 
+type InstanceConnection struct {
+	ID              string
+	PrincipalID     string
+	Label           string
+	Kind            string
+	Verifier        []byte
+	PrefixHint      string
+	Lifetime        string
+	ExpiresAt       sql.NullString
+	CredentialEpoch int64
+	CreatedAt       string
+	CreatedBy       string
+	RevokedAt       sql.NullString
+	LastUsedAt      sql.NullString
+}
+
+type InstanceIdentity struct {
+	ID        int64
+	Identity  string
+	CreatedAt string
+}
+
 type Key struct {
 	ID              string
 	OrgID           string
@@ -338,6 +360,8 @@ type ReauthWindow struct {
 	CredentialEpoch int64
 	ConsumedAt      sql.NullString
 	CreatedAt       string
+	BoundOperation  string
+	BoundKeySet     string
 }
 
 type RecoveryCode struct {
@@ -347,6 +371,28 @@ type RecoveryCode struct {
 	CredentialEpoch int64
 	RowVersion      int64
 	GeneratedAt     string
+}
+
+type Remote struct {
+	ID               string
+	Name             string
+	Url              string
+	SpkiPin          string
+	CredentialSealed []byte
+	CreatedAt        string
+	CreatedBy        string
+}
+
+type RemoteSnapshot struct {
+	RemoteID         string
+	LastAttemptAt    string
+	LastOutcome      string
+	ObservedAt       sql.NullString
+	InstanceIdentity sql.NullString
+	Version          sql.NullString
+	OrgCount         sql.NullInt64
+	ProjectCount     sql.NullInt64
+	Listing          sql.NullString
 }
 
 type RevisionKeyChange struct {
@@ -539,6 +585,8 @@ type Session struct {
 	CsrfVerifier      []byte
 	ProviderID        sql.NullString
 	SamlProviderID    sql.NullString
+	RequestingOrigin  sql.NullString
+	HandoffID         sql.NullString
 }
 
 type Snapshot struct {
@@ -647,4 +695,30 @@ type WebauthnCredential struct {
 	DisabledAt      sql.NullString
 	CreatedAt       string
 	LastUsedAt      sql.NullString
+}
+
+type WorkspaceHandoff struct {
+	ID            string
+	StateVerifier []byte
+	CodeVerifier  []byte
+	Origin        string
+	RedirectUri   string
+	PkceChallenge string
+	Purpose       string
+	SessionID     sql.NullString
+	Operation     sql.NullString
+	EnvID         sql.NullString
+	KeySet        sql.NullString
+	PrincipalID   sql.NullString
+	CreatedAt     string
+	ExpiresAt     string
+	ConsumedAt    sql.NullString
+	Factors       string
+	FactorClass   string
+}
+
+type WorkspaceOrigin struct {
+	Origin    string
+	CreatedAt string
+	CreatedBy string
 }
