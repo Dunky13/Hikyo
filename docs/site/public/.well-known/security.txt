@@ -2,5 +2,5 @@ Contact: https://github.com/Dunky13/hikyo/security/advisories/new
 Contact: mailto:security@developwent.io
 Expires: 2027-08-09T00:00:00Z
 Preferred-Languages: en
-Canonical: https://dunky13.github.io/hikyo/.well-known/security.txt
-Policy: https://dunky13.github.io/hikyo/security/
+Canonical: https://hikyo.app/.well-known/security.txt
+Policy: https://hikyo.app/security/

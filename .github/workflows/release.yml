@@ -102,7 +102,7 @@ jobs:
             release/repository/fallback-channel-test.json \
             security@developwent.io
           ./scripts/ci/check-docs-live.sh \
-            https://dunky13.github.io/hikyo security@developwent.io
+            https://hikyo.app security@developwent.io
 
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
