@@ -1,7 +1,7 @@
-# CI for the walking skeleton (#42): build, vet, generated-code freshness,
-# and the full test suite including the cross-engine conformance harness on
-# sqlite and postgres. Actions pinned by commit SHA and the Go toolchain
-# pinned exactly, per the system-architecture ADR's pinned-everything rule.
+# CI for the walking skeleton (#42): pull requests run every validation domain
+# affected by their changed paths; main runs the complete suite, including the
+# sqlite/postgres conformance harness. Actions and toolchains remain pinned per
+# the system-architecture ADR's pinned-everything rule.
 name: ci
 
 on:
@@ -19,7 +19,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Keep the required workflow present on every PR, then select jobs inside it.
+  # Unknown paths and changes to this classifier fail closed to the full plan.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      plan: ${{ steps.classify.outputs.plan }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            plan=$(./scripts/ci/classify-changed-paths.sh --all)
+          else
+            plan=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" |
+              ./scripts/ci/classify-changed-paths.sh --files)
+          fi
+          printf 'plan=%s\n' "$plan" >>"$GITHUB_OUTPUT"
+
   lint:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).lint }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,6 +112,8 @@ jobs:
           "${{ github.event.pull_request.head.sha }}"
 
   supply-chain-checks:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).supply_chain_checks }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +145,8 @@ jobs:
         run: ./scripts/ci/check-dco_test.sh
       - name: Required-jobs fixture
         run: ./scripts/ci/check-required-jobs_test.sh
+      - name: Changed-path classifier fixture
+        run: ./scripts/ci/classify-changed-paths_test.sh
       - name: Immutable-tag probe fixture
         run: ./scripts/release/probe-tag-move_test.sh
       - name: Release-tag guard fixture
@@ -125,6 +159,8 @@ jobs:
         run: ./scripts/release/render-installer_test.sh
 
   release-snapshot:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).release_snapshot }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -177,6 +213,8 @@ jobs:
           key: ${{ steps.release-snapshot-go-cache.outputs.cache-primary-key }}
 
   generated:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).generated }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,6 +258,8 @@ jobs:
   # needs a different toolchain, and because a Go-only change must not be able
   # to leave the generated client stale without anyone noticing.
   client:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).client }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -248,6 +288,8 @@ jobs:
         run: pnpm run test
 
   docs:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).docs }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -265,6 +307,8 @@ jobs:
   # check runs first of all — a locked surface without a flow should fail in
   # seconds, not after a full browser suite has passed.
   web:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).web }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -353,6 +397,8 @@ jobs:
           key: ${{ steps.web-go-cache.outputs.cache-primary-key }}
 
   test:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).test }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -436,6 +482,8 @@ jobs:
   # narrowed a -run pattern would still look green, and this is the one row
   # the project's positioning rests on.
   headline-guarantee:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).headline_guarantee }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -488,6 +536,7 @@ jobs:
   ci-required:
     if: always()
     needs:
+      - changes
       - client
       - dco
       - docs
@@ -506,20 +555,7 @@ jobs:
       - name: Require every validation job
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: ./scripts/ci/check-required-jobs.sh "$GITHUB_EVENT_NAME" "$NEEDS_JSON"
-
-  # Compatibility context for ruleset 20539346. Keep it until ci-required has
-  # reported on main and the live ruleset requires ci-required instead.
-  supply-chain-fixtures:
-    if: always()
-    needs:
-      - ci-required
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Forward permanent required context
-        env:
-          CI_REQUIRED_RESULT: ${{ needs.ci-required.result }}
-        run: test "$CI_REQUIRED_RESULT" = success
+          PLAN_JSON: ${{ needs.changes.outputs.plan }}
+        run: >-
+          ./scripts/ci/check-required-jobs.sh
+          "$GITHUB_EVENT_NAME" "$NEEDS_JSON" "$PLAN_JSON"
