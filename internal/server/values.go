@@ -28,8 +28,8 @@ import (
 type ValueService interface {
 	Get(ctx context.Context, actor service.Actor, scope domain.Scope, keyName string, reveal bool) (service.ValueCell, error)
 	List(ctx context.Context, actor service.Actor, scope domain.Scope, reveal bool) ([]service.ValueCell, error)
-	Set(ctx context.Context, actor service.Actor, scope domain.Scope, keyName, value string) (service.ValueCell, error)
-	Clear(ctx context.Context, actor service.Actor, scope domain.Scope, keyName string) error
+	Set(ctx context.Context, actor service.Actor, scope domain.Scope, keyName, value string) (service.StagedChange, error)
+	Unset(ctx context.Context, actor service.Actor, scope domain.Scope, keyName string) (service.StagedChange, error)
 	Declare(ctx context.Context, actor service.Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]service.ValueCell, error)
 	Copy(ctx context.Context, actor service.Actor, scope domain.Scope, req service.CopyRequest) (service.CopyResult, error)
 	Diff(ctx context.Context, actor service.Actor, scope domain.Scope, left, right string, reveal bool) ([]service.DiffRow, error)
@@ -53,21 +53,37 @@ func (a *API) GetValue(ctx context.Context, req apigen.GetValueRequestObject) (a
 	return apigen.GetValue200JSONResponse(wireValueCell(cell)), nil
 }
 
+// SetValue and ClearValue STAGE. Neither publishes, so neither answers with a
+// value cell: what they return is the immutable version id a later selective
+// publish names, which is the only thing the caller can act on.
 func (a *API) SetValue(ctx context.Context, req apigen.SetValueRequestObject) (apigen.SetValueResponseObject, error) {
-	cell, err := a.Values.Set(ctx, service.Bearer(bearer(ctx)),
+	staged, err := a.Values.Set(ctx, service.Bearer(bearer(ctx)),
 		envScope(req.Org, req.Project, req.Environment), req.Key, req.Body.Value)
 	if err != nil {
 		return nil, err
 	}
-	return apigen.SetValue200JSONResponse(wireValueCell(cell)), nil
+	return apigen.SetValue200JSONResponse(wireStagedChange(staged)), nil
 }
 
 func (a *API) ClearValue(ctx context.Context, req apigen.ClearValueRequestObject) (apigen.ClearValueResponseObject, error) {
-	if err := a.Values.Clear(ctx, service.Bearer(bearer(ctx)),
-		envScope(req.Org, req.Project, req.Environment), req.Key); err != nil {
+	staged, err := a.Values.Unset(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), req.Key)
+	if err != nil {
 		return nil, err
 	}
-	return apigen.ClearValue204Response{}, nil
+	return apigen.ClearValue200JSONResponse(wireStagedChange(staged)), nil
+}
+
+func wireStagedChange(c service.StagedChange) apigen.PendingChange {
+	return apigen.PendingChange{
+		VersionId:          c.VersionID,
+		KeyId:              c.KeyID,
+		Name:               c.Name,
+		Classification:     apigen.KeyClassification(c.Classification),
+		Operation:          apigen.PendingChangeOperation(c.Operation),
+		StagedFromRevision: c.StagedFromRevision,
+		CreatedAt:          c.CreatedAt,
+	}
 }
 
 func (a *API) DeclareValues(ctx context.Context, req apigen.DeclareValuesRequestObject) (apigen.DeclareValuesResponseObject, error) {

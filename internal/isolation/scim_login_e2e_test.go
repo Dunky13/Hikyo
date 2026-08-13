@@ -601,7 +601,7 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	}
 	// It works, and it reaches the object the mapping's `read` grant covers.
 	// Without this control the denials below would prove nothing.
-	_, projects, _ := services(db)
+	_, projects, _ := services(t, db)
 	protectedOp := func(token string) error {
 		_, err := projects.Get(ctx, service.Bearer(token), scopeProject(orgA, prjA1))
 		return err

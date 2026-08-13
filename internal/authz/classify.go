@@ -295,6 +295,19 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal":                             ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone":                             ClassTenant,
 
+	// Drafts, publishing and revisions (#51). Every one is tenant-class: an
+	// environment the caller may not reach answers byte-identically to one that
+	// is not there, history included.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":       ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/events":                                          ClassTenant,
+	// The root token key belongs to the instance, so there is no tenant object
+	// whose nonexistence a refusal could mimic.
+	"http:POST /api/v1/instance/rotate-token-key": ClassInstance,
+
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":    ClassTenant,
@@ -353,9 +366,17 @@ var wireRegistry = map[string]Class{
 	// `key` reaches the catalogue and the group routes, all tenant-class.
 	"cli:key": ClassTenant,
 	// `values` reaches only the tenant-scoped value routes.
-	"cli:values":          ClassTenant,
-	"cli:instance-config": ClassInstance,
-	"cli:doctor":          ClassInstance,
+	"cli:values": ClassTenant,
+	// `revision` reaches the two tenant-scoped history routes (#51). It
+	// discloses no value: history is lineage, and the one verb that reads a
+	// snapshot's values is `values export`.
+	"cli:revision": ClassTenant,
+	// `rotate-token-key` reaches one instance-scoped route: the root token key
+	// belongs to the instance, so there is no tenant object whose nonexistence
+	// a refusal could mimic.
+	"cli:rotate-token-key": ClassInstance,
+	"cli:instance-config":  ClassInstance,
+	"cli:doctor":           ClassInstance,
 	// `access` reaches BOTH classes — the org/project/env grant routes are
 	// tenant-class, the instance-scope ones are instance-class. It is
 	// classified instance because that is the WEAKER probe contract of the
@@ -429,6 +450,15 @@ var wireEvents = map[string][]audit.EventType{
 	"http:GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas": {
 		audit.EventSCIMCredentialRefused,
 	},
+
+	// Drafts, publishing and revisions (#51). Staging rides the value routes'
+	// existing entries; these three are the ones that emit something new.
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":    {audit.EventValueStaged},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}": {audit.EventValueStaged},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":        {audit.EventRevisionPublished},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":  {audit.EventValueRevealed},
+	"http:POST /api/v1/instance/rotate-token-key":                                               {audit.EventTokenKeyRotated},
+
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
 		audit.EventAuthSessionCreated,
@@ -704,18 +734,36 @@ var wireRoutes = map[string][]Operation{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window":        {OpRevealWindowRead},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal":       {OpValueReveal},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueRead},
-	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueSet},
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":      {OpValueClear},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueStage},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":      {OpValueStage},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal": {OpValueReveal},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/values/declare":                                 {OpValueSet},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/values/declare":                                 {OpValueSet, OpValuePublish},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/values/copy": {
-		OpValueList, OpValueCopySource, OpValueCopyDestination, OpValueCopyDestinationConfig,
+		OpValueList, OpValueCopySource, OpValueCopyDestination,
+		OpValueCopyDestinationConfig, OpValuePublish,
 	},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/values/diff":         {OpValueList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal": {OpValueReveal},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/clone": {
-		OpEnvCreate, OpValueList, OpValueCopySource, OpValueCopyDestination, OpValueCopyDestinationConfig,
+		OpEnvCreate, OpValueList, OpValueCopySource, OpValueCopyDestination,
+		OpValueCopyDestinationConfig, OpValuePublish,
 	},
+
+	// Drafts, publishing and revisions (#51). A publish authorizes
+	// value.publish once per AFFECTED environment, which is the addressed one
+	// plus any other environment the selected versions -- or key-group closure
+	// -- reach.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             {OpValuePublish},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              {OpRevisionSignals},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            {OpRevisionList},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": {OpRevisionShow},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export": {
+		OpValueExport, OpValueExportReveal, OpValueExportRevealHistory,
+	},
+	// The stream authorizes twice: once at connect over the project, and once
+	// per event over the environment the event names.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/events": {OpAdvisoryWatch, OpAdvisoryEvent},
+	"http:POST /api/v1/instance/rotate-token-key":           {OpRotateTokenKey},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            {OpKeyGroupList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           {OpKeyGroupCreate},

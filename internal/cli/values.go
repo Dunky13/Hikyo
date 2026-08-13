@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Dunky13/hikyo/api/apigen"
@@ -45,21 +46,32 @@ var valueColumns = []string{"KEY", "CLASS", "PRESENCE", "VALUE"}
 
 // runValues is the `values` family.
 func runValues(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("values", args, "list", "get", "set", "declare", "diff", "copy")
+	sub, rest, err := subverb("values", args,
+		"list", "get", "set", "declare", "diff", "copy", "publish", "export", "pending")
 	if err != nil {
 		return err
 	}
 
 	var format, valueFile, left, right, source, destinations, keyNames, environments string
+	var versions string
+	var revision int64
 	var clear, reveal, stdin, dangerous, confirmProtected bool
 	var outputFile string
 	st, flags, err := parseCommon("values "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
-		if sub == "list" || sub == "get" || sub == "diff" {
+		if sub == "list" || sub == "get" || sub == "diff" || sub == "export" {
 			fs.BoolVar(&reveal, "reveal", false,
 				"disclose `secret` plaintext; audited per key, and refused without the reveal capability")
 		}
-		if sub == "list" || sub == "get" || sub == "diff" {
+		if sub == "publish" {
+			fs.StringVar(&versions, "versions", "",
+				"the pending-change version ids to publish, comma-separated")
+		}
+		if sub == "export" {
+			fs.Int64Var(&revision, "revision", 0,
+				"the revision to export; omitted means the latest")
+		}
+		if sub == "list" || sub == "get" || sub == "diff" || sub == "export" {
 			// The print triad for the reveal paths. `get` delivers one revealed
 			// secret; `list` and `diff` deliver the WHOLE rendered output (it may
 			// contain revealed secrets), so the same three flags guard all three.
@@ -126,6 +138,8 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	case sub == "declare" && environments == "":
 		return failf(ExitUsage,
 			"usage: hikyo values declare <KEY> --envs <env,env,env> (--stdin | --value-file PATH)")
+	case sub == "publish" && versions == "":
+		return failf(ExitUsage, "usage: hikyo values publish --versions <id,id> [--env <env>]")
 	}
 
 	// The value is read BEFORE the request is built and before the session is
@@ -150,7 +164,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		OutputFile: outputFile, DangerouslyPrint: dangerous,
 		Stdout: ios.Stdout, OpenTerminal: ios.OpenTerminal,
 	}
-	if reveal && (sub == "list" || sub == "diff") {
+	if reveal && (sub == "list" || sub == "diff" || sub == "export") {
 		if err := disclose.Preflight(deliver); err != nil {
 			return failf(ExitRefused, "the values have nowhere to go: %v", err)
 		}
@@ -208,19 +222,21 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 		target := base + "/" + url.PathEscape(flags.positional())
+		// Both directions STAGE (#51). What comes back is the immutable version
+		// id a later `values publish` names, not a cell: nothing delivers yet,
+		// and rendering a cell here would say otherwise.
+		var staged apigen.PendingChange
 		if clear {
-			if err := client.Do(ctx, http.MethodDelete, target, nil, nil); err != nil {
+			if err := client.Do(ctx, http.MethodDelete, target, nil, &staged); err != nil {
 				return err
 			}
-			fmt.Fprintf(ios.Stderr, "cleared %s\n", flags.positional())
-			return nil
-		}
-		var cell apigen.ValueCell
-		if err := client.Do(ctx, http.MethodPut, target,
-			apigen.SetValueRequest{Value: value}, &cell); err != nil {
+		} else if err := client.Do(ctx, http.MethodPut, target,
+			apigen.SetValueRequest{Value: value}, &staged); err != nil {
 			return err
 		}
-		return Render(ios.Stdout, f, valueTable(apigen.ValueList{Items: []apigen.ValueCell{cell}, Count: 1}))
+		fmt.Fprintf(ios.Stderr, "staged %s (%s); publish it with: hikyo values publish --versions %s\n",
+			staged.Name, staged.Operation, staged.VersionId)
+		return Render(ios.Stdout, f, pendingTable(staged))
 
 	case "declare":
 		// Declare-into-environments: ONE supplied plaintext into several
@@ -272,9 +288,137 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		return Render(ios.Stdout, f, Table{
 			Columns: []string{"KEY", "DESTINATION"}, Rows: rows, JSON: result,
 		})
+	case "publish":
+		// SELECTIVE by construction: the verb takes version ids, not key
+		// names. A publish carries exactly the drafts it names plus whatever
+		// key-group closure requires, and the result says which was which.
+		base, err := environmentBase(project, resolved, flags, "values publish")
+		if err != nil {
+			return err
+		}
+		var result apigen.PublishResult
+		if err := client.Do(ctx, http.MethodPost, base+"/publish",
+			apigen.PublishRequest{VersionIds: splitList(versions)}, &result); err != nil {
+			return err
+		}
+		return Render(ios.Stdout, f, publishTable(result))
+
+	case "pending":
+		// The caller's own working state for one environment, plus the
+		// write-presence marker for everybody else's. It is what supplies the
+		// version ids `values publish` names.
+		base, err := environmentBase(project, resolved, flags, "values pending")
+		if err != nil {
+			return err
+		}
+		var signals apigen.EnvironmentSignals
+		if err := client.Do(ctx, http.MethodGet, base+"/signals", nil, &signals); err != nil {
+			return err
+		}
+		return Render(ios.Stdout, f, signalsTable(signals))
+
+	case "export":
+		// The one bulk-disclosure verb, and what "fetch resolved" actually is:
+		// it reads a COMMITTED SNAPSHOT, never live values.
+		base, err := environmentBase(project, resolved, flags, "values export")
+		if err != nil {
+			return err
+		}
+		body := apigen.ExportValuesRequest{}
+		if reveal {
+			body.Reveal = &reveal
+		}
+		if revision > 0 {
+			body.Revision = &revision
+		}
+		var out apigen.ExportedValues
+		if err := client.Do(ctx, http.MethodPost, base+"/values/export", body, &out); err != nil {
+			return err
+		}
+		if reveal {
+			return emitRendered(f, exportTable(out), "exported values", deliver)
+		}
+		return Render(ios.Stdout, f, exportTable(out))
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
 	return failf(ExitInternal, "hikyo values: unhandled subverb %q", sub)
+}
+
+// environmentBase addresses one environment. The environment is required
+// explicitly (or through `--env` / a context) for the same reason
+// environmentValuesBase requires it: guessing it is how a publish lands in the
+// wrong environment.
+func environmentBase(project string, resolved Resolved, flags commonFlags, verb string) (string, error) {
+	env, err := addressed(resolved, DimEnv, flags.Env, verb)
+	if err != nil {
+		return "", err
+	}
+	return project + "/environments/" + url.PathEscape(env), nil
+}
+
+func pendingTable(c apigen.PendingChange) Table {
+	return Table{
+		Columns: []string{"KEY", "CLASS", "OPERATION", "VERSION", "STAGED FROM"},
+		Rows: [][]string{{
+			c.Name, string(c.Classification), string(c.Operation), c.VersionId,
+			strconv.FormatInt(c.StagedFromRevision, 10),
+		}},
+		JSON: c,
+	}
+}
+
+func publishTable(r apigen.PublishResult) Table {
+	rows := make([][]string, 0, len(r.Environments))
+	for _, env := range r.Environments {
+		rows = append(rows, []string{
+			env.EnvironmentId,
+			strconv.FormatInt(env.Revision, 10),
+			strconv.Itoa(len(env.ChangedKeys)),
+			env.ChangeToken,
+		})
+	}
+	return Table{
+		Columns: []string{"ENVIRONMENT", "REVISION", "CHANGED", "CHANGE TOKEN"},
+		Rows:    rows, JSON: r,
+	}
+}
+
+func signalsTable(s apigen.EnvironmentSignals) Table {
+	rows := make([][]string, 0, len(s.Cells))
+	for _, cell := range s.Cells {
+		pending := ""
+		if cell.PendingVersionId != nil {
+			pending = *cell.PendingVersionId
+		}
+		others := ""
+		if cell.PendingByOthers {
+			others = "yes"
+		}
+		changed := ""
+		if cell.ChangedInRevision != nil {
+			changed = strconv.FormatInt(*cell.ChangedInRevision, 10)
+		}
+		rows = append(rows, []string{cell.Name, string(cell.Classification), pending, others, changed})
+	}
+	return Table{
+		Columns: []string{"KEY", "CLASS", "PENDING VERSION", "OTHERS PENDING", "CHANGED IN"},
+		Rows:    rows, JSON: s,
+	}
+}
+
+func exportTable(e apigen.ExportedValues) Table {
+	rows := make([][]string, 0, len(e.Items))
+	for _, item := range e.Items {
+		// A value is printed only where the server says it was REVEALED. An
+		// unrevealed `secret` prints nothing rather than an empty string a
+		// reader could not tell from an empty value.
+		value := ""
+		if item.Value != nil {
+			value = *item.Value
+		}
+		rows = append(rows, []string{item.Name, string(item.Classification), value})
+	}
+	return Table{Columns: []string{"KEY", "CLASS", "VALUE"}, Rows: rows, JSON: e}
 }
 
 // environmentValuesBase addresses the environment a value lives in. The

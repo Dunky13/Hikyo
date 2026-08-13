@@ -152,6 +152,32 @@ const (
 	// under `read`.
 	OpValueCopyDestinationConfig Operation = "value.copy-destination-config"
 
+	// Drafts, publishing and revisions (#51, revision-model ADR).
+	OpValueStage   Operation = "value.stage"
+	OpValuePublish Operation = "value.publish"
+	// The one bulk-disclosure verb and its two material halves. `values export`
+	// carries `read ∧ reveal` for CURRENT material and `read ∧ reveal-history`
+	// for historical material; a mixed export evaluates each formula over
+	// exactly the material it governs, which one formula cannot express.
+	OpValueExport              Operation = "value.export"
+	OpValueExportReveal        Operation = "value.export-reveal"
+	OpValueExportRevealHistory Operation = "value.export-reveal-history"
+
+	OpRevisionList    Operation = "revision.list"
+	OpRevisionShow    Operation = "revision.show"
+	OpRevisionSignals Operation = "revision.signals"
+
+	// The advisory channel's two checks: one at connect, over the project, and
+	// one PER EVENT over the environment the event names.
+	OpAdvisoryWatch Operation = "advisory.watch"
+	OpAdvisoryEvent Operation = "advisory.event"
+
+	// `rotate-token-key` rides `rotate-dek`: the permission ADR's capability
+	// set is CLOSED and names four rotation atoms for five rotation verbs, and
+	// the root token key is a tier-3 key alongside the DEKs -- same master,
+	// same one-active-per-scope index, same retirement path.
+	OpRotateTokenKey Operation = "crypto.rotate-token-key"
+
 	OpKeyGroupCreate Operation = "key-group.create"
 	OpKeyGroupGet    Operation = "key-group.get"
 	OpKeyGroupList   Operation = "key-group.list"
@@ -456,6 +482,27 @@ const (
 	StoreValuesClear                 StoreOp = "values.Clear"
 	StoreValuesClearEnvironment      StoreOp = "values.ClearEnvironment"
 
+	// Drafts and published revisions (#51). `pending.*` is the per-user
+	// working state; `snapshots.*` is the published state, its lineage and
+	// its payload — one aggregate because a revision, its resolved map and
+	// its changed-key rows are written in one act and must never drift.
+	StorePendingListForOwner       StoreOp = "pending.ListForOwner"
+	StorePendingListMarkers        StoreOp = "pending.ListMarkers"
+	StorePendingStage              StoreOp = "pending.Stage"
+	StorePendingDiscard            StoreOp = "pending.Discard"
+	StorePendingDiscardEnvironment StoreOp = "pending.DiscardEnvironment"
+	StorePendingDiscardKey         StoreOp = "pending.DiscardKey"
+
+	StoreSnapshotsLatest            StoreOp = "snapshots.Latest"
+	StoreSnapshotsAtRevision        StoreOp = "snapshots.AtRevision"
+	StoreSnapshotsList              StoreOp = "snapshots.List"
+	StoreSnapshotsEntries           StoreOp = "snapshots.Entries"
+	StoreSnapshotsChanges           StoreOp = "snapshots.Changes"
+	StoreSnapshotsInsert            StoreOp = "snapshots.Insert"
+	StoreSnapshotsInsertEntry       StoreOp = "snapshots.InsertEntry"
+	StoreSnapshotsInsertChange      StoreOp = "snapshots.InsertChange"
+	StoreSnapshotsDeleteEnvironment StoreOp = "snapshots.DeleteEnvironment"
+
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
 	// belongs to is part of its AAD, not a tenant predicate.
@@ -464,6 +511,7 @@ const (
 	StoreKeysAcquireHierarchyGeneration StoreOp = "keys.AcquireHierarchyGeneration"
 	StoreKeysInsertMaster               StoreOp = "keys.InsertMaster"
 	StoreKeysInsertTier3                StoreOp = "keys.InsertTier3"
+	StoreKeysRotateTokenKey             StoreOp = "keys.RotateTokenKey"
 	StoreKeysInsertScopeGeneration      StoreOp = "keys.InsertScopeGeneration"
 
 	// Audit trails (#45). INSERT and SELECT only — the append-only invariant
@@ -574,6 +622,13 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreValuesGet:                   true,
 	StoreValuesList:                  true,
 	StoreValuesEnvironmentsWithValue: true,
+	StorePendingListForOwner:         true,
+	StorePendingListMarkers:          true,
+	StoreSnapshotsLatest:             true,
+	StoreSnapshotsAtRevision:         true,
+	StoreSnapshotsList:               true,
+	StoreSnapshotsEntries:            true,
+	StoreSnapshotsChanges:            true,
 	StoreKeysActiveMasterWrappers:    true,
 	StoreKeysActiveTier3:             true,
 	StoreAuditTenantPage:             true,
@@ -941,8 +996,9 @@ var operations = map[Operation]opSpec{
 			// this environment and nothing else, the composite foreign key
 			// would refuse the delete while they existed, and there is no
 			// other environment for them to survive in.
-			StoreValuesClearEnvironment: true,
-			StoreEnvironmentsDelete:     true, StoreAuditTenantInsert: true,
+			StoreValuesClearEnvironment:    true,
+			StorePendingDiscardEnvironment: true, StoreSnapshotsDeleteEnvironment: true,
+			StoreEnvironmentsDelete: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventEnvDeleted},
 	},
@@ -970,7 +1026,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueCount: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueCount: true,
 			StoreCatalogueList: true, StoreCataloguePresenceList: true,
 			StoreCatalogueGroupGet: true, StoreCatalogueCreate: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueRevisionBump: true,
@@ -1005,7 +1065,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueRename: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueRename: true,
 			StoreCatalogueRevisionBump: true, StoreCataloguePresenceList: true,
 			StoreAuditTenantInsert: true,
 		},
@@ -1016,7 +1080,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueList: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreCatalogueUpdateDeclaration: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueRevisionBump: true,
 			// The resulting revision is read back inside the same transaction:
@@ -1046,7 +1114,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGet: true, StoreCatalogueGroupGet: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueGroupGet: true,
 			StoreCatalogueList: true, StoreCataloguePresenceList: true,
 			StoreCatalogueSetGroup: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
@@ -1058,7 +1130,13 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGet: true,
+			// Deleting a key collects every draft that referenced it.
+			StorePendingDiscardKey: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGet: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueDelete: true,
 			// A key that any environment still holds a value for is REFUSED
 			// (#50), naming those environments: destroying delivered material
@@ -1079,7 +1157,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGet: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGet: true,
 			StoreCatalogueSetClassification: true, StoreCatalogueRevisionBump: true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
 		},
@@ -1274,12 +1356,164 @@ var operations = map[Operation]opSpec{
 		events: []audit.EventType{audit.EventValueCopied},
 	},
 
+	// DRAFTS AND PUBLISHING (#51).
+	//
+	// `edit` ALONE stages. The permission ADR is explicit that `edit` confers
+	// no delivery power and that a draft is never a disclosure, so staging must
+	// not require `publish` -- edit-without-publish IS the propose-and-review
+	// flow v1 ships instead of an approval engine.
+	OpValueStage: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreValuesGet: true, StoreSnapshotsLatest: true,
+			StorePendingStage: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueStaged},
+	},
+	// `publish` alone commits. It reaches everything a materialization touches
+	// because it IS the materialization: the published cells, the immutable
+	// snapshot, its entries, its lineage, and the drafts it consumes.
+	OpValuePublish: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapPublish, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreCatalogueRevisionGet: true,
+			StoreValuesList: true, StoreValuesPut: true, StoreValuesClear: true,
+			StorePendingListForOwner: true, StorePendingListMarkers: true,
+			StorePendingDiscard:  true,
+			StoreSnapshotsLatest: true, StoreSnapshotsEntries: true,
+			StoreSnapshotsInsert: true, StoreSnapshotsInsertEntry: true,
+			StoreSnapshotsInsertChange: true,
+			StoreAuditTenantInsert:     true,
+		},
+		events: []audit.EventType{
+			audit.EventRevisionPublished,
+			// The per-key delivery facts: a publish is where a cell starts and
+			// stops delivering, so the two transition events are emitted here.
+			audit.EventValueSet, audit.EventValueCleared,
+		},
+	},
+	// The export triple. `read` alone exports `config` plaintext and `secret`
+	// write-presence; the reveal legs are evaluated only where the material
+	// they govern is actually present.
+	OpValueExport: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreSnapshotsLatest: true, StoreSnapshotsAtRevision: true,
+			StoreSnapshotsEntries: true,
+		},
+		auditedNone: true,
+	},
+	OpValueExportReveal: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelEnv},
+			{Cap: domain.CapReveal, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreSnapshotsLatest: true, StoreSnapshotsAtRevision: true,
+			StoreSnapshotsEntries: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueRevealed},
+	},
+	OpValueExportRevealHistory: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelEnv},
+			{Cap: domain.CapRevealHistory, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreSnapshotsLatest: true, StoreSnapshotsAtRevision: true,
+			StoreSnapshotsEntries: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueRevealed},
+	},
+	// History is lineage: numbers, publishers, timestamps and which keys moved.
+	// It never carries a value, so it rides `read` like any other browse verb.
+	// `rotate-token-key` is instance-class: the root token key belongs to the
+	// instance, not to a tenant, so there is no tenant object whose
+	// nonexistence a refusal could mimic.
+	OpRotateTokenKey: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapRotateDEK, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreKeysRotateTokenKey:  true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventTokenKeyRotated},
+	},
+	OpRevisionList: {
+		class:       ClassTenant,
+		level:       domain.LevelEnv,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps:    map[StoreOp]bool{StoreSnapshotsList: true, StoreSnapshotsChanges: true},
+		auditedNone: true,
+	},
+	// `revision show` returns the change token, which is NON-SECRET metadata by
+	// construction: keyed, un-invertible, and designed to travel in pod
+	// annotations. It is not a reveal, and gating it on one would make the
+	// operator's own change-detection value harder to read than the annotation
+	// it lands in.
+	OpRevisionShow: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreSnapshotsLatest: true, StoreSnapshotsAtRevision: true,
+			StoreSnapshotsEntries: true, StoreSnapshotsChanges: true,
+		},
+		auditedNone: true,
+	},
+	// The matrix signals, and the advisory channel's documented polling
+	// fallback. Both signals degrade to write-presence for `secret` keys, which
+	// is what `read` already covers.
+	OpRevisionSignals: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StorePendingListMarkers: true,
+			StoreSnapshotsLatest: true, StoreSnapshotsChanges: true,
+		},
+		auditedNone: true,
+	},
+	// The advisory channel touches no store operation at all: the events are
+	// metadata the server already emitted, and every one of them is authorized
+	// here before it is written to a stream.
+	OpAdvisoryWatch: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{},
+		auditedNone: true,
+	},
+	OpAdvisoryEvent: {
+		class:       ClassTenant,
+		level:       domain.LevelEnv,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps:    map[StoreOp]bool{},
+		auditedNone: true,
+	},
+
 	OpKeyGroupCreate: {
 		class:   ClassTenant,
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGroupCount: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGroupCount: true,
 			StoreCatalogueGroupCreate: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
 		},
@@ -1308,7 +1542,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGroupGet: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGroupGet: true,
 			StoreCatalogueGroupRename: true, StoreCatalogueList: true,
 			StoreAuditTenantInsert: true,
 		},
@@ -1322,7 +1560,11 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapDefinitionsEdit, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{
-			StoreProjectsLock: true, StoreCatalogueGroupGet: true,
+			// The semantic schema fan-out enumerates the project's
+			// environments; each one is then authorized for `publish`
+			// separately, immediately before commit.
+			StoreEnvironmentsList: true,
+			StoreProjectsLock:     true, StoreCatalogueGroupGet: true,
 			StoreCatalogueList: true, StoreCatalogueGroupClearMembers: true,
 			StoreCatalogueGroupDelete: true, StoreCatalogueRevisionBump: true,
 			StoreAuditTenantInsert: true,
@@ -1760,6 +2002,7 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelEnv,
 		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{
+			StoreSnapshotsLatest: true, StoreSnapshotsEntries: true,
 			StoreCatalogueList:         true,
 			StoreCataloguePresenceList: true,
 			StoreCatalogueRevisionGet:  true,

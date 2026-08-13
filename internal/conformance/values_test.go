@@ -11,7 +11,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/schema"
@@ -69,17 +68,62 @@ func sharedKeyring(t *testing.T, db *store.DB) *crypto.Keyring {
 }
 
 // valueFixture is tenantFixture plus the capabilities the value surface needs.
-// tenantFixture seeds manage-projects, definitions-edit, read and edit at ORG
-// scope; a value write is `edit ∧ publish` and a copy adds `reveal`.
+// tenantFixture seeds manage-projects, definitions-edit, read, edit and publish
+// at ORG scope; a copy adds `reveal`.
 func valueFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID, domain.Scope, *service.Values, *service.Environments, *service.Keys) {
 	t.Helper()
 	who, scope := tenantFixture(t, db, label)
-	grantOrg(t, db, who, scope.Org, label, "publish", "reveal")
+	grantOrg(t, db, who, scope.Org, label, "reveal")
 	kr := sharedKeyring(t, db)
 	return who, scope,
 		&service.Values{DB: db, Keyring: kr},
 		&service.Environments{DB: db, Keyring: kr},
-		&service.Keys{DB: db}
+		&service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
+}
+
+// publishValue is the two-step every delivering write is now made of (#51):
+// STAGE the edit into the caller's own working state, then PUBLISH exactly that
+// version id. It is one helper rather than two lines per call site so the
+// scenarios below read as "this value now delivers" instead of re-stating the
+// pipeline every time.
+//
+// Staging alone delivers nothing: `value_entries` is written by the publish
+// pipeline and by nothing else, which is what makes "delivery reads only
+// committed snapshots" a property of the schema rather than a promise.
+func publishValue(t *testing.T, db *store.DB, values *service.Values, actor service.Actor,
+	env domain.Scope, key, value string) service.PublishResult {
+	t.Helper()
+	staged, err := values.Set(t.Context(), actor, env, key, value)
+	if err != nil {
+		t.Fatalf("stage %s in %s: %v", key, env.Env, err)
+	}
+	return publishVersions(t, db, actor, env, staged.VersionID)
+}
+
+// unpublishValue is publishValue's twin for the `set` -> `absent` transition.
+func unpublishValue(t *testing.T, db *store.DB, values *service.Values, actor service.Actor,
+	env domain.Scope, key string) service.PublishResult {
+	t.Helper()
+	staged, err := values.Unset(t.Context(), actor, env, key)
+	if err != nil {
+		t.Fatalf("stage clear of %s in %s: %v", key, env.Env, err)
+	}
+	return publishVersions(t, db, actor, env, staged.VersionID)
+}
+
+func publishVersions(t *testing.T, db *store.DB, actor service.Actor,
+	env domain.Scope, versionIDs ...string) service.PublishResult {
+	t.Helper()
+	out, err := revisionSvc(t, db).Publish(t.Context(), actor, env, versionIDs)
+	if err != nil {
+		t.Fatalf("publish %v in %s: %v", versionIDs, env.Env, err)
+	}
+	return out
+}
+
+func revisionSvc(t *testing.T, db *store.DB) *service.Revisions {
+	t.Helper()
+	return &service.Revisions{DB: db, Keyring: sharedKeyring(t, db)}
 }
 
 // grantOrg seeds org-scoped grants for an existing principal.
@@ -163,9 +207,17 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	prod := mustEnv(t, envs, actor, scope, "prod")
 	mustKey(t, keys, actor, scope, "API_URL", string(schema.Config), schema.DefaultPresenceRules())
 
-	if _, err := values.Set(t.Context(), actor, dev, "API_URL", "https://dev.example"); err != nil {
+	// STAGING ALONE DELIVERS NOTHING (#51): the draft is saved, and the
+	// environment keeps delivering what it delivered until a publish names the
+	// version id. That is the whole of `edit` conferring no delivery power.
+	staged, err := values.Set(t.Context(), actor, dev, "API_URL", "https://dev.example")
+	if err != nil {
 		t.Fatal(err)
 	}
+	if beforePublish, err := values.Get(t.Context(), actor, dev, "API_URL", false); err != nil || beforePublish.Set {
+		t.Fatalf("a staged edit delivered before publish: %+v, %v", beforePublish, err)
+	}
+	publishVersions(t, db, actor, dev, staged.VersionID)
 	cell, err := values.Get(t.Context(), actor, dev, "API_URL", false)
 	if err != nil {
 		t.Fatal(err)
@@ -185,17 +237,13 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	}
 	// A value written in one environment is INDEPENDENT: writing prod does not
 	// touch dev, and no relationship is created either way.
-	if _, err := values.Set(t.Context(), actor, prod, "API_URL", "https://prod.example"); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, prod, "API_URL", "https://prod.example")
 	if cell, err = values.Get(t.Context(), actor, dev, "API_URL", false); err != nil || cell.Value != "https://dev.example" {
 		t.Fatalf("dev moved when prod was written: %+v, %v", cell, err)
 	}
 
 	// Clearing takes the cell to `absent`. There is nothing underneath.
-	if err := values.Clear(t.Context(), actor, dev, "API_URL"); err != nil {
-		t.Fatal(err)
-	}
+	unpublishValue(t, db, values, actor, dev, "API_URL")
 	cleared, err := values.Get(t.Context(), actor, dev, "API_URL", false)
 	if err != nil {
 		t.Fatal(err)
@@ -204,15 +252,12 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 		t.Fatalf("a cleared cell still delivers: %+v", cleared)
 	}
 	// Clearing twice is not an error: `absent` is a state, and the caller
-	// asked for that state.
-	if err := values.Clear(t.Context(), actor, dev, "API_URL"); err != nil {
-		t.Fatalf("clearing an absent cell: %v", err)
-	}
-	// …and it emits NOTHING the second time: value.cleared records a transition,
-	// and the no-op clear transitions nothing. Exactly one event for the two
-	// clears — the real one — never a second for a change that never happened.
-	if n := auditEventCount(t, db, string(dev.Env), string(audit.EventValueCleared)); n != 1 {
-		t.Fatalf("clearing an absent cell emitted a spurious value.cleared event: count = %d, want 1", n)
+	// asked for that state. Publishing the second clear moves the environment
+	// to a new revision whose lineage records NOTHING — the cell did not
+	// transition, so there is no changed-key row for it.
+	second := unpublishValue(t, db, values, actor, dev, "API_URL")
+	if len(second.Environments) != 1 || len(second.Environments[0].ChangedKeys) != 0 {
+		t.Fatalf("clearing an already-absent cell recorded a change: %+v", second.Environments)
 	}
 
 	// The list view is the resolved snapshot: every declared key, each `set`
@@ -230,12 +275,18 @@ func scenarioValueDelivery(t *testing.T, db *store.DB) {
 	if _, err := values.Set(t.Context(), actor, dev, "NEVER_DECLARED", "x"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("an undeclared key accepted a value: %v", err)
 	}
-	// Validation runs on the write, because in this slice the write IS what
-	// the environment delivers.
-	strict := mustKey(t, keys, actor, scope, "PORT", string(schema.Config), schema.DefaultPresenceRules())
-	_ = strict
-	if _, err := values.Set(t.Context(), actor, dev, "PORT", strings.Repeat("x", schema.MaxValueBytes+1)); !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("an over-budget value was accepted: %v", err)
+	// VALIDATION MOVED TO PUBLISH (schema ADR § Validation timing: advisory on
+	// save, authoritative at publish). The over-budget value SAVES — a draft is
+	// the user's scratchpad, and blocking the save pushes work in progress into
+	// external notepads, which for secrets is exactly where it must not go —
+	// and the publish that would commit it is what refuses.
+	mustKey(t, keys, actor, scope, "PORT", string(schema.Config), schema.DefaultPresenceRules())
+	oversized, err := values.Set(t.Context(), actor, dev, "PORT", strings.Repeat("x", schema.MaxValueBytes+1))
+	if err != nil {
+		t.Fatalf("staging an over-budget value was refused; saving is free: %v", err)
+	}
+	if _, err := revisionSvc(t, db).Publish(t.Context(), actor, dev, []string{oversized.VersionID}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("publishing an over-budget value was accepted: %v", err)
 	}
 }
 
@@ -265,11 +316,12 @@ func scenarioValueDeclare(t *testing.T, db *store.DB) {
 		if !cell.Set || cell.Value != "info" {
 			t.Fatalf("declare missed %s: %+v", env.Env, cell)
 		}
+		if got, ok := exportedValue(t, db, actor, env, "LOG_LEVEL"); !ok || got != "info" {
+			t.Fatalf("declare missed committed snapshot %s: value %q, present %t", env.Env, got, ok)
+		}
 	}
 	// Every copy is independent: editing one leaves the others alone.
-	if _, err := values.Set(t.Context(), actor, dev, "LOG_LEVEL", "debug"); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, dev, "LOG_LEVEL", "debug")
 	cell, err := values.Get(t.Context(), actor, prod, "LOG_LEVEL", false)
 	if err != nil || cell.Value != "info" {
 		t.Fatalf("editing dev moved prod: %+v, %v", cell, err)
@@ -315,9 +367,7 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	mustKey(t, keys, actor, scope, "TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "REGION", string(schema.Config), schema.DefaultPresenceRules())
 	for name, value := range map[string]string{"TOKEN": "s3cret-material", "REGION": "eu-west"} {
-		if _, err := values.Set(t.Context(), actor, dev, name, value); err != nil {
-			t.Fatal(err)
-		}
+		publishValue(t, db, values, actor, dev, name, value)
 	}
 
 	base := []grantSpec{
@@ -367,6 +417,9 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	if cell, err := values.Get(t.Context(), actor, prod, "REGION", false); err != nil || cell.Value != "eu-west" {
 		t.Fatalf("config copy did not land: %+v, %v", cell, err)
 	}
+	if got, ok := exportedValue(t, db, actor, prod, "REGION"); !ok || got != "eu-west" {
+		t.Fatalf("config copy did not reach the committed snapshot: value %q, present %t", got, ok)
+	}
 
 	// The full formula: the copy lands, and the copy is an INDEPENDENT value.
 	if _, err := values.Copy(t.Context(), actor, scope, req); err != nil {
@@ -376,9 +429,10 @@ func scenarioValueCopyFormula(t *testing.T, db *store.DB) {
 	if err != nil || copied.Value != "s3cret-material" {
 		t.Fatalf("copy did not land: %+v, %v", copied, err)
 	}
-	if _, err := values.Set(t.Context(), actor, dev, "TOKEN", "rotated"); err != nil {
-		t.Fatal(err)
+	if _, ok := exportedValue(t, db, actor, prod, "TOKEN"); !ok {
+		t.Fatal("secret copy did not reach the committed snapshot")
 	}
+	publishValue(t, db, values, actor, dev, "TOKEN", "rotated")
 	after, err := values.Get(t.Context(), actor, prod, "TOKEN", true)
 	if err != nil || after.Value != "s3cret-material" {
 		t.Fatalf("editing the source changed the copy: %+v, %v", after, err)
@@ -428,17 +482,25 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	source := mustEnv(t, envs, actor, scope, "source")
 	mustKey(t, keys, actor, scope, "REGION", string(schema.Config), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "OPTIONAL_TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
-	required := schema.PresenceRules{
-		Required:  schema.Presence{Mode: schema.PresenceAll},
-		Forbidden: schema.Presence{Mode: schema.PresenceNone},
-	}
-	mustKey(t, keys, actor, scope, "REQUIRED_TOKEN", string(schema.Secret), required)
+	// The `mode: all` requirement lands AFTER `source` can satisfy it. Under
+	// #51 a semantic schema change materializes every environment, and a key
+	// required where it resolves to absent vetoes that materialization — so
+	// declaring the rule up front would abort on the key's own creation and
+	// never reach the clone this scenario is about.
+	requiredToken := mustKey(t, keys, actor, scope, "REQUIRED_TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
 	for name, value := range map[string]string{
 		"REGION": "eu-west", "OPTIONAL_TOKEN": "optional-material", "REQUIRED_TOKEN": "required-material",
 	} {
-		if _, err := values.Set(t.Context(), actor, source, name, value); err != nil {
-			t.Fatal(err)
-		}
+		publishValue(t, db, values, actor, source, name, value)
+	}
+	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, requiredToken.ID, service.KeyDeclarationUpdate{
+		Declaration: decl(schema.Rule{Type: schema.TypeString}),
+		Presence: schema.PresenceRules{
+			Required:  schema.Presence{Mode: schema.PresenceAll},
+			Forbidden: schema.Presence{Mode: schema.PresenceNone},
+		},
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	// A caller with no `reveal` anywhere: `config` copies freely, both secrets
@@ -457,6 +519,25 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("clone abort sentinel: %v", err)
 	}
+	// THE PREFLIGHT DISCRIMINATOR (#50 R2): the same gate-blocked clone, with
+	// the source secret's ciphertext replaced by bytes nothing can decrypt. The
+	// preflight aborts against a PLAN that opens nothing, so the abort still
+	// fires by name; an open-before-abort order would hit ErrDecrypt and fail
+	// with a fault instead. That is what actually catches the regression — the
+	// disclosure rows roll back either way, so the row count nets zero on its
+	// own. The real material is republished afterwards so the rest of the
+	// scenario sees the environment it expects.
+	restoreToken := corruptValueCiphertext(t, db, string(source.Env), requiredToken.ID)
+	disclosuresBefore := disclosureEvents(t, db, string(source.Env))
+	_, _, corruptErr := envs.Clone(t.Context(), service.LocalPrincipal(noReveal), scope, "clone-corrupt", string(source.Env))
+	if corruptErr == nil || !strings.Contains(corruptErr.Error(), "REQUIRED_TOKEN") || !errors.Is(corruptErr, domain.ErrInvalid) {
+		t.Fatalf("a gate-blocked clone over corrupted source material did not abort naming the key: %v", corruptErr)
+	}
+	if after := disclosureEvents(t, db, string(source.Env)); after != disclosuresBefore {
+		t.Fatalf("aborted clone wrote %d disclosure row(s) then rolled them back (before %d, after %d); "+
+			"the preflight must abort before opening any secret", after-disclosuresBefore, disclosuresBefore, after)
+	}
+	restoreToken()
 	// The abort is a real abort: no environment was created.
 	list, err := envs.List(t.Context(), actor, scope)
 	if err != nil {
@@ -491,6 +572,9 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	if cell, err := values.Get(t.Context(), actor, partial, "REGION", false); err != nil || cell.Value != "eu-west" {
 		t.Fatalf("config did not copy freely: %+v, %v", cell, err)
 	}
+	if got, ok := exportedValue(t, db, actor, partial, "REGION"); !ok || got != "eu-west" {
+		t.Fatalf("partial clone snapshot missed config: value %q, present %t", got, ok)
+	}
 	if cell, err := values.Get(t.Context(), actor, partial, "OPTIONAL_TOKEN", true); err != nil || cell.Set {
 		t.Fatalf("a gate-blocked secret landed anyway: %+v, %v", cell, err)
 	}
@@ -509,60 +593,49 @@ func scenarioValueClone(t *testing.T, db *store.DB) {
 	if err != nil || cell.Value != "required-material" {
 		t.Fatalf("clone did not carry the secret: %+v, %v", cell, err)
 	}
+	if got, ok := exportedValue(t, db, actor, fullScope, "REGION"); !ok || got != "eu-west" {
+		t.Fatalf("full clone snapshot missed config: value %q, present %t", got, ok)
+	}
 
-	// The source-absent half of the abort (the BLOCKER): a `mode: all` required
-	// SECRET the source never held would leave the new environment born invalid,
-	// and this actor holds full reveal — so the source gate PASSES and the abort
-	// is reached purely because the secret is absent at source, not because a
-	// gate blocked it. Added after the clone-full block so it does not disturb
-	// that block's Copied/UncopiedSecrets counts.
-	mustKey(t, keys, actor, scope, "NEVER_SET_TOKEN", string(schema.Secret), required)
-	// This actor holds full reveal, so the source gate PASSES: without the
-	// plan/open split the clone would OPEN the source secrets and write their
-	// disclosure.value_revealed rows before the abort rolled the transaction back,
-	// violating the OpValueCopySource promise (one durable event per secret opened).
+	// THE SOURCE-ABSENT HALF IS NOW UNREACHABLE STATE, and the assertion is
+	// strengthened rather than dropped.
 	//
-	// TWO assertions prove the trail was never written rather than
-	// written-and-rolled-back:
-	//
-	//  1. The disclosure-row count before == after. This is the LITERAL check, but
-	//     it cannot distinguish the regression on its own: the disclosure rows are
-	//     written in the clone's own transaction, so a buggy open-before-abort
-	//     rolls them back too and the count also nets zero. It becomes a real guard
-	//     only if audit ever moves out of the business transaction.
-	//  2. The DISCRIMINATOR: a source secret whose ciphertext is corrupted. The
-	//     fixed preflight aborts without decrypting anything, so the abort still
-	//     fires (assertions below pass). The buggy order decrypts first, hits
-	//     ErrDecrypt, and fails with a fault instead of the abort — turning the
-	//     abort assertions red. This is what actually catches the regression.
-	corruptValueCiphertext(t, db, string(source.Env), keyIDByName(t, keys, actor, scope, "REQUIRED_TOKEN"))
-	disclosuresBefore := disclosureEvents(t, db, string(source.Env))
-	_, _, err = envs.Clone(t.Context(), actor, scope, "clone-stranded", string(source.Env))
-	if err == nil || !strings.Contains(err.Error(), "NEVER_SET_TOKEN") {
-		t.Fatalf("a clone stranding a source-absent required secret did not abort naming it: %v", err)
-	}
+	// #50 fixed a BLOCKER here: a `mode: all` required SECRET the source never
+	// held cloned through and left the new environment born invalid. Under #51
+	// that state cannot be constructed at all — declaring a key required where
+	// any environment resolves to absent VETOES the semantic schema change that
+	// would create it, naming key and environment (mvp-boundary C2). So the
+	// guarantee moved one step earlier in the pipeline, and what is asserted
+	// here is the earlier, stronger refusal: the declaration is refused, so no
+	// clone ever has to abort for this cause.
+	_, err = keys.Create(t.Context(), actor, scope, service.KeySpec{
+		Name: "NEVER_SET_TOKEN", Classification: string(schema.Secret),
+		Declaration: decl(schema.Rule{Type: schema.TypeString}),
+		Presence: schema.PresenceRules{
+			Required:  schema.Presence{Mode: schema.PresenceAll},
+			Forbidden: schema.Presence{Mode: schema.PresenceNone},
+		},
+	})
 	if !errors.Is(err, domain.ErrInvalid) {
-		t.Fatalf("source-absent clone abort sentinel: %v", err)
+		t.Fatalf("declaring a `mode: all` required secret no environment can satisfy was accepted: %v", err)
 	}
-	if disclosuresAfter := disclosureEvents(t, db, string(source.Env)); disclosuresAfter != disclosuresBefore {
-		t.Fatalf("aborted clone wrote %d disclosure row(s) then rolled them back (before %d, after %d); "+
-			"the preflight must abort before opening any secret",
-			disclosuresAfter-disclosuresBefore, disclosuresBefore, disclosuresAfter)
+	if !strings.Contains(err.Error(), "NEVER_SET_TOKEN") || !strings.Contains(err.Error(), string(source.Env)) {
+		t.Fatalf("the veto names neither the key nor the environment: %v", err)
 	}
-	// The abort exposes the stranded key as a caller-safe detail, which is what
-	// carries it to the wire (server errorBody honours detail for bad_request).
+	// The veto exposes both as a caller-safe detail, which is what carries them
+	// to the wire (server errorBody honours detail for bad_request).
 	var sd interface{ SafeDetail() string }
 	if !errors.As(err, &sd) || !strings.Contains(sd.SafeDetail(), "NEVER_SET_TOKEN") {
-		t.Fatalf("clone abort does not expose the stranded key as a safe detail: %v", err)
+		t.Fatalf("the veto does not expose the key as a safe detail: %v", err)
 	}
-	// A real abort: no environment was created.
-	after, err := envs.List(t.Context(), actor, scope)
+	// A real refusal: the key was not declared.
+	declared, _, err := keys.List(t.Context(), actor, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, env := range after {
-		if env.Name == "clone-stranded" {
-			t.Fatal("an aborted source-absent clone left the environment behind")
+	for _, k := range declared {
+		if k.Name == "NEVER_SET_TOKEN" {
+			t.Fatal("a vetoed declaration left the key behind")
 		}
 	}
 }
@@ -578,14 +651,10 @@ func scenarioValueDiff(t *testing.T, db *store.DB) {
 	mustKey(t, keys, actor, scope, "TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "ONLY_DEV", string(schema.Config), schema.DefaultPresenceRules())
 	for name, value := range map[string]string{"REGION": "eu-west", "TOKEN": "same", "ONLY_DEV": "yes"} {
-		if _, err := values.Set(t.Context(), actor, dev, name, value); err != nil {
-			t.Fatal(err)
-		}
+		publishValue(t, db, values, actor, dev, name, value)
 	}
 	for name, value := range map[string]string{"REGION": "us-east", "TOKEN": "same"} {
-		if _, err := values.Set(t.Context(), actor, prod, name, value); err != nil {
-			t.Fatal(err)
-		}
+		publishValue(t, db, values, actor, prod, name, value)
 	}
 
 	// Without the gate: `config` compares by value, `secret` reports
@@ -655,9 +724,7 @@ func scenarioValueCiphertext(t *testing.T, db *store.DB) {
 	prod := mustEnv(t, envs, actor, scope, "prod")
 	mustKey(t, keys, actor, scope, "TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
 	const plaintext = "known-plaintext-row-bound"
-	if _, err := values.Set(t.Context(), actor, dev, "TOKEN", plaintext); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, dev, "TOKEN", plaintext)
 	stored := ciphertextOf(t, db, string(dev.Env), "TOKEN")
 	if bytes.Contains(stored, []byte(plaintext)) {
 		t.Fatal("the stored value contains its plaintext")
@@ -666,9 +733,7 @@ func scenarioValueCiphertext(t *testing.T, db *store.DB) {
 	// Rewriting the same cell with the same plaintext mints a NEW row id — the
 	// id is AAD-bound, so it is never reused — and therefore new ciphertext.
 	before := valueRowID(t, db, string(dev.Env), "TOKEN")
-	if _, err := values.Set(t.Context(), actor, dev, "TOKEN", plaintext); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, dev, "TOKEN", plaintext)
 	if after := valueRowID(t, db, string(dev.Env), "TOKEN"); after == before {
 		t.Fatal("a rewrite reused the row id an AAD is bound to")
 	}
@@ -702,6 +767,20 @@ func disclosureEvents(t *testing.T, db *store.DB, envID string) int64 {
 	return auditEventCount(t, db, envID, "disclosure.value_revealed")
 }
 
+func exportedValue(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope, name string) (string, bool) {
+	t.Helper()
+	values, _, err := revisionSvc(t, db).Export(t.Context(), actor, scope, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range values {
+		if value.Name == name {
+			return value.Value, true
+		}
+	}
+	return "", false
+}
+
 // auditEventCount counts one environment's tenant audit rows of a given type.
 func auditEventCount(t *testing.T, db *store.DB, envID, eventType string) int64 {
 	t.Helper()
@@ -720,6 +799,23 @@ func auditEventCount(t *testing.T, db *store.DB, envID, eventType string) int64 
 	return out
 }
 
+// queryBlob reads one ciphertext column.
+func queryBlob(t *testing.T, db *store.DB, query string, args ...any) []byte {
+	t.Helper()
+	var out []byte
+	var err error
+	if db.Engine() == store.EnginePostgres {
+		err = db.PG().QueryRow(t.Context(), query, args...).Scan(&out)
+	} else {
+		err = db.SQLiteRead().QueryRowContext(t.Context(),
+			strings.NewReplacer("$1", "?", "$2", "?").Replace(query), args...).Scan(&out)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // corruptValueCiphertext replaces one cell's sealed envelope with bytes no
 // sealer can open. It is the discriminator the clone-abort disclosure test needs:
 // the audit trail is written in the clone's OWN transaction, so an aborted clone
@@ -728,10 +824,23 @@ func auditEventCount(t *testing.T, db *store.DB, envID, eventType string) int64 
 // preflight aborts without ever decrypting (so the abort still fires), while the
 // buggy open-before-abort order hits ErrDecrypt first and fails with a fault, not
 // the abort — so the scenario's abort assertions go red on the regression.
-func corruptValueCiphertext(t *testing.T, db *store.DB, envID, keyID string) {
+// It returns the restore function: the original envelope written back, so a
+// scenario can corrupt one cell for one assertion without destroying the
+// material the rest of it needs. Re-publishing is not an option — a
+// materialization opens every cell it carries forward, so it would trip over
+// the corruption it is trying to undo.
+func corruptValueCiphertext(t *testing.T, db *store.DB, envID, keyID string) (restore func()) {
+	t.Helper()
+	original := queryBlob(t, db,
+		`SELECT ciphertext FROM value_entries WHERE environment_id = $1 AND key_id = $2`, envID, keyID)
+	writeCiphertext(t, db, envID, keyID, []byte("corrupted-not-a-valid-envelope"))
+	return func() { writeCiphertext(t, db, envID, keyID, original) }
+}
+
+func writeCiphertext(t *testing.T, db *store.DB, envID, keyID string, blob []byte) {
 	t.Helper()
 	q := `UPDATE value_entries SET ciphertext = $1 WHERE environment_id = $2 AND key_id = $3`
-	garbage := []byte("corrupted-not-a-valid-envelope")
+	garbage := blob
 	var err error
 	if db.Engine() == store.EnginePostgres {
 		_, err = db.PG().Exec(t.Context(), q, garbage, envID, keyID)

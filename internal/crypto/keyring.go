@@ -99,7 +99,13 @@ type Keyring struct {
 
 	master   keyHandle
 	instance keyHandle
-	token    keyHandle
+
+	// tokenMu guards the root token key handle against `rotate-token-key`
+	// swapping it under a concurrent derivation. It is separate from mu (the
+	// DEK cache's lock) so a rotation's datastore write never holds the lock
+	// every value read needs.
+	tokenMu sync.Mutex
+	token   keyHandle
 
 	mu   sync.Mutex
 	deks map[string]*list.Element // scope → *list.Element holding *dekEntry
@@ -232,6 +238,14 @@ func (k *Keyring) mintHierarchy(ctx context.Context, root []byte) error {
 // mintTier3 generates a tier-3 key and its wrapped row under the current
 // master. The caller persists the row.
 func (k *Keyring) mintTier3(p Purpose, orgID, projectID string) (keyHandle, WrappedKey, error) {
+	return k.mintTier3At(p, orgID, projectID, 1)
+}
+
+// mintTier3At is mintTier3 at an explicit version. Rotation is the only
+// caller that supplies one: the version is bound into the wrapping AAD, so a
+// rotated key must be sealed under the version it will be stored at, not
+// resealed afterwards.
+func (k *Keyring) mintTier3At(p Purpose, orgID, projectID string, version uint32) (keyHandle, WrappedKey, error) {
 	key, err := k.newKey()
 	if err != nil {
 		return keyHandle{}, WrappedKey{}, err
@@ -245,7 +259,7 @@ func (k *Keyring) mintTier3(p Purpose, orgID, projectID string) (keyHandle, Wrap
 		Purpose:          p,
 		OrgID:            orgID,
 		ProjectID:        projectID,
-		Version:          1,
+		Version:          version,
 		MasterKeyVersion: k.master.version,
 	}
 	if row.Blob, err = seal(k.rnd, k.master.key, masterKeyID, k.master.version, tier3AAD(row), key); err != nil {

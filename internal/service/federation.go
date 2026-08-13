@@ -805,7 +805,12 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 				Audience:           b.Audience,
 				RequiredClaimsJSON: b.RequiredClaimsJSON,
 				ReactivatedAt:      b.ReactivatedAt,
-			}, claims, now)
+				// The clock is read when the PREDICATE runs -- inside the
+				// authorizing transaction -- not captured at validation time. The
+				// sealer preflight between the two can take real time, and a token
+				// whose `exp` passes during it must be refused by the
+				// authentication this delivery actually rides.
+			}, claims, s.now())
 		},
 	}, nil
 }

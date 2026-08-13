@@ -149,6 +149,68 @@ async function valueUpdatedAt(page: Page, environment: string, key: string): Pro
   );
 }
 
+/**
+ * publishOwnDraft bridges the staging model until the matrix grows its publish
+ * affordance (#56): since #51 a save only STAGES a pending change, so a flow
+ * that asserts on DELIVERED state publishes its own draft through the API —
+ * the same seam the CLI demo uses. It reads the caller's own
+ * `pending_version_id` off the signals endpoint and publishes exactly that.
+ */
+async function publishOwnDraft(page: Page, environment: string, key: string): Promise<void> {
+  const published = await page.evaluate(
+    async (input: { org: string; project: string; environment: string; key: string }) => {
+      const base = `/api/v1/orgs/${input.org}/projects/${input.project}/environments/${input.environment}`;
+      // The save is fire-and-forget from the DOM's point of view, so the
+      // draft may not have committed by the time this runs. Poll the signals
+      // endpoint until the caller's own pending version appears; the bound
+      // exists so a genuinely lost write still fails loudly rather than
+      // spinning.
+      let versionID: string | undefined;
+      for (let attempt = 0; attempt < 50 && versionID === undefined; attempt++) {
+        const signals = await fetch(`${base}/signals`, { credentials: 'same-origin' });
+        if (!signals.ok) {
+          return `signals ${String(signals.status)}`;
+        }
+        const body: unknown = await signals.json();
+        if (typeof body !== 'object' || body === null || !Array.isArray((body as { cells?: unknown }).cells)) {
+          return 'signals: not a cells object';
+        }
+        const cells: unknown[] = (body as { cells: unknown[] }).cells;
+        const cell = cells.find(
+          (c): c is { name: string; pending_version_id?: string } =>
+            typeof c === 'object' && c !== null && (c as { name?: unknown }).name === input.key,
+        );
+        versionID = cell?.pending_version_id;
+        if (versionID === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (versionID === undefined) {
+        return 'no pending draft for key';
+      }
+      const cell = { pending_version_id: versionID };
+      const csrf = (): string => {
+        for (const part of document.cookie.split(';')) {
+          const [name, ...rest] = part.trim().split('=');
+          if (name === '__Host-hikyo-csrf') {
+            return rest.join('=');
+          }
+        }
+        return '';
+      };
+      const resp = await fetch(`${base}/publish`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Hikyo-CSRF': csrf() },
+        body: JSON.stringify({ version_ids: [cell.pending_version_id] }),
+      });
+      return resp.ok ? 'published' : `publish ${String(resp.status)}`;
+    },
+    { org: seed.org, project: seed.project, environment, key },
+  );
+  expect(published, 'publishing the staged draft').toBe('published');
+}
+
 /** auditLines is the surface's per-key disclosure record. */
 function auditLines(page: Page) {
   return page.getByRole('region', { name: 'Disclosure records' }).getByRole('listitem');
@@ -654,7 +716,11 @@ test.describe('write-only editing', () => {
       await page.getByRole('button', { name: 'Save draft' }).click();
       await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(page.getByLabel(`${secret} is masked`)).toBeVisible();
-      // Wait for the write to have reached the server before restoring the
+      // A save STAGES (#51); the blind edit only lands on delivery when its
+      // draft is published. `edit` staged it, `publish` commits it — and
+      // neither needs `reveal`, which is the point of the write-only path.
+      await publishOwnDraft(page, seed.dev, secret);
+      // Wait for the publish to have reached the server before restoring the
       // grant, so the readback below cannot race it.
       await expect
         .poll(async () => valueUpdatedAt(page, seed.dev, secret), { timeout: 5_000 })

@@ -33,7 +33,7 @@ func keySpec(name, classification string, d schema.Declaration) service.KeySpec 
 // project, identity is the immutable id, and the declaration survives the
 // round trip through both engines byte-for-byte.
 func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "catalogue")
 	actor := service.LocalPrincipal(who)
 
@@ -210,7 +210,7 @@ func scenarioKeyCatalogueCRUD(t *testing.T, db *store.DB) {
 // canonical round trip but changes meaning is exactly the failure a
 // declaration-time-only test cannot see.
 func scenarioDeclarationFixtures(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "fixtures")
 	actor := service.LocalPrincipal(who)
 
@@ -277,7 +277,7 @@ func i64(v int64) *int64 { return &v }
 // refused at SAVE and the refusal names what it refused, because a rule that
 // appears to enforce something and does not is worse than no rule at all.
 func scenarioDeclarationRejections(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "rejections")
 	actor := service.LocalPrincipal(who)
 
@@ -344,7 +344,7 @@ func scenarioDeclarationRejections(t *testing.T, db *store.DB) {
 // declaration that is itself broken: if the gate ran second, the answer would
 // be the validation error rather than the uniform nonexistent one.
 func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
 	editorPrincipal, scope := tenantFixture(t, db, "revealgate")
 	editor := service.LocalPrincipal(editorPrincipal)
 
@@ -515,8 +515,8 @@ func scenarioSecretRuleChangeNeedsReveal(t *testing.T, db *store.DB) {
 // set's foreign-key confinement, and the environment-lifecycle cascade the
 // schema ADR puts in the same serialization domain.
 func scenarioPresenceRules(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
-	envs := &service.Environments{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "presence")
 	actor := service.LocalPrincipal(who)
 
@@ -553,16 +553,33 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 		t.Fatalf("a foreign environment id was accepted into a presence set: %v", err)
 	}
 
+	// ORDERING, forced by #51 and worth stating because it looks like a
+	// fixture detail and is not: a semantic schema change MATERIALIZES every
+	// environment in the project, and a key `required_in` an environment that
+	// resolves to absent VETOES that materialization (mvp-boundary C2). So the
+	// requirement cannot be declared before the environment can satisfy it —
+	// the key is created unconstrained, the value is published, and only then
+	// does the presence rule land. That is the same order an operator must
+	// follow, not a test-only dance.
 	required := service.KeySpec{
 		Name: "REQUIRED_IN_PROD", Classification: string(schema.Config),
+		Declaration: decl(schema.Rule{Type: schema.TypeString}),
+		Presence:    schema.DefaultPresenceRules(),
+	}
+	created, err := keys.Create(t.Context(), actor, scope, required)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishValue(t, db, &service.Values{DB: db, Keyring: sharedKeyring(t, db)}, actor,
+		domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(env.ID)},
+		"REQUIRED_IN_PROD", "eu-west")
+	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, created.ID, service.KeyDeclarationUpdate{
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence: schema.PresenceRules{
 			Required:  schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
 			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
-	}
-	created, err := keys.Create(t.Context(), actor, scope, required)
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := keys.Get(t.Context(), actor, scope, created.ID)
@@ -618,9 +635,9 @@ func scenarioPresenceRules(t *testing.T, db *store.DB) {
 // flag, and the delete that dissolves a coupling without deleting what it
 // coupled.
 func scenarioKeyGroups(t *testing.T, db *store.DB) {
-	keys := &service.Keys{DB: db}
-	groups := &service.KeyGroups{DB: db}
-	envs := &service.Environments{DB: db}
+	keys := &service.Keys{DB: db, Keyring: sharedKeyring(t, db)}
+	groups := &service.KeyGroups{DB: db, Keyring: sharedKeyring(t, db)}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "groups")
 	actor := service.LocalPrincipal(who)
 
@@ -636,26 +653,37 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 		t.Fatal("a brand-new group with no members is not flagged inert")
 	}
 
+	// THE ORDER OF THESE TWO IS LOAD-BEARING under #51, and the reason is not a
+	// fixture detail. The pair asserted here is the same pair as before — one
+	// member required where another is forbidden — but the FORBIDDEN one is
+	// declared first now. A semantic schema change materializes every
+	// environment, and a key `required_in` an environment that resolves to
+	// absent vetoes that materialization; declaring the required member first
+	// would abort on its own creation and never reach the static check the
+	// scenario is about. Forbidden-and-absent is a valid environment, so the
+	// first declaration lands and the second is refused at DECLARATION time,
+	// before anything materializes — which is exactly the "statically decidable
+	// conflict" the schema ADR requires rejected there rather than at publish.
 	user, err := keys.Create(t.Context(), actor, scope, service.KeySpec{
 		Name: "DB_USER", Classification: string(schema.Config),
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence: schema.PresenceRules{
-			Required:  schema.Presence{Mode: schema.PresenceAll},
-			Forbidden: schema.Presence{Mode: schema.PresenceNone},
+			Required:  schema.Presence{Mode: schema.PresenceNone},
+			Forbidden: schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
 		},
 		GroupID: group.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A second member FORBIDDEN where the first is required breaks all-or-none
+	// A second member REQUIRED where the first is forbidden breaks all-or-none
 	// presence statically, so the membership is refused at declaration.
 	_, err = keys.Create(t.Context(), actor, scope, service.KeySpec{
 		Name: "DB_PASSWORD", Classification: string(schema.Secret),
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
 		Presence: schema.PresenceRules{
-			Required:  schema.Presence{Mode: schema.PresenceNone},
-			Forbidden: schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
+			Required:  schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{env.ID}},
+			Forbidden: schema.Presence{Mode: schema.PresenceNone},
 		},
 		GroupID: group.ID,
 	})
@@ -666,14 +694,15 @@ func scenarioKeyGroups(t *testing.T, db *store.DB) {
 		t.Errorf("the refusal names neither member: %v", err)
 	}
 
+	// Declared unconstrained: this member is DELETED further down, and a key
+	// holding a published value refuses deletion (#50). The all-or-none STATIC
+	// conflict is already asserted by the refused variant above, so nothing is
+	// lost by leaving this one's presence at the default.
 	password, err := keys.Create(t.Context(), actor, scope, service.KeySpec{
 		Name: "DB_PASSWORD", Classification: string(schema.Secret),
 		Declaration: decl(schema.Rule{Type: schema.TypeString}),
-		Presence: schema.PresenceRules{
-			Required:  schema.Presence{Mode: schema.PresenceAll},
-			Forbidden: schema.Presence{Mode: schema.PresenceNone},
-		},
-		GroupID: group.ID,
+		Presence:    schema.DefaultPresenceRules(),
+		GroupID:     group.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
