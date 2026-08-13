@@ -40,28 +40,34 @@ ORDER BY name, id;
 DELETE FROM service_accounts
 WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id) AND id = sqlc.arg(id);
 
+-- The mint, writing both credential kinds; see the sqlite dialect.
 -- hikyo:authn-resolution
 -- name: InsertMachineCredential :exec
 INSERT INTO machine_credentials (
     id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-    credential_epoch, created_at, created_by, revoked_at, last_used_at
+    credential_epoch, created_at, created_by, revoked_at, last_used_at,
+    issuer_id, subject, audience, required_claims, reactivated_at
 ) VALUES (sqlc.arg(id), sqlc.arg(service_account_id), sqlc.arg(kind), sqlc.arg(verifier),
           sqlc.arg(prefix_hint), sqlc.arg(lifetime), sqlc.arg(expires_at),
-          sqlc.arg(credential_epoch), sqlc.arg(created_at), sqlc.arg(created_by), NULL, NULL);
+          sqlc.arg(credential_epoch), sqlc.arg(created_at), sqlc.arg(created_by), NULL, NULL,
+          sqlc.arg(issuer_id), sqlc.arg(subject), sqlc.arg(audience),
+          sqlc.arg(required_claims), NULL);
 
 -- Authentication's single indexed read; see the sqlite dialect for why it
 -- filters on nothing but the verifier.
 -- hikyo:authn-resolution
 -- name: MachineCredentialByVerifier :one
 SELECT id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE verifier = sqlc.arg(verifier);
 
 -- hikyo:authn-resolution
 -- name: ListMachineCredentials :many
 SELECT id, service_account_id, kind, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE service_account_id = sqlc.arg(service_account_id)
 ORDER BY created_at, id;

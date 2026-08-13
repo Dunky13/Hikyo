@@ -33,12 +33,20 @@ import (
 // the terminal exactly once, at mint, through the print triad.
 
 func runServiceAccount(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("sa", args, "list", "create", "delete", "credential")
+	sub, rest, err := subverb("sa", args, "list", "create", "delete", "credential", "binding")
 	if err != nil {
 		return err
 	}
 	if sub == "credential" {
 		return runServiceAccountCredential(ctx, ios, rest)
+	}
+	// `binding` creates a federated `(issuer, subject)` binding (#62). It has no
+	// `list` and no `delete` of its own: a binding IS a credential row, so
+	// `sa credential list` already shows it and `sa credential revoke` already
+	// kills it. Two verb families over the same rows would be two places for the
+	// never-return-a-value rule and the revoke formula to drift.
+	if sub == "binding" {
+		return runServiceAccountBinding(ctx, ios, rest)
 	}
 
 	var format, name, kind, id string
@@ -373,13 +381,19 @@ func credentialTable(list apigen.MachineCredentialList) Table {
 	rows := make([][]string, 0, len(list.Items))
 	for _, c := range list.Items {
 		rows = append(rows, []string{
-			c.Id, c.PrefixHint, string(c.Kind), renderExpiry(c), credentialStatus(c),
+			c.Id, credentialIdentity(c), string(c.Kind), renderExpiry(c), credentialStatus(c),
 		})
 	}
 	return Table{
 		// No VALUE column, and there is no data to fill one: the API returns
 		// metadata, and a credential value is shown once at mint.
-		Columns: []string{"ID", "PREFIX", "KIND", "EXPIRES", "STATUS"},
+		//
+		// The second column is IDENTITY rather than PREFIX because the two kinds
+		// identify themselves differently: a bearer credential by its non-secret
+		// prefix hint, a federated binding by the `(issuer, subject)` it names.
+		// One column, because an operator scanning this list is asking the same
+		// question of both — which of these is which.
+		Columns: []string{"ID", "IDENTITY", "KIND", "EXPIRES", "STATUS"},
 		Rows:    rows,
 		JSON:    list,
 	}
@@ -393,6 +407,22 @@ func renderExpiry(c apigen.MachineCredential) string {
 		return "indefinite"
 	}
 	return c.ExpiresAt.UTC().Format(time.RFC3339)
+}
+
+// credentialIdentity renders whichever identifier the credential's kind has.
+// Neither is secret: a prefix hint is a few characters of a 256-bit value, and
+// an `(issuer, subject)` pair is a public external identity.
+func credentialIdentity(c apigen.MachineCredential) string {
+	if c.PrefixHint != nil {
+		return *c.PrefixHint
+	}
+	if c.Subject != nil {
+		return *c.Subject
+	}
+	// Unreachable through the API — the shape CHECKs make one of the two total —
+	// so an empty cell here would be a silent claim that the row has no
+	// identity at all.
+	return "-"
 }
 
 func credentialStatus(c apigen.MachineCredential) string {

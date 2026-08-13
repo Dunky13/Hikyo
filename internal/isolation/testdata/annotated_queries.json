@@ -91,6 +91,12 @@
   },
   {
     "engine": "postgres",
+    "name": "CountBindingsForIssuer",
+    "annotation": "authn-resolution",
+    "hash": "35cb2098f9fd4c86d88b0e7bc238d1d1ed5e3ec8d6b7bd2886a0580f16523986"
+  },
+  {
+    "engine": "postgres",
     "name": "CountGrantOrigins",
     "annotation": "authn-resolution",
     "hash": "c0b35a1d2aaefea234d06693e608f33023aea3a7424e9fe9da8275b0bfc62d25"
@@ -136,6 +142,12 @@
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "ce3fc198e5d22eee48a2e571cd645cb564b86549cf38ce4a1a63650060063338"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "c583427cddc2b8905baacaa02031181c136986049c2e0ae3346ff501fcea4590"
   },
   {
     "engine": "postgres",
@@ -271,6 +283,24 @@
   },
   {
     "engine": "postgres",
+    "name": "FederatedBindingByIdentity",
+    "annotation": "authn-resolution",
+    "hash": "26edd6e39c39ab482cb9acd16caffb57f7a8050e58244a9bcd7dc5c08375aab3"
+  },
+  {
+    "engine": "postgres",
+    "name": "FederationIssuerByID",
+    "annotation": "authn-resolution",
+    "hash": "53a36a2d06285430ea8d1ebdc152d4be41244abd0c066decd53bfafb105f1870"
+  },
+  {
+    "engine": "postgres",
+    "name": "FederationIssuerByIssuer",
+    "annotation": "authn-resolution",
+    "hash": "a25ee03eb250af60512d86fc16310bba28ba3ecf96299ea2427e3c6163f536bc"
+  },
+  {
+    "engine": "postgres",
     "name": "GetAccountByID",
     "annotation": "authn-resolution",
     "hash": "f53bce6b6f22df5007369ba4429fb0a7256d27776cab7a7e798458b64e06c576"
@@ -370,6 +400,12 @@
     "name": "GetPendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "3b4cde94f9b090861f71ec55cc1a8d4539f7118ade43720eeefe42cf4cfa35d3"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetPinGeneration",
+    "annotation": "authn-resolution",
+    "hash": "70fdbb1672f004a200c91729c6876d1723d3cdb8aba7e7b25832b033b9215d5b"
   },
   {
     "engine": "postgres",
@@ -523,6 +559,12 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "514a45b185c62b4be0aabd6f616ec0e30dcc04eac91c8729d3e3b89e4e4d241c"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertGrant",
     "annotation": "authn-resolution",
     "hash": "ebc8f27edf50d6400f6d92ed1af408ac9d3fdfa83e238498de684da12ff795f2"
@@ -537,7 +579,7 @@
     "engine": "postgres",
     "name": "InsertMachineCredential",
     "annotation": "authn-resolution",
-    "hash": "44d08900c862053ff1c11069015e87029398b31d64a70b185d9f04ad29eb460f"
+    "hash": "3087eb28f9dbca80a2ef51c37bc42f965c5354a10d8e0bb15182076cac7d8206"
   },
   {
     "engine": "postgres",
@@ -649,6 +691,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListFederationIssuers",
+    "annotation": "authn-resolution",
+    "hash": "1139f76c90e0b533d815df7ee67b88486d667af6e715ed41b371829ca3158554"
+  },
+  {
+    "engine": "postgres",
     "name": "ListGrantOriginsForGrant",
     "annotation": "authn-resolution",
     "hash": "a0f716110dc6023bde69b0940562d62b4dfd349ceabe7435b2c37928beb9aa52"
@@ -699,7 +747,7 @@
     "engine": "postgres",
     "name": "ListMachineCredentials",
     "annotation": "authn-resolution",
-    "hash": "4dc1586cf9a018863cc3a1733cf3f9b636b5e7b08a1d70624d28411a5e3466e6"
+    "hash": "4f070bd0e263a733cc37357480c0a6fa37a892f651e4be9143b4248f91ae9498"
   },
   {
     "engine": "postgres",
@@ -783,7 +831,7 @@
     "engine": "postgres",
     "name": "MachineCredentialByVerifier",
     "annotation": "authn-resolution",
-    "hash": "f8657a74c7a3299e00bb23f6472e7c75d1fa5acbced4312544e28200db8408e4"
+    "hash": "845cdcc10c445ea545fb47ef3a8a292a98471773bca7991bae5ab54862668706"
   },
   {
     "engine": "postgres",
@@ -802,6 +850,12 @@
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "bcc965f2855da3601f60cdfd2208dc7559ecb6935a789ee3f1a1cb65168021af"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReactivateFederatedBinding",
+    "annotation": "authn-resolution",
+    "hash": "10ac6d7bbf58375e23ade4d244a983c5e4fcfef05c118afd0033fce9fd6b2aa3"
   },
   {
     "engine": "postgres",
@@ -859,6 +913,12 @@
   },
   {
     "engine": "postgres",
+    "name": "SetPinGeneration",
+    "annotation": "authn-resolution",
+    "hash": "0a3b09284d40d19d206619372f70f922ae3cfdafcb438107cfe7a0fb35dab133"
+  },
+  {
+    "engine": "postgres",
     "name": "SetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "f6e17867c0d902e40805f567c0967893ff46ac2be926b014218a48d895efc36f"
@@ -886,6 +946,12 @@
     "name": "TouchSession",
     "annotation": "authn-resolution",
     "hash": "f28d8e41a5d8bfdc200bf38c1459ac05c3585e125bf69831572ed61df85f349e"
+  },
+  {
+    "engine": "postgres",
+    "name": "UpdateFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "c57739c2b1170b8d706089d1877f62b85bf405d80d8af2a5c40ff032e557860c"
   },
   {
     "engine": "postgres",
@@ -1003,6 +1069,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "CountBindingsForIssuer",
+    "annotation": "authn-resolution",
+    "hash": "b98c0f276802ff367b62169e60805c269e29d5f6a279fb238fbb435aefc5a494"
+  },
+  {
+    "engine": "sqlite",
     "name": "CountGrantOrigins",
     "annotation": "authn-resolution",
     "hash": "8cdfcb0b0673b9d4c0e9cfb497752f42e8894170e2a4b0d58a56d55214c1f7e9"
@@ -1048,6 +1120,12 @@
     "name": "DeleteExternalIdentity",
     "annotation": "authn-resolution",
     "hash": "574453c51e84c4da03caec855e0349be62c896361ff20697f106e03907d4e8e2"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "6470e6f6f031fe4756c0314d59496c1fa3b16e477e8b71506acf1e3620fed828"
   },
   {
     "engine": "sqlite",
@@ -1183,6 +1261,24 @@
   },
   {
     "engine": "sqlite",
+    "name": "FederatedBindingByIdentity",
+    "annotation": "authn-resolution",
+    "hash": "00da829b2a1c8c308f979a3a7e0293ae77730f77d31e780b32296491c12e2b46"
+  },
+  {
+    "engine": "sqlite",
+    "name": "FederationIssuerByID",
+    "annotation": "authn-resolution",
+    "hash": "ec0bfde3c68ab0ced1492f8cb5ceea9e11036b5b78d387074a27ffa3f370a8d1"
+  },
+  {
+    "engine": "sqlite",
+    "name": "FederationIssuerByIssuer",
+    "annotation": "authn-resolution",
+    "hash": "19f5b8e759461faa3f66473f15dc49522d92a9696d5a57f85dd7750009de893c"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetAccountByID",
     "annotation": "authn-resolution",
     "hash": "3a8ac0bfba6d04e573b523a3bcba38919495c87cfac6b91ce40103cf38392d4e"
@@ -1282,6 +1378,12 @@
     "name": "GetPendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "717001fe5fe0f074ccd4fc8c8809ddb3cdaa48f393db4353205de1d6ab6cb8a4"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetPinGeneration",
+    "annotation": "authn-resolution",
+    "hash": "e5eda7da051579b3d910028c6a55cdcebced58154b126caecc6657a363aa6688"
   },
   {
     "engine": "sqlite",
@@ -1435,6 +1537,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "6201e32fefe5ff452564a729531ff34acf6220840dab206c46bb83bc60f867ae"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertGrant",
     "annotation": "authn-resolution",
     "hash": "25705797d0c69e23afdd18e67f04a3bbdb8d4a7de4272109983dbf76a62afa01"
@@ -1449,7 +1557,7 @@
     "engine": "sqlite",
     "name": "InsertMachineCredential",
     "annotation": "authn-resolution",
-    "hash": "de3477618a30ebe5e8230169cb3ea6b5456f10261342bc372ba44c7dbe82a411"
+    "hash": "15de5dd8c89c656f367c0b5edc583d0b23f253ada778ca06bc2f1e70a9008057"
   },
   {
     "engine": "sqlite",
@@ -1561,6 +1669,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListFederationIssuers",
+    "annotation": "authn-resolution",
+    "hash": "1139f76c90e0b533d815df7ee67b88486d667af6e715ed41b371829ca3158554"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListGrantOriginsForGrant",
     "annotation": "authn-resolution",
     "hash": "dee82ca27e85e95bb31cc66f601699accb07bb7fe12d4fc3f5e58351f75d4124"
@@ -1611,7 +1725,7 @@
     "engine": "sqlite",
     "name": "ListMachineCredentials",
     "annotation": "authn-resolution",
-    "hash": "a2c799c8cbc1691142fa543daaeab2f978682bd01dd985f60a30c09c260f905f"
+    "hash": "e771adf3d2972f9fbf73a467876fc26f0d77eea3092f3ccb93c27dba4179f9a4"
   },
   {
     "engine": "sqlite",
@@ -1695,7 +1809,7 @@
     "engine": "sqlite",
     "name": "MachineCredentialByVerifier",
     "annotation": "authn-resolution",
-    "hash": "8c0a279c6bddb476eafdf9c4a21c1d169bf3b9778955194ec26abb185b10034a"
+    "hash": "ec44641fd3fc57c8bea6e32001e782c24a8452af5771919a4596b978bd0bc051"
   },
   {
     "engine": "sqlite",
@@ -1714,6 +1828,12 @@
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "f383c912996548ac51227f8498725e4fb230a527819836d5b5efacfbacc9ce62"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReactivateFederatedBinding",
+    "annotation": "authn-resolution",
+    "hash": "ac75916135c4754e20f2443397e125f88862e82ca8bcb254c8fb999a90b9cb8e"
   },
   {
     "engine": "sqlite",
@@ -1771,6 +1891,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "SetPinGeneration",
+    "annotation": "authn-resolution",
+    "hash": "1f2113f9be15d76853483b2bb34e0fa2f627c04278308180ff7f600bbb5f686e"
+  },
+  {
+    "engine": "sqlite",
     "name": "SetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "e9cb27a19d04f2aa166d07dd84c3db52e274c8507ab774d6728de4f267b945c3"
@@ -1798,6 +1924,12 @@
     "name": "TouchSession",
     "annotation": "authn-resolution",
     "hash": "dc82c58a0bdd5b936cbd194f398a94c000bf292f6cbba03c61df86c159a85769"
+  },
+  {
+    "engine": "sqlite",
+    "name": "UpdateFederationIssuer",
+    "annotation": "authn-resolution",
+    "hash": "3e1efc023ce69cbbc706ff3553b296aa57989fb8b5a2bddec71a59e98995ac23"
   },
   {
     "engine": "sqlite",

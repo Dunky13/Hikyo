@@ -82,6 +82,13 @@ tags:
       that authenticate them. A service account is a principal in the grant
       table; a credential is an authenticator for it, and every credential of
       one confers identical authority.
+  - name: delivery
+    description: |
+      The machine fetch surface. Fetches are CONDITIONAL, and the cursor covers
+      authorization rather than merely content: a caller presenting a current
+      cursor is told it is current and receives no plaintext, while any
+      authorization movement invalidates the cursor and produces a full
+      authorized delivery.
 
   - name: values
     description: |
@@ -4357,6 +4364,260 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/federation-issuers:
+    get:
+      operationId: listFederationIssuers
+      tags: [instance]
+      summary: List the configured OIDC federation issuers.
+      description: |
+        Instance-scoped, never org- or project-scoped: an org-scoped issuer would
+        let an org admin add a provider and mint identities authenticating into
+        the instance.
+
+        Audited rather than silent — reading which external authorities the
+        instance trusts to name principals is not a bare tenant read.
+      x-hikyo-class: instance
+      x-hikyo-operation: federation.issuer-list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The configured issuers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationIssuerList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createFederationIssuer
+      tags: [instance]
+      summary: Configure an OIDC federation issuer.
+      description: |
+        The issuer string is stored and matched BYTE-EXACT, with no
+        canonicalization step. OpenID Connect defines `iss` as case-sensitive, so
+        any normalization that folds case, resolves a URL or strips a trailing
+        slash can merge two distinct external issuers into one configuration —
+        and the uniqueness constraint would enforce the merge rather than catch
+        it.
+      x-hikyo-class: instance
+      x-hikyo-operation: federation.issuer-create
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFederationIssuerRequest"
+      responses:
+        "201":
+          description: The configured issuer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationIssuer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/federation-issuers/{issuer}:
+    parameters:
+      - $ref: "#/components/parameters/FederationIssuerID"
+    patch:
+      operationId: updateFederationIssuer
+      tags: [instance]
+      summary: Move an issuer's JWKS source or refused audiences.
+      description: |
+        The mutable half only. The issuer string and the platform type cannot
+        move: changing either would silently re-point every binding underneath at
+        a different external authority, which is a replacement, not an edit.
+      x-hikyo-class: instance
+      x-hikyo-operation: federation.issuer-update
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFederationIssuerRequest"
+      responses:
+        "200":
+          description: The issuer as written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationIssuer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteFederationIssuer
+      tags: [instance]
+      summary: Remove an issuer configuration.
+      description: |
+        Refused with 409 while live bindings still name it. A cascade would
+        deprovision N workloads under an operation whose name says
+        "configuration", and an orphaning delete would leave bindings that
+        silently stop authenticating. The operator revokes the bindings first,
+        which is the same act stated honestly.
+      x-hikyo-class: instance
+      x-hikyo-operation: federation.issuer-delete
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/ServiceAccountID"
+    post:
+      operationId: createFederatedBinding
+      tags: [identities]
+      summary: Mint a federated `(issuer, subject)` binding. Nothing at rest.
+      description: |
+        The full authorization formula is `manage-identities(project)` AND a
+        disclosure capability over EVERY environment reachable in the resulting
+        post-state AND reauthentication — the same formula a bearer mint carries,
+        and for the same reason: the actor decides which external identity may
+        speak as this service account, and that identity reaches everything the
+        account's grants reach.
+
+        There is no PUT and no PATCH. Bindings are IMMUTABLE; a change is a
+        replacement mint through this route naming `replaces`, so the predecessor
+        is revoked and the successor inserted in one transaction. Editing in place
+        would let a principal without `reveal` re-point a production binding at an
+        identity they control while the recorded authorization stayed behind.
+
+        Bindings are LISTED and DELETED through the credentials routes: a binding
+        is a credential row, so a second pair of routes over the same rows would
+        be two places for one formula to drift.
+      x-hikyo-class: tenant
+      x-hikyo-operation: identity.binding-create
+      x-hikyo-formula: [manage-identities@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBindingRequest"
+      responses:
+        "201":
+          description: The created binding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederatedBinding"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - $ref: "#/components/parameters/DeliveryCursor"
+    get:
+      operationId: fetchDelivery
+      tags: [delivery]
+      summary: Fetch the authorized projection, conditionally.
+      description: |
+        The machine fetch surface. Presenting a current cursor answers
+        `current: true` with NO content and no key names — only a fetch that
+        actually delivers values is a disclosure — and either disposition emits
+        exactly one immutable access record.
+
+        Authorization is evaluated on the conditional path EXACTLY as on the
+        delivering path, so a caller who has lost `read` receives the uniform
+        nonexistent response rather than "current".
+
+        Today there are no value tables, so what is delivered is the key
+        catalogue and each key's declared presence for this environment: config
+        keys and secret PRESENCE only, no plaintext anywhere. That is the surface
+        the Compose and Kubernetes integrations consume, and it is the seam the
+        value tables land behind.
+
+        Both a `hik_` bearer credential and an externally issued OIDC ID token
+        authenticate here, with identical authority: a machine principal's
+        authority is the union of the grants on its service account and nothing
+        else, so there is no per-credential scope for either kind to widen.
+      x-hikyo-class: tenant
+      x-hikyo-operation: delivery.fetch
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The authorized projection, or the statement that the cursor is current.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     hikyoSession:
@@ -4490,6 +4751,29 @@ components:
       description: The target principal whose credential is being reset.
       schema:
         $ref: "#/components/schemas/ID"
+    FederationIssuerID:
+      name: issuer
+      in: path
+      required: true
+      description: |
+        Federation issuer identifier. It is the server-minted id, not the issuer
+        URL: a URL in a path segment would have to be escaped, and an escaping
+        rule on a byte-exact identity is a canonicalization step waiting to
+        happen.
+      schema:
+        $ref: "#/components/schemas/ID"
+    DeliveryCursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        The opaque cursor a previous fetch returned. Absent means a full
+        authorized delivery. A cursor is never parsed by the caller and never
+        constructed by one: the server recomputes it for the state it is about to
+        serve and compares.
+      schema:
+        type: string
+        maxLength: 128
 
   responses:
     BadRequest:
@@ -5436,7 +5720,7 @@ components:
         How a credential authenticates its service account. The discriminator
         exists before a second kind does, so adding one is a new row type
         rather than a schema change.
-      enum: [hikyo-token]
+      enum: [hikyo-token, oidc-federation]
 
     CredentialLifetime:
       type: string
@@ -5497,11 +5781,14 @@ components:
     MachineCredential:
       type: object
       additionalProperties: false
-      required: [id, kind, prefix_hint, lifetime, created_at, created_by, expiring_soon]
+      required: [id, kind, lifetime, created_at, created_by, expiring_soon]
       description: |
         Metadata only. There is deliberately no value property: a credential
         value is displayed exactly once, at mint, and is never retrievable
         afterwards.
+
+        A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+        no minted value to hint at — and carries the binding members instead.
       properties:
         id:
           $ref: "#/components/schemas/ID"
@@ -5514,6 +5801,33 @@ components:
             The non-secret leading slice of the minted value - the grammar
             prefix plus a few body characters, enough to tell two live
             credentials apart and far short of anything a search can narrow.
+            Absent for an `oidc-federation` row.
+        issuer:
+          type: string
+          maxLength: 512
+          description: "`oidc-federation` only: the byte-exact issuer this binding trusts."
+        subject:
+          type: string
+          maxLength: 512
+          description: "`oidc-federation` only: the byte-exact `sub` it names."
+        audience:
+          type: string
+          maxLength: 512
+          description: "`oidc-federation` only: the audience it accepts, never the issuer's default."
+        required_claims:
+          type: array
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/FederatedClaimPin"
+          description: "`oidc-federation` only: every pinned claim, all of which validation requires."
+        reactivated_at:
+          allOf:
+            - $ref: "#/components/schemas/Timestamp"
+          description: |
+            `oidc-federation` only, and null unless this binding has been through
+            a restore. When set, the binding permanently refuses any token whose
+            `iat` is not strictly after this instant plus the maximum accepted
+            positive clock skew.
         lifetime:
           $ref: "#/components/schemas/CredentialLifetime"
         expires_at:
@@ -5585,6 +5899,318 @@ components:
             True when the instance ceiling shortened what was asked for, so
             the caller can say so rather than let the operator discover it
             when the credential dies early.
+
+    IssuerType:
+      type: string
+      description: |
+        The federation issuer's platform. It is DECLARED rather than inferred
+        from the issuer URL, because the per-platform binding rules differ — a
+        Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+        has no such claim — and inferring the type from a URL would let renaming
+        a deployment change the security rules that apply to it.
+      enum: [kubernetes, forgejo, github-actions]
+
+    JWKSMode:
+      type: string
+      description: |
+        Where the issuer's signing keys come from. `discovery` is the default:
+        keys are fetched and cached with a bounded staleness window. `static` is
+        the configured alternative for air-gapped installations and for
+        deployments whose issuer discovery endpoint this instance cannot reach —
+        deliberately not the default, because a static-only installation breaks
+        silently on the day someone rotates the issuer's keys.
+      enum: [discovery, static]
+
+    FederationIssuer:
+      type: object
+      additionalProperties: false
+      required:
+        [id, issuer, issuer_type, jwks_mode, refused_audiences, created_at, created_by, live_bindings]
+      description: |
+        One instance-scoped issuer configuration. There is deliberately no
+        `static_jwks` property on the READ shape: the document is configuration
+        an operator supplied and can re-supply, nothing needs it back, and a read
+        surface that returned it would carry a key document for no reason.
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        issuer:
+          type: string
+          maxLength: 512
+          description: |
+            The byte-exact `iss`. Nothing folds case, resolves the URL or strips
+            a trailing slash: OpenID Connect defines `iss` as case-sensitive, so
+            any normalization could merge two distinct external issuers into one
+            configuration.
+        issuer_type:
+          $ref: "#/components/schemas/IssuerType"
+        jwks_mode:
+          $ref: "#/components/schemas/JWKSMode"
+        refused_audiences:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 512
+          description: |
+            The issuer's DEFAULT audiences, which no binding may name and which
+            no token may carry. At least one is required: a Kubernetes API-server
+            audience is whatever that cluster was configured with and is not
+            derivable, so an empty list would silently accept the audience that
+            must be refused.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          $ref: "#/components/schemas/ID"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_by:
+          $ref: "#/components/schemas/ID"
+        live_bindings:
+          type: integer
+          minimum: 0
+          description: |
+            How many bindings name this issuer, LIVE OR HISTORICAL, so an operator
+            sees the blast radius before attempting a delete — which is refused
+            while any remain. Revoked bindings count: erasing the issuer a past
+            binding trusted erases what it trusted, and the foreign key would
+            refuse the delete anyway with a driver message instead of a reason.
+
+    FederationIssuerList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FederationIssuer"
+        count:
+          type: integer
+          minimum: 0
+
+    CreateFederationIssuerRequest:
+      type: object
+      additionalProperties: false
+      required: [issuer, issuer_type, jwks_mode, refused_audiences]
+      properties:
+        issuer:
+          type: string
+          minLength: 9
+          maxLength: 512
+          description: |
+            The byte-exact `iss`, `https://` only. Discovery and JWKS are fetched
+            from this URL, so an `http` issuer would rest the instance's whole
+            federation trust on whoever holds the network path.
+        issuer_type:
+          $ref: "#/components/schemas/IssuerType"
+        jwks_mode:
+          $ref: "#/components/schemas/JWKSMode"
+        static_jwks:
+          type: string
+          maxLength: 1048576
+          description: |
+            The JWKS document, required under `static` mode and refused under
+            `discovery`. The pairing is total: a document stored but unused is a
+            key set nobody rotates.
+        refused_audiences:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 512
+
+    UpdateFederationIssuerRequest:
+      type: object
+      additionalProperties: false
+      required: [jwks_mode, refused_audiences]
+      description: |
+        The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
+        changing either would silently re-point every binding underneath at a
+        different external authority, which is a replacement, not an edit.
+      properties:
+        jwks_mode:
+          $ref: "#/components/schemas/JWKSMode"
+        static_jwks:
+          type: string
+          maxLength: 1048576
+        refused_audiences:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 512
+
+    FederatedClaimPin:
+      type: object
+      additionalProperties: false
+      required: [claim]
+      description: |
+        One pinned claim, as a DISCRIMINATED scalar rather than a free-form JSON
+        value. Exactly one of `string_value`, `number_value` or `bool_value` is
+        set, and that is what makes "a string is never folded to a number" true
+        at the wire boundary rather than only inside the validator:
+        `repository_id: 123` and `repository_id: "123"` are two different
+        requests that cannot be mistaken for one another, and a 64-bit repository
+        id survives without passing through a float.
+
+        A pin naming none or several values is refused rather than resolved by
+        precedence.
+      properties:
+        claim:
+          type: string
+          minLength: 1
+          maxLength: 128
+        string_value:
+          type: string
+          maxLength: 512
+        number_value:
+          type: integer
+          format: int64
+        bool_value:
+          type: boolean
+
+    CreateBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [issuer, subject, audience, required_claims]
+      description: |
+        A binding names exactly one service account, matched byte-for-byte on
+        `(issuer, subject)`. There are no wildcards, no namespace patterns, no
+        path prefixes, no case folding and no JIT provisioning: a pattern rule
+        such as "any ServiceAccount in namespace prod" would hand a Hikyo
+        principal to anyone holding `create serviceaccount` in that namespace, a
+        far wider group than cluster-admin.
+      properties:
+        issuer:
+          type: string
+          maxLength: 512
+          description: The byte-exact `iss` of a configured issuer.
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 512
+        audience:
+          type: string
+          minLength: 1
+          maxLength: 512
+          description: |
+            Mandatory, and may not be the issuer's default. A Kubernetes token
+            minted for the default API-server audience would otherwise
+            authenticate here, and a Forgejo Actions audience defaults to
+            `<instance>/<owner>`, shared across every repository that owner has.
+        required_claims:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: "#/components/schemas/FederatedClaimPin"
+          description: |
+            Every pinned claim, all of which validation requires. A Forgejo or
+            GitHub Actions binding MUST pin `event_name`: `pull_request_target`
+            carries the ordinary ref-form subject — the default branch's subject,
+            the one a production binding names — so the protection comes from the
+            pinned event, never from the subject's shape.
+        indefinite:
+          type: boolean
+        lifetime_seconds:
+          type: integer
+          minimum: 1
+        replaces:
+          allOf:
+            - $ref: "#/components/schemas/ID"
+          description: |
+            The binding this one supersedes. Bindings are IMMUTABLE, so every
+            change is a replacement mint carrying the full formula: the
+            predecessor is revoked and the successor inserted in one transaction.
+
+    FederatedBinding:
+      type: object
+      additionalProperties: false
+      required: [credential, issuer_id, clamped]
+      properties:
+        credential:
+          $ref: "#/components/schemas/MachineCredential"
+        issuer_id:
+          $ref: "#/components/schemas/ID"
+        clamped:
+          type: boolean
+          description: True when the instance ceiling shortened the requested lifetime.
+        replaced_id:
+          allOf:
+            - $ref: "#/components/schemas/ID"
+          description: The predecessor this mint revoked, absent for a first issue.
+
+    DeliveredKey:
+      type: object
+      additionalProperties: false
+      required: [name, classification, presence]
+      description: |
+        One key as the machine surface delivers it. There is deliberately NO
+        value property, and its absence is not a placeholder: no plaintext
+        crosses this surface, so the ticket that adds values has to add the
+        member deliberately.
+      properties:
+        name:
+          type: string
+          maxLength: 256
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        presence:
+          type: string
+          enum: [required, forbidden, optional]
+          description: |
+            The key's declared presence for the addressed environment. When
+            values land this enumeration gains `set`, and the change token starts
+            moving with values.
+
+    DeliveryResponse:
+      type: object
+      additionalProperties: false
+      required: [current, cursor, change_token, schema_revision, keys]
+      description: |
+        Either the authorized projection, or the statement that the presented
+        cursor is current — in which case `keys` is empty and NOTHING was
+        disclosed. Only a fetch that actually delivers values is a disclosure.
+      properties:
+        current:
+          type: boolean
+          description: |
+            True when the presented cursor named the state the server was about
+            to serve.
+        cursor:
+          type: string
+          maxLength: 128
+          description: |
+            The opaque cursor for the state this answer describes, returned on
+            BOTH dispositions so a caller told "current" can keep polling without
+            re-fetching to learn its own cursor.
+
+            It is bound to four things — the change token, the caller's
+            authorized delivery projection, the principal's authorization
+            revision, and the pin generation — never to content alone. Any
+            authorization movement therefore invalidates it and produces a full
+            authorized delivery rather than a "current" answer.
+        change_token:
+          type: string
+          maxLength: 128
+          description: |
+            The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
+            a content digest, so it is unforgeable and un-invertible without the
+            server key and may flow into pod annotations, logs and
+            change-detection caches as ordinary non-secret metadata.
+        schema_revision:
+          type: integer
+          minimum: 0
+          description: The project's monotonic key-catalogue revision.
+        keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveredKey"
+          description: Empty when `current` is true.
 
     CredentialPolicy:
       type: object

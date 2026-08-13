@@ -140,19 +140,62 @@ func TestContractSecuredOperationsTakeAnArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	for id, op := range ops {
-		// Every verb declares its eligible artifact set as a closed matrix.
-		// This slice ships human sessions only; a machine-credential entry
-		// appearing here without the machine-identity surface behind it would
-		// be a promise nothing keeps.
+		// Every verb declares its eligible artifact set as a closed matrix, and
+		// machine-credential eligibility is now REAL (#62's delivery surface)
+		// rather than a promise nothing keeps. So the check inverts: a route may
+		// declare it only if a machine principal could actually satisfy its
+		// formula.
+		//
+		// The test is the normative allowlist itself — a machine class may hold
+		// only the capabilities #55 admits for it — so a route claiming machine
+		// eligibility under, say, `manage-identities` fails here rather than
+		// advertising an authority no machine can ever hold. That is the property
+		// the old blanket refusal was standing in for.
 		for _, artifact := range op.Artifacts {
-			if artifact == "machine-credential" {
-				t.Errorf("%s declares machine-credential eligibility, which no code serves yet (#61)", id)
+			if artifact != "machine-credential" {
+				continue
+			}
+			if op.AuthzOp == "" {
+				t.Errorf("%s declares machine-credential eligibility but reaches no registered operation", id)
+				continue
+			}
+			if !machineSatisfiable(authz.Operation(op.AuthzOp)) {
+				t.Errorf("%s declares machine-credential eligibility, but no machine class may hold its formula %v",
+					id, op.Formula)
 			}
 		}
 		if op.Secured && len(op.Artifacts) == 1 && op.Artifacts[0] == "none" {
 			t.Errorf("%s: secured but eligible for no artifact", id)
 		}
 	}
+}
+
+// machineSatisfiable reports whether SOME machine class may hold every atom of
+// an operation's formula, under #55's normative per-class allowlists.
+//
+// It asks "some class", not "every class": a workload holds `read` and an
+// automation holds more, so a route reachable by one of them is legitimately
+// machine-eligible. What it refuses is a route whose formula no machine class
+// can ever satisfy — which is what a stale or aspirational eligibility
+// declaration looks like.
+func machineSatisfiable(op authz.Operation) bool {
+	formula := facts.Formulas()[op]
+	if len(formula) == 0 {
+		return false
+	}
+	for _, class := range domain.MachineClasses() {
+		ok := true
+		for _, atom := range formula {
+			if !domain.MachineMayHold(class, atom.Cap) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 // chiPath converts an OpenAPI path template to chi's spelling. They agree

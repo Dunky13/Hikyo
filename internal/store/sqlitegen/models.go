@@ -118,6 +118,19 @@ type ExternalIdentity struct {
 	CreatedAt       string
 }
 
+type FederationIssuer struct {
+	ID               string
+	Issuer           string
+	IssuerType       string
+	JwksMode         string
+	StaticJwks       sql.NullString
+	RefusedAudiences string
+	CreatedAt        string
+	CreatedBy        string
+	UpdatedAt        sql.NullString
+	UpdatedBy        sql.NullString
+}
+
 type Folder struct {
 	ID        string
 	OrgID     string
@@ -187,7 +200,7 @@ type MachineCredential struct {
 	ServiceAccountID string
 	Kind             string
 	Verifier         []byte
-	PrefixHint       string
+	PrefixHint       sql.NullString
 	Lifetime         string
 	ExpiresAt        sql.NullString
 	CredentialEpoch  int64
@@ -195,6 +208,11 @@ type MachineCredential struct {
 	CreatedBy        string
 	RevokedAt        sql.NullString
 	LastUsedAt       sql.NullString
+	IssuerID         sql.NullString
+	Subject          sql.NullString
+	Audience         sql.NullString
+	RequiredClaims   sql.NullString
+	ReactivatedAt    sql.NullString
 }
 
 type MasterKey struct {
@@ -263,6 +281,12 @@ type PasswordCredential struct {
 	CredentialEpoch int64
 	RowVersion      int64
 	UpdatedAt       string
+}
+
+type PinGeneration struct {
+	PrincipalID   string
+	EnvironmentID string
+	Generation    int64
 }
 
 type Principal struct {

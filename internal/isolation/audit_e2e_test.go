@@ -455,6 +455,9 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// The machine-identity surface (#61): every identity.* type gets a
 		// real emitter before the trails are read.
 		runIdentityLifecycle(t, db)
+		// OIDC federation and the delivery surface (#62): the same obligation, one
+		// ticket later.
+		runFederationLifecycle(t, db)
 		// The operator lifecycle (#76): every backup.* and restore.* type gets
 		// a real emitter. It runs LAST of the lifecycles because it advances
 		// the restore epoch and then reconciles the principals it made inert,

@@ -68,23 +68,98 @@ type IdP struct {
 	// A snapshot and its Phase C write. A race fixture uses it to reconfigure
 	// the provider mid-exchange and assert the stale evaluation is refused.
 	OnToken func()
+
+	// Offline, when set, makes the discovery and JWKS endpoints answer 503.
+	// This is the INDUCED ISSUER OUTAGE the federation staleness fixture needs
+	// (#62): closing the server would work once, but the bound has to be
+	// exercised on both sides — serve-from-cache inside it, fail closed past it
+	// — and that needs the issuer to come back.
+	Offline bool
+	// retired holds superseded signing keys. Rotate moves the current key here
+	// and the JWKS keeps publishing it, which is what a real issuer does and
+	// what makes "old and new tokens both verify during a rotation" true rather
+	// than hoped for.
+	retired []retiredKey
+	// PublishRetired, when false, makes the JWKS publish ONLY the current key —
+	// an issuer that rotated hard. Default true.
+	PublishRetired bool
+	// JWKSHits counts JWKS reads this fixture SERVED, so a rate-limit fixture can
+	// assert that a throttled unknown-`kid` refresh performed no outbound request.
+	JWKSHits int
+	// KeyAttempts counts every request to the discovery and JWKS endpoints
+	// INCLUDING the ones answered 503 while offline.
+	//
+	// It exists because JWKSHits cannot answer the question that matters during an
+	// outage: a suppressed fetch and a failed fetch both serve nothing, so
+	// "attempts stayed bounded" is unassertable from served reads alone. This
+	// counts what left the client, which is the property the backoff and the
+	// per-issuer allowance exist to bound.
+	KeyAttempts int
+	// JWKSURIOverride, when set, is advertised as `jwks_uri` in the discovery
+	// document instead of this server's own endpoint. It is what makes the
+	// plaintext-transport fixture real: an HTTPS discovery document that names an
+	// `http://` key endpoint is exactly the attack, and no amount of mocking our
+	// own code exercises it.
+	JWKSURIOverride string
+	// RedirectJWKSTo, when set, makes `/jwks-redirect` answer 302 to it. The
+	// second half of the same fixture: an HTTPS `jwks_uri` that redirects to
+	// plaintext passes a scheme check on the initial URL and must still be
+	// refused.
+	RedirectJWKSTo string
 }
 
-// New starts a fake IdP. Callers own Close via t.Cleanup.
-func New() (*IdP, error) {
+type retiredKey struct {
+	key   *rsa.PrivateKey
+	keyID string
+}
+
+// New starts a fake IdP over plain HTTP. Callers own Close via t.Cleanup.
+func New() (*IdP, error) { return newIdP(false) }
+
+// NewTLS starts the same fake IdP over TLS, so its issuer is an `https://` URL.
+//
+// It exists for the federation fixtures (#62), which configure an issuer through
+// the real API — and that API refuses a non-https issuer, because discovery and
+// JWKS are fetched from it and an `http` issuer would rest the instance's whole
+// federation trust on whoever holds the network path. Rather than carve a
+// loopback exception into production validation to suit a test, the test speaks
+// TLS; Client() hands back the client that trusts this server's certificate.
+func NewTLS() (*IdP, error) { return newIdP(true) }
+
+func newIdP(useTLS bool) (*IdP, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, fmt.Errorf("oidctest: generate key: %w", err)
 	}
-	p := &IdP{key: key, keyID: "test-key-1", codes: map[string]Code{}}
+	p := &IdP{key: key, keyID: "test-key-1", codes: map[string]Code{}, PublishRetired: true}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", p.discovery)
 	mux.HandleFunc("/jwks", p.jwks)
+	mux.HandleFunc("/jwks-redirect", func(w http.ResponseWriter, r *http.Request) {
+		p.mu.Lock()
+		target := p.RedirectJWKSTo
+		p.mu.Unlock()
+		if target == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, target, http.StatusFound)
+	})
 	mux.HandleFunc("/authorize", p.authorize)
 	mux.HandleFunc("/token", p.token)
-	p.Server = httptest.NewServer(mux)
+	if useTLS {
+		p.Server = httptest.NewTLSServer(mux)
+	} else {
+		p.Server = httptest.NewServer(mux)
+	}
 	return p, nil
 }
+
+// Client is an HTTP client that trusts this fixture's certificate. For a plain
+// -HTTP fixture it is an ordinary client; for a TLS one it carries the test CA,
+// which is what lets the JWKS cache fetch from it without disabling
+// verification anywhere in production code.
+func (p *IdP) Client() *http.Client { return p.Server.Client() }
 
 // Issuer is the issuer string this IdP asserts.
 func (p *IdP) Issuer() string {
@@ -105,12 +180,21 @@ func (p *IdP) MintCode(code string, c Code) {
 }
 
 func (p *IdP) discovery(w http.ResponseWriter, _ *http.Request) {
+	if p.down(w) {
+		return
+	}
 	base := p.Server.URL
+	p.mu.Lock()
+	jwksURI := p.JWKSURIOverride
+	p.mu.Unlock()
+	if jwksURI == "" {
+		jwksURI = base + "/jwks"
+	}
 	writeJSON(w, map[string]any{
 		"issuer":                                         p.Issuer(),
 		"authorization_endpoint":                         base + "/authorize",
 		"token_endpoint":                                 base + "/token",
-		"jwks_uri":                                       base + "/jwks",
+		"jwks_uri":                                       jwksURI,
 		"response_types_supported":                       []string{"code"},
 		"subject_types_supported":                        []string{"public"},
 		"id_token_signing_alg_values_supported":          []string{"RS256"},
@@ -120,14 +204,104 @@ func (p *IdP) discovery(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (p *IdP) jwks(w http.ResponseWriter, _ *http.Request) {
-	pub := &p.key.PublicKey
-	writeJSON(w, map[string]any{
-		"keys": []map[string]any{{
-			"kty": "RSA", "alg": "RS256", "use": "sig", "kid": p.keyID,
-			"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-		}},
-	})
+	if p.down(w) {
+		return
+	}
+	p.mu.Lock()
+	p.JWKSHits++
+	keys := []map[string]any{jwkOf(&p.key.PublicKey, p.keyID)}
+	if p.PublishRetired {
+		for _, r := range p.retired {
+			keys = append(keys, jwkOf(&r.key.PublicKey, r.keyID))
+		}
+	}
+	p.mu.Unlock()
+	writeJSON(w, map[string]any{"keys": keys})
+}
+
+func jwkOf(pub *rsa.PublicKey, kid string) map[string]any {
+	return map[string]any{
+		"kty": "RSA", "alg": "RS256", "use": "sig", "kid": kid,
+		"n": base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
+		"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
+	}
+}
+
+// down answers 503 while the fixture is offline, which is what an unreachable
+// issuer looks like from the relying party's side: a transport that connects and
+// refuses, not a name that fails to resolve. Both exercise the same branch.
+//
+// It also counts the ATTEMPT, before deciding whether to serve, so an offline
+// fixture still records what the client tried.
+func (p *IdP) down(w http.ResponseWriter) bool {
+	p.mu.Lock()
+	p.KeyAttempts++
+	offline := p.Offline
+	p.mu.Unlock()
+	if !offline {
+		return false
+	}
+	http.Error(w, "issuer offline", http.StatusServiceUnavailable)
+	return true
+}
+
+// Rotate mints a fresh signing key, retiring the current one. The retired key
+// keeps being published unless PublishRetired is cleared, so a token minted
+// before the rotation still verifies — the behaviour that makes serving a whole
+// JWKS correct rather than a shortcut.
+func (p *IdP) Rotate() error {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("oidctest: rotate key: %w", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.retired = append(p.retired, retiredKey{key: p.key, keyID: p.keyID})
+	p.key = key
+	p.keyID = fmt.Sprintf("test-key-%d", len(p.retired)+1)
+	return nil
+}
+
+// CurrentKeyID is the `kid` the next MintIDToken will carry.
+func (p *IdP) CurrentKeyID() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.keyID
+}
+
+// SetOffline induces or lifts the outage.
+func (p *IdP) SetOffline(offline bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Offline = offline
+}
+
+// Fetches reports how many JWKS reads this fixture has SERVED.
+func (p *IdP) Fetches() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.JWKSHits
+}
+
+// Attempts reports how many discovery or JWKS requests REACHED this fixture,
+// served or refused. It is the counter to assert against when the fixture is
+// offline.
+func (p *IdP) Attempts() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.KeyAttempts
+}
+
+// MintIDToken signs an ID token with exactly the claims given — no defaults, no
+// merging.
+//
+// Federation has no authorization-code flow, so there is no `Code` to hang
+// claims off: a workload arrives holding a token its platform minted. This is
+// therefore the whole minting surface for the federation fixtures, and it takes
+// the claim map VERBATIM so a fixture can assert a refusal by omitting `aud`,
+// backdating `iat`, or naming the issuer's default audience.
+func (p *IdP) MintIDToken(claims map[string]any) (string, error) {
+	return p.signJWT(claims)
 }
 
 // authorize implements the front-channel leg: it immediately redirects to the
@@ -229,8 +403,14 @@ func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// signJWT signs with the CURRENT key under the lock, so a fixture that rotates
+// between mints cannot observe a header `kid` that disagrees with the key that
+// signed the body.
 func (p *IdP) signJWT(claims map[string]any) (string, error) {
-	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": p.keyID}
+	p.mu.Lock()
+	key, keyID := p.key, p.keyID
+	p.mu.Unlock()
+	header := map[string]any{"alg": "RS256", "typ": "JWT", "kid": keyID}
 	hb, err := json.Marshal(header)
 	if err != nil {
 		return "", err
@@ -240,7 +420,7 @@ func (p *IdP) signJWT(claims map[string]any) (string, error) {
 		return "", err
 	}
 	signing := base64.RawURLEncoding.EncodeToString(hb) + "." + base64.RawURLEncoding.EncodeToString(cb)
-	sig, err := signRS256(p.key, signing)
+	sig, err := signRS256(key, signing)
 	if err != nil {
 		return "", err
 	}

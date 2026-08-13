@@ -362,7 +362,7 @@ export const zServiceAccountKind = z.enum(['workload', 'automation']);
  * rather than a schema change.
  *
  */
-export const zCredentialKind = z.enum(['hikyo-token']);
+export const zCredentialKind = z.enum(['hikyo-token', 'oidc-federation']);
 
 /**
  * `indefinite` is a VALUE, not a large number: it is unreachable by
@@ -393,15 +393,124 @@ export const zServiceAccountList = z.object({
 });
 
 /**
+ * The zero request asks for the finite default, which is the rule that
+ * the easy path is bounded and a long-lived credential is a typed choice
+ * someone made.
+ *
+ */
+export const zMintCredentialRequest = z.object({
+    indefinite: z.optional(z.boolean()),
+    lifetime_seconds: z.optional(z.int().gte(1))
+});
+
+/**
+ * The federation issuer's platform. It is DECLARED rather than inferred
+ * from the issuer URL, because the per-platform binding rules differ — a
+ * Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+ * has no such claim — and inferring the type from a URL would let renaming
+ * a deployment change the security rules that apply to it.
+ *
+ */
+export const zIssuerType = z.enum([
+    'kubernetes',
+    'forgejo',
+    'github-actions'
+]);
+
+/**
+ * Where the issuer's signing keys come from. `discovery` is the default:
+ * keys are fetched and cached with a bounded staleness window. `static` is
+ * the configured alternative for air-gapped installations and for
+ * deployments whose issuer discovery endpoint this instance cannot reach —
+ * deliberately not the default, because a static-only installation breaks
+ * silently on the day someone rotates the issuer's keys.
+ *
+ */
+export const zJwksMode = z.enum(['discovery', 'static']);
+
+/**
+ * One instance-scoped issuer configuration. There is deliberately no
+ * `static_jwks` property on the READ shape: the document is configuration
+ * an operator supplied and can re-supply, nothing needs it back, and a read
+ * surface that returned it would carry a key document for no reason.
+ *
+ */
+export const zFederationIssuer = z.object({
+    id: zId,
+    issuer: z.string().max(512),
+    issuer_type: zIssuerType,
+    jwks_mode: zJwksMode,
+    refused_audiences: z.array(z.string().max(512)).min(1).max(16),
+    created_at: zTimestamp,
+    created_by: zId,
+    updated_at: z.optional(zTimestamp),
+    updated_by: z.optional(zId),
+    live_bindings: z.int().gte(0)
+});
+
+export const zFederationIssuerList = z.object({
+    items: z.array(zFederationIssuer),
+    count: z.int().gte(0)
+});
+
+export const zCreateFederationIssuerRequest = z.object({
+    issuer: z.string().min(9).max(512),
+    issuer_type: zIssuerType,
+    jwks_mode: zJwksMode,
+    static_jwks: z.optional(z.string().max(1048576)),
+    refused_audiences: z.array(z.string().max(512)).min(1).max(16)
+});
+
+/**
+ * The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
+ * changing either would silently re-point every binding underneath at a
+ * different external authority, which is a replacement, not an edit.
+ *
+ */
+export const zUpdateFederationIssuerRequest = z.object({
+    jwks_mode: zJwksMode,
+    static_jwks: z.optional(z.string().max(1048576)),
+    refused_audiences: z.array(z.string().max(512)).min(1).max(16)
+});
+
+/**
+ * One pinned claim, as a DISCRIMINATED scalar rather than a free-form JSON
+ * value. Exactly one of `string_value`, `number_value` or `bool_value` is
+ * set, and that is what makes "a string is never folded to a number" true
+ * at the wire boundary rather than only inside the validator:
+ * `repository_id: 123` and `repository_id: "123"` are two different
+ * requests that cannot be mistaken for one another, and a 64-bit repository
+ * id survives without passing through a float.
+ *
+ * A pin naming none or several values is refused rather than resolved by
+ * precedence.
+ *
+ */
+export const zFederatedClaimPin = z.object({
+    claim: z.string().min(1).max(128),
+    string_value: z.optional(z.string().max(512)),
+    number_value: z.optional(z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })),
+    bool_value: z.optional(z.boolean())
+});
+
+/**
  * Metadata only. There is deliberately no value property: a credential
  * value is displayed exactly once, at mint, and is never retrievable
  * afterwards.
+ *
+ * A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+ * no minted value to hint at — and carries the binding members instead.
  *
  */
 export const zMachineCredential = z.object({
     id: zId,
     kind: zCredentialKind,
-    prefix_hint: z.string().max(32),
+    prefix_hint: z.optional(z.string().max(32)),
+    issuer: z.optional(z.string().max(512)),
+    subject: z.optional(z.string().max(512)),
+    audience: z.optional(z.string().max(512)),
+    required_claims: z.optional(z.array(zFederatedClaimPin).max(16)),
+    reactivated_at: z.optional(zTimestamp),
     lifetime: zCredentialLifetime,
     expires_at: z.optional(zTimestamp),
     created_at: zTimestamp,
@@ -416,21 +525,36 @@ export const zMachineCredentialList = z.object({
     count: z.int().gte(0)
 });
 
-/**
- * The zero request asks for the finite default, which is the rule that
- * the easy path is bounded and a long-lived credential is a typed choice
- * someone made.
- *
- */
-export const zMintCredentialRequest = z.object({
-    indefinite: z.optional(z.boolean()),
-    lifetime_seconds: z.optional(z.int().gte(1))
-});
-
 export const zMintCredentialResult = z.object({
     value: z.string(),
     credential: zMachineCredential,
     clamped: z.boolean()
+});
+
+/**
+ * A binding names exactly one service account, matched byte-for-byte on
+ * `(issuer, subject)`. There are no wildcards, no namespace patterns, no
+ * path prefixes, no case folding and no JIT provisioning: a pattern rule
+ * such as "any ServiceAccount in namespace prod" would hand a Hikyo
+ * principal to anyone holding `create serviceaccount` in that namespace, a
+ * far wider group than cluster-admin.
+ *
+ */
+export const zCreateBindingRequest = z.object({
+    issuer: z.string().max(512),
+    subject: z.string().min(1).max(512),
+    audience: z.string().min(1).max(512),
+    required_claims: z.array(zFederatedClaimPin).min(1).max(16),
+    indefinite: z.optional(z.boolean()),
+    lifetime_seconds: z.optional(z.int().gte(1)),
+    replaces: z.optional(zId)
+});
+
+export const zFederatedBinding = z.object({
+    credential: zMachineCredential,
+    issuer_id: zId,
+    clamped: z.boolean(),
+    replaced_id: z.optional(zId)
 });
 
 export const zCredentialPolicy = z.object({
@@ -645,6 +769,37 @@ export const zValueDiff = z.object({
     left_environment_id: zId,
     right_environment_id: zId,
     items: z.array(zValueDiffRow)
+});
+
+/**
+ * One key as the machine surface delivers it. There is deliberately NO
+ * value property, and its absence is not a placeholder: no plaintext
+ * crosses this surface, so the ticket that adds values has to add the
+ * member deliberately.
+ *
+ */
+export const zDeliveredKey = z.object({
+    name: z.string().max(256),
+    classification: zKeyClassification,
+    presence: z.enum([
+        'required',
+        'forbidden',
+        'optional'
+    ])
+});
+
+/**
+ * Either the authorized projection, or the statement that the presented
+ * cursor is current — in which case `keys` is empty and NOTHING was
+ * disclosed. Only a fetch that actually delivers values is a disclosure.
+ *
+ */
+export const zDeliveryResponse = z.object({
+    current: z.boolean(),
+    cursor: z.string().max(128),
+    change_token: z.string().max(128),
+    schema_revision: z.int().gte(0),
+    keys: z.array(zDeliveredKey)
 });
 
 /**
@@ -1241,6 +1396,24 @@ export const zWebauthnCredentialId = zId;
  * The target principal whose credential is being reset.
  */
 export const zResetTargetPrincipal = zId;
+
+/**
+ * Federation issuer identifier. It is the server-minted id, not the issuer
+ * URL: a URL in a path segment would have to be escaped, and an escaping
+ * rule on a byte-exact identity is a canonicalization step waiting to
+ * happen.
+ *
+ */
+export const zFederationIssuerId = zId;
+
+/**
+ * The opaque cursor a previous fetch returned. Absent means a full
+ * authorized delivery. A cursor is never parsed by the caller and never
+ * constructed by one: the server recomputes it for the state it is about to
+ * serve and compares.
+ *
+ */
+export const zDeliveryCursor = z.string().max(128);
 
 export const zGetMetaData = z.object({
     body: z.optional(z.never()),
@@ -2828,3 +3001,83 @@ export const zSetCredentialPolicyData = z.object({
  * The policy as written, with what the clamp touched.
  */
 export const zSetCredentialPolicyResponse = zCredentialPolicyResult;
+
+export const zListFederationIssuersData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The configured issuers.
+ */
+export const zListFederationIssuersResponse = zFederationIssuerList;
+
+export const zCreateFederationIssuerData = z.object({
+    body: zCreateFederationIssuerRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The configured issuer.
+ */
+export const zCreateFederationIssuerResponse = zFederationIssuer;
+
+export const zDeleteFederationIssuerData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        issuer: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Deleted.
+ */
+export const zDeleteFederationIssuerResponse = z.void();
+
+export const zUpdateFederationIssuerData = z.object({
+    body: zUpdateFederationIssuerRequest,
+    path: z.object({
+        issuer: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The issuer as written.
+ */
+export const zUpdateFederationIssuerResponse = zFederationIssuer;
+
+export const zCreateFederatedBindingData = z.object({
+    body: zCreateBindingRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        serviceAccount: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created binding.
+ */
+export const zCreateFederatedBindingResponse = zFederatedBinding;
+
+export const zFetchDeliveryData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.object({
+        cursor: z.optional(z.string().max(128))
+    }))
+});
+
+/**
+ * The authorized projection, or the statement that the cursor is current.
+ */
+export const zFetchDeliveryResponse = zDeliveryResponse;

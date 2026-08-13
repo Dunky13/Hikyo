@@ -37,13 +37,16 @@ func (e AffectedCredentialReason) Valid() bool {
 
 // Defines values for CredentialKind.
 const (
-	HikyoToken CredentialKind = "hikyo-token"
+	HikyoToken     CredentialKind = "hikyo-token"
+	OidcFederation CredentialKind = "oidc-federation"
 )
 
 // Valid indicates whether the value is a known member of the CredentialKind enum.
 func (e CredentialKind) Valid() bool {
 	switch e {
 	case HikyoToken:
+		return true
+	case OidcFederation:
 		return true
 	default:
 		return false
@@ -62,6 +65,27 @@ func (e CredentialLifetime) Valid() bool {
 	case Finite:
 		return true
 	case Indefinite:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeliveredKeyPresence.
+const (
+	DeliveredKeyPresenceForbidden DeliveredKeyPresence = "forbidden"
+	DeliveredKeyPresenceOptional  DeliveredKeyPresence = "optional"
+	DeliveredKeyPresenceRequired  DeliveredKeyPresence = "required"
+)
+
+// Valid indicates whether the value is a known member of the DeliveredKeyPresence enum.
+func (e DeliveredKeyPresence) Valid() bool {
+	switch e {
+	case DeliveredKeyPresenceForbidden:
+		return true
+	case DeliveredKeyPresenceOptional:
+		return true
+	case DeliveredKeyPresenceRequired:
 		return true
 	default:
 		return false
@@ -143,6 +167,45 @@ func (e IdentityProviderKind) Valid() bool {
 	case IdentityProviderKindOidc:
 		return true
 	case IdentityProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IssuerType.
+const (
+	Forgejo       IssuerType = "forgejo"
+	GithubActions IssuerType = "github-actions"
+	Kubernetes    IssuerType = "kubernetes"
+)
+
+// Valid indicates whether the value is a known member of the IssuerType enum.
+func (e IssuerType) Valid() bool {
+	switch e {
+	case Forgejo:
+		return true
+	case GithubActions:
+		return true
+	case Kubernetes:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JWKSMode.
+const (
+	Discovery JWKSMode = "discovery"
+	Static    JWKSMode = "static"
+)
+
+// Valid indicates whether the value is a known member of the JWKSMode enum.
+func (e JWKSMode) Valid() bool {
+	switch e {
+	case Discovery:
+		return true
+	case Static:
 		return true
 	default:
 		return false
@@ -608,6 +671,38 @@ type CopyValuesResult struct {
 	} `json:"copied"`
 }
 
+// CreateBindingRequest A binding names exactly one service account, matched byte-for-byte on
+// `(issuer, subject)`. There are no wildcards, no namespace patterns, no
+// path prefixes, no case folding and no JIT provisioning: a pattern rule
+// such as "any ServiceAccount in namespace prod" would hand a Hikyo
+// principal to anyone holding `create serviceaccount` in that namespace, a
+// far wider group than cluster-admin.
+type CreateBindingRequest struct {
+	// Audience Mandatory, and may not be the issuer's default. A Kubernetes token
+	// minted for the default API-server audience would otherwise
+	// authenticate here, and a Forgejo Actions audience defaults to
+	// `<instance>/<owner>`, shared across every repository that owner has.
+	Audience   string `json:"audience"`
+	Indefinite *bool  `json:"indefinite,omitempty"`
+
+	// Issuer The byte-exact `iss` of a configured issuer.
+	Issuer          string `json:"issuer"`
+	LifetimeSeconds *int   `json:"lifetime_seconds,omitempty"`
+
+	// Replaces The binding this one supersedes. Bindings are IMMUTABLE, so every
+	// change is a replacement mint carrying the full formula: the
+	// predecessor is revoked and the successor inserted in one transaction.
+	Replaces *ID `json:"replaces,omitempty"`
+
+	// RequiredClaims Every pinned claim, all of which validation requires. A Forgejo or
+	// GitHub Actions binding MUST pin `event_name`: `pull_request_target`
+	// carries the ordinary ref-form subject — the default branch's subject,
+	// the one a production binding names — so the protection comes from the
+	// pinned event, never from the subject's shape.
+	RequiredClaims []FederatedClaimPin `json:"required_claims"`
+	Subject        string              `json:"subject"`
+}
+
 // CreateEnvironmentRequest defines model for CreateEnvironmentRequest.
 type CreateEnvironmentRequest struct {
 	// Name A display name for an organisation, project or environment. Identity is
@@ -625,6 +720,35 @@ type CreateEnvironmentRequest struct {
 	// and is still refused by the server with `bad_request`. Clients that want
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
+}
+
+// CreateFederationIssuerRequest defines model for CreateFederationIssuerRequest.
+type CreateFederationIssuerRequest struct {
+	// Issuer The byte-exact `iss`, `https://` only. Discovery and JWKS are fetched
+	// from this URL, so an `http` issuer would rest the instance's whole
+	// federation trust on whoever holds the network path.
+	Issuer string `json:"issuer"`
+
+	// IssuerType The federation issuer's platform. It is DECLARED rather than inferred
+	// from the issuer URL, because the per-platform binding rules differ — a
+	// Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+	// has no such claim — and inferring the type from a URL would let renaming
+	// a deployment change the security rules that apply to it.
+	IssuerType IssuerType `json:"issuer_type"`
+
+	// JwksMode Where the issuer's signing keys come from. `discovery` is the default:
+	// keys are fetched and cached with a bounded staleness window. `static` is
+	// the configured alternative for air-gapped installations and for
+	// deployments whose issuer discovery endpoint this instance cannot reach —
+	// deliberately not the default, because a static-only installation breaks
+	// silently on the day someone rotates the issuer's keys.
+	JwksMode         JWKSMode `json:"jwks_mode"`
+	RefusedAudiences []string `json:"refused_audiences"`
+
+	// StaticJwks The JWKS document, required under `static` mode and refused under
+	// `discovery`. The pairing is total: a document stored but unused is a
+	// key set nobody rotates.
+	StaticJwks *string `json:"static_jwks,omitempty"`
 }
 
 // CreateFolderRequest defines model for CreateFolderRequest.
@@ -796,6 +920,61 @@ type DeclareValuesRequest struct {
 	Value string  `json:"value"`
 }
 
+// DeliveredKey One key as the machine surface delivers it. There is deliberately NO
+// value property, and its absence is not a placeholder: no plaintext
+// crosses this surface, so the ticket that adds values has to add the
+// member deliberately.
+type DeliveredKey struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+	Name           string            `json:"name"`
+
+	// Presence The key's declared presence for the addressed environment. When
+	// values land this enumeration gains `set`, and the change token starts
+	// moving with values.
+	Presence DeliveredKeyPresence `json:"presence"`
+}
+
+// DeliveredKeyPresence The key's declared presence for the addressed environment. When
+// values land this enumeration gains `set`, and the change token starts
+// moving with values.
+type DeliveredKeyPresence string
+
+// DeliveryResponse Either the authorized projection, or the statement that the presented
+// cursor is current — in which case `keys` is empty and NOTHING was
+// disclosed. Only a fetch that actually delivers values is a disclosure.
+type DeliveryResponse struct {
+	// ChangeToken The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
+	// a content digest, so it is unforgeable and un-invertible without the
+	// server key and may flow into pod annotations, logs and
+	// change-detection caches as ordinary non-secret metadata.
+	ChangeToken string `json:"change_token"`
+
+	// Current True when the presented cursor named the state the server was about
+	// to serve.
+	Current bool `json:"current"`
+
+	// Cursor The opaque cursor for the state this answer describes, returned on
+	// BOTH dispositions so a caller told "current" can keep polling without
+	// re-fetching to learn its own cursor.
+	//
+	// It is bound to four things — the change token, the caller's
+	// authorized delivery projection, the principal's authorization
+	// revision, and the pin generation — never to content alone. Any
+	// authorization movement therefore invalidates it and produces a full
+	// authorized delivery rather than a "current" answer.
+	Cursor string `json:"cursor"`
+
+	// Keys Empty when `current` is true.
+	Keys []DeliveredKey `json:"keys"`
+
+	// SchemaRevision The project's monotonic key-catalogue revision.
+	SchemaRevision int `json:"schema_revision"`
+}
+
 // EntityName A display name for an organisation, project or environment. Identity is
 // the immutable id, so this is a label and a rename never breaks a
 // reference. The 128-byte bound is the one the organisation contract has
@@ -910,6 +1089,105 @@ type ExternalIdentity struct {
 
 // FactorClass OPEN enum — new factor classes are additive.
 type FactorClass = string
+
+// FederatedBinding defines model for FederatedBinding.
+type FederatedBinding struct {
+	// Clamped True when the instance ceiling shortened the requested lifetime.
+	Clamped bool `json:"clamped"`
+
+	// Credential Metadata only. There is deliberately no value property: a credential
+	// value is displayed exactly once, at mint, and is never retrievable
+	// afterwards.
+	//
+	// A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+	// no minted value to hint at — and carries the binding members instead.
+	Credential MachineCredential `json:"credential"`
+
+	// IssuerId A prefixed UUIDv7, e.g. `org_0198…`.
+	IssuerId ID `json:"issuer_id"`
+
+	// ReplacedId The predecessor this mint revoked, absent for a first issue.
+	ReplacedId *ID `json:"replaced_id,omitempty"`
+}
+
+// FederatedClaimPin One pinned claim, as a DISCRIMINATED scalar rather than a free-form JSON
+// value. Exactly one of `string_value`, `number_value` or `bool_value` is
+// set, and that is what makes "a string is never folded to a number" true
+// at the wire boundary rather than only inside the validator:
+// `repository_id: 123` and `repository_id: "123"` are two different
+// requests that cannot be mistaken for one another, and a 64-bit repository
+// id survives without passing through a float.
+//
+// A pin naming none or several values is refused rather than resolved by
+// precedence.
+type FederatedClaimPin struct {
+	BoolValue   *bool   `json:"bool_value,omitempty"`
+	Claim       string  `json:"claim"`
+	NumberValue *int64  `json:"number_value,omitempty"`
+	StringValue *string `json:"string_value,omitempty"`
+}
+
+// FederationIssuer One instance-scoped issuer configuration. There is deliberately no
+// `static_jwks` property on the READ shape: the document is configuration
+// an operator supplied and can re-supply, nothing needs it back, and a read
+// surface that returned it would carry a key document for no reason.
+type FederationIssuer struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// CreatedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	CreatedBy ID `json:"created_by"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Issuer The byte-exact `iss`. Nothing folds case, resolves the URL or strips
+	// a trailing slash: OpenID Connect defines `iss` as case-sensitive, so
+	// any normalization could merge two distinct external issuers into one
+	// configuration.
+	Issuer string `json:"issuer"`
+
+	// IssuerType The federation issuer's platform. It is DECLARED rather than inferred
+	// from the issuer URL, because the per-platform binding rules differ — a
+	// Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+	// has no such claim — and inferring the type from a URL would let renaming
+	// a deployment change the security rules that apply to it.
+	IssuerType IssuerType `json:"issuer_type"`
+
+	// JwksMode Where the issuer's signing keys come from. `discovery` is the default:
+	// keys are fetched and cached with a bounded staleness window. `static` is
+	// the configured alternative for air-gapped installations and for
+	// deployments whose issuer discovery endpoint this instance cannot reach —
+	// deliberately not the default, because a static-only installation breaks
+	// silently on the day someone rotates the issuer's keys.
+	JwksMode JWKSMode `json:"jwks_mode"`
+
+	// LiveBindings How many bindings name this issuer, LIVE OR HISTORICAL, so an operator
+	// sees the blast radius before attempting a delete — which is refused
+	// while any remain. Revoked bindings count: erasing the issuer a past
+	// binding trusted erases what it trusted, and the foreign key would
+	// refuse the delete anyway with a driver message instead of a reason.
+	LiveBindings int `json:"live_bindings"`
+
+	// RefusedAudiences The issuer's DEFAULT audiences, which no binding may name and which
+	// no token may carry. At least one is required: a Kubernetes API-server
+	// audience is whatever that cluster was configured with and is not
+	// derivable, so an empty list would silently accept the audience that
+	// must be refused.
+	RefusedAudiences []string `json:"refused_audiences"`
+
+	// UpdatedAt RFC 3339 UTC, microsecond precision.
+	UpdatedAt *Timestamp `json:"updated_at,omitempty"`
+
+	// UpdatedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	UpdatedBy *ID `json:"updated_by,omitempty"`
+}
+
+// FederationIssuerList defines model for FederationIssuerList.
+type FederationIssuerList struct {
+	Count int                `json:"count"`
+	Items []FederationIssuer `json:"items"`
+}
 
 // Folder defines model for Folder.
 type Folder struct {
@@ -1064,6 +1342,21 @@ type IdentityProviderKind string
 type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
 }
+
+// IssuerType The federation issuer's platform. It is DECLARED rather than inferred
+// from the issuer URL, because the per-platform binding rules differ — a
+// Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+// has no such claim — and inferring the type from a URL would let renaming
+// a deployment change the security rules that apply to it.
+type IssuerType string
+
+// JWKSMode Where the issuer's signing keys come from. `discovery` is the default:
+// keys are fetched and cached with a bounded staleness window. `static` is
+// the configured alternative for air-gapped installations and for
+// deployments whose issuer discovery endpoint this instance cannot reach —
+// deliberately not the default, because a static-only installation breaks
+// silently on the day someone rotates the issuer's keys.
+type JWKSMode string
 
 // Key defines model for Key.
 type Key struct {
@@ -1315,7 +1608,13 @@ type LoginResult struct {
 // MachineCredential Metadata only. There is deliberately no value property: a credential
 // value is displayed exactly once, at mint, and is never retrievable
 // afterwards.
+//
+// A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+// no minted value to hint at — and carries the binding members instead.
 type MachineCredential struct {
+	// Audience `oidc-federation` only: the audience it accepts, never the issuer's default.
+	Audience *string `json:"audience,omitempty"`
+
 	// CreatedAt RFC 3339 UTC, microsecond precision.
 	CreatedAt Timestamp `json:"created_at"`
 
@@ -1331,6 +1630,9 @@ type MachineCredential struct {
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
 	Id ID `json:"id"`
+
+	// Issuer `oidc-federation` only: the byte-exact issuer this binding trusts.
+	Issuer *string `json:"issuer,omitempty"`
 
 	// Kind How a credential authenticates its service account. The discriminator
 	// exists before a second kind does, so adding one is a new row type
@@ -1348,10 +1650,23 @@ type MachineCredential struct {
 	// PrefixHint The non-secret leading slice of the minted value - the grammar
 	// prefix plus a few body characters, enough to tell two live
 	// credentials apart and far short of anything a search can narrow.
-	PrefixHint string `json:"prefix_hint"`
+	// Absent for an `oidc-federation` row.
+	PrefixHint *string `json:"prefix_hint,omitempty"`
+
+	// ReactivatedAt `oidc-federation` only, and null unless this binding has been through
+	// a restore. When set, the binding permanently refuses any token whose
+	// `iat` is not strictly after this instant plus the maximum accepted
+	// positive clock skew.
+	ReactivatedAt *Timestamp `json:"reactivated_at,omitempty"`
+
+	// RequiredClaims `oidc-federation` only: every pinned claim, all of which validation requires.
+	RequiredClaims *[]FederatedClaimPin `json:"required_claims,omitempty"`
 
 	// RevokedAt RFC 3339 UTC, microsecond precision.
 	RevokedAt *Timestamp `json:"revoked_at,omitempty"`
+
+	// Subject `oidc-federation` only: the byte-exact `sub` it names.
+	Subject *string `json:"subject,omitempty"`
 }
 
 // MachineCredentialList defines model for MachineCredentialList.
@@ -1403,6 +1718,9 @@ type MintCredentialResult struct {
 	// Credential Metadata only. There is deliberately no value property: a credential
 	// value is displayed exactly once, at mint, and is never retrievable
 	// afterwards.
+	//
+	// A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+	// no minted value to hint at — and carries the binding members instead.
 	Credential MachineCredential `json:"credential"`
 
 	// Value The credential value, returned EXACTLY ONCE to exactly one caller.
@@ -2041,6 +2359,21 @@ type TotpReauthRequest struct {
 	EnvironmentId ID `json:"environment_id"`
 }
 
+// UpdateFederationIssuerRequest The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
+// changing either would silently re-point every binding underneath at a
+// different external authority, which is a replacement, not an edit.
+type UpdateFederationIssuerRequest struct {
+	// JwksMode Where the issuer's signing keys come from. `discovery` is the default:
+	// keys are fetched and cached with a bounded staleness window. `static` is
+	// the configured alternative for air-gapped installations and for
+	// deployments whose issuer discovery endpoint this instance cannot reach —
+	// deliberately not the default, because a static-only installation breaks
+	// silently on the day someone rotates the issuer's keys.
+	JwksMode         JWKSMode `json:"jwks_mode"`
+	RefusedAudiences []string `json:"refused_audiences"`
+	StaticJwks       *string  `json:"static_jwks,omitempty"`
+}
+
 // UpdateKeyDeclarationRequest defines model for UpdateKeyDeclarationRequest.
 type UpdateKeyDeclarationRequest struct {
 	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
@@ -2232,8 +2565,14 @@ type WhoAmI struct {
 // CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type CredentialID = ID
 
+// DeliveryCursor defines model for DeliveryCursor.
+type DeliveryCursor = string
+
 // EnvironmentID A prefixed UUIDv7, e.g. `org_0198…`.
 type EnvironmentID = ID
+
+// FederationIssuerID A prefixed UUIDv7, e.g. `org_0198…`.
+type FederationIssuerID = ID
 
 // FolderID A prefixed UUIDv7, e.g. `org_0198…`.
 type FolderID = ID
@@ -2332,6 +2671,15 @@ type RevokeOrgGrantParams struct {
 	Capability GrantCapability `form:"capability" json:"capability"`
 }
 
+// FetchDeliveryParams defines parameters for FetchDelivery.
+type FetchDeliveryParams struct {
+	// Cursor The opaque cursor a previous fetch returned. Absent means a full
+	// authorized delivery. A cursor is never parsed by the caller and never
+	// constructed by one: the server recomputes it for the state it is about to
+	// serve and compares.
+	Cursor *DeliveryCursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // RevokeEnvGrantParams defines parameters for RevokeEnvGrant.
 type RevokeEnvGrantParams struct {
 	// Principal The principal whose grant is being revoked.
@@ -2424,6 +2772,12 @@ type StepUpPasskeyFinishJSONRequestBody = WebauthnResponse
 
 // SetCredentialPolicyJSONRequestBody defines body for SetCredentialPolicy for application/json ContentType.
 type SetCredentialPolicyJSONRequestBody = SetCredentialPolicyRequest
+
+// CreateFederationIssuerJSONRequestBody defines body for CreateFederationIssuer for application/json ContentType.
+type CreateFederationIssuerJSONRequestBody = CreateFederationIssuerRequest
+
+// UpdateFederationIssuerJSONRequestBody defines body for UpdateFederationIssuer for application/json ContentType.
+type UpdateFederationIssuerJSONRequestBody = UpdateFederationIssuerRequest
 
 // CreateInstanceGrantJSONRequestBody defines body for CreateInstanceGrant for application/json ContentType.
 type CreateInstanceGrantJSONRequestBody = CreateGrantRequest
@@ -2523,6 +2877,9 @@ type RenameKeyJSONRequestBody = RenameKeyRequest
 
 // CreateServiceAccountJSONRequestBody defines body for CreateServiceAccount for application/json ContentType.
 type CreateServiceAccountJSONRequestBody = CreateServiceAccountRequest
+
+// CreateFederatedBindingJSONRequestBody defines body for CreateFederatedBinding for application/json ContentType.
+type CreateFederatedBindingJSONRequestBody = CreateBindingRequest
 
 // MintMachineCredentialJSONRequestBody defines body for MintMachineCredential for application/json ContentType.
 type MintMachineCredentialJSONRequestBody = MintCredentialRequest
@@ -2637,6 +2994,18 @@ type ServerInterface interface {
 	// SetCredentialPolicy Move the instance credential lifetime controls.
 	// (PUT /api/v1/instance/credential-policy)
 	SetCredentialPolicy(w http.ResponseWriter, r *http.Request)
+	// ListFederationIssuers List the configured OIDC federation issuers.
+	// (GET /api/v1/instance/federation-issuers)
+	ListFederationIssuers(w http.ResponseWriter, r *http.Request)
+	// CreateFederationIssuer Configure an OIDC federation issuer.
+	// (POST /api/v1/instance/federation-issuers)
+	CreateFederationIssuer(w http.ResponseWriter, r *http.Request)
+	// DeleteFederationIssuer Remove an issuer configuration.
+	// (DELETE /api/v1/instance/federation-issuers/{issuer})
+	DeleteFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID)
+	// UpdateFederationIssuer Move an issuer's JWKS source or refused audiences.
+	// (PATCH /api/v1/instance/federation-issuers/{issuer})
+	UpdateFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID)
 	// RevokeInstanceGrant Revoke one capability at instance scope.
 	// (DELETE /api/v1/instance/grants)
 	RevokeInstanceGrant(w http.ResponseWriter, r *http.Request, params RevokeInstanceGrantParams)
@@ -2760,6 +3129,9 @@ type ServerInterface interface {
 	// RenameEnvironment Rename an environment.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment})
 	RenameEnvironment(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// FetchDelivery Fetch the authorized projection, conditionally.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
+	FetchDelivery(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params FetchDeliveryParams)
 	// RevokeEnvGrant Revoke one capability on one environment.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
 	RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams)
@@ -2874,6 +3246,9 @@ type ServerInterface interface {
 	// DeleteServiceAccount Delete a service account, revoking every credential and grant.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
 	DeleteServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
+	// CreateFederatedBinding Mint a federated `(issuer, subject)` binding. Nothing at rest.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings)
+	CreateFederatedBinding(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
 	// ListMachineCredentials List a service account's credentials, metadata only.
 	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
 	ListMachineCredentials(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID)
@@ -3096,6 +3471,30 @@ func (_ Unimplemented) GetCredentialPolicy(w http.ResponseWriter, r *http.Reques
 // SetCredentialPolicy Move the instance credential lifetime controls.
 // (PUT /api/v1/instance/credential-policy)
 func (_ Unimplemented) SetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFederationIssuers List the configured OIDC federation issuers.
+// (GET /api/v1/instance/federation-issuers)
+func (_ Unimplemented) ListFederationIssuers(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateFederationIssuer Configure an OIDC federation issuer.
+// (POST /api/v1/instance/federation-issuers)
+func (_ Unimplemented) CreateFederationIssuer(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteFederationIssuer Remove an issuer configuration.
+// (DELETE /api/v1/instance/federation-issuers/{issuer})
+func (_ Unimplemented) DeleteFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateFederationIssuer Move an issuer's JWKS source or refused audiences.
+// (PATCH /api/v1/instance/federation-issuers/{issuer})
+func (_ Unimplemented) UpdateFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3345,6 +3744,12 @@ func (_ Unimplemented) RenameEnvironment(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// FetchDelivery Fetch the authorized projection, conditionally.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
+func (_ Unimplemented) FetchDelivery(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params FetchDeliveryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RevokeEnvGrant Revoke one capability on one environment.
 // (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
 func (_ Unimplemented) RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams) {
@@ -3570,6 +3975,12 @@ func (_ Unimplemented) CreateServiceAccount(w http.ResponseWriter, r *http.Reque
 // DeleteServiceAccount Delete a service account, revoking every credential and grant.
 // (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
 func (_ Unimplemented) DeleteServiceAccount(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateFederatedBinding Mint a federated `(issuer, subject)` binding. Nothing at rest.
+// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings)
+func (_ Unimplemented) CreateFederatedBinding(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4228,6 +4639,86 @@ func (siw *ServerInterfaceWrapper) SetCredentialPolicy(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetCredentialPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFederationIssuers operation middleware
+func (siw *ServerInterfaceWrapper) ListFederationIssuers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFederationIssuers(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFederationIssuer operation middleware
+func (siw *ServerInterfaceWrapper) CreateFederationIssuer(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFederationIssuer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteFederationIssuer operation middleware
+func (siw *ServerInterfaceWrapper) DeleteFederationIssuer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "issuer" -------------
+	var issuer FederationIssuerID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "issuer", chi.URLParam(r, "issuer"), &issuer, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "issuer", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteFederationIssuer(w, r, issuer)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFederationIssuer operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFederationIssuer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "issuer" -------------
+	var issuer FederationIssuerID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "issuer", chi.URLParam(r, "issuer"), &issuer, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "issuer", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFederationIssuer(w, r, issuer)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5328,6 +5819,66 @@ func (siw *ServerInterfaceWrapper) RenameEnvironment(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameEnvironment(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// FetchDelivery operation middleware
+func (siw *ServerInterfaceWrapper) FetchDelivery(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params FetchDeliveryParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.FetchDelivery(w, r, org, project, environment, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6995,6 +7546,50 @@ func (siw *ServerInterfaceWrapper) DeleteServiceAccount(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// CreateFederatedBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreateFederatedBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "serviceAccount" -------------
+	var serviceAccount ServiceAccountID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceAccount", chi.URLParam(r, "serviceAccount"), &serviceAccount, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceAccount", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFederatedBinding(w, r, org, project, serviceAccount)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMachineCredentials operation middleware
 func (siw *ServerInterfaceWrapper) ListMachineCredentials(w http.ResponseWriter, r *http.Request) {
 
@@ -7774,6 +8369,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/instance/credential-policy", wrapper.SetCredentialPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/federation-issuers", wrapper.ListFederationIssuers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/federation-issuers", wrapper.CreateFederationIssuer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/federation-issuers/{issuer}", wrapper.DeleteFederationIssuer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/instance/federation-issuers/{issuer}", wrapper.UpdateFederationIssuer)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings", wrapper.CreateFederatedBinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery", wrapper.FetchDelivery)
 	})
 
 	return r
@@ -10290,6 +10903,400 @@ func (response SetCredentialPolicy429JSONResponse) VisitSetCredentialPolicyRespo
 type SetCredentialPolicy500JSONResponse struct{ InternalJSONResponse }
 
 func (response SetCredentialPolicy500JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFederationIssuersRequestObject struct {
+}
+
+type ListFederationIssuersResponseObject interface {
+	VisitListFederationIssuersResponse(w http.ResponseWriter) error
+}
+
+type ListFederationIssuers200JSONResponse FederationIssuerList
+
+func (response ListFederationIssuers200JSONResponse) VisitListFederationIssuersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFederationIssuers401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListFederationIssuers401JSONResponse) VisitListFederationIssuersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFederationIssuers403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListFederationIssuers403JSONResponse) VisitListFederationIssuersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFederationIssuers429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListFederationIssuers429JSONResponse) VisitListFederationIssuersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListFederationIssuers500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListFederationIssuers500JSONResponse) VisitListFederationIssuersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuerRequestObject struct {
+	Body *CreateFederationIssuerJSONRequestBody
+}
+
+type CreateFederationIssuerResponseObject interface {
+	VisitCreateFederationIssuerResponse(w http.ResponseWriter) error
+}
+
+type CreateFederationIssuer201JSONResponse FederationIssuer
+
+func (response CreateFederationIssuer201JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateFederationIssuer400JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateFederationIssuer401JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateFederationIssuer403JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateFederationIssuer409JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateFederationIssuer429JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederationIssuer500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateFederationIssuer500JSONResponse) VisitCreateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuerRequestObject struct {
+	Issuer FederationIssuerID `json:"issuer"`
+}
+
+type DeleteFederationIssuerResponseObject interface {
+	VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error
+}
+
+type DeleteFederationIssuer204Response struct {
+}
+
+func (response DeleteFederationIssuer204Response) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteFederationIssuer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteFederationIssuer401JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteFederationIssuer403JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteFederationIssuer404JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuer409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteFederationIssuer409JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuer429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteFederationIssuer429JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteFederationIssuer500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteFederationIssuer500JSONResponse) VisitDeleteFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuerRequestObject struct {
+	Issuer FederationIssuerID `json:"issuer"`
+	Body   *UpdateFederationIssuerJSONRequestBody
+}
+
+type UpdateFederationIssuerResponseObject interface {
+	VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error
+}
+
+type UpdateFederationIssuer200JSONResponse FederationIssuer
+
+func (response UpdateFederationIssuer200JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateFederationIssuer400JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateFederationIssuer401JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateFederationIssuer403JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateFederationIssuer404JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateFederationIssuer429JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateFederationIssuer500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateFederationIssuer500JSONResponse) VisitUpdateFederationIssuerResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -14183,6 +15190,88 @@ func (response RenameEnvironment500JSONResponse) VisitRenameEnvironmentResponse(
 	return err
 }
 
+type FetchDeliveryRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Params      FetchDeliveryParams
+}
+
+type FetchDeliveryResponseObject interface {
+	VisitFetchDeliveryResponse(w http.ResponseWriter) error
+}
+
+type FetchDelivery200JSONResponse DeliveryResponse
+
+func (response FetchDelivery200JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FetchDelivery401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response FetchDelivery401JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FetchDelivery404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response FetchDelivery404JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FetchDelivery429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response FetchDelivery429JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type FetchDelivery500JSONResponse struct{ InternalJSONResponse }
+
+func (response FetchDelivery500JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevokeEnvGrantRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -17860,6 +18949,116 @@ func (response DeleteServiceAccount500JSONResponse) VisitDeleteServiceAccountRes
 	return err
 }
 
+type CreateFederatedBindingRequestObject struct {
+	Org            OrgID            `json:"org"`
+	Project        ProjectID        `json:"project"`
+	ServiceAccount ServiceAccountID `json:"serviceAccount"`
+	Body           *CreateFederatedBindingJSONRequestBody
+}
+
+type CreateFederatedBindingResponseObject interface {
+	VisitCreateFederatedBindingResponse(w http.ResponseWriter) error
+}
+
+type CreateFederatedBinding201JSONResponse FederatedBinding
+
+func (response CreateFederatedBinding201JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateFederatedBinding400JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateFederatedBinding401JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateFederatedBinding404JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateFederatedBinding409JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateFederatedBinding429JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateFederatedBinding500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateFederatedBinding500JSONResponse) VisitCreateFederatedBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMachineCredentialsRequestObject struct {
 	Org            OrgID            `json:"org"`
 	Project        ProjectID        `json:"project"`
@@ -18664,6 +19863,18 @@ type StrictServerInterface interface {
 	// SetCredentialPolicy Move the instance credential lifetime controls.
 	// (PUT /api/v1/instance/credential-policy)
 	SetCredentialPolicy(ctx context.Context, request SetCredentialPolicyRequestObject) (SetCredentialPolicyResponseObject, error)
+	// ListFederationIssuers List the configured OIDC federation issuers.
+	// (GET /api/v1/instance/federation-issuers)
+	ListFederationIssuers(ctx context.Context, request ListFederationIssuersRequestObject) (ListFederationIssuersResponseObject, error)
+	// CreateFederationIssuer Configure an OIDC federation issuer.
+	// (POST /api/v1/instance/federation-issuers)
+	CreateFederationIssuer(ctx context.Context, request CreateFederationIssuerRequestObject) (CreateFederationIssuerResponseObject, error)
+	// DeleteFederationIssuer Remove an issuer configuration.
+	// (DELETE /api/v1/instance/federation-issuers/{issuer})
+	DeleteFederationIssuer(ctx context.Context, request DeleteFederationIssuerRequestObject) (DeleteFederationIssuerResponseObject, error)
+	// UpdateFederationIssuer Move an issuer's JWKS source or refused audiences.
+	// (PATCH /api/v1/instance/federation-issuers/{issuer})
+	UpdateFederationIssuer(ctx context.Context, request UpdateFederationIssuerRequestObject) (UpdateFederationIssuerResponseObject, error)
 	// RevokeInstanceGrant Revoke one capability at instance scope.
 	// (DELETE /api/v1/instance/grants)
 	RevokeInstanceGrant(ctx context.Context, request RevokeInstanceGrantRequestObject) (RevokeInstanceGrantResponseObject, error)
@@ -18787,6 +19998,9 @@ type StrictServerInterface interface {
 	// RenameEnvironment Rename an environment.
 	// (PATCH /api/v1/orgs/{org}/projects/{project}/environments/{environment})
 	RenameEnvironment(ctx context.Context, request RenameEnvironmentRequestObject) (RenameEnvironmentResponseObject, error)
+	// FetchDelivery Fetch the authorized projection, conditionally.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery)
+	FetchDelivery(ctx context.Context, request FetchDeliveryRequestObject) (FetchDeliveryResponseObject, error)
 	// RevokeEnvGrant Revoke one capability on one environment.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants)
 	RevokeEnvGrant(ctx context.Context, request RevokeEnvGrantRequestObject) (RevokeEnvGrantResponseObject, error)
@@ -18901,6 +20115,9 @@ type StrictServerInterface interface {
 	// DeleteServiceAccount Delete a service account, revoking every credential and grant.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount})
 	DeleteServiceAccount(ctx context.Context, request DeleteServiceAccountRequestObject) (DeleteServiceAccountResponseObject, error)
+	// CreateFederatedBinding Mint a federated `(issuer, subject)` binding. Nothing at rest.
+	// (POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings)
+	CreateFederatedBinding(ctx context.Context, request CreateFederatedBindingRequestObject) (CreateFederatedBindingResponseObject, error)
 	// ListMachineCredentials List a service account's credentials, metadata only.
 	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials)
 	ListMachineCredentials(ctx context.Context, request ListMachineCredentialsRequestObject) (ListMachineCredentialsResponseObject, error)
@@ -19923,6 +21140,120 @@ func (sh *strictHandler) SetCredentialPolicy(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetCredentialPolicyResponseObject); ok {
 		if err := validResponse.VisitSetCredentialPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFederationIssuers operation middleware
+func (sh *strictHandler) ListFederationIssuers(w http.ResponseWriter, r *http.Request) {
+	var request ListFederationIssuersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFederationIssuers(ctx, request.(ListFederationIssuersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFederationIssuers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFederationIssuersResponseObject); ok {
+		if err := validResponse.VisitListFederationIssuersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateFederationIssuer operation middleware
+func (sh *strictHandler) CreateFederationIssuer(w http.ResponseWriter, r *http.Request) {
+	var request CreateFederationIssuerRequestObject
+
+	var body CreateFederationIssuerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateFederationIssuer(ctx, request.(CreateFederationIssuerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateFederationIssuer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateFederationIssuerResponseObject); ok {
+		if err := validResponse.VisitCreateFederationIssuerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteFederationIssuer operation middleware
+func (sh *strictHandler) DeleteFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID) {
+	var request DeleteFederationIssuerRequestObject
+
+	request.Issuer = issuer
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteFederationIssuer(ctx, request.(DeleteFederationIssuerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteFederationIssuer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteFederationIssuerResponseObject); ok {
+		if err := validResponse.VisitDeleteFederationIssuerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateFederationIssuer operation middleware
+func (sh *strictHandler) UpdateFederationIssuer(w http.ResponseWriter, r *http.Request, issuer FederationIssuerID) {
+	var request UpdateFederationIssuerRequestObject
+
+	request.Issuer = issuer
+
+	var body UpdateFederationIssuerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateFederationIssuer(ctx, request.(UpdateFederationIssuerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateFederationIssuer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateFederationIssuerResponseObject); ok {
+		if err := validResponse.VisitUpdateFederationIssuerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -21100,6 +22431,35 @@ func (sh *strictHandler) RenameEnvironment(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// FetchDelivery operation middleware
+func (sh *strictHandler) FetchDelivery(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params FetchDeliveryParams) {
+	var request FetchDeliveryRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.FetchDelivery(ctx, request.(FetchDeliveryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "FetchDelivery")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(FetchDeliveryResponseObject); ok {
+		if err := validResponse.VisitFetchDeliveryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RevokeEnvGrant operation middleware
 func (sh *strictHandler) RevokeEnvGrant(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, params RevokeEnvGrantParams) {
 	var request RevokeEnvGrantRequestObject
@@ -22270,6 +23630,41 @@ func (sh *strictHandler) DeleteServiceAccount(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteServiceAccountResponseObject); ok {
 		if err := validResponse.VisitDeleteServiceAccountResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateFederatedBinding operation middleware
+func (sh *strictHandler) CreateFederatedBinding(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, serviceAccount ServiceAccountID) {
+	var request CreateFederatedBindingRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.ServiceAccount = serviceAccount
+
+	var body CreateFederatedBindingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateFederatedBinding(ctx, request.(CreateFederatedBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateFederatedBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateFederatedBindingResponseObject); ok {
+		if err := validResponse.VisitCreateFederatedBindingResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

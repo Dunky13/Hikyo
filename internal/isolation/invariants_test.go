@@ -358,6 +358,10 @@ func TestInvariant12CacheDiscipline(t *testing.T) {
 	knownPkgs := map[string]bool{
 		lint.Module + "/internal/crypto": true, // the DEK LRU, registered below
 		lint.Module + "/internal/authz":  true, // holds the registry itself
+		// The JWKS cache (#62), registered as `oidcfed.jwks`. The sweep matches
+		// on the TYPE NAME, so a package whose cache is registered still trips it;
+		// the registry entry is what states the keying and the proof-gating.
+		lint.Module + "/internal/oidcfed": true,
 	}
 	for _, p := range pkgs {
 		if p.Types == nil || !strings.HasPrefix(p.PkgPath, lint.Module) {

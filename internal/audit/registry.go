@@ -361,21 +361,72 @@ const (
 	// same shape auth.provider_read already has for OIDC configuration.
 	EventCredentialPolicyRead EventType = "identity.lifetime_policy_read"
 
-	// NOT REGISTERED HERE, deliberately: `identity.disclosure`, the per-key
-	// disclosure event on a machine fetch. #15's locked cardinality — one
-	// immutable event per disclosed key, never collapsed, never counted — is
-	// unchanged and binding, but there is no fetch path in this repository
-	// yet (no secret values, no delivery manifest, no cursor), so there is no
-	// key for a per-key event to name. This registry's closure invariant
-	// refuses a type with no emitter, and it is right to: registering it now
-	// would be dead catalogue asserting a guarantee nothing upholds.
+	// identity.* — OIDC federation and the machine delivery surface (#62,
+	// machine-identities ADR § Federation, § JWKS, § Restore, § Audit
+	// attribution).
 	//
-	// The same reasoning applies to a machine authentication-failure event.
-	// A failed machine presentation today rides the SAME silent path a failed
-	// human session does at the chokepoint; giving machines a failure event
-	// humans do not have would claim an asymmetry the system does not
-	// implement. Both land with the fetch surface and the pre-authentication
-	// admission wiring.
+	// identity.binding_created records a federated binding coming into
+	// existence, and — when it replaced one — which. There is deliberately no
+	// `binding_modified`: a binding is IMMUTABLE, so every change is a
+	// replacement, and an event type for an operation that cannot happen would
+	// suggest it can. The predecessor's death is recorded by
+	// identity.credential_revoked with `cause: replaced`, at the same
+	// cardinality an ordinary revoke has.
+	EventBindingCreated EventType = "identity.binding_created"
+	// identity.binding_reactivated records a restore-time RE-VALIDATION of one
+	// binding. It carries the `reactivated_at` instant and the clock-skew
+	// margin, because together they are the permanent predicate every later
+	// token is measured against — an investigator asking "why was this token
+	// refused" needs both numbers, and only this row has them.
+	EventBindingReactivated EventType = "identity.binding_reactivated"
+	// identity.federation_issuer_changed records an instance-scoped issuer
+	// configuration coming into existence, moving, or going away. The ADR names
+	// "federation issuer configuration" in its audit propagation, and the
+	// reason is the blast radius: an issuer is an external authority the
+	// instance trusts to name principals.
+	EventFederationIssuerChanged EventType = "identity.federation_issuer_changed"
+	// identity.federation_issuer_read is the instance-scoped read. Not
+	// `audited: none`: the audit-model ADR's default-deny permit rule admits
+	// only tenant-class bare-`read` operations, and reading which external
+	// authorities the instance trusts is neither.
+	EventFederationIssuerRead EventType = "identity.federation_issuer_read"
+	// identity.federation_refused records a federated presentation failing, BY
+	// CAUSE, with a closed enum covering not-a-token, unknown issuer,
+	// unavailable and stale keys, signature, token age and span, audience,
+	// claim, the CI event rule, the restore predicate, and an unbound identity.
+	//
+	// It is the one machine authentication-failure event #61 deliberately did
+	// NOT register, and what changed is that the asymmetry it would have
+	// claimed is now real: a federated refusal has causes a human session
+	// refusal does not have — an unreachable issuer, a rotated key, a pinned
+	// claim that moved — and an operator debugging a fleet that stopped
+	// authenticating has no other way to tell them apart. Aggregation is
+	// permitted for failure floods and for nothing else, per #16.
+	EventFederationRefused EventType = "identity.federation_refused"
+	// identity.jwks_refresh_failed records both halves of the ADR's JWKS
+	// obligation: a refresh failure the cache ABSORBED by serving keys inside
+	// the staleness window, and the staleness-bound BREACH that fails closed.
+	// One type, discriminated by `served_stale` and `staleness_breached`,
+	// because they are the same fact about the same object at two severities
+	// and splitting them would make a reader join two streams to answer "was
+	// this issuer reachable".
+	EventJWKSRefreshFailed EventType = "identity.jwks_refresh_failed"
+	// identity.delivery_fetched is the machine fetch record. `disposition`
+	// distinguishes a full authorized delivery from a "current" answer, and the
+	// ADR requires exactly one immutable record per conditional fetch that
+	// delivered nothing — never aggregated, never a counter, never a mutable
+	// last-seen field.
+	EventDeliveryFetched EventType = "identity.delivery_fetched"
+
+	// STILL NOT REGISTERED HERE, deliberately: `identity.disclosure`, the
+	// per-key disclosure event on a machine fetch. #15's locked cardinality —
+	// one immutable event per disclosed key, never collapsed, never counted —
+	// is unchanged and binding. The fetch path now exists, but it delivers NO
+	// PLAINTEXT: there are no value tables yet (#50/#51), so what it delivers
+	// is the key catalogue and presence, and a disclosure event naming a key
+	// whose value was not disclosed would be a false record of a disclosure.
+	// #61's accepted disposition stands: the criterion transfers to the ticket
+	// that ships values.
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -1239,8 +1290,16 @@ var registry = map[EventType]TypeSpec{
 			"credential_id":      {Kind: KindString, Required: true},
 			// `expire` distinguishes a credential the operator killed from
 			// one the clock did, which is the difference between an incident
-			// and a Tuesday.
+			// and a Tuesday. `replaced` is the third: a binding is immutable,
+			// so a re-pin kills its predecessor, and that is neither an
+			// incident nor the clock.
 			"cause": {Kind: KindString, Required: true},
+			// Which KIND died. Optional because #61's revoke path did not
+			// record it and the trail must stay readable across the two; every
+			// #62 emitter sets it. The forensic question after a leak is not
+			// only which credential but what sort of thing it was — a bearer
+			// value someone may still hold, or a binding that held nothing.
+			"credential_kind": {Kind: KindString},
 		},
 	},
 	EventMachineGrantWidened: {
@@ -1292,6 +1351,154 @@ var registry = map[EventType]TypeSpec{
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
 		Trails:        map[Trail]bool{TrailInstance: true},
 		Schema:        Schema{},
+	},
+
+	// OIDC federation (#62). `subject` and `audience` are FreeText because they
+	// are externally chosen strings — a Kubernetes namespace, a repository path,
+	// an audience URI — so they ride the free-text bound and the sanitizer like
+	// every other operator-supplied label. The pinned claim NAMES are recorded;
+	// their VALUES are not. A pinned value is usually schema-ish (a repository
+	// id, a workflow ref) but it is whatever an operator chose to pin, and a
+	// durable trail is not the place to discover that it was something else.
+	EventBindingCreated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			"credential_id":      {Kind: KindString, Required: true},
+			"issuer_id":          {Kind: KindString, Required: true},
+			"issuer":             {Kind: KindFreeText, Required: true},
+			"issuer_type":        {Kind: KindString, Required: true},
+			"subject":            {Kind: KindFreeText, Required: true},
+			"audience":           {Kind: KindFreeText, Required: true},
+			"pinned_claims":      {Kind: KindStringList, Required: true},
+			"lifetime":           {Kind: KindString, Required: true},
+			"expires_at":         {Kind: KindString},
+			"clamped":            {Kind: KindBool, Required: true},
+			// The predecessor this mint superseded, "" for a first issue. It is
+			// required-and-possibly-empty rather than optional so a reader never
+			// has to decide whether an absent member means "not a replacement"
+			// or "the emitter forgot".
+			"replaces": {Kind: KindString, Required: true},
+			// The two authority classes the formula ranged over, kept separate
+			// for the same reason the bearer mint keeps them separate.
+			"reveal_environments":         {Kind: KindStringList, Required: true},
+			"reveal_history_environments": {Kind: KindStringList, Required: true},
+		},
+	},
+	EventBindingReactivated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"service_account_id": {Kind: KindString, Required: true},
+			"target_principal":   {Kind: KindString, Required: true},
+			"principal_class":    {Kind: KindString, Required: true},
+			"credential_id":      {Kind: KindString, Required: true},
+			// Both numbers, because together they ARE the permanent predicate:
+			// every later token must carry an `iat` strictly greater than
+			// reactivated_at + skew_seconds. An investigator asking why a token
+			// was refused needs the pair, and only this row has it.
+			"reactivated_at": {Kind: KindString, Required: true},
+			"skew_seconds":   {Kind: KindInt, Required: true},
+		},
+	},
+	EventFederationIssuerChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"issuer_id":   {Kind: KindString, Required: true},
+			"issuer":      {Kind: KindFreeText, Required: true},
+			"issuer_type": {Kind: KindString, Required: true},
+			// created | updated | deleted.
+			"change":    {Kind: KindString, Required: true},
+			"jwks_mode": {Kind: KindString, Required: true},
+			// The refused-audience list is recorded because it IS the
+			// default-audience defence: an operator who narrowed it narrowed the
+			// rule, and that has to be visible without diffing configuration.
+			"refused_audiences": {Kind: KindStringList, Required: true},
+		},
+	},
+	EventFederationIssuerRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
+	EventFederationRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		// Failure only: a successful federated presentation is recorded by the
+		// operation it went on to perform, and a second success row here would
+		// be the login event this path does not have.
+		Outcomes: map[Outcome]bool{OutcomeFailure: true},
+		Trails:   map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// "" when the presentation was not even a token, so the member is
+			// required-and-possibly-empty rather than optional.
+			"issuer": {Kind: KindFreeText, Required: true},
+			"cause":  {Kind: KindString, Required: true},
+		},
+	},
+	EventJWKSRefreshFailed: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"issuer":      {Kind: KindFreeText, Required: true},
+			"age_seconds": {Kind: KindInt, Required: true},
+			// The three discriminators. `served_stale` is the tolerated window
+			// in use — the ADR's explicit refusal to fail closed on a blip;
+			// `staleness_breached` is the bound reached, which DID fail closed;
+			// `refresh_throttled` is the unknown-`kid` rate limit refusing an
+			// outbound fetch, which is a different fact from the issuer being
+			// unreachable and must not read as one.
+			"served_stale":       {Kind: KindBool, Required: true},
+			"staleness_breached": {Kind: KindBool, Required: true},
+			"refresh_throttled":  {Kind: KindBool, Required: true},
+		},
+	},
+	EventDeliveryFetched: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			// full | current. A "current" answer delivers nothing and is not a
+			// disclosure; a full answer delivers the authorized projection. One
+			// immutable record either way, never aggregated, never a counter.
+			"disposition": {Kind: KindString, Required: true},
+			// Which credential asked. The forensic question after a leak is
+			// which token, and one service account holds several.
+			"credential_id":   {Kind: KindString, Required: true},
+			"credential_kind": {Kind: KindString, Required: true},
+			"principal_class": {Kind: KindString, Required: true},
+			"scope":           {Kind: KindString, Required: true},
+			// The delivered key count, and NOT the key names: a "current" answer
+			// delivers no names, so recording them on the full answer only would
+			// make the two rows different shapes for one operation.
+			"key_count": {Kind: KindInt, Required: true},
+			// The change token version prefix, so a consumer's comparison
+			// failure can be traced to a scheme change rather than guessed at.
+			"change_token_version": {Kind: KindString, Required: true},
+			// Whether the caller presented a cursor at all. Repeated
+			// cursor-LESS fetching by one credential is itself a signal worth
+			// surfacing (§ Audit attribution's honest bound), and it is not
+			// derivable from the disposition: a stale cursor and no cursor both
+			// produce a full delivery.
+			"cursor_presented": {Kind: KindBool, Required: true},
+		},
 	},
 }
 

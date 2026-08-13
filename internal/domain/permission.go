@@ -159,12 +159,71 @@ func IsServiceAccountKind(c PrincipalClass) bool {
 // CredentialKind discriminates HOW a credential authenticates its service
 // account. The ADR requires the discriminator to exist before a second kind
 // does: "the API and schema MUST NOT assume the bearer token is the only
-// kind". v1 implements one; `oidc-federation` is a later ticket's row, not a
-// later ticket's schema change.
+// kind". #61 shipped the discriminator with one value; #62 shipped the second
+// as a row type, exactly as the ADR predicted — no change to the grant model,
+// no re-granting, no principal churn.
 type CredentialKind string
 
-// CredentialHikyoToken is the hikyo-issued opaque bearer token.
-const CredentialHikyoToken CredentialKind = "hikyo-token"
+const (
+	// CredentialHikyoToken is the hikyo-issued opaque bearer token: something
+	// at rest on the workload's host.
+	CredentialHikyoToken CredentialKind = "hikyo-token"
+	// CredentialOIDCFederation is a standing permission for an externally
+	// issued OIDC identity to authenticate as one service account. NOTHING is
+	// at rest: the row holds no secret, which is why a restore may re-activate
+	// it where a bearer verifier is permanently dead.
+	CredentialOIDCFederation CredentialKind = "oidc-federation"
+)
+
+// IsCredentialKind reports whether k is one of the two implemented kinds.
+func IsCredentialKind(k CredentialKind) bool {
+	return k == CredentialHikyoToken || k == CredentialOIDCFederation
+}
+
+// IssuerType is the closed set of federation issuer platforms. It is declared
+// at configuration time rather than inferred from the issuer URL, because the
+// per-platform binding rules differ — a Forgejo or GitHub Actions binding MUST
+// pin `event_name`, a Kubernetes one has no such claim — and inferring the type
+// from a URL would let renaming a deployment change the security rules that
+// apply to it.
+type IssuerType string
+
+const (
+	IssuerKubernetes    IssuerType = "kubernetes"
+	IssuerForgejo       IssuerType = "forgejo"
+	IssuerGitHubActions IssuerType = "github-actions"
+)
+
+// IsIssuerType reports whether t is one of the three configured platforms.
+func IsIssuerType(t IssuerType) bool {
+	return t == IssuerKubernetes || t == IssuerForgejo || t == IssuerGitHubActions
+}
+
+// IsCIIssuerType reports whether t is a CI platform, which is what makes the
+// `event_name` pin mandatory: a CI issuer mints tokens for events an untrusted
+// contributor can trigger, and `pull_request_target` in particular carries the
+// ordinary ref-form subject a production binding names.
+func IsCIIssuerType(t IssuerType) bool {
+	return t == IssuerForgejo || t == IssuerGitHubActions
+}
+
+// JWKSMode is where an issuer's signing keys come from.
+type JWKSMode string
+
+const (
+	// JWKSDiscovery is the default: the issuer's discovery document names a
+	// JWKS endpoint, and keys are fetched and cached with a bounded staleness
+	// window.
+	JWKSDiscovery JWKSMode = "discovery"
+	// JWKSStatic is the configured alternative for air-gapped installations
+	// and deployments whose issuer discovery endpoint Hikyo cannot reach. It
+	// is deliberately not the default: a static-only installation breaks
+	// silently on the day someone rotates the issuer's keys.
+	JWKSStatic JWKSMode = "static"
+)
+
+// IsJWKSMode reports whether m is one of the two sources.
+func IsJWKSMode(m JWKSMode) bool { return m == JWKSDiscovery || m == JWKSStatic }
 
 // CredentialLifetime is the ADR's typed lifetime. `indefinite` is a VALUE,
 // not a large number: it is unreachable by raising any ceiling, which is the

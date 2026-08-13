@@ -553,6 +553,16 @@ func (s *Identities) RevokeCredential(ctx context.Context, actor Actor, scope do
 		if err != nil {
 			return err
 		}
+		// The kind is read BEFORE the revoke, from the row about to die. The
+		// forensic question after a leak is not only which credential but what
+		// sort of thing it was — a bearer value someone may still hold, or a
+		// binding that held nothing — and after the revoke that is still
+		// readable, but reading it first keeps the event's payload a description
+		// of the state the operation acted on.
+		kind, err := credentialKindOf(ctx, az, sa.ID, credentialID)
+		if err != nil {
+			return err
+		}
 		revoked, err := az.RevokeMachineCredential(ctx, sa.ID, credentialID, now)
 		if err != nil {
 			return err
@@ -569,6 +579,7 @@ func (s *Identities) RevokeCredential(ctx context.Context, actor Actor, scope do
 				"target_principal":   string(sa.PrincipalID),
 				"principal_class":    string(sa.Kind),
 				"credential_id":      credentialID,
+				"credential_kind":    string(kind),
 				"cause":              "revoked",
 			})
 		if err != nil {
@@ -900,4 +911,27 @@ func expiringSoon(c CredentialView, now time.Time) bool {
 
 func sortedKeys(m map[domain.EnvID]bool) []domain.EnvID {
 	return newlyReachable(nil, m)
+}
+
+// credentialKindOf answers which kind a credential is, for the revoke event's
+// payload. It reads the account's credential list rather than adding a by-id
+// query: the list is already the surface's own read, the cap keeps it small
+// (five live credentials per account), and a second query shape over the same
+// rows would be a second predicate to keep chain-correct.
+//
+// An id this account does not hold answers the empty kind rather than an error:
+// the revoke below is the one that decides, and refusing here would give this
+// surface a distinguishable "no such credential" one statement earlier than the
+// uniform refusal.
+func credentialKindOf(ctx context.Context, az *authz.TxAuthorizer, saID, credentialID string) (domain.CredentialKind, error) {
+	creds, err := az.MachineCredentialsFor(ctx, saID)
+	if err != nil {
+		return "", err
+	}
+	for _, c := range creds {
+		if c.ID == credentialID {
+			return c.Kind, nil
+		}
+	}
+	return "", nil
 }

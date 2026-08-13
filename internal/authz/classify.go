@@ -196,6 +196,27 @@ var wireRegistry = map[string]Class{
 	"http:GET /api/v1/instance/credential-policy":                                                                  ClassInstance,
 	"http:PUT /api/v1/instance/credential-policy":                                                                  ClassInstance,
 
+	// OIDC federation (#62). Issuer configuration is instance-class under
+	// `instance-config` — the same siting as OIDC and SAML provider
+	// administration, and for the same reason #16 gave: an org-scoped issuer
+	// would let an org admin add a provider and mint identities authenticating
+	// into the instance.
+	"http:GET /api/v1/instance/federation-issuers":             ClassInstance,
+	"http:POST /api/v1/instance/federation-issuers":            ClassInstance,
+	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":  ClassInstance,
+	"http:DELETE /api/v1/instance/federation-issuers/{issuer}": ClassInstance,
+	// A binding is a credential row, so it is created beside the credentials and
+	// listed and revoked THROUGH them. There is no PUT and no PATCH: bindings
+	// are immutable, and a change is a replacement mint through this same POST
+	// naming the predecessor it supersedes.
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings": ClassTenant,
+
+	// The machine delivery surface (#62). Tenant-class at environment depth: a
+	// caller who cannot read the environment gets exactly what a caller
+	// addressing an environment that does not exist gets, which is what makes
+	// the conditional answer safe to give.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery": ClassTenant,
+
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/grants":                                   ClassTenant,
@@ -499,6 +520,21 @@ var wireEvents = map[string][]audit.EventType{
 	// anything to fall back to.
 	"cli:migrate": {audit.EventBackupExported, audit.EventBackupExportSkipped},
 	"cli:server":  {audit.EventBackupExported, audit.EventBackupExportSkipped},
+
+	// The machine delivery route is deliberately in BOTH tables (#62), the same
+	// exception credential-reset already is. It reaches an operation —
+	// delivery.fetch, which carries its formula and its access record — AND it
+	// emits two events with no operation behind them, because they happen BEFORE
+	// a principal exists: a federated presentation refused by cause, and the
+	// JWKS observations (a tolerated refresh failure, a staleness-bound breach,
+	// a throttled unknown-`kid` refresh). Both ride the resolution surface's
+	// pre-authentication audit writer, exactly as `auth.oidc_refused` does, so
+	// there is no proof to write them under and no operation row to hang them
+	// on. The completeness invariant unions both sources.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery": {
+		audit.EventFederationRefused,
+		audit.EventJWKSRefreshFailed,
+	},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
@@ -555,6 +591,14 @@ var wireRoutes = map[string][]Operation{
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}": {OpCredentialRevoke},
 	"http:GET /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyRead},
 	"http:PUT /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyUpdate},
+
+	// OIDC federation (#62). One route, one operation.
+	"http:GET /api/v1/instance/federation-issuers":                                               {OpFederationIssuerList},
+	"http:POST /api/v1/instance/federation-issuers":                                              {OpFederationIssuerCreate},
+	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":                                    {OpFederationIssuerUpdate},
+	"http:DELETE /api/v1/instance/federation-issuers/{issuer}":                                   {OpFederationIssuerDelete},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings": {OpBindingCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":         {OpDeliveryFetch},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      {OpGrantListProject},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     {OpGrantCreateProject},
@@ -689,6 +733,20 @@ var caches = map[string]Cache{
 		// authorize() and pass the proof's chain — a cache hit must not be a
 		// proof-free path to tenant material.
 		ProofGatedAt: "service seam (#50); no tenant caller today",
+	},
+	"oidcfed.jwks": {
+		// Keyed by the BYTE-EXACT issuer string, and that string IS the whole
+		// key: an issuer is instance configuration under a unique index, so it
+		// is already an injective identifier with no chain to compose.
+		KeyConstructor: "internal/oidcfed.Issuer.Issuer (byte-exact issuer string)",
+		// Not proof-gated, and here that is the right answer rather than a
+		// deferral. The contents are the PUBLIC signing keys an issuer publishes
+		// at a well-known URL — no tenant material, nothing a proof could
+		// protect. What the cache governs is the FRESHNESS of the answer, which
+		// is the staleness bound. And it is read pre-authentication by
+		// construction: validating the presented token is what produces a
+		// principal, so no proof can exist yet.
+		ProofGatedAt: "not proof-gated: public issuer signing keys, read pre-authentication (#62)",
 	},
 }
 
