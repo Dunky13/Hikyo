@@ -185,9 +185,14 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// drops before either.
 		"value_entries",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
+		// OIDC federation (#62, migration 00017): machine_credentials gained a
+		// foreign key to federation_issuers, so the issuers drop AFTER it;
+		// pin_generations references principals.
+		"pin_generations",
 		// Machine identities (#61, migration 00014): machine_credentials
 		// references service_accounts, which references projects/principals.
 		"machine_credentials", "service_accounts",
+		"federation_issuers",
 		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
 		// goes first of the pair.
 		"grant_origins", "grants", "folders", "environments", "projects", "principals",

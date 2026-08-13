@@ -283,6 +283,42 @@ const (
 	OpCredentialRevoke       Operation = "identity.credential-revoke"
 	OpCredentialPolicyRead   Operation = "identity.credential-policy-read"
 	OpCredentialPolicyUpdate Operation = "identity.credential-policy-update"
+
+	// OIDC federation (#62). Issuer configuration is INSTANCE-scoped under
+	// `instance-config`, never org- or project-scoped: #16 fixed this exact
+	// argument for human providers, because an org-scoped issuer would let an
+	// org admin add a provider and mint identities authenticating into the
+	// instance.
+	OpFederationIssuerCreate Operation = "federation.issuer-create"
+	OpFederationIssuerList   Operation = "federation.issuer-list"
+	OpFederationIssuerUpdate Operation = "federation.issuer-update"
+	OpFederationIssuerDelete Operation = "federation.issuer-delete"
+
+	// Creating a federated binding is a MINT, so it sits beside
+	// identity.credential-mint and carries the same capability half here and the
+	// same post-state disclosure conjunct in the service. There is no
+	// binding-UPDATE operation, and that absence is the immutability rule
+	// expressed in the registry: a change is a replacement mint through this
+	// same row, carrying the full formula, and an operation for editing in place
+	// would be the authority-laundering path #15 closed for adapters.
+	//
+	// Binding DELETE and LIST reuse identity.credential-revoke and
+	// identity.credential-list: a binding IS a credential row, so a second pair
+	// of operations over the same rows would be two places for one formula to
+	// drift. Reactivation (§ Restore) rides credential-revoke too, because it
+	// only ever NARROWS what the binding accepts.
+	OpBindingCreate Operation = "identity.binding-create"
+
+	// The machine delivery surface (#62; ADR § Authentication, authorization
+	// and the fetch path). Tenant-class at ENVIRONMENT depth under bare `read`,
+	// which is what makes a caller who lost `read` receive the
+	// uniform-nonexistent answer rather than "current" — the conditional path
+	// authorizes exactly like the delivering path.
+	//
+	// It is NOT `audited: none` despite being a bare-`read` tenant operation:
+	// the ADR requires one immutable access record per fetch, including the
+	// conditional fetch that delivers nothing.
+	OpDeliveryFetch Operation = "delivery.fetch"
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -1498,12 +1534,19 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventCredentialsListed},
 	},
+	// Revocation, and — via the same row — federated-binding DELETION and
+	// restore-time RE-ACTIVATION. All three are narrowings over the same rows:
+	// a binding is a credential, deleting one is revoking it, and re-activating
+	// one only ever refuses tokens it would otherwise have accepted. One
+	// formula, one place for it to be wrong.
 	OpCredentialRevoke: {
 		class:    ClassTenant,
 		level:    domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
 		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventCredentialRevoked},
+		events: []audit.EventType{
+			audit.EventCredentialRevoked, audit.EventBindingReactivated,
+		},
 	},
 	// Not `audited: none`: the default-deny permit rule admits only
 	// tenant-class bare-`read` operations, and reading the instance's
@@ -1526,6 +1569,69 @@ var operations = map[Operation]opSpec{
 		events: []audit.EventType{
 			audit.EventCredentialPolicyChanged, audit.EventCredentialPolicyRead,
 		},
+	},
+
+	// OIDC federation (#62). The issuer rows are instance-class under
+	// `instance-config`, like every other instance knob; the federation tables
+	// are class=authn, so their reads and writes ride the resolution surface and
+	// what IS a store op is the audit insert.
+	OpFederationIssuerCreate: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventFederationIssuerChanged},
+	},
+	OpFederationIssuerUpdate: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventFederationIssuerChanged},
+	},
+	OpFederationIssuerDelete: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventFederationIssuerChanged},
+	},
+	// Not `audited: none`: the permit rule admits only tenant-class bare-`read`
+	// operations, and reading which external authorities the instance trusts to
+	// name principals is neither.
+	OpFederationIssuerList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventFederationIssuerRead},
+	},
+	// The binding mint. This row is the capability half only: the post-state
+	// disclosure conjunct and the reauthentication conjunct are evaluated in
+	// service.Federation, over a set computed from the resulting state, which no
+	// static (capability, level) atom can express.
+	OpBindingCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageIdentities, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventBindingCreated, audit.EventCredentialRevoked,
+		},
+	},
+	// The machine fetch. Bare `read` at environment depth — the same formula the
+	// delivering path uses, because they ARE the same path: a caller who lost
+	// `read` gets the uniform nonexistent answer, never "current".
+	//
+	// It reads the key catalogue through the proof-carrying store, so those
+	// store ops are named here as well as the audit insert.
+	OpDeliveryFetch: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList:         true,
+			StoreCataloguePresenceList: true,
+			StoreCatalogueRevisionGet:  true,
+			StoreAuditTenantInsert:     true,
+		},
+		events: []audit.EventType{audit.EventDeliveryFetched},
 	},
 }
 

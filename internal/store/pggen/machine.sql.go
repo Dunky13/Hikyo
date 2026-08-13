@@ -293,10 +293,13 @@ func (q *Queries) GetServiceAccountByPrincipal(ctx context.Context, principalID 
 const insertMachineCredential = `-- name: InsertMachineCredential :exec
 INSERT INTO machine_credentials (
     id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-    credential_epoch, created_at, created_by, revoked_at, last_used_at
+    credential_epoch, created_at, created_by, revoked_at, last_used_at,
+    issuer_id, subject, audience, required_claims, reactivated_at
 ) VALUES ($1, $2, $3, $4,
           $5, $6, $7,
-          $8, $9, $10, NULL, NULL)
+          $8, $9, $10, NULL, NULL,
+          $11, $12, $13,
+          $14, NULL)
 `
 
 type InsertMachineCredentialParams struct {
@@ -304,14 +307,19 @@ type InsertMachineCredentialParams struct {
 	ServiceAccountID string
 	Kind             string
 	Verifier         []byte
-	PrefixHint       string
+	PrefixHint       pgtype.Text
 	Lifetime         string
 	ExpiresAt        pgtype.Timestamptz
 	CredentialEpoch  int64
 	CreatedAt        pgtype.Timestamptz
 	CreatedBy        string
+	IssuerID         pgtype.Text
+	Subject          pgtype.Text
+	Audience         pgtype.Text
+	RequiredClaims   pgtype.Text
 }
 
+// The mint, writing both credential kinds; see the sqlite dialect.
 // hikyo:authn-resolution
 func (q *Queries) InsertMachineCredential(ctx context.Context, arg InsertMachineCredentialParams) error {
 	_, err := q.db.Exec(ctx, insertMachineCredential,
@@ -325,6 +333,10 @@ func (q *Queries) InsertMachineCredential(ctx context.Context, arg InsertMachine
 		arg.CredentialEpoch,
 		arg.CreatedAt,
 		arg.CreatedBy,
+		arg.IssuerID,
+		arg.Subject,
+		arg.Audience,
+		arg.RequiredClaims,
 	)
 	return err
 }
@@ -485,7 +497,8 @@ func (q *Queries) ListIndefiniteCredentials(ctx context.Context) ([]ListIndefini
 
 const listMachineCredentials = `-- name: ListMachineCredentials :many
 SELECT id, service_account_id, kind, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE service_account_id = $1
 ORDER BY created_at, id
@@ -495,7 +508,7 @@ type ListMachineCredentialsRow struct {
 	ID               string
 	ServiceAccountID string
 	Kind             string
-	PrefixHint       string
+	PrefixHint       pgtype.Text
 	Lifetime         string
 	ExpiresAt        pgtype.Timestamptz
 	CredentialEpoch  int64
@@ -503,6 +516,11 @@ type ListMachineCredentialsRow struct {
 	CreatedBy        string
 	RevokedAt        pgtype.Timestamptz
 	LastUsedAt       pgtype.Timestamptz
+	IssuerID         pgtype.Text
+	Subject          pgtype.Text
+	Audience         pgtype.Text
+	RequiredClaims   pgtype.Text
+	ReactivatedAt    pgtype.Timestamptz
 }
 
 // hikyo:authn-resolution
@@ -527,6 +545,11 @@ func (q *Queries) ListMachineCredentials(ctx context.Context, serviceAccountID s
 			&i.CreatedBy,
 			&i.RevokedAt,
 			&i.LastUsedAt,
+			&i.IssuerID,
+			&i.Subject,
+			&i.Audience,
+			&i.RequiredClaims,
+			&i.ReactivatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -595,7 +618,8 @@ func (q *Queries) LockCredentialPolicy(ctx context.Context) (int32, error) {
 
 const machineCredentialByVerifier = `-- name: MachineCredentialByVerifier :one
 SELECT id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE verifier = $1
 `
@@ -619,6 +643,11 @@ func (q *Queries) MachineCredentialByVerifier(ctx context.Context, verifier []by
 		&i.CreatedBy,
 		&i.RevokedAt,
 		&i.LastUsedAt,
+		&i.IssuerID,
+		&i.Subject,
+		&i.Audience,
+		&i.RequiredClaims,
+		&i.ReactivatedAt,
 	)
 	return i, err
 }

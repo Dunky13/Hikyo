@@ -94,6 +94,36 @@ machine identities:
   --token-file <path> or HIKYO_TOKEN, never a --token flag: a secret in argv
   is visible in ps, in /proc, and in shell history.
 
+oidc federation:
+  hikyo instance-config federation-issuer list [-o table|json]
+  hikyo instance-config federation-issuer add --issuer <url>
+      --type kubernetes|forgejo|github-actions --refuse-audience <aud>
+      [--jwks discovery|static --jwks-file PATH]
+  hikyo instance-config federation-issuer update --id <id>
+      --jwks discovery|static --refuse-audience <aud> [--jwks-file PATH]
+  hikyo instance-config federation-issuer remove --id <id>
+  hikyo sa binding create --sa <id> --issuer <url> --subject <sub>
+      --audience <aud> --claim name=value [--claim ...]
+      [--lifetime 720h | --indefinite] [--replaces <credential-id>]
+
+  a binding names ONE service account by byte-exact (issuer, subject). No
+  wildcards, no namespace patterns, no prefixes: a pattern rule would hand a
+  principal to everyone who can create a service account in that namespace.
+  Bindings are immutable, so a change is --replaces, never an edit. A pinned
+  claim is name=value for a string, name=#42 for an integer, name=?true for a
+  boolean: 4242 and "4242" are different claim values and never match.
+  A claim name starting with / is a JSON pointer into nested claims, e.g.
+  --claim /kubernetes.io/serviceaccount/uid=9f2c-… .
+
+  every binding MUST pin the immutable identifiers its platform exposes:
+    github-actions  repository_id, repository_owner_id, event_name
+    kubernetes      /kubernetes.io/serviceaccount/uid
+    forgejo         repository, event_name  (Forgejo exposes no numeric ids)
+  pinning a name where an id exists lets a renamed-and-reused path inherit the
+  binding, so there is no override.
+
+  Bindings are listed and revoked through "sa credential".
+
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
 

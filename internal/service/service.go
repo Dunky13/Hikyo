@@ -85,6 +85,7 @@ func (s *System) Ready(ctx context.Context) error {
 type Actor struct {
 	bearer    string
 	principal domain.PrincipalID
+	federated *FederatedCaller
 }
 
 // Bearer is the network path: a presented session artifact, resolved at the
@@ -100,6 +101,24 @@ func Bearer(artifact string) Actor { return Actor{bearer: artifact} }
 // transport that could build one could authorize as anybody.
 func LocalPrincipal(p domain.PrincipalID) Actor { return Actor{principal: p} }
 
+// FederatedActor is the machine federation path (#62): an externally issued OIDC
+// ID token whose signature, issuer, audience-independent timing and Hikyo caps
+// have ALREADY been validated, outside any transaction, because validating them
+// needs the network and a JWKS fetch inside a write transaction would stall
+// every writer on sqlite.
+//
+// What has NOT happened yet is the part that must not be cached: resolving which
+// service account the `(issuer, subject)` pair names, checking the binding is
+// live under the current credential epoch, and evaluating the binding's own
+// predicate — audience, every pinned claim, the CI event rule, the post-restore
+// `iat` floor. All of that happens at the chokepoint inside the operation's
+// transaction, which is what makes revocation bite at the next fetch.
+//
+// It is therefore NOT the cross-transaction authorization cache the permission
+// model forbids: what crosses the boundary is a validated set of external claims,
+// not a resolved principal, and no Hikyo state was read to produce it.
+func FederatedActor(c FederatedCaller) Actor { return Actor{federated: &c} }
+
 // resolve returns the caller's live Identity. A LocalPrincipal actor is local
 // host authority: it carries no session, so its Identity has an empty SessionID
 // and is exempt from the MFA-mandatory assurance check at authorize(). A bearer
@@ -107,6 +126,9 @@ func LocalPrincipal(p domain.PrincipalID) Actor { return Actor{principal: p} }
 func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (authz.Identity, error) {
 	if a.principal != "" {
 		return authz.Identity{Principal: a.principal}, nil
+	}
+	if a.federated != nil {
+		return az.AuthenticateFederated(ctx, a.federated.IssuerID, a.federated.Subject, a.federated.Check, now)
 	}
 	if a.bearer == "" {
 		return authz.Identity{}, domain.ErrUnauthenticated

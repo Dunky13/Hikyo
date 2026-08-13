@@ -120,6 +120,19 @@ type ExternalIdentity struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type FederationIssuer struct {
+	ID               string
+	Issuer           string
+	IssuerType       string
+	JwksMode         string
+	StaticJwks       pgtype.Text
+	RefusedAudiences string
+	CreatedAt        pgtype.Timestamptz
+	CreatedBy        string
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedBy        pgtype.Text
+}
+
 type Folder struct {
 	ID        string
 	OrgID     string
@@ -189,7 +202,7 @@ type MachineCredential struct {
 	ServiceAccountID string
 	Kind             string
 	Verifier         []byte
-	PrefixHint       string
+	PrefixHint       pgtype.Text
 	Lifetime         string
 	ExpiresAt        pgtype.Timestamptz
 	CredentialEpoch  int64
@@ -197,6 +210,11 @@ type MachineCredential struct {
 	CreatedBy        string
 	RevokedAt        pgtype.Timestamptz
 	LastUsedAt       pgtype.Timestamptz
+	IssuerID         pgtype.Text
+	Subject          pgtype.Text
+	Audience         pgtype.Text
+	RequiredClaims   pgtype.Text
+	ReactivatedAt    pgtype.Timestamptz
 }
 
 type MasterKey struct {
@@ -265,6 +283,12 @@ type PasswordCredential struct {
 	CredentialEpoch int64
 	RowVersion      int64
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type PinGeneration struct {
+	PrincipalID   string
+	EnvironmentID string
+	Generation    int64
 }
 
 type Principal struct {

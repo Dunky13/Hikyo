@@ -18,9 +18,13 @@ import (
 // administration (#72) joins this existing grammar; it is never local-admin
 // authority and every request still proves instance-config at the server.
 func runInstanceConfig(ctx context.Context, ios IO, args []string) error {
-	noun, rest, err := subverb("instance-config", args, "provider", "saml-sp-key", "credential-policy")
+	noun, rest, err := subverb("instance-config", args,
+		"provider", "saml-sp-key", "credential-policy", "federation-issuer")
 	if err != nil {
 		return err
+	}
+	if noun == "federation-issuer" {
+		return runFederationIssuer(ctx, ios, rest)
 	}
 	if noun == "saml-sp-key" {
 		return runSAMLSPKey(ctx, ios, rest)

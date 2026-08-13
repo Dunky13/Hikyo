@@ -52,12 +52,17 @@ ORDER BY name, id;
 -- name: DeleteServiceAccount :execrows
 DELETE FROM service_accounts WHERE org_id = ? AND project_id = ? AND id = ?;
 
+-- The mint. It writes BOTH credential kinds: the binding columns are NULL for
+-- a bearer credential and the verifier/prefix columns are NULL for a federated
+-- binding, and the table's two shape CHECKs make each pairing total, so one
+-- statement cannot produce a half-shaped row of either kind.
 -- hikyo:authn-resolution
 -- name: InsertMachineCredential :exec
 INSERT INTO machine_credentials (
     id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-    credential_epoch, created_at, created_by, revoked_at, last_used_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL);
+    credential_epoch, created_at, created_by, revoked_at, last_used_at,
+    issuer_id, subject, audience, required_claims, reactivated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL);
 
 -- Authentication's single indexed read. It returns the row unconditionally --
 -- revoked, expired and epoch-superseded rows included -- because the caller
@@ -67,14 +72,16 @@ INSERT INTO machine_credentials (
 -- hikyo:authn-resolution
 -- name: MachineCredentialByVerifier :one
 SELECT id, service_account_id, kind, verifier, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE verifier = ?;
 
 -- hikyo:authn-resolution
 -- name: ListMachineCredentials :many
 SELECT id, service_account_id, kind, prefix_hint, lifetime, expires_at,
-       credential_epoch, created_at, created_by, revoked_at, last_used_at
+       credential_epoch, created_at, created_by, revoked_at, last_used_at,
+       issuer_id, subject, audience, required_claims, reactivated_at
 FROM machine_credentials
 WHERE service_account_id = ?
 ORDER BY created_at, id;

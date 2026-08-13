@@ -124,6 +124,8 @@ type API struct {
 	KeyGroups     KeyGroupService
 	Grants        GrantService
 	Identities    IdentityService
+	Federation    FederationService
+	Delivery      DeliveryService
 	Settings      SettingsService
 	Providers     ProviderService
 	SAMLProviders SAMLProviderService

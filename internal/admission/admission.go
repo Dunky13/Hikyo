@@ -48,6 +48,12 @@ const (
 	// budget would make the client's own capability check the thing that
 	// throttles the client.
 	MetaPerIPPerMinute = 60
+	// IssuerRefreshPerMinute is how many unknown-`kid` JWKS refreshes one
+	// configured issuer may trigger per minute (#62). It is small because it
+	// bounds an OUTBOUND fetch amplifier on a pre-authentication path, and
+	// because the legitimate trigger — an issuer rotating its signing keys —
+	// needs exactly one.
+	IssuerRefreshPerMinute = 5
 	// FailuresBeforeBackoff is how many consecutive per-account failures pass
 	// before the delay starts.
 	FailuresBeforeBackoff = 5
@@ -104,8 +110,12 @@ type Limiter struct {
 	waiting  int
 	ipHits   map[string][]time.Time
 	metaHits map[string][]time.Time
-	failures map[[32]byte]int
-	blocked  map[[32]byte]time.Time
+	// issuerRefreshes is keyed by configured issuer, not by source IP: the
+	// amplification an unknown `kid` buys is aimed at the ISSUER, so one
+	// fabricated-`kid` stream from a thousand addresses is one outbound flood.
+	issuerRefreshes map[string][]time.Time
+	failures        map[[32]byte]int
+	blocked         map[[32]byte]time.Time
 }
 
 // New derives the concurrency and refuses a configuration in which a single
@@ -140,14 +150,15 @@ func New(cfg Config) (*Limiter, error) {
 		perIP = PerIPPerMinute
 	}
 	l := &Limiter{
-		concurrency: concurrency,
-		perIP:       perIP,
-		slots:       make(chan struct{}, concurrency),
-		now:         now,
-		ipHits:      map[string][]time.Time{},
-		metaHits:    map[string][]time.Time{},
-		failures:    map[[32]byte]int{},
-		blocked:     map[[32]byte]time.Time{},
+		concurrency:     concurrency,
+		perIP:           perIP,
+		slots:           make(chan struct{}, concurrency),
+		now:             now,
+		ipHits:          map[string][]time.Time{},
+		metaHits:        map[string][]time.Time{},
+		issuerRefreshes: map[string][]time.Time{},
+		failures:        map[[32]byte]int{},
+		blocked:         map[[32]byte]time.Time{},
 	}
 	for range concurrency {
 		l.slots <- struct{}{}
@@ -203,6 +214,25 @@ func (l *Limiter) dequeue() {
 // 64 MiB derivations would be throttled by a cost it does not incur.
 func (l *Limiter) AllowDiscovery(ip string) bool {
 	return l.allowIPIn(l.metaHits, ip, MetaPerIPPerMinute)
+}
+
+// AllowIssuerRefresh admits one OUTBOUND JWKS refresh triggered by an unknown
+// `kid` (#62, machine-identities ADR § JWKS: "unknown-`kid` refresh is
+// rate-limited, and that is load-bearing rather than hygiene").
+//
+// It rides this limiter rather than a bucket of its own inside the JWKS cache,
+// because the ADR puts it under the SAME instance-wide pre-authentication
+// budget as #16's human paths — and because this limiter already owns the
+// bounded-tracking discipline the naive version forgets: the key is an
+// operator-configured issuer rather than an attacker-chosen value, but the
+// eviction ceiling costs nothing and means one more map cannot become the
+// memory-exhaustion vector it exists to prevent.
+//
+// The allowance is per issuer per minute. Charging it per source IP would miss
+// the shape of the attack: the amplification is aimed at the ISSUER, and one
+// fabricated-`kid` stream from a thousand addresses is the same outbound flood.
+func (l *Limiter) AllowIssuerRefresh(issuer string) bool {
+	return l.allowIPIn(l.issuerRefreshes, issuer, IssuerRefreshPerMinute)
 }
 
 func (l *Limiter) allowIP(ip string) bool {

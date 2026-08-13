@@ -80,6 +80,14 @@
     ]
   },
   {
+    "operation": "delivery.fetch",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
     "operation": "environment.create",
     "class": "tenant",
     "level": "project",
@@ -149,6 +157,38 @@
     "level": "environment",
     "formula": [
       "edit@environment"
+    ]
+  },
+  {
+    "operation": "federation.issuer-create",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "federation.issuer-delete",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "federation.issuer-list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "federation.issuer-update",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
     ]
   },
   {
@@ -309,6 +349,14 @@
     "level": "project",
     "formula": [
       "manage-members@project"
+    ]
+  },
+  {
+    "operation": "identity.binding-create",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-identities@project"
     ]
   },
   {

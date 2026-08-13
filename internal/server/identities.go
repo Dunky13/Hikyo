@@ -149,11 +149,12 @@ func wireServiceAccount(sa service.ServiceAccountView) apigen.ServiceAccount {
 // that could add a value: the generated type has no member for one.
 func wireCredential(c service.CredentialView) apigen.MachineCredential {
 	out := apigen.MachineCredential{
-		Id: c.ID, Kind: apigen.CredentialKind(c.Kind), PrefixHint: c.PrefixHint,
+		Id: c.ID, Kind: apigen.CredentialKind(c.Kind),
 		Lifetime:  apigen.CredentialLifetime(c.Lifetime),
 		CreatedAt: c.CreatedAt, CreatedBy: string(c.CreatedBy),
 		ExpiringSoon: c.ExpiringSoon,
 	}
+	out.PrefixHint = optional(c.PrefixHint)
 	out.ExpiresAt = optionalTime(c.ExpiresAt)
 	out.RevokedAt = optionalTime(c.RevokedAt)
 	out.LastUsedAt = optionalTime(c.LastUsedAt)

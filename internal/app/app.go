@@ -16,6 +16,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/admission"
 	"github.com/Dunky13/hikyo/internal/config"
 	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Dunky13/hikyo/internal/oidcfed"
 	"github.com/Dunky13/hikyo/internal/server"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
@@ -227,6 +228,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: listen %s: %w", cfg.Listen, err)
 	}
 
+	federation := &service.Federation{
+		DB: db, Auth: authSvc, Admission: limiter,
+		Cache: &oidcfed.Cache{Limiter: limiter},
+	}
+
 	api := &server.API{
 		Auth:     authSvc,
 		SAMLAuth: authSvc,
@@ -252,6 +258,16 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// they cannot come from two configurations.
 		Grants:     &service.Grants{DB: db, Auth: authSvc},
 		Identities: &service.Identities{DB: db, Auth: authSvc},
+		// One Federation across the issuer surface and the delivery surface, and
+		// one JWKS cache inside it: the cache's staleness bound is an instance
+		// property, so two caches would mean two answers to "are this issuer's
+		// keys fresh". Its unknown-`kid` refresh rides the SAME admission limiter
+		// every other pre-authentication path rides, which is what the ADR means
+		// by putting the trigger under the instance-wide budget.
+		Federation: federation,
+		Delivery: &service.Delivery{
+			DB: db, Keyring: kr, Federation: federation,
+		},
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the
 		// window the reveal guard reads cannot come from two configurations.

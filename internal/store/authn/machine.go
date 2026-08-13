@@ -62,9 +62,14 @@ type MachineCredential struct {
 	Kind             domain.CredentialKind
 	// PrefixHint is the leading, non-secret slice of the minted value —
 	// `hik_1_wl_` plus a few body characters — so an operator can tell two
-	// live credentials apart in a list without either being retrievable.
+	// live credentials apart in a list without either being retrievable. It is
+	// EMPTY for an `oidc-federation` row, which has no minted value to hint at.
 	PrefixHint string
-	Lifetime   domain.CredentialLifetime
+	// Binding is the federated identity this credential is, and is the zero
+	// value for a bearer credential. The kind discriminates, so there is no
+	// second boolean saying which half of the row is meaningful.
+	Binding  Binding
+	Lifetime domain.CredentialLifetime
 	// ExpiresAt is the zero time IFF Lifetime is indefinite. The database
 	// CHECK makes the pairing total; this type keeps it total in Go.
 	ExpiresAt       time.Time
@@ -111,14 +116,18 @@ type NewServiceAccount struct {
 	CreatedBy   domain.PrincipalID
 }
 
-// NewMachineCredential is one mint. Verifier is the unsalted SHA-256 of the
-// whole presented value; the value itself never reaches this package.
+// NewMachineCredential is one mint of EITHER kind. Verifier is the unsalted
+// SHA-256 of the whole presented value; the value itself never reaches this
+// package. For an `oidc-federation` mint, Verifier and PrefixHint are empty and
+// Binding carries the identity instead — the table's two shape CHECKs make the
+// pairing total, so a half-shaped row of either kind is unrepresentable.
 type NewMachineCredential struct {
 	ID               string
 	ServiceAccountID string
 	Kind             domain.CredentialKind
 	Verifier         []byte
 	PrefixHint       string
+	Binding          Binding
 	Lifetime         domain.CredentialLifetime
 	ExpiresAt        time.Time
 	CredentialEpoch  int64
@@ -331,19 +340,23 @@ func (r *Resolver) DeleteMachinePrincipal(ctx context.Context, p domain.Principa
 // CreateMachineCredential persists one mint.
 func (r *Resolver) CreateMachineCredential(ctx context.Context, c NewMachineCredential) error {
 	if r.sq != nil {
-		return r.sq.InsertMachineCredential(ctx, sqlitegen.InsertMachineCredentialParams{
+		return bindingConstraint(r.sq.InsertMachineCredential(ctx, sqlitegen.InsertMachineCredentialParams{
 			ID: c.ID, ServiceAccountID: c.ServiceAccountID, Kind: string(c.Kind),
-			Verifier: c.Verifier, PrefixHint: c.PrefixHint, Lifetime: string(c.Lifetime),
+			Verifier: c.Verifier, PrefixHint: nullString(c.PrefixHint), Lifetime: string(c.Lifetime),
 			ExpiresAt: nullTimeString(c.ExpiresAt), CredentialEpoch: c.CredentialEpoch,
 			CreatedAt: encodeTime(c.CreatedAt), CreatedBy: string(c.CreatedBy),
-		})
+			IssuerID: nullString(c.Binding.IssuerID), Subject: nullString(c.Binding.Subject),
+			Audience: nullString(c.Binding.Audience), RequiredClaims: nullString(c.Binding.RequiredClaimsJSON),
+		}))
 	}
-	return r.pg.InsertMachineCredential(ctx, pggen.InsertMachineCredentialParams{
+	return bindingConstraint(r.pg.InsertMachineCredential(ctx, pggen.InsertMachineCredentialParams{
 		ID: c.ID, ServiceAccountID: c.ServiceAccountID, Kind: string(c.Kind),
-		Verifier: c.Verifier, PrefixHint: c.PrefixHint, Lifetime: string(c.Lifetime),
+		Verifier: c.Verifier, PrefixHint: pgText(c.PrefixHint), Lifetime: string(c.Lifetime),
 		ExpiresAt: nullPGTime(c.ExpiresAt), CredentialEpoch: c.CredentialEpoch,
 		CreatedAt: pgTime(c.CreatedAt), CreatedBy: string(c.CreatedBy),
-	})
+		IssuerID: pgText(c.Binding.IssuerID), Subject: pgText(c.Binding.Subject),
+		Audience: pgText(c.Binding.Audience), RequiredClaims: pgText(c.Binding.RequiredClaimsJSON),
+	}))
 }
 
 // The decoy row and verifier the MISS paths do their work against.
@@ -379,18 +392,55 @@ var (
 
 	decoyCredentialRowSQLite = sqlitegen.ListMachineCredentialsRow{
 		ID: "mcr_decoy", ServiceAccountID: "sa_decoy", Kind: string(domain.CredentialHikyoToken),
-		PrefixHint: "hik_1_wl_000000", Lifetime: string(domain.LifetimeFinite),
+		PrefixHint:      sql.NullString{String: "hik_1_wl_000000", Valid: true},
+		Lifetime:        string(domain.LifetimeFinite),
 		ExpiresAt:       sql.NullString{String: decoyTime, Valid: true},
 		CredentialEpoch: 1, CreatedAt: decoyTime, CreatedBy: "usr_decoy",
 	}
 
 	decoyCredentialRowPG = pggen.ListMachineCredentialsRow{
 		ID: "mcr_decoy", ServiceAccountID: "sa_decoy", Kind: string(domain.CredentialHikyoToken),
-		PrefixHint: "hik_1_wl_000000", Lifetime: string(domain.LifetimeFinite),
+		PrefixHint:      pgtype.Text{String: "hik_1_wl_000000", Valid: true},
+		Lifetime:        string(domain.LifetimeFinite),
 		ExpiresAt:       pgtype.Timestamptz{Time: decoyInstant, Valid: true},
 		CredentialEpoch: 1,
 		CreatedAt:       pgtype.Timestamptz{Time: decoyInstant, Valid: true},
 		CreatedBy:       "usr_decoy",
+	}
+
+	// The BINDING decoy is its own row rather than the bearer one, and the
+	// difference is the point: the two kinds decode different column sets — a
+	// bearer row parses no `reactivated_at`, a binding row parses no
+	// verifier — so reusing one decoy would make a miss on the federated path
+	// cost less than a hit on it. Same reasoning as the engine-matched split
+	// above, one axis further in.
+	decoyBindingRowSQLite = sqlitegen.ListMachineCredentialsRow{
+		ID: "mcr_decoy", ServiceAccountID: "sa_decoy", Kind: string(domain.CredentialOIDCFederation),
+		Lifetime:        string(domain.LifetimeFinite),
+		ExpiresAt:       sql.NullString{String: decoyTime, Valid: true},
+		CredentialEpoch: 1, CreatedAt: decoyTime, CreatedBy: "usr_decoy",
+		IssuerID: sql.NullString{String: "fis_decoy", Valid: true},
+		Subject:  sql.NullString{String: "system:serviceaccount:decoy:decoy", Valid: true},
+		Audience: sql.NullString{String: "hikyo", Valid: true},
+		// A PLAUSIBLE pinned set, not `{}`: the caller's binding predicate parses
+		// this document and compares each pin, so an empty object would make the
+		// miss path skip the JSON work a hit performs.
+		RequiredClaims: sql.NullString{String: decoyRequiredClaims, Valid: true},
+		ReactivatedAt:  sql.NullString{String: decoyTime, Valid: true},
+	}
+
+	decoyBindingRowPG = pggen.ListMachineCredentialsRow{
+		ID: "mcr_decoy", ServiceAccountID: "sa_decoy", Kind: string(domain.CredentialOIDCFederation),
+		Lifetime:        string(domain.LifetimeFinite),
+		ExpiresAt:       pgtype.Timestamptz{Time: decoyInstant, Valid: true},
+		CredentialEpoch: 1,
+		CreatedAt:       pgtype.Timestamptz{Time: decoyInstant, Valid: true},
+		CreatedBy:       "usr_decoy",
+		IssuerID:        pgtype.Text{String: "fis_decoy", Valid: true},
+		Subject:         pgtype.Text{String: "system:serviceaccount:decoy:decoy", Valid: true},
+		Audience:        pgtype.Text{String: "hikyo", Valid: true},
+		RequiredClaims:  pgtype.Text{String: decoyRequiredClaims, Valid: true},
+		ReactivatedAt:   pgtype.Timestamptz{Time: decoyInstant, Valid: true},
 	}
 
 	decoyServiceAccountRowSQLite = sqlitegen.ServiceAccount{
@@ -417,6 +467,11 @@ var (
 // early; decoyInstant is the same moment for the postgres shape.
 const decoyTime = "1970-01-01T00:00:00.000000Z"
 
+// decoyRequiredClaims is a three-pin document in the shape a real CI binding
+// carries, so the miss path's predicate parses and compares rather than
+// returning early on an empty set.
+const decoyRequiredClaims = `{"event_name":"push","repository":"decoy/decoy","workflow_ref":"decoy/decoy/.forgejo/workflows/decoy.yaml@refs/heads/main"}`
+
 var decoyInstant = time.Unix(0, 0).UTC()
 
 // MachineCredentialByVerifier is authentication's single indexed read. It
@@ -440,6 +495,8 @@ func (r *Resolver) MachineCredentialByVerifier(ctx context.Context, verifier []b
 			PrefixHint: row.PrefixHint, Lifetime: row.Lifetime, ExpiresAt: row.ExpiresAt,
 			CredentialEpoch: row.CredentialEpoch, CreatedAt: row.CreatedAt,
 			CreatedBy: row.CreatedBy, RevokedAt: row.RevokedAt, LastUsedAt: row.LastUsedAt,
+			IssuerID: row.IssuerID, Subject: row.Subject, Audience: row.Audience,
+			RequiredClaims: row.RequiredClaims, ReactivatedAt: row.ReactivatedAt,
 		})
 	}
 	row, err := r.pg.MachineCredentialByVerifier(ctx, verifier)
@@ -457,6 +514,8 @@ func (r *Resolver) MachineCredentialByVerifier(ctx context.Context, verifier []b
 		PrefixHint: row.PrefixHint, Lifetime: row.Lifetime, ExpiresAt: row.ExpiresAt,
 		CredentialEpoch: row.CredentialEpoch, CreatedAt: row.CreatedAt,
 		CreatedBy: row.CreatedBy, RevokedAt: row.RevokedAt, LastUsedAt: row.LastUsedAt,
+		IssuerID: row.IssuerID, Subject: row.Subject, Audience: row.Audience,
+		RequiredClaims: row.RequiredClaims, ReactivatedAt: row.ReactivatedAt,
 	}), nil
 }
 
@@ -880,9 +939,18 @@ func credentialFromSQLite(row sqlitegen.ListMachineCredentialsRow) (MachineCrede
 	if err != nil {
 		return MachineCredential{}, err
 	}
+	reactivated, err := decodeNullTime(row.ReactivatedAt)
+	if err != nil {
+		return MachineCredential{}, err
+	}
 	return MachineCredential{
 		ID: row.ID, ServiceAccountID: row.ServiceAccountID,
-		Kind: domain.CredentialKind(row.Kind), PrefixHint: row.PrefixHint,
+		Kind: domain.CredentialKind(row.Kind), PrefixHint: row.PrefixHint.String,
+		Binding: Binding{
+			IssuerID: row.IssuerID.String, Subject: row.Subject.String,
+			Audience: row.Audience.String, RequiredClaimsJSON: row.RequiredClaims.String,
+			ReactivatedAt: reactivated,
+		},
 		Lifetime: domain.CredentialLifetime(row.Lifetime), ExpiresAt: expires,
 		CredentialEpoch: row.CredentialEpoch, CreatedAt: created,
 		CreatedBy: domain.PrincipalID(row.CreatedBy), RevokedAt: revoked, LastUsedAt: used,
@@ -892,7 +960,12 @@ func credentialFromSQLite(row sqlitegen.ListMachineCredentialsRow) (MachineCrede
 func credentialFromPG(row pggen.ListMachineCredentialsRow) MachineCredential {
 	return MachineCredential{
 		ID: row.ID, ServiceAccountID: row.ServiceAccountID,
-		Kind: domain.CredentialKind(row.Kind), PrefixHint: row.PrefixHint,
+		Kind: domain.CredentialKind(row.Kind), PrefixHint: row.PrefixHint.String,
+		Binding: Binding{
+			IssuerID: row.IssuerID.String, Subject: row.Subject.String,
+			Audience: row.Audience.String, RequiredClaimsJSON: row.RequiredClaims.String,
+			ReactivatedAt: row.ReactivatedAt.Time,
+		},
 		Lifetime: domain.CredentialLifetime(row.Lifetime), ExpiresAt: row.ExpiresAt.Time,
 		CredentialEpoch: row.CredentialEpoch, CreatedAt: row.CreatedAt.Time,
 		CreatedBy: domain.PrincipalID(row.CreatedBy),
