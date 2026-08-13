@@ -39,6 +39,10 @@ all_success='{
 
 expect_accept 'successful pull request' pull_request "$all_success"
 expect_accept 'successful base-controlled pull request' pull_request_target "$all_success"
+for result in failure cancelled skipped; do
+	expect_reject "base-controlled pull request with $result client" pull_request_target \
+		"$(printf '%s' "$all_success" | jq --arg result "$result" '.client.result = $result')"
+done
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')"
 
