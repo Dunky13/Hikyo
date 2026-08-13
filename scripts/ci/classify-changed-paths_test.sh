@@ -122,18 +122,6 @@ if ! printf '%s\n' "$main_gate_actual" | jq -e '
 	exit 1
 fi
 
-docs_workflow_actual=$(printf '%s\n' '.github/workflows/docs.yml' | "$classifier" --files)
-if ! printf '%s\n' "$docs_workflow_actual" | jq -e '
-	.docs == true and
-	.lint == true and
-	([.client, .generated, .headline_guarantee, .release_snapshot, .supply_chain_checks, .test, .web] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: docs-workflow plan was wrong\n' >&2
-	printf 'actual: %s\n' "$docs_workflow_actual" >&2
-	exit 1
-fi
-
 docs_script_actual=$(printf '%s\n' 'scripts/ci/check-docs-live.sh' | "$classifier" --files)
 if ! printf '%s\n' "$docs_script_actual" | jq -e '
 	.docs == true and
@@ -143,19 +131,6 @@ if ! printf '%s\n' "$docs_script_actual" | jq -e '
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: docs-script plan was wrong\n' >&2
 	printf 'actual: %s\n' "$docs_script_actual" >&2
-	exit 1
-fi
-
-release_workflow_actual=$(printf '%s\n' '.github/workflows/release.yml' | "$classifier" --files)
-if ! printf '%s\n' "$release_workflow_actual" | jq -e '
-	.docs == true and
-	.lint == true and
-	.release_snapshot == true and
-	.supply_chain_checks == true and
-	([.client, .generated, .headline_guarantee, .test, .web] | all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: release-workflow plan was wrong\n' >&2
-	printf 'actual: %s\n' "$release_workflow_actual" >&2
 	exit 1
 fi
 
@@ -214,6 +189,9 @@ for fail_closed_input in \
 	'' \
 	'future/product/file.new' \
 	'.github/workflows/ci.yml' \
+	'.github/workflows/ci-control.yml' \
+	'.github/workflows/docs.yml' \
+	'.github/workflows/release.yml' \
 	'scripts/ci/classify-changed-paths.sh' \
 	'scripts/ci/check-required-jobs.sh'; do
 	fail_closed_actual=$(printf '%s\n' "$fail_closed_input" | "$classifier" --files)

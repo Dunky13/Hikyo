@@ -17,7 +17,7 @@ expected_results='["changes","client","dco","docs","generated","headline-guarant
 expected_plan='["client","docs","generated","headline_guarantee","lint","release_snapshot","supply_chain_checks","test","web"]'
 
 case "$event" in
-	pull_request | push) ;;
+	pull_request | pull_request_target | push) ;;
 	*)
 		printf 'required jobs: unsupported event %s\n' "$event" >&2
 		exit 2

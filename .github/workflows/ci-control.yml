@@ -1,0 +1,32 @@
+# Pull-request orchestration must come from the base branch. This workflow
+# never executes PR-controlled workflow YAML, receives no secrets, and narrows
+# the automatic token to public-source read access.
+name: trusted-ci
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trusted-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validation:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # Permanent required context. This job and its success criteria are loaded
+  # from the base branch, so a PR cannot redefine its own merge gate.
+  ci-required:
+    if: always()
+    needs: validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require trusted validation
+        env:
+          VALIDATION_RESULT: ${{ needs.validation.result }}
+        run: test "$VALIDATION_RESULT" = success

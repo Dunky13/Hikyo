@@ -39,6 +39,9 @@ else
 		[ -n "$path" ] || continue
 		saw_path=true
 		case "$path" in
+		.github/workflows/*)
+			all_jobs
+			;;
 		# Dependency manifests and build/tool configuration can affect more than
 		# their owning directory, so keep them on the full integration backstop.
 		go.mod | go.sum | sqlc.yaml | .goreleaser.yaml | \
@@ -46,16 +49,6 @@ else
 			clients/ts/package.json | clients/ts/pnpm-lock.yaml | clients/ts/tsconfig*.json | clients/ts/*.config.* | \
 			docs/site/package.json | docs/site/pnpm-lock.yaml | docs/site/tsconfig*.json | docs/site/*.config.*)
 			all_jobs
-			;;
-		.github/workflows/docs.yml)
-			docs=true
-			lint=true
-			;;
-		.github/workflows/release.yml)
-			docs=true
-			lint=true
-			release_snapshot=true
-			supply_chain_checks=true
 			;;
 		LICENSE)
 			docs=true

@@ -71,6 +71,13 @@ docs_success=$(printf '%s' "$all_success" | jq '
 
 expect_accept 'successful full pull request' pull_request "$all_success" "$all_plan"
 expect_accept 'successful docs-only pull request' pull_request "$docs_success" "$docs_plan"
+expect_accept 'successful base-controlled pull request' pull_request_target \
+	"$all_success" "$all_plan"
+for result in failure cancelled skipped; do
+	expect_reject "base-controlled pull request with $result client" pull_request_target \
+		"$(printf '%s' "$all_success" | jq --arg result "$result" '.client.result = $result')" \
+		"$all_plan"
+done
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')" "$all_plan"
 
