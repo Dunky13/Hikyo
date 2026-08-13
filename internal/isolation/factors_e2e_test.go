@@ -52,6 +52,10 @@ func bootstrapFactorAdmin(t *testing.T, db *store.DB) (*service.Auth, service.Bo
 	if err := auth.EstablishCredential(t.Context(), boot.Authority, password); err != nil {
 		t.Fatal(err)
 	}
+	// See bootstrapWebAuthnAdmin: the reauth routes authorize the environment
+	// under `read` before inspecting its policy, and bootstrap seeds no tenant
+	// capability.
+	grantRead(t, db, boot.PrincipalID)
 	return auth, boot, password
 }
 

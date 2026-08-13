@@ -48,12 +48,30 @@ func TestBreakGlassHasNoNetworkRoute(t *testing.T) {
 // `ts` is only ever read by columns that are not time-parsed).
 const tsMicro = "'2026-01-01T00:00:00.000000Z'"
 
+// grantRead gives a principal INSTANCE-scope `read`, which the reauth routes
+// now require before they will discuss an environment's reauthentication
+// policy at all.
+//
+// Instance rather than org scope, and that is not arbitrary: `listMyOrgs`
+// projects the orgs a caller's own grants NAME, so an org-scoped grant would
+// put org A in every bootstrap administrator's rail and break the fixtures
+// that assert a purely instance-scoped principal sees none. Instance scope
+// reaches the same environments by the ordinary downward inheritance.
+func grantRead(t *testing.T, db *store.DB, p domain.PrincipalID) {
+	t.Helper()
+	id := "g_rd_" + string(p)
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) `+
+		`VALUES ('`+id+`', '`+string(p)+`', 'read', NULL, NULL, NULL, `+ts+`)`)
+	execRaw(t, db, `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at) `+
+		`VALUES ('gor_`+id+`', '`+id+`', 'manual', '`+string(p)+`', `+ts+`)`)
+}
+
 // consumeWindow runs ConsumeReauthWindow inside its own transaction, as the
 // reveal path will, and returns the refusal (or nil) unwrapped for errors.Is.
 func consumeWindow(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env string, keys []string, now time.Time) error {
 	t.Helper()
 	return tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		return auth.ConsumeReauthWindow(ctx, az, sessionID, env, keys, now)
+		return auth.ConsumeReauthWindow(ctx, az, sessionID, service.PurposeReveal, env, keys, now)
 	})
 }
 
@@ -80,7 +98,7 @@ func runReauthConsumeSingleDecision(t *testing.T, db *store.DB) {
 	stepped := stepUpPasskey(t, auth, ctx, token, dev)
 	token = stepped
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_b", "key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -140,7 +158,7 @@ func runReauthConsumeSlidingHardCap(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -209,7 +227,7 @@ func runReauthWebAuthnOpenClampsHardCap(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -260,7 +278,7 @@ func runReauthSlideUsesEffectiveWindow(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -327,7 +345,7 @@ func runReauthConsumeInvalidationFailsClosed(t *testing.T, db *store.DB) {
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 	token = stepUpPasskey(t, auth, ctx, token, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}

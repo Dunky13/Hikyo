@@ -51,7 +51,8 @@ var (
 // to an enumerated unit — authorizes exactly the unit its ceremony pinned and is
 // consumed by exactly one decision through the consumed_at NULL guard. A sliding
 // window slides window_expires_at forward per disclosure, never past the hard cap.
-func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID, environmentID string, keyIDs []string, now time.Time) error {
+func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
+	purpose ReauthPurpose, environmentID string, keyIDs []string, now time.Time) error {
 	w, err := az.ReauthWindowFor(ctx, sessionID, environmentID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return ErrNoReauthWindow
@@ -69,13 +70,15 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		return ErrReauthWindowExpired
 	}
 	if w.SingleDecision {
-		// The unit is fixed before the ceremony and cannot grow after it: the
-		// ceremony's pinned binding is matched byte-exact against this unit.
+		// The unit is fixed before the ceremony and cannot grow after it, and it
+		// includes the PURPOSE: the ceremony's pinned binding is matched
+		// byte-exact against this decision, so an assertion given to one act is
+		// not spendable on another over the same keys.
 		ceremony, err := az.WebAuthnCeremonyByID(ctx, w.CeremonyID)
 		if err != nil {
 			return err
 		}
-		want, err := operationBinding(environmentID, keyIDs)
+		want, err := operationBinding(purpose, environmentID, keyIDs)
 		if err != nil {
 			return err
 		}
@@ -122,6 +125,26 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		return ErrReauthWindowExpired
 	}
 	return nil
+}
+
+// authorizeEnvironmentRead resolves an environment from its id alone and
+// requires `read` on it.
+//
+// The reauth routes address an environment by id rather than by chain, because
+// a ceremony is about a session and an environment and not about a path. That
+// makes the chain something to LOOK UP rather than something to trust, which is
+// exactly what this does — and the lookup's own miss is indistinguishable from
+// a refusal, which is the property the uniform nonexistent rule wants.
+func authorizeEnvironmentRead(ctx context.Context, az *authz.TxAuthorizer, caller authz.Identity, envID string) error {
+	chain, err := az.EnvironmentChainByID(ctx, envID)
+	if err != nil {
+		return err
+	}
+	_, err = az.Authorize(ctx, caller, authz.OpRevealWindowRead, domain.Scope{
+		Org: domain.OrgID(chain.Org), Project: domain.ProjectID(chain.Project),
+		Env: domain.EnvID(chain.Env),
+	})
+	return err
 }
 
 // LowerEffectiveWindow performs, in one transaction, the five ADR items on an
@@ -261,26 +284,36 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		if err != nil {
 			return err
 		}
+		// AUTHORIZE THE ENVIRONMENT BEFORE LOOKING AT ITS POLICY.
+		//
+		// Without this the route is an oracle: the window check runs before any
+		// code is verified, so a signed-in principal with no access to an
+		// environment could tell a protected one (409) from an unreachable or
+		// nonexistent one (401) by presenting nonsense. Resolving the chain and
+		// requiring `read(E)` first collapses both into the same refusal, and
+		// the chokepoint's own uniform nonexistent outcome does the collapsing.
+		if err := authorizeEnvironmentRead(ctx, az, id, environmentID); err != nil {
+			return err
+		}
+		// THE ENVIRONMENT'S POLICY BEFORE THE CALLER'S FACTORS. A 0-window
+		// environment has no TOTP path whoever is asking, so it answers the
+		// same to an account with an enrolled authenticator and one without —
+		// and the remedy it names (a passkey ceremony) is the same for both.
+		effWin, err = s.effectiveReauthWindow(ctx, az, environmentID)
+		if err != nil {
+			return err
+		}
+		if effWin <= 0 {
+			return ErrReauthWindowClosed
+		}
 		confirmed, err = az.ConfirmedTOTP(ctx, account.ID)
 		if errors.Is(err, domain.ErrNotFound) {
 			return ErrNoTOTPFactor
 		}
-		if err != nil {
-			return err
-		}
-		effWin, err = s.effectiveReauthWindow(ctx, az, environmentID)
 		return err
 	})
 	if err != nil {
 		return ReauthResult{}, err
-	}
-
-	// Refuse at a 0 effective window BEFORE consuming any code: TOTP cannot supply
-	// a per-operation gate, so a 0 window has no TOTP path (ADR - Reauthentication).
-	// The environment's effective window is resolved through the one seam, never
-	// the global (A2), so a lowered environment is honoured here.
-	if effWin <= 0 {
-		return ReauthResult{}, ErrReauthWindowClosed
 	}
 
 	release, err := s.enterFactorBudget(ctx, account.ID)

@@ -275,6 +275,30 @@ func (e PrincipalKind) Valid() bool {
 	}
 }
 
+// Defines values for ReauthPurpose.
+const (
+	Copy    ReauthPurpose = "copy"
+	Mint    ReauthPurpose = "mint"
+	Publish ReauthPurpose = "publish"
+	Reveal  ReauthPurpose = "reveal"
+)
+
+// Valid indicates whether the value is a known member of the ReauthPurpose enum.
+func (e ReauthPurpose) Valid() bool {
+	switch e {
+	case Copy:
+		return true
+	case Mint:
+		return true
+	case Publish:
+		return true
+	case Reveal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoleTemplate.
 const (
 	Admin      RoleTemplate = "admin"
@@ -1541,6 +1565,26 @@ type ProjectList struct {
 // unknown value rather than reject the response.
 type ProtocolCapability = string
 
+// ReauthPurpose The decision a disclosure ceremony authorizes. It is part of the SIGNED
+// binding, not a label: without it an assertion given to `reveal` would be
+// spendable on `publish` over the same environment and keys — the same
+// unit, a different decision, and the human agreed to only one of them.
+type ReauthPurpose string
+
+// ReauthResult defines model for ReauthResult.
+type ReauthResult struct {
+	EnvironmentId string `json:"environment_id"`
+
+	// SessionId A prefixed UUIDv7, e.g. `org_0198…`.
+	SessionId ID `json:"session_id"`
+
+	// SingleDecision True where the effective window is zero — the window authorizes exactly one decision.
+	SingleDecision bool `json:"single_decision"`
+
+	// WindowExpires RFC 3339 UTC, microsecond precision.
+	WindowExpires Timestamp `json:"window_expires"`
+}
+
 // ReclassifyKeyRequest defines model for ReclassifyKeyRequest.
 type ReclassifyKeyRequest struct {
 	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
@@ -1637,6 +1681,46 @@ type RevealDiffRequest struct {
 
 	// Right A prefixed UUIDv7, e.g. `org_0198…`.
 	Right ID `json:"right"`
+}
+
+// RevealWindow The reveal guard's state for one environment and the acting session.
+// Nothing here is material: it is project settings plus the caller's own
+// window.
+type RevealWindow struct {
+	// CanReveal Whether this principal satisfies `read(E) AND reveal(E)` here. It is
+	// an AFFORDANCE, never a decision — the chokepoint judges every
+	// disclosure regardless — and it is what makes the write-only editing
+	// path first-class: `edit` without `reveal` is a supported state, so
+	// the editor offers a blind-replacement field with honest microcopy
+	// rather than guessing from whether a cell happens to be on screen.
+	CanReveal bool `json:"can_reveal"`
+
+	// EffectiveWindowSeconds The environment's resolved reauthentication window. `0` means
+	// every disclosure takes its own ceremony — the state a protected
+	// environment is capped at.
+	EffectiveWindowSeconds int `json:"effective_window_seconds"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt *Timestamp `json:"expires_at,omitempty"`
+
+	// Live Whether a window is open for this session right now.
+	Live bool `json:"live"`
+
+	// Protected The protected-environment flag. Reported beside the window rather
+	// than folded into it, because "this environment is protected" and
+	// "the window is set to 0" are different sentences to a human even
+	// when they produce the same gate.
+	Protected bool `json:"protected"`
+
+	// SingleDecision True when the live window authorizes exactly the keys its ceremony
+	// enumerated and is spent by one decision — never presented as a
+	// standing window with a countdown.
+	SingleDecision bool `json:"single_decision"`
+
+	// TotpOffered Whether a TOTP code may open a window here. False exactly where
+	// the effective window is `0`: TOTP cannot bind a challenge to the
+	// enumerated unit, so a passkey ceremony is the only path there.
+	TotpOffered bool `json:"totp_offered"`
 }
 
 // RoleTemplate The closed v1 role template set.
@@ -1946,6 +2030,17 @@ type TotpProofRequest struct {
 	Password string `json:"password"`
 }
 
+// TotpReauthRequest A disclosure reauthentication by TOTP. `environment_id` is what the
+// window is opened OVER — the reveal guard is per environment, so a
+// window on staging authorizes nothing in production.
+type TotpReauthRequest struct {
+	// Code A TOTP code from the enrolled authenticator.
+	Code string `json:"code"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID `json:"environment_id"`
+}
+
 // UpdateKeyDeclarationRequest defines model for UpdateKeyDeclarationRequest.
 type UpdateKeyDeclarationRequest struct {
 	// Declaration Exactly one of `rule` or `any_of`. `any_of` is a bounded union whose
@@ -2110,26 +2205,18 @@ type WebauthnEnrolStartRequest struct {
 // fields the authenticator signs over are preserved by round-tripping.
 type WebauthnOptions map[string]interface{}
 
-// WebauthnReauthResult defines model for WebauthnReauthResult.
-type WebauthnReauthResult struct {
-	EnvironmentId string `json:"environment_id"`
-
-	// SessionId A prefixed UUIDv7, e.g. `org_0198…`.
-	SessionId ID `json:"session_id"`
-
-	// SingleDecision True where the effective window is zero — the window authorizes exactly one decision.
-	SingleDecision bool `json:"single_decision"`
-
-	// WindowExpires RFC 3339 UTC, microsecond precision.
-	WindowExpires Timestamp `json:"window_expires"`
-}
-
 // WebauthnReauthStartRequest defines model for WebauthnReauthStartRequest.
 type WebauthnReauthStartRequest struct {
 	EnvironmentId string `json:"environment_id"`
 
 	// KeyIds The credential ids the reauthentication is bound to.
 	KeyIds []string `json:"key_ids"`
+
+	// Operation The decision a disclosure ceremony authorizes. It is part of the SIGNED
+	// binding, not a label: without it an assertion given to `reveal` would be
+	// spendable on `publish` over the same environment and keys — the same
+	// unit, a different decision, and the human agreed to only one of them.
+	Operation ReauthPurpose `json:"operation"`
 }
 
 // WebauthnResponse Opaque WebAuthn authenticator response (attestation or assertion) as
@@ -2286,6 +2373,9 @@ type LocalLoginJSONRequestBody = LocalLoginRequest
 
 // OidcStartJSONRequestBody defines body for OidcStart for application/json ContentType.
 type OidcStartJSONRequestBody = OidcStartRequest
+
+// ReauthTotpJSONRequestBody defines body for ReauthTotp for application/json ContentType.
+type ReauthTotpJSONRequestBody = TotpReauthRequest
 
 // RegenerateRecoveryCodesJSONRequestBody defines body for RegenerateRecoveryCodes for application/json ContentType.
 type RegenerateRecoveryCodesJSONRequestBody = RecoveryProofRequest
@@ -2478,6 +2568,9 @@ type ServerInterface interface {
 	// OidcStart Begin an OIDC transaction (login, link or reauth).
 	// (POST /api/v1/auth/oidc/{provider}/start)
 	OidcStart(w http.ResponseWriter, r *http.Request, provider ProviderSlug)
+	// ReauthTotp Open a disclosure reauthentication window with a TOTP code.
+	// (POST /api/v1/auth/reauth/totp)
+	ReauthTotp(w http.ResponseWriter, r *http.Request)
 	// RegenerateRecoveryCodes Replace the recovery-code batch; returns the codes once.
 	// (POST /api/v1/auth/recovery-codes/regenerate)
 	RegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request)
@@ -2676,6 +2769,9 @@ type ServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// GetRevealWindow The reveal guard's state for this environment and session.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
+	GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
@@ -2862,6 +2958,12 @@ func (_ Unimplemented) OidcCallback(w http.ResponseWriter, r *http.Request, prov
 // OidcStart Begin an OIDC transaction (login, link or reauth).
 // (POST /api/v1/auth/oidc/{provider}/start)
 func (_ Unimplemented) OidcStart(w http.ResponseWriter, r *http.Request, provider ProviderSlug) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReauthTotp Open a disclosure reauthentication window with a TOTP code.
+// (POST /api/v1/auth/reauth/totp)
+func (_ Unimplemented) ReauthTotp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3258,6 +3360,12 @@ func (_ Unimplemented) CreateEnvGrant(w http.ResponseWriter, r *http.Request, or
 // ApplyEnvTemplate Apply a role template on one environment.
 // (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 func (_ Unimplemented) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevealWindow The reveal guard's state for this environment and session.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
+func (_ Unimplemented) GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3750,6 +3858,20 @@ func (siw *ServerInterfaceWrapper) OidcStart(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.OidcStart(w, r, provider)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReauthTotp operation middleware
+func (siw *ServerInterfaceWrapper) ReauthTotp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReauthTotp(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5367,6 +5489,50 @@ func (siw *ServerInterfaceWrapper) ApplyEnvTemplate(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ApplyEnvTemplate(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevealWindow operation middleware
+func (siw *ServerInterfaceWrapper) GetRevealWindow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevealWindow(w, r, org, project, environment)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7277,6 +7443,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/auth/totp/step-up", wrapper.StepUpTotp)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/reauth/totp", wrapper.ReauthTotp)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/api/v1/auth/totp", wrapper.RemoveTotp)
 	})
 	r.Group(func(r chi.Router) {
@@ -7464,6 +7633,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/values/diff", wrapper.DiffValues)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window", wrapper.GetRevealWindow)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal", wrapper.RevealValues)
@@ -8325,6 +8497,99 @@ func (response OidcStart429JSONResponse) VisitOidcStartResponse(w http.ResponseW
 type OidcStart500JSONResponse struct{ InternalJSONResponse }
 
 func (response OidcStart500JSONResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotpRequestObject struct {
+	Body *ReauthTotpJSONRequestBody
+}
+
+type ReauthTotpResponseObject interface {
+	VisitReauthTotpResponse(w http.ResponseWriter) error
+}
+
+type ReauthTotp200JSONResponse ReauthResult
+
+func (response ReauthTotp200JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotp400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ReauthTotp400JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotp401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReauthTotp401JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotp409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ReauthTotp409JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotp429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReauthTotp429JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReauthTotp500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReauthTotp500JSONResponse) VisitReauthTotpResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -9494,7 +9759,7 @@ type ReauthPasskeyFinishResponseObject interface {
 	VisitReauthPasskeyFinishResponse(w http.ResponseWriter) error
 }
 
-type ReauthPasskeyFinish200JSONResponse WebauthnReauthResult
+type ReauthPasskeyFinish200JSONResponse ReauthResult
 
 func (response ReauthPasskeyFinish200JSONResponse) VisitReauthPasskeyFinishResponse(w http.ResponseWriter) error {
 
@@ -14256,6 +14521,87 @@ func (response ApplyEnvTemplate500JSONResponse) VisitApplyEnvTemplateResponse(w 
 	return err
 }
 
+type GetRevealWindowRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type GetRevealWindowResponseObject interface {
+	VisitGetRevealWindowResponse(w http.ResponseWriter) error
+}
+
+type GetRevealWindow200JSONResponse RevealWindow
+
+func (response GetRevealWindow200JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevealWindow401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetRevealWindow401JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevealWindow404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetRevealWindow404JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevealWindow429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetRevealWindow429JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevealWindow500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetRevealWindow500JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetEnvironmentSettingsRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -18249,6 +18595,9 @@ type StrictServerInterface interface {
 	// OidcStart Begin an OIDC transaction (login, link or reauth).
 	// (POST /api/v1/auth/oidc/{provider}/start)
 	OidcStart(ctx context.Context, request OidcStartRequestObject) (OidcStartResponseObject, error)
+	// ReauthTotp Open a disclosure reauthentication window with a TOTP code.
+	// (POST /api/v1/auth/reauth/totp)
+	ReauthTotp(ctx context.Context, request ReauthTotpRequestObject) (ReauthTotpResponseObject, error)
 	// RegenerateRecoveryCodes Replace the recovery-code batch; returns the codes once.
 	// (POST /api/v1/auth/recovery-codes/regenerate)
 	RegenerateRecoveryCodes(ctx context.Context, request RegenerateRecoveryCodesRequestObject) (RegenerateRecoveryCodesResponseObject, error)
@@ -18447,6 +18796,9 @@ type StrictServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(ctx context.Context, request ApplyEnvTemplateRequestObject) (ApplyEnvTemplateResponseObject, error)
+	// GetRevealWindow The reveal guard's state for this environment and session.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
+	GetRevealWindow(ctx context.Context, request GetRevealWindowRequestObject) (GetRevealWindowResponseObject, error)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(ctx context.Context, request GetEnvironmentSettingsRequestObject) (GetEnvironmentSettingsResponseObject, error)
@@ -18888,6 +19240,37 @@ func (sh *strictHandler) OidcStart(w http.ResponseWriter, r *http.Request, provi
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(OidcStartResponseObject); ok {
 		if err := validResponse.VisitOidcStartResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReauthTotp operation middleware
+func (sh *strictHandler) ReauthTotp(w http.ResponseWriter, r *http.Request) {
+	var request ReauthTotpRequestObject
+
+	var body ReauthTotpJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReauthTotp(ctx, request.(ReauthTotpRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReauthTotp")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReauthTotpResponseObject); ok {
+		if err := validResponse.VisitReauthTotpResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -20809,6 +21192,34 @@ func (sh *strictHandler) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ApplyEnvTemplateResponseObject); ok {
 		if err := validResponse.VisitApplyEnvTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevealWindow operation middleware
+func (sh *strictHandler) GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request GetRevealWindowRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevealWindow(ctx, request.(GetRevealWindowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevealWindow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevealWindowResponseObject); ok {
+		if err := validResponse.VisitGetRevealWindowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

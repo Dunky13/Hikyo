@@ -555,7 +555,7 @@
     "engine": "postgres",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "b982bfee62b12e70885ce008b88d4c46f437d5967438c6f427cbbc0978248dea"
+    "hash": "a1ce272e0656027b787426fafa64c8ad308a78b598f848e4aff0ced3899b588b"
   },
   {
     "engine": "postgres",
@@ -1431,7 +1431,7 @@
     "engine": "sqlite",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "f36017eb4e7bb1366ac7c308f4952bc3479b5d911b1ebaf948d0b53598d4e13e"
+    "hash": "7a6860ee1a30cd8cd57bb472839b579d09678804ccc04277caffe955440142a6"
   },
   {
     "engine": "sqlite",

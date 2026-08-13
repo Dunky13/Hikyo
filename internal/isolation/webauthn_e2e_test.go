@@ -59,6 +59,14 @@ func bootstrapWebAuthnAdmin(t *testing.T, db *store.DB) (*service.Auth, string, 
 		t.Fatal(err)
 	}
 	accountID := queryString(t, db, "SELECT id FROM accounts WHERE username = '"+waAdmin+"'")
+	// The reauth routes resolve and authorize the environment under `read`
+	// before they will discuss its reauthentication policy — otherwise the
+	// route is an oracle for which environment ids exist and which are
+	// protected. Every reauth fixture in this package addresses org A's
+	// `env_prod`, so the bootstrap administrator is given the `read` that gate
+	// sits behind; bootstrap itself deliberately seeds no tenant capability.
+	grantRead(t, db, domain.PrincipalID(queryString(t, db,
+		"SELECT principal_id FROM accounts WHERE username = '"+waAdmin+"'")))
 	return auth, accountID, login.SessionToken
 }
 
@@ -363,7 +371,7 @@ func runWebAuthnStepUpReauth(t *testing.T, db *store.DB) {
 
 	// Reauth over an enumerated unit opens a single-decision window (default
 	// effective window is 0, so only WebAuthn can gate it).
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_b", "key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_b", "key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}
@@ -388,7 +396,7 @@ func runWebAuthnStepUpReauth(t *testing.T, db *store.DB) {
 	// key ids), which #7's consumption at disclosure will read to match the unit
 	// a reveal names. Pinning it here fixes the sort and the row linkage.
 	binding := queryString(t, db, "SELECT c.operation_binding FROM webauthn_ceremonies c JOIN reauth_windows w ON w.ceremony_id = c.id WHERE w.environment_id = 'env_prod'")
-	if binding != `{"environment_id":"env_prod","key_ids":["key_a","key_b"]}` {
+	if binding != `{"operation":"reveal","environment_id":"env_prod","key_ids":["key_a","key_b"]}` {
 		t.Errorf("reauth operation_binding = %q, want canonical sorted JSON", binding)
 	}
 }
@@ -412,7 +420,7 @@ func runWebAuthnReauthBindingMismatch(t *testing.T, db *store.DB) {
 	dev := webauthntest.New(waRPID, waOrigin)
 	token = enrolPasskey(t, auth, ctx, token, waPassword, dev)
 
-	ropts, err := auth.ReauthPasskeyStart(ctx, token, "env_prod", []string{"key_a"})
+	ropts, err := auth.ReauthPasskeyStart(ctx, token, service.PurposeReveal, "env_prod", []string{"key_a"})
 	if err != nil {
 		t.Fatalf("reauth start: %v", err)
 	}

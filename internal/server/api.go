@@ -49,8 +49,9 @@ type AuthService interface {
 	PasskeyLoginFinish(ctx context.Context, responseJSON []byte) (service.LoginResult, error)
 	StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error)
 	StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
-	ReauthPasskeyStart(ctx context.Context, presented, environmentID string, keyIDs []string) ([]byte, error)
+	ReauthPasskeyStart(ctx context.Context, presented string, purpose service.ReauthPurpose, environmentID string, keyIDs []string) ([]byte, error)
 	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
+	ReauthTOTP(ctx context.Context, presented, environmentID, code string) (service.ReauthResult, error)
 	RemovePasskey(ctx context.Context, presented, credentialID, password, code string) (service.LoginResult, error)
 	ListPasskeys(ctx context.Context, presented string) ([]service.PasskeyView, error)
 	ResetCredential(ctx context.Context, actor service.Actor, targetPrincipal, delivery string) (service.ResetResult, error)
@@ -119,6 +120,7 @@ type API struct {
 	Folders       FolderService
 	Keys          KeyService
 	Values        ValueService
+	Reveal        RevealService
 	KeyGroups     KeyGroupService
 	Grants        GrantService
 	Identities    IdentityService

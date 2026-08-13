@@ -590,6 +590,11 @@ func environmentOf(e store.Environment) Environment {
 type Environments struct {
 	DB      *store.DB
 	Keyring *crypto.Keyring
+	// Auth supplies the reveal guard for clone-at-creation (#58): a clone
+	// duplicates stored `secret` material, which is a disclosure by proxy, so
+	// its source side takes the same enumerated-key ceremony a cell reveal
+	// does. Nil refuses a clone that would open secrets, loudly.
+	Auth *Auth
 }
 
 // Environment methods address scope as a domain.Scope — the same shape
@@ -706,7 +711,8 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		// The row exists now, so the destination half of the copy formula can
 		// be evaluated against the environment being created — which is what
 		// the ADR requires it to be evaluated against.
-		clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID)
+		clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID,
+			ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
 		return err
 	})
 	if err != nil {

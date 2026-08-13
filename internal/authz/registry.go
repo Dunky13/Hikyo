@@ -117,8 +117,15 @@ const (
 	OpValueRead   Operation = "value.read"
 	OpValueList   Operation = "value.list"
 	OpValueReveal Operation = "value.reveal"
-	OpValueSet    Operation = "value.set"
-	OpValueClear  Operation = "value.clear"
+	// The reveal guard's own read (#58). It answers "will disclosing here
+	// prompt me, and with which factor" — the window state, the protected
+	// flag, and whether TOTP may open a window at all. Its formula is `read`
+	// ALONE and deliberately not `reveal`: the browser has to render the
+	// ceremony modal's shape before it holds any disclosure, and the answer is
+	// project settings plus the caller's own session state, never material.
+	OpRevealWindowRead Operation = "reveal.window_read"
+	OpValueSet         Operation = "value.set"
+	OpValueClear       Operation = "value.clear"
 	// The copy pair. Both are reached by copy-to, bulk-apply AND
 	// clone-at-creation: one authorization story for every server-side
 	// duplication of stored material, which is exactly what the flat model's
@@ -984,6 +991,20 @@ var operations = map[Operation]opSpec{
 			// required secret absent?" before anything is written.
 			StoreCataloguePresenceList: true,
 		},
+		auditedNone: true,
+	},
+	// The reveal guard's state (#58). Reads nothing from the tenant store: the
+	// window, the protected flag and the effective window are resolved through
+	// the authorization package's own enumerated resolution surface, which is
+	// the same seam every window opener already uses. It mutates nothing and
+	// its formula is bare `read`, which is exactly the audited-none permit
+	// rule's shape — and recording "someone looked at whether they would be
+	// prompted" would bury the disclosures themselves in noise.
+	OpRevealWindowRead: {
+		class:       ClassTenant,
+		level:       domain.LevelEnv,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps:    map[StoreOp]bool{},
 		auditedNone: true,
 	},
 	// The disclosure operation. `read ∧ reveal` is the permission ADR's locked

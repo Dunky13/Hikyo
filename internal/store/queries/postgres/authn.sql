@@ -339,18 +339,45 @@ DELETE FROM external_identities WHERE id = $1;
 -- name: DeleteSessionsForProvider :execrows
 DELETE FROM sessions WHERE provider_id = $1;
 
--- A reauthentication window opened by a possession-factor ceremony. OIDC reauth
--- opens one only where the effective window is > 0; a WebAuthn ceremony can bind
--- the enumerated unit, so at a 0 effective window it opens a single_decision
--- window (B11) consumed by exactly one enumerated decision. Keyed by session,
--- cascading with it.
+-- A FRESH CEREMONY SUPERSEDES THE PAIR'S PREVIOUS WINDOW (#58).
+--
+-- The table holds AT MOST ONE window per (session, environment) and that
+-- invariant is unchanged; what changes is that a fresh ceremony REPLACES the
+-- pair's row instead of colliding with it. Without this the unique constraint
+-- quietly meant "one window EVER per session and environment", which breaks the
+-- reveal guard's own headline case: a protected environment is capped at 0, so
+-- its disclosures are "a passkey ceremony per disclosure" (ceremony, disclose,
+-- ceremony again) and the second ceremony hit the first window's spent row.
+--
+-- It is ONE atomic statement rather than a delete followed by an insert,
+-- because two tabs finishing ceremonies at the same time are a real shape: on
+-- postgres both deletes can miss the other transaction's not-yet-visible row
+-- and the second insert then hits the unique constraint, turning a legitimate
+-- supersede into an intermittent failure. `ON CONFLICT DO UPDATE` makes the
+-- loser update instead of fail.
+--
+-- consumed_at resets to NULL because the row now describes the NEW ceremony,
+-- which nothing has spent.
 -- hikyo:authn-resolution
 -- name: InsertReauthWindow :exec
 INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
      consumed_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11);
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11)
+ON CONFLICT (session_id, environment_id) DO UPDATE SET
+    id = excluded.id,
+    ceremony_id = excluded.ceremony_id,
+    factor_class = excluded.factor_class,
+    single_decision = excluded.single_decision,
+    authenticated_at = excluded.authenticated_at,
+    window_expires_at = excluded.window_expires_at,
+    hard_expires_at = excluded.hard_expires_at,
+    credential_epoch = excluded.credential_epoch,
+    consumed_at = NULL,
+    created_at = excluded.created_at;
+
+
 
 -- Start resolves the provider by slug for an enabled provider only: a login,
 -- link or reauth may only begin against a provider that is currently serving.

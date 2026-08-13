@@ -12,7 +12,7 @@
  * login page is reached by not being signed in, never by choosing it).
  */
 
-export type SurfaceId = 'login' | 'overview' | 'projects' | 'settings';
+export type SurfaceId = 'login' | 'overview' | 'projects' | 'settings' | 'values';
 
 export type Surface = {
   readonly id: SurfaceId;
@@ -26,6 +26,16 @@ export const SURFACES: readonly Surface[] = [
   { id: 'overview', path: '/', label: 'Overview', section: 'Organisation' },
   { id: 'projects', path: '/projects', label: 'Projects', section: 'Organisation' },
   { id: 'settings', path: '/settings', label: 'Settings', section: 'Account' },
+  // The reveal / copy / write-only-edit surface (#58). `section: null` because
+  // it is not a navigation destination: it addresses one environment of one
+  // project, so it is reached from the matrix and by deep link, never from a
+  // static sidebar entry that could not know which environment to mean.
+  {
+    id: 'values',
+    path: '/orgs/:org/projects/:project/environments/:environment/values',
+    label: 'Values',
+    section: null,
+  },
 ];
 
 export type Section = {

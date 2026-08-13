@@ -151,6 +151,20 @@ export type TotpCodeRequest = {
     code: string;
 };
 
+/**
+ * A disclosure reauthentication by TOTP. `environment_id` is what the
+ * window is opened OVER — the reveal guard is per environment, so a
+ * window on staging authorizes nothing in production.
+ *
+ */
+export type TotpReauthRequest = {
+    environment_id: Id;
+    /**
+     * A TOTP code from the enrolled authenticator.
+     */
+    code: string;
+};
+
 export type TotpProofRequest = {
     /**
      * The account-security proof for removing the factor.
@@ -1392,12 +1406,22 @@ export type WebauthnEnrolStartRequest = {
 };
 
 export type WebauthnReauthStartRequest = {
+    operation: ReauthPurpose;
     environment_id: string;
     /**
      * The credential ids the reauthentication is bound to.
      */
     key_ids: Array<string>;
 };
+
+/**
+ * The decision a disclosure ceremony authorizes. It is part of the SIGNED
+ * binding, not a label: without it an assertion given to `reveal` would be
+ * spendable on `publish` over the same environment and keys — the same
+ * unit, a different decision, and the human agreed to only one of them.
+ *
+ */
+export type ReauthPurpose = 'reveal' | 'copy' | 'publish' | 'mint';
 
 /**
  * The account-security proof for removing a credential — the pre-existing
@@ -1410,7 +1434,7 @@ export type WebauthnCredentialProofRequest = {
     code?: string;
 };
 
-export type WebauthnReauthResult = {
+export type ReauthResult = {
     session_id: Id;
     environment_id: string;
     /**
@@ -1418,6 +1442,59 @@ export type WebauthnReauthResult = {
      */
     single_decision: boolean;
     window_expires: Timestamp;
+};
+
+/**
+ * The reveal guard's state for one environment and the acting session.
+ * Nothing here is material: it is project settings plus the caller's own
+ * window.
+ *
+ */
+export type RevealWindow = {
+    /**
+     * The environment's resolved reauthentication window. `0` means
+     * every disclosure takes its own ceremony — the state a protected
+     * environment is capped at.
+     *
+     */
+    effective_window_seconds: number;
+    /**
+     * The protected-environment flag. Reported beside the window rather
+     * than folded into it, because "this environment is protected" and
+     * "the window is set to 0" are different sentences to a human even
+     * when they produce the same gate.
+     *
+     */
+    protected: boolean;
+    /**
+     * Whether a TOTP code may open a window here. False exactly where
+     * the effective window is `0`: TOTP cannot bind a challenge to the
+     * enumerated unit, so a passkey ceremony is the only path there.
+     *
+     */
+    totp_offered: boolean;
+    /**
+     * Whether a window is open for this session right now.
+     */
+    live: boolean;
+    /**
+     * True when the live window authorizes exactly the keys its ceremony
+     * enumerated and is spent by one decision — never presented as a
+     * standing window with a countdown.
+     *
+     */
+    single_decision: boolean;
+    /**
+     * Whether this principal satisfies `read(E) AND reveal(E)` here. It is
+     * an AFFORDANCE, never a decision — the chokepoint judges every
+     * disclosure regardless — and it is what makes the write-only editing
+     * path first-class: `edit` without `reveal` is a supported state, so
+     * the editor offers a blind-replacement field with honest microcopy
+     * rather than guessing from whether a cell happens to be on screen.
+     *
+     */
+    can_reveal: boolean;
+    expires_at?: Timestamp;
 };
 
 export type PasskeyList = {
@@ -1850,6 +1927,60 @@ export type StepUpTotpResponses = {
 };
 
 export type StepUpTotpResponse = StepUpTotpResponses[keyof StepUpTotpResponses];
+
+export type ReauthTotpData = {
+    body: TotpReauthRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/reauth/totp';
+};
+
+export type ReauthTotpErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReauthTotpError = ReauthTotpErrors[keyof ReauthTotpErrors];
+
+export type ReauthTotpResponses = {
+    /**
+     * The window this reauthentication opened.
+     */
+    200: ReauthResult;
+};
+
+export type ReauthTotpResponse = ReauthTotpResponses[keyof ReauthTotpResponses];
 
 export type RemoveTotpData = {
     body: TotpProofRequest;
@@ -6059,6 +6190,63 @@ export type DiffValuesResponses = {
 
 export type DiffValuesResponse = DiffValuesResponses[keyof DiffValuesResponses];
 
+export type GetRevealWindowData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window';
+};
+
+export type GetRevealWindowErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetRevealWindowError = GetRevealWindowErrors[keyof GetRevealWindowErrors];
+
+export type GetRevealWindowResponses = {
+    /**
+     * The guard's state.
+     */
+    200: RevealWindow;
+};
+
+export type GetRevealWindowResponse = GetRevealWindowResponses[keyof GetRevealWindowResponses];
+
 export type RevealValuesData = {
     body?: never;
     path: {
@@ -7130,7 +7318,7 @@ export type ReauthPasskeyFinishResponses = {
     /**
      * The window this reauthentication opened.
      */
-    200: WebauthnReauthResult;
+    200: ReauthResult;
 };
 
 export type ReauthPasskeyFinishResponse = ReauthPasskeyFinishResponses[keyof ReauthPasskeyFinishResponses];

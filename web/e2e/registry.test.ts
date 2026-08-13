@@ -104,20 +104,28 @@ describe('the execution half of closure', () => {
   it('is satisfied when every claim ran', () => {
     expect(
       unexecutedClaims(
-        log('login\tlogin\tdark', 'shell\toverview\tdark', 'shell\tprojects\tlight', 'shell\tsettings\tdark'),
+        log(
+          'login\tlogin\tdark',
+          'shell\toverview\tdark',
+          'shell\tprojects\tlight',
+          'shell\tsettings\tdark',
+          'reveal\tvalues\tdark',
+        ),
       ),
     ).toEqual([]);
   });
 
   it('fails a surface that was claimed but never asserted', () => {
-    const problems = unexecutedClaims(log('login\tlogin\tdark', 'shell\toverview\tdark'));
+    const problems = unexecutedClaims(
+      log('login\tlogin\tdark', 'shell\toverview\tdark', 'reveal\tvalues\tdark'),
+    );
     expect(problems).toHaveLength(2);
     expect(problems.join(' ')).toContain('claims surface "projects" but the pinned assertion set never ran');
     expect(problems.join(' ')).toContain('claims surface "settings" but the pinned assertion set never ran');
   });
 
   it('fails everything when nothing ran at all', () => {
-    expect(unexecutedClaims('')).toHaveLength(4);
+    expect(unexecutedClaims('')).toHaveLength(5);
   });
 
   it('does not accept another flow\'s execution as this one\'s', () => {

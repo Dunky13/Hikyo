@@ -466,3 +466,237 @@ select {
     display: none;
   }
 }
+
+/* --- Values, reveal ceremony (#58) ---------------------------------------
+ *
+ * Nothing here carries state by colour alone: the countdown is a number, the
+ * chip says what it means in words, and the masked cell has an accessible
+ * name. The palette adds emphasis on top of text that already says it.
+ */
+
+.notice {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  color: var(--tx);
+  background: var(--bg-raise);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.values__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-badge);
+  color: var(--tx);
+  background: var(--bg-raise);
+  font-size: 13px;
+}
+
+.chip--armed {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--bg-raise), var(--accent) 14%);
+}
+
+.values__bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.field--inline {
+  min-width: 220px;
+}
+
+.field select {
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--tx);
+}
+
+.values__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.values__table th,
+.values__table td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.values__table thead th {
+  color: var(--tx-dim);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.values__keyname {
+  min-height: var(--touch);
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--tx);
+  cursor: pointer;
+}
+
+.values__keyname:hover {
+  border-color: var(--line);
+}
+
+.values__masked {
+  color: var(--tx-dim);
+  letter-spacing: 2px;
+}
+
+.values__plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--tx);
+}
+
+.values__absent {
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.values__countdown {
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-badge);
+  padding: 1px 6px;
+  color: var(--tx);
+  font-size: 12px;
+}
+
+.values__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.values__editor {
+  padding-bottom: 12px;
+}
+
+.row-editor {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.row-editor__hint {
+  color: var(--tx-dim);
+  font-size: 13px;
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.values__audit h2 {
+  font-size: 14px;
+  color: var(--tx-dim);
+}
+
+.values__audit ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tx);
+}
+
+/* The ceremony modal (locked prototype #21, approach a).
+ *
+ * A native <dialog> in the top layer: the scrim is ::backdrop, so there is no
+ * positioning wrapper and no z-index to lose an argument with. */
+
+.ceremony {
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg-raise);
+  color: var(--tx);
+}
+
+.ceremony::backdrop {
+  background: color-mix(in srgb, black 55%, transparent);
+}
+
+.ceremony__title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.ceremony__lede,
+.ceremony__scope {
+  margin: 0;
+  color: var(--tx);
+}
+
+.ceremony__keys {
+  margin: 0;
+  padding: 8px 12px 8px 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  max-height: 30vh;
+  overflow: auto;
+}
+
+.ceremony__cap {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-container);
+  background: color-mix(in oklch, var(--bg), var(--accent) 8%);
+}
+
+.ceremony__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ceremony__totp {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}

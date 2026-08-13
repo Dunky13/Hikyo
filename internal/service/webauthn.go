@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -681,14 +682,14 @@ func (s *Auth) StepUpPasskeyFinish(ctx context.Context, presented string, respon
 }
 
 // ReauthPasskeyStart opens a reauth ceremony bound to the enumerated unit
-// (environment + sorted key ids), so the challenge authorizes exactly that unit
-// (the 0-window per-operation gate). The window's consumption at disclosure is
-// #7; this vertical opens it.
-func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented, environmentID string, keyIDs []string) ([]byte, error) {
+// (purpose + environment + sorted key ids), so the challenge authorizes exactly
+// that decision and no other with the same shape.
+func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, purpose ReauthPurpose,
+	environmentID string, keyIDs []string) ([]byte, error) {
 	if environmentID == "" {
 		return nil, ErrNoWebAuthnCeremony
 	}
-	binding, err := operationBinding(environmentID, keyIDs)
+	binding, err := operationBinding(purpose, environmentID, keyIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -764,6 +765,24 @@ func (s *Auth) beginAccountCeremony(ctx context.Context, presented, purpose, ope
 		id, err := az.Authenticate(ctx, presented, now)
 		if err != nil {
 			return err
+		}
+		// AUTHORIZE THE ENVIRONMENT BEFORE ANYTHING ELSE TOUCHES IT.
+		//
+		// A reauth ceremony names an environment, and `finish` derives the
+		// window's shape from that environment's policy — so without this the
+		// route is the same oracle the TOTP one was: an authenticated
+		// principal could tell an environment they cannot reach from one that
+		// is missing, and a protected one from an open one, by starting
+		// ceremonies and reading the refusals. Resolving the chain and
+		// requiring `read(E)` first collapses all of those into the
+		// chokepoint's own uniform nonexistent outcome.
+		//
+		// An empty environment id is the ACCOUNT ceremonies (enrol, step-up):
+		// they address no environment, so there is nothing to authorize.
+		if environmentID != "" {
+			if err := authorizeEnvironmentRead(ctx, az, id, environmentID); err != nil {
+				return err
+			}
 		}
 		account, err := az.AccountByPrincipal(ctx, id.Principal)
 		if err != nil {
@@ -1423,15 +1442,25 @@ func credPropsDiscoverable(props map[string]any) bool {
 }
 
 // operationBinding is the reauth enumerated-unit binding: canonical JSON of the
-// environment and the sorted key ids, so the ceremony commits to exactly the
-// unit the challenge authorizes.
-func operationBinding(environmentID string, keyIDs []string) (string, error) {
+// OPERATION, the environment and the sorted key ids, so the ceremony commits to
+// exactly the decision the challenge authorizes.
+//
+// The operation is in here because "purpose-bound" has to mean something the
+// SIGNATURE covers, not something the modal says. Without it, an assertion the
+// human gave to "reveal · production" would be spendable on "publish into ·
+// production" over the same keys — the same unit, a different decision, and
+// the human agreed to only one of them.
+func operationBinding(op ReauthPurpose, environmentID string, keyIDs []string) (string, error) {
+	if !op.Valid() {
+		return "", fmt.Errorf("%w: unknown reauthentication purpose %q", domain.ErrInvalid, op)
+	}
 	sorted := append([]string(nil), keyIDs...)
 	sort.Strings(sorted)
 	b, err := json.Marshal(struct {
+		Operation     string   `json:"operation"`
 		EnvironmentID string   `json:"environment_id"`
 		KeyIDs        []string `json:"key_ids"`
-	}{EnvironmentID: environmentID, KeyIDs: sorted})
+	}{Operation: string(op), EnvironmentID: environmentID, KeyIDs: sorted})
 	if err != nil {
 		return "", err
 	}
