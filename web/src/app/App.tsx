@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import { useSession } from '../api/session.ts';
 import { Login } from '../routes/Login.tsx';
+import { MachineAccess } from '../routes/MachineAccess.tsx';
 import { NotFound, Overview, Projects, Settings } from '../routes/Placeholder.tsx';
 import { Shell } from '../routes/Shell.tsx';
 import { Values } from '../routes/Values.tsx';
@@ -24,6 +25,7 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   projects: <Projects />,
   settings: <Settings />,
   values: <Values />,
+  'machine-access': <MachineAccess />,
 };
 
 const signedInSurfaces: readonly Surface[] = SURFACES.filter((s) => s.id !== 'login');

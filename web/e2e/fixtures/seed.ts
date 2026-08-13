@@ -69,6 +69,29 @@ export type Seeded = {
    * or be refused as a replay, which looks exactly like a wrong code.
    */
   lastTotpStep: number;
+  /**
+   * The machine-access fixture (#67).
+   *
+   * Three service accounts because the surface has three shapes to show: a
+   * workload that has been granted `read` (its journey is under way), a
+   * workload with no grants at all (whose mint therefore needs no disclosure
+   * ceremony, and whose credential count the mint flow may move), and an
+   * automation principal (which has no setup journey at all).
+   */
+  machine: {
+    /** The workload holding `read` on development, with a federated binding. */
+    workload: string;
+    /** The automation principal — no journey, different allowlist. */
+    automation: string;
+    /** The workload the mint flow mints on, so counts stay predictable. */
+    mintable: string;
+    /** The configured issuer, byte-exact. */
+    issuer: string;
+    /** The bound subject, byte-exact. */
+    subject: string;
+    /** The bound audience, which is never the issuer's default. */
+    audience: string;
+  };
 };
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -121,6 +144,7 @@ type Json = Record<string, unknown>;
 
 /** zCreated is every create response this fixture reads: it needs the id. */
 const zCreated = z.object({ id: z.string() });
+const zServiceAccount = z.object({ id: z.string(), principal_id: z.string() });
 const zEnrolStart = z.object({ otpauth_uri: z.string() });
 const zRotated = z.object({ session_token: z.string() });
 const zWhoAmI = z.object({ principal: z.object({ id: z.string() }) });
@@ -232,6 +256,24 @@ async function signIn(): Promise<string> {
 /** REVEAL_GRANT is the instance-scope `reveal` row the write-only flow toggles. */
 export const REVEAL_GRANT = { capability: 'reveal', scope: 'instance' } as const;
 
+/**
+ * MACHINE is the machine-access fixture's fixed vocabulary (#67).
+ *
+ * The issuer, subject and audience are byte-exact strings the flow asserts on
+ * screen: the whole federation rule is that nothing folds case, resolves a URL
+ * or strips a slash, so what is seeded and what is rendered must be one string.
+ */
+export const MACHINE = {
+  workload: 'web-api',
+  automation: 'nightly-export',
+  mintable: 'batch-worker',
+  issuer: 'https://kubernetes.default.svc.cluster.local',
+  subject: 'system:serviceaccount:hikyo-system:hikyo-fetch',
+  // Never the issuer's default: a token minted for the API server must not
+  // authenticate here, which is what the refused-audience list enforces.
+  audience: 'hikyo.example.org/main',
+} as const;
+
 /** grantReveal creates the revocable instance-scope `reveal` grant. */
 export async function grantReveal(token: string, principal: string): Promise<void> {
   await call(token, 'POST', '/api/v1/instance/grants', zIgnored, {
@@ -277,6 +319,10 @@ export async function seedTenant(
     'manage-projects',
     'definitions-edit',
     'project-settings',
+    // The machine-access surface's own authority (#67): listing service
+    // accounts, minting and binding are all `manage-identities`, which is a
+    // separate atom from administering members.
+    'manage-identities',
   ]) {
     runAdminGrant(['--principal', principal, '--capability', capability]);
   }
@@ -306,16 +352,19 @@ export async function seedTenant(
     name: 'Ceremonies',
   });
 
-  // `reveal` through the API, under the instance `manage-members` the operator
-  // template seeds — the ADR's own unheld-capability granting power, at the
-  // scope where the threat model actually extends that trust.
-  await grantReveal(token, principal);
-
-  // That grant killed the session with it. Nothing left to seed is
-  // MFA-mandatory — `manage-projects`, `definitions-edit`, `edit`, `publish`
-  // and `project-settings` are all ordinary capabilities — so a plain password
-  // session finishes the job with no further codes.
-  token = await signIn();
+  // The federation issuer is instance-scoped configuration, so it is
+  // `instance-config` and belongs in this same stepped-up session. Static JWKS
+  // rather than discovery: nothing in this fixture presents a token, and a
+  // discovery issuer would make setup depend on an unreachable network host.
+  await call(token, 'POST', '/api/v1/instance/federation-issuers', zCreated, {
+    issuer: MACHINE.issuer,
+    issuer_type: 'kubernetes',
+    jwks_mode: 'static',
+    static_jwks: '{"keys":[]}',
+    // The API server's own audience, which no binding may name and no token may
+    // carry — the rule the mandatory audience exists to enforce.
+    refused_audiences: ['https://kubernetes.default.svc'],
+  });
 
   const { id: project } = await call(token, 'POST', `/api/v1/orgs/${org}/projects`, zCreated, {
     name: 'payments',
@@ -334,6 +383,57 @@ export async function seedTenant(
     zCreated,
     { name: 'production' },
   );
+
+  // The machine-identity fixture, still on the stepped-up session: granting a
+  // capability to the service account is `manage-members`, which is
+  // MFA-mandatory, so it cannot wait for the plain session below.
+  const created = async (name: string, kind: 'workload' | 'automation') =>
+    call(
+      token,
+      'POST',
+      `/api/v1/orgs/${org}/projects/${project}/service-accounts`,
+      zServiceAccount,
+      { name, kind },
+    );
+  const workload = await created(MACHINE.workload, 'workload');
+  await created(MACHINE.automation, 'automation');
+  await created(MACHINE.mintable, 'workload');
+
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${project}/environments/${dev}/grants`,
+    zIgnored,
+    { principal: workload.principal_id, capability: 'read' },
+  );
+  // A binding whose service account reaches no plaintext: `read` delivers
+  // configuration and secret presence, so the mint formula's disclosure
+  // conjunct is vacuous and no reauthentication is required here.
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${project}/service-accounts/${workload.id}/bindings`,
+    zIgnored,
+    {
+      issuer: MACHINE.issuer,
+      subject: MACHINE.subject,
+      audience: MACHINE.audience,
+      required_claims: [
+        { claim: '/kubernetes.io/serviceaccount/uid', string_value: '9f2c-fixture-uid' },
+      ],
+    },
+  );
+
+  // `reveal` through the API, under the instance `manage-members` the operator
+  // template seeds — the ADR's own unheld-capability granting power, at the
+  // scope where the threat model actually extends that trust.
+  await grantReveal(token, principal);
+
+  // That grant killed the session with it. Nothing left to seed is
+  // MFA-mandatory — `manage-projects`, `definitions-edit`, `edit`, `publish`
+  // and `project-settings` are all ordinary capabilities — so a plain password
+  // session finishes the job with no further codes.
+  token = await signIn();
 
   const secrets = ['DB_PASSWORD', 'STRIPE_SECRET_KEY', 'ROTATE_ME'];
   const rotatable = 'ROTATE_ME';
@@ -413,5 +513,6 @@ export async function seedTenant(
     principal,
     otpauth: uri,
     lastTotpStep: lastStep,
+    machine: MACHINE,
   };
 }

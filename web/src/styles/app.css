@@ -700,3 +700,286 @@ select {
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
+
+/* --- Machine access (#67, locked prototype #31 iteration 3) ---------------
+ *
+ * Nothing here carries state by colour: an expiry is a sentence, a journey
+ * step names its own state in words, and the policy strip is a paragraph. The
+ * palette only emphasises what the text already says — which is also what
+ * keeps the surface readable under forced-colors.
+ */
+
+.card--wide {
+  max-width: none;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  min-height: var(--touch);
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+  background: none;
+  color: var(--tx-dim);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--tx);
+}
+
+.tab[aria-selected='true'] {
+  color: var(--tx);
+  font-weight: 500;
+  border-bottom-color: var(--accent);
+}
+
+.machine__policy,
+.machine__lede,
+.machine__footnote {
+  margin: 12px 0;
+}
+
+.machine__lede,
+.machine__footnote {
+  color: var(--tx-dim);
+  max-width: 80ch;
+}
+
+.machine__none {
+  color: var(--tx-dim);
+  margin: 4px 0 12px;
+  max-width: 70ch;
+}
+
+/* The binding form's in-flight latch: a bare <fieldset> used only for its
+   native disabled propagation, stripped of every default it draws. The
+   min-inline-size reset matters — fieldset's UA min-content default breaks
+   narrow dialogs. */
+.machine__lock {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.machine__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.machine__table th,
+.machine__table td {
+  vertical-align: top;
+}
+
+.machine__sub > td {
+  background: var(--bg);
+  padding: 12px 8px 16px;
+}
+
+.machine__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 32px;
+}
+
+.machine__subhead {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tx-dim);
+}
+
+.machine__creds,
+.machine__bindings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cred {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cred__meta {
+  color: var(--tx-dim);
+}
+
+.machine__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.machine__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--tx);
+  background: color-mix(in oklch, var(--bg-raise), var(--accent) 14%);
+}
+
+.bindrow {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+  padding: 12px;
+}
+
+.bindrow__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.kv {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.kv__pair {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.kv dt {
+  color: var(--tx-dim);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--tx);
+  overflow-wrap: anywhere;
+}
+
+/* The setup journey. The state is a WORD in its own column, so the rail reads
+   the same with every colour removed. */
+.journey {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 90ch;
+}
+
+.journey__step {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+
+.journey__step--done {
+  border-left-color: var(--accent);
+}
+
+.journey__step--unavailable {
+  border-left-style: dashed;
+}
+
+.journey__state {
+  color: var(--tx-dim);
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.journey__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.journey__note {
+  color: var(--tx-dim);
+}
+
+.machine__token {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--tx);
+  overflow-wrap: anywhere;
+}
+
+/* A checkbox is a control the pinned set sweeps like any other, so it carries
+   the touch floor on a phone rather than the browser's 13px default. */
+.chk {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.chk input[type='checkbox'] {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.chk label {
+  color: var(--tx);
+}
+
+.ceremony__stepup {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--changed);
+  border-radius: var(--radius-container);
+  background: color-mix(in oklch, var(--bg), var(--changed) 10%);
+  color: var(--tx);
+}
+
+@media (max-width: 800px) {
+  /* The two columns the expansion repeats in detail drop off the summary row
+     on a phone; the expansion still carries them. */
+  .col-secondary {
+    display: none;
+  }
+
+  .machine__grid,
+  .journey__step,
+  .kv__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chk input[type='checkbox'] {
+    width: var(--touch);
+    height: var(--touch);
+  }
+}

@@ -160,8 +160,12 @@ export type PasskeyCeremonyInput = {
    * The decision this ceremony authorizes. It goes into the SIGNED binding, so
    * an assertion given to `reveal` cannot be spent on `publish` over the same
    * environment and keys — the same unit, a different decision.
+   *
+   * `mint` is the machine-identity row (#61/#67): the credential mint and the
+   * grant-widening gate both consume a window opened under this purpose, over
+   * each environment the service account reaches in the resulting post-state.
    */
-  operation: 'reveal' | 'copy' | 'publish';
+  operation: 'reveal' | 'copy' | 'publish' | 'mint';
   environmentId: string;
   /** The enumerated unit: exactly the keys this one decision covers. */
   keyIds: readonly string[];

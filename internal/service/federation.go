@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -939,10 +940,18 @@ func (s *Federation) recordKeyState(ctx context.Context, issuer string, state oi
 // checkIssuerRequest validates the whole configuration before any row is
 // written.
 func checkIssuerRequest(req IssuerRequest) error {
-	if req.Issuer == "" || !strings.HasPrefix(req.Issuer, "https://") {
-		// https only, and not as ceremony: discovery and JWKS are fetched from
-		// this URL, and an http issuer means the instance's whole federation
-		// trust rests on whoever holds the network path.
+	// The OIDC issuer grammar exactly: an https URL with a host and nothing
+	// that is not part of an identity namespace. https only, and not as
+	// ceremony — discovery and JWKS are fetched from this URL, and an http
+	// issuer means the instance's whole federation trust rests on whoever
+	// holds the network path. Userinfo is the load-bearing refusal: an issuer
+	// stored as `https://user:secret@host` would be disclosed byte-exact on
+	// every credential listing, turning an instance-config mistake into
+	// plaintext exposure on a project surface (#67 review). Query and fragment
+	// are refused with it — no issuer identifier carries either, and byte-exact
+	// matching means a junk component would live forever.
+	if u, err := url.Parse(req.Issuer); err != nil || u.Scheme != "https" ||
+		u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return ErrIssuerValue
 	}
 	if !domain.IsIssuerType(req.Type) {
