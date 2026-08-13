@@ -11,11 +11,38 @@ fallback_email=$2
 CURL_BIN=${CURL_BIN:-curl}
 JQ_BIN=${JQ_BIN:-jq}
 NODE_BIN=${NODE_BIN:-node}
+docs_cache_bust=${DOCS_CACHE_BUST:-}
+docs_attempts=${DOCS_ATTEMPTS:-1}
+docs_retry_delay_seconds=${DOCS_RETRY_DELAY_SECONDS:-10}
+
+case "$docs_attempts" in
+	'' | *[!0-9]*)
+		printf 'live docs gate: DOCS_ATTEMPTS must be a positive integer\n' >&2
+		exit 2
+		;;
+esac
+[ "$docs_attempts" -ge 1 ] || {
+	printf 'live docs gate: DOCS_ATTEMPTS must be a positive integer\n' >&2
+	exit 2
+}
+case "$docs_retry_delay_seconds" in
+	'' | *[!0-9]*)
+		printf 'live docs gate: DOCS_RETRY_DELAY_SECONDS must be a non-negative integer\n' >&2
+		exit 2
+		;;
+esac
 
 case "$docs_origin" in
 	https://*) ;;
 	*)
 		printf 'live docs gate: DOCS_ORIGIN must use HTTPS\n' >&2
+		exit 2
+		;;
+esac
+
+case "$docs_cache_bust" in
+	*[!A-Za-z0-9._-]*)
+		printf 'live docs gate: DOCS_CACHE_BUST contains unsafe URL characters\n' >&2
 		exit 2
 		;;
 esac
@@ -36,6 +63,27 @@ case "$fallback_domain" in
 		;;
 esac
 
+if [ "$docs_attempts" -gt 1 ]; then
+	attempt=1
+	cache_bust_prefix=${docs_cache_bust:-deployment}
+	while [ "$attempt" -le "$docs_attempts" ]; do
+		if DOCS_ATTEMPTS=1 \
+			DOCS_CACHE_BUST="$cache_bust_prefix-$attempt" \
+			"$0" "$@"; then
+			exit 0
+		fi
+		if [ "$attempt" -eq "$docs_attempts" ]; then
+			printf 'live docs gate: deployment remained unavailable after %s attempts\n' \
+				"$docs_attempts" >&2
+			exit 1
+		fi
+		printf 'live docs gate: attempt %s/%s failed; retrying in %ss\n' \
+			"$attempt" "$docs_attempts" "$docs_retry_delay_seconds" >&2
+		sleep "$docs_retry_delay_seconds"
+		attempt=$((attempt + 1))
+	done
+fi
+
 fetch() {
 	"$CURL_BIN" --fail --location --silent --show-error \
 		--proto '=https' --tlsv1.2 --max-time 20 "$1"
@@ -49,6 +97,88 @@ require_response_text() {
 		exit 1
 	}
 }
+
+reject_response_text() {
+	response=$1
+	forbidden=$2
+	if printf '%s\n' "$response" | grep -F -- "$forbidden" >/dev/null; then
+		printf 'live docs gate: served response contains stale text: %s\n' \
+			"$forbidden" >&2
+		exit 1
+	fi
+}
+
+extract_asset_path() {
+	response=$1
+	kind=$2
+	case "$kind" in
+		stylesheet)
+			path=$(printf '%s\n' "$response" | \
+				grep -o 'href="/_astro/[^"]*\.css"' | head -n 1 | \
+				sed 's/^href="//; s/"$//')
+			;;
+		module)
+			path=$(printf '%s\n' "$response" | \
+				grep -E -o '(src|component-url|renderer-url)="/_astro/[^"]*\.js"' | \
+				head -n 1 | sed 's/^[^=]*="//; s/"$//')
+			;;
+		*)
+			printf 'live docs gate: unsupported asset kind: %s\n' "$kind" >&2
+			exit 2
+			;;
+	esac
+	[ -n "$path" ] || {
+		printf 'live docs gate: served page has no root-hosted %s asset\n' "$kind" >&2
+		exit 1
+	}
+	printf '%s\n' "$path"
+}
+
+require_asset() {
+	asset_path=$1
+	kind=$2
+	case "$asset_path" in
+		/_astro/*) ;;
+		*)
+			printf 'live docs gate: asset is not same-origin: %s\n' "$asset_path" >&2
+			exit 1
+			;;
+	esac
+	content_type=$("$CURL_BIN" --fail --location --silent --show-error \
+		--proto '=https' --tlsv1.2 --max-time 20 --output /dev/null \
+		--write-out '%{content_type}' "$docs_origin$asset_path")
+	case "$kind:$content_type" in
+		stylesheet:text/css* | module:application/javascript* | module:text/javascript*) ;;
+		*)
+			printf 'live docs gate: %s returned unexpected content type: %s\n' \
+				"$asset_path" "$content_type" >&2
+			exit 1
+			;;
+	esac
+}
+
+landing_url="$docs_origin/"
+docs_url="$docs_origin/docs/"
+if [ -n "$docs_cache_bust" ]; then
+	landing_url="${landing_url}?deployment=$docs_cache_bust"
+	docs_url="${docs_url}?deployment=$docs_cache_bust"
+fi
+
+landing_page=$(fetch "$landing_url")
+require_response_text "$landing_page" '<title>Hikyo'
+reject_response_text "$landing_page" '="/hikyo/'
+landing_stylesheet=$(extract_asset_path "$landing_page" stylesheet)
+landing_module=$(extract_asset_path "$landing_page" module)
+require_asset "$landing_stylesheet" stylesheet
+require_asset "$landing_module" module
+
+docs_page=$(fetch "$docs_url")
+require_response_text "$docs_page" '<title>Hikyo documentation'
+reject_response_text "$docs_page" '="/hikyo/'
+docs_stylesheet=$(extract_asset_path "$docs_page" stylesheet)
+docs_module=$(extract_asset_path "$docs_page" module)
+require_asset "$docs_stylesheet" stylesheet
+require_asset "$docs_module" module
 
 security_txt=$(fetch "$docs_origin/.well-known/security.txt")
 require_response_text "$security_txt" 'Contact: https://github.com/Dunky13/hikyo/security/advisories/new'
@@ -97,4 +227,4 @@ printf '%s\n' "$mx_response" | "$JQ_BIN" -e \
 	exit 1
 }
 
-printf 'live docs gate: security.txt, all policy pages, and fallback MX route passed\n'
+printf 'live docs gate: root assets, docs assets, policy pages, security.txt, and fallback MX passed\n'

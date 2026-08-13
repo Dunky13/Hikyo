@@ -8,10 +8,56 @@ trap 'rm -rf "$fixture_dir"' EXIT HUP INT TERM
 
 cat >"$fixture_dir/curl" <<'EOF'
 #!/bin/sh
+write_content_type=0
 for argument do
+	if [ "$argument" = '%{content_type}' ]; then
+		write_content_type=1
+	fi
 	url=$argument
 done
 case "$url" in
+	https://hikyo.app/ | https://hikyo.app/\?*)
+		stale_base=${FAKE_STALE_BASE:-0}
+		if [ "${FAKE_STALE_ONCE:-0}" -eq 1 ] && \
+			[ ! -f "${FAKE_STALE_MARKER:?}" ]; then
+			: >"$FAKE_STALE_MARKER"
+			stale_base=1
+		fi
+		if [ "$stale_base" -eq 1 ]; then
+			base=/hikyo
+		else
+			base=
+		fi
+		printf '<title>Hikyo</title><link rel="stylesheet" href="%s/_astro/landing.css"><script type="module" src="%s/_astro/landing.js"></script>\n' \
+			"$base" "$base"
+		;;
+	*/docs/ | */docs/\?*)
+		if [ "${FAKE_STALE_BASE:-0}" -eq 1 ]; then
+			base=/hikyo
+		else
+			base=
+		fi
+		printf '<title>Hikyo documentation</title><link rel="stylesheet" href="%s/_astro/docs.css"><astro-island component-url="%s/_astro/docs.js" renderer-url="%s/_astro/client.js"></astro-island>\n' \
+			"$base" "$base" "$base"
+		;;
+	*/_astro/*.css)
+		if [ "$write_content_type" -eq 1 ]; then
+			if [ "${FAKE_BAD_ASSET_TYPE:-0}" -eq 1 ]; then
+				printf '%s' 'text/html; charset=utf-8'
+			else
+				printf '%s' 'text/css; charset=utf-8'
+			fi
+		else
+			printf '%s\n' 'fixture stylesheet'
+		fi
+		;;
+	*/_astro/*.js)
+		if [ "$write_content_type" -eq 1 ]; then
+			printf '%s' 'application/javascript; charset=utf-8'
+		else
+			printf '%s\n' 'fixture module'
+		fi
+		;;
 	*/.well-known/security.txt)
 		if [ "${FAKE_EXPIRED:-0}" -eq 1 ]; then
 			expires=2000-08-09T00:00:00Z
@@ -22,7 +68,7 @@ case "$url" in
 			'Contact: https://github.com/Dunky13/hikyo/security/advisories/new' \
 			'Contact: mailto:security@developwent.io' \
 			"Expires: $expires" \
-			'Canonical: https://dunky13.github.io/hikyo/.well-known/security.txt'
+			'Canonical: https://hikyo.app/.well-known/security.txt'
 		;;
 	*/security/)
 		printf '%s\n' 'The default embargo is 90 days from the report itself.'
@@ -65,25 +111,54 @@ chmod +x "$fixture_dir/curl"
 
 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/hikyo security@developwent.io
+	https://hikyo.app security@developwent.io
 
 if FAKE_NO_MX=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: fallback domain without MX was accepted\n' >&2
 	exit 1
 fi
 
 if FAKE_EXPIRED=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: elapsed security.txt expiry was accepted\n' >&2
 	exit 1
 fi
 
 if FAKE_STALE_GOVERNANCE=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
-	https://dunky13.github.io/hikyo security@developwent.io >/dev/null 2>&1; then
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: stale served governance was accepted\n' >&2
+	exit 1
+fi
+
+if FAKE_STALE_BASE=1 CURL_BIN="$fixture_dir/curl" \
+	"$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: stale /hikyo/ assets were accepted\n' >&2
+	exit 1
+fi
+
+if FAKE_BAD_ASSET_TYPE=1 CURL_BIN="$fixture_dir/curl" \
+	"$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: HTML stylesheet response was accepted\n' >&2
+	exit 1
+fi
+
+if ! FAKE_STALE_ONCE=1 FAKE_STALE_MARKER="$fixture_dir/stale-once" \
+	DOCS_ATTEMPTS=2 DOCS_RETRY_DELAY_SECONDS=0 CURL_BIN="$fixture_dir/curl" \
+	"$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: transient stale deployment was not retried\n' >&2
+	exit 1
+fi
+
+if FAKE_STALE_BASE=1 DOCS_ATTEMPTS=2 DOCS_RETRY_DELAY_SECONDS=0 \
+	CURL_BIN="$fixture_dir/curl" "$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: persistent stale deployment was accepted\n' >&2
 	exit 1
 fi
