@@ -123,12 +123,32 @@ func ceremonyFixture(t *testing.T, db *store.DB, username string) (
 			`description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, `+
 			`group_id, created_at) VALUES ('key_`+name+`', 'org_a', 'prj_a1', '`+name+`', '', 'secret', `+
 			`'', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, `+ts+`)`)
-		if _, err := values.Set(ctx, service.LocalPrincipal(custodian),
-			scopeEnv(orgA, prjA1, envA1), name, "plaintext-"+name); err != nil {
-			t.Fatalf("seed %s: %v", name, err)
-		}
+		publishValue(t, values, service.LocalPrincipal(custodian),
+			scopeEnv(orgA, prjA1, envA1), name, "plaintext-"+name)
 	}
 	return auth, token, values, dev
+}
+
+// publishValue stages a value and then publishes it, which is what "seed a
+// value that can be read" means since #51: `Set` only writes a pending change
+// owned by its caller, and nothing delivers — nor reveals, copies or exports —
+// until a publish materializes the environment's next revision.
+//
+// The Revisions service is built from the Values service's OWN datastore and
+// keyring rather than from the package keyring cache, because a drill fixture
+// mints its keyring under a root of its own and a second root is refused.
+func publishValue(t *testing.T, values *service.Values, actor service.Actor,
+	scope domain.Scope, keyName, value string) {
+	t.Helper()
+	ctx := t.Context()
+	staged, err := values.Set(ctx, actor, scope, keyName, value)
+	if err != nil {
+		t.Fatalf("stage %s: %v", keyName, err)
+	}
+	revisions := &service.Revisions{DB: values.DB, Keyring: values.Keyring}
+	if _, err := revisions.Publish(ctx, actor, scope, []string{staged.VersionID}); err != nil {
+		t.Fatalf("publish %s: %v", keyName, err)
+	}
 }
 
 // passkeyCeremony runs a full purpose-bound reauth over an enumerated unit and
@@ -650,10 +670,8 @@ func runProtectedDestinationRefusesAConfirmationFlag(t *testing.T, db *store.DB)
 		`description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, `+
 		`group_id, created_at) VALUES ('key_CEREMONY_CONFIG', 'org_a', 'prj_a1', 'CEREMONY_CONFIG', '', `+
 		`'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, `+ts+`)`)
-	if _, err := values.Set(ctx, service.LocalPrincipal(custodian),
-		scopeEnv(orgA, prjA1, envA1), "CEREMONY_CONFIG", "debug"); err != nil {
-		t.Fatalf("seed config value: %v", err)
-	}
+	publishValue(t, values, service.LocalPrincipal(custodian),
+		scopeEnv(orgA, prjA1, envA1), "CEREMONY_CONFIG", "debug")
 	settings := &service.ProjectSettings{DB: db, Auth: auth}
 	if _, err := settings.SetEnvironment(ctx, service.Bearer(token), prodScope,
 		service.EnvironmentSettings{Protected: true}); err != nil {

@@ -195,6 +195,11 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// value_entries references BOTH keys and environments (#50), so it
 		// drops before either.
 		"value_entries",
+		// Revisions and drafts (#51). snapshot_entries references snapshots,
+		// so it goes first of that pair; pending_changes references keys,
+		// environments and principals; revision_key_changes references
+		// environments. All four drop before the hierarchy they hang from.
+		"snapshot_entries", "snapshots", "revision_key_changes", "pending_changes",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
 		// OIDC federation (#62, migration 00018): machine_credentials gained a
 		// foreign key to federation_issuers, so the issuers drop AFTER it;
@@ -349,7 +354,7 @@ func scenarioNotFound(t *testing.T, db *store.DB) {
 func scenarioTenantChain(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	projects := &service.Projects{DB: db}
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 
 	org, err := orgs.Create(t.Context(), service.LocalPrincipal(admin), "tenant-chain", true, json.RawMessage(`{}`))
 	if err != nil {
@@ -366,6 +371,11 @@ func scenarioTenantChain(t *testing.T, db *store.DB) {
 		 VALUES ('grt_ct_read', 'usr_conformance_tenant', 'read', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 		 VALUES ('grt_ct_edit', 'usr_conformance_tenant', 'edit', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
+		// `publish` joined with #51: creating an environment MATERIALIZES its
+		// revision 1 before it becomes fetchable, and a materialization is a
+		// publish authorized on the environment it creates.
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+		 VALUES ('grt_ct_pub', 'usr_conformance_tenant', 'publish', '` + org.ID + `', NULL, NULL, '2026-01-01T00:00:00Z')`,
 	})
 
 	proj, err := projects.Create(t.Context(), service.LocalPrincipal(tenant), domain.OrgID(org.ID), "conformance-project")
@@ -455,7 +465,10 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 	stmts := []string{
 		`INSERT INTO principals (id, kind, created_at) VALUES ('` + string(principal) + `', 'human', '2026-01-01T00:00:00Z')`,
 	}
-	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "edit"} {
+	// `publish` joined with #51: an environment is validated and materialized
+	// at creation, and every semantic schema change materializes every
+	// environment in the project.
+	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "edit", "publish"} {
 		stmts = append(stmts, fmt.Sprintf(
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 			 VALUES ('grt_%s_%d', '%s', '%s', '%s', NULL, NULL, '2026-01-01T00:00:00Z')`,
@@ -475,7 +488,7 @@ func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID
 func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 	orgs := &service.Orgs{DB: db}
 	projects := &service.Projects{DB: db}
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	folders := &service.Folders{DB: db}
 	who, scope := tenantFixture(t, db, "hierarchy")
 	actor := service.LocalPrincipal(who)
@@ -655,7 +668,7 @@ func scenarioHierarchyCRUD(t *testing.T, db *store.DB) {
 // refusal on both engines, and that it names the bound rather than failing
 // somewhere downstream.
 func scenarioEnvironmentCap(t *testing.T, db *store.DB) {
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "envcap")
 	actor := service.LocalPrincipal(who)
 	for i := range service.MaxEnvironmentsPerProject {
@@ -681,7 +694,7 @@ func scenarioEnvironmentCap(t *testing.T, db *store.DB) {
 // is a conflict rather than a driver error escaping as a fault.
 func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 	projects := &service.Projects{DB: db}
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	folders := &service.Folders{DB: db}
 	who, scope := tenantFixture(t, db, "nocascade")
 	actor := service.LocalPrincipal(who)
@@ -721,7 +734,7 @@ func scenarioDeleteRefusesChildren(t *testing.T, db *store.DB) {
 // count would hand the new row position 2 — which the last row already holds —
 // and the list order would silently depend on the name tiebreak.
 func scenarioOrderAfterDeletion(t *testing.T, db *store.DB) {
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: sharedKeyring(t, db)}
 	who, scope := tenantFixture(t, db, "ordergap")
 	actor := service.LocalPrincipal(who)
 

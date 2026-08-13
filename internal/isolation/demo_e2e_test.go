@@ -68,13 +68,27 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	// server-side conflict, and both are exit 4 on this surface.
 	var wireMu sync.Mutex
 	var requests []string
+	var lastBearer string
 	recorded := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			wireMu.Lock()
 			requests = append(requests, r.Method+" "+r.URL.Path)
+			// The SECOND CLIENT's credential. The advisory stream authenticates
+			// on the same session artifact the browser surface uses, and the
+			// CLI is the only thing in this harness that holds one — so the
+			// stream borrows the artifact the CLI just presented rather than
+			// forging one below the network.
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				lastBearer = strings.TrimPrefix(auth, "Bearer ")
+			}
 			wireMu.Unlock()
 			next.ServeHTTP(w, r)
 		})
+	}
+	bearer := func() string {
+		wireMu.Lock()
+		defer wireMu.Unlock()
+		return lastBearer
 	}
 	takeRequests := func() []string {
 		wireMu.Lock()
@@ -85,12 +99,20 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	}
 
 	scimDemoSvc := &service.SCIM{DB: db, Auth: auth}
+	// One Advisory across the value and revision surfaces: staging and
+	// publishing announce on the same channel, and two channels would mean a
+	// subscriber saw half the events.
+	advisory := service.NewAdvisory()
+	kr := probeKeyring(t, db)
 	httpSrv := httptest.NewServer(recorded(server.New(&service.System{DB: db}, &server.API{
 		Auth: auth, Orgs: orgs,
 		Projects:     &service.Projects{DB: db},
-		Environments: &service.Environments{DB: db},
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: auth, Advisory: advisory},
 		Folders:      &service.Folders{DB: db},
 		Grants:       &service.Grants{DB: db},
+		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory},
+		Values:       &service.Values{DB: db, Keyring: kr, Auth: auth, Advisory: advisory},
+		Revisions:    &service.Revisions{DB: db, Keyring: kr, Auth: auth, Advisory: advisory},
 		// One Auth, so the window the settings knob writes and the window the
 		// reveal guard reads cannot come from two configurations.
 		Settings: &service.ProjectSettings{DB: db, Auth: auth},
@@ -300,12 +322,15 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 		}
 		advanceClock(30 * time.Second)
 		prompts["authenticator:"] = totpCode(t, otpauthURI, clockNow())
-		if code := cli.Run(t.Context(), ios(), []string{"account", "factor", "step-up"}); code != cli.ExitOK {
-			t.Fatalf("re-step-up exited %d", code)
+		stepIO := ios()
+		stepErr := &strings.Builder{}
+		stepIO.Stderr = stepErr
+		if code := cli.Run(t.Context(), stepIO, []string{"account", "factor", "step-up"}); code != cli.ExitOK {
+			t.Fatalf("re-step-up exited %d: %s", code, stepErr.String())
 		}
 	}
 
-	runHierarchyDemo(t, db, ios, takeRequests, relogin)
+	demoOrg := runHierarchyDemo(t, db, ios, takeRequests, relogin)
 
 	// The permission-model demo (#55), through the same real CLI: grant a
 	// template role, list the independent grants it expanded into, revoke one,
@@ -330,6 +355,9 @@ func runDemoFlow(t *testing.T, db *store.DB) {
 	advanceClock(30 * time.Second)
 	prompts["Account-security proof"] = totpCode(t, otpauthURI, clockNow())
 	runSCIMDemo(t, db, ios, httpSrv.URL)
+	// The revision demo (#51): edit -> selective publish -> fetch the resolved
+	// snapshot, with a second client watching the advisory stream.
+	runRevisionDemo(t, ios, demoOrg, httpSrv.URL, bearer)
 
 	// Logging out revokes the artifact; the next call is refused with the
 	// authentication exit code, not a stale success.
@@ -426,7 +454,11 @@ func TestLoginDoesNotHoldTheWriteLockWhileDeriving(t *testing.T) {
 // against the real server: create org → project → envs → folders, list and
 // rename them. It asserts on the CLI's own `-o json` output, because that is
 // the surface the criterion names and the one scripts consume.
-func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string, relogin func()) {
+// It returns the org it built, so a later demo can ride the administrator's
+// existing admin-template grants there instead of minting a second org and
+// spending another login on the self-grant that kills its own session — the
+// pre-auth admission limiter is instance-wide and counts those.
+func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequests func() []string, relogin func()) string {
 	t.Helper()
 
 	run := func(args ...string) string {
@@ -669,6 +701,7 @@ func runHierarchyDemo(t *testing.T, db *store.DB, ios func() cli.IO, takeRequest
 	if afterDelete.Count != 0 {
 		t.Fatalf("the project survived its own delete: %+v", afterDelete)
 	}
+	return org.Id
 }
 
 // delIO is a throwaway IO whose stdout is discarded — the delete verbs report on

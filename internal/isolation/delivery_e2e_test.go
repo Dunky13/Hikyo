@@ -9,6 +9,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/delivery"
 	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/schema"
 	"github.com/Dunky13/hikyo/internal/service"
 	"github.com/Dunky13/hikyo/internal/store"
 	"github.com/Dunky13/hikyo/internal/store/tx"
@@ -48,26 +49,30 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	if first.Current {
 		t.Fatal("a cursor-less fetch answered `current`")
 	}
-	// The count is read from the catalogue rather than hard-coded: the shared
-	// fixture database declares keys of its own, and a literal here would break
-	// the day another ticket adds one — which is a test asserting the fixture
-	// rather than the surface.
+	// THE DELIVERED KEY SET IS WHAT THE SNAPSHOT DELIVERS, not what the project
+	// declares — "a delivered payload's key set is exactly the declared keys
+	// that RESOLVE in that environment, under the schema revision that snapshot
+	// pinned" (schema ADR § Closed schema). A declared key with no value
+	// resolves to nothing and is therefore not delivered at all, which is why
+	// this counts the snapshot's entries rather than the catalogue's rows.
 	if want := queryInt(t, db,
-		"SELECT COUNT(*) FROM keys WHERE org_id = 'org_a' AND project_id = 'prj_a1'"); int64(len(first.Keys)) != want {
-		t.Fatalf("delivered %d keys, want the project's %d", len(first.Keys), want)
+		`SELECT COUNT(*) FROM snapshot_entries WHERE environment_id = 'env_a1'
+		 AND snapshot_id = (SELECT id FROM snapshots WHERE environment_id = 'env_a1'
+		                    ORDER BY revision DESC LIMIT 1)`); int64(len(first.Keys)) != want {
+		t.Fatalf("delivered %d keys, want the snapshot's %d", len(first.Keys), want)
 	}
 	presence := map[string]delivery.Presence{}
 	for _, k := range first.Keys {
 		presence[k.Name] = k.Presence
 	}
-	// `mode: all` covers every environment; an `explicit` set covers only the
-	// environments it names. Both are the ADR's presence semantics, and the
-	// manifest carries them per environment.
-	if presence["DATABASE_URL"] != delivery.PresenceRequired {
-		t.Errorf("DATABASE_URL presence = %q, want required (mode: all)", presence["DATABASE_URL"])
-	}
-	if presence["DATABASE_PASSWORD"] != delivery.PresenceRequired {
-		t.Errorf("DATABASE_PASSWORD presence = %q, want required in env_a1", presence["DATABASE_PASSWORD"])
+	// Every delivered key is `set`: it is in the snapshot because it resolved.
+	// The declared presence RULE is no longer what the fetch reports, and it is
+	// no longer in the manifest either — the change token covers delivered
+	// content only, so tightening `required_in` must not fire a rollout wave.
+	for _, name := range []string{"DATABASE_URL", "DATABASE_PASSWORD"} {
+		if presence[name] != delivery.PresenceSet {
+			t.Errorf("%s presence = %q, want set (the snapshot delivers it)", name, presence[name])
+		}
 	}
 	if first.Cursor == "" || first.ChangeToken == "" {
 		t.Fatal("a full delivery returned no cursor or no change token")
@@ -407,34 +412,72 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A VALUE CHANGE moves the token. This is the leg the pre-#51 surface could
+	// not express — there were no values — and it is the whole reason the token
+	// exists: a rotated credential that did not move the token would never fire
+	// the consumer's rollout.
+	publishDeliveryValues(t, db, envA1, map[string]string{"DATABASE_URL": "postgres://dev-rotated"})
+	afterValue, err := del.FetchAs(t.Context(), caller, env, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterValue.ChangeToken == before.ChangeToken {
+		t.Fatal("changing a value left the change token unchanged: the manifest does not cover values")
+	}
+
 	// RECLASSIFICATION moves the token even though no value changed. That is the
 	// schema ADR's amendment to the revision ADR, and the reason is concrete: an
 	// adapter routing `secret` to a Secret and `config` to a ConfigMap would
 	// otherwise see an unchanged token across a reclassification and never fire
 	// the rollout that relocates the value.
-	execRaw(t, db, `UPDATE keys SET classification = 'secret' WHERE id = 'key_fed_url'`)
+	//
+	// It runs through the real ceremony rather than a raw UPDATE, because under
+	// #51 the snapshot is immutable: what a revision delivered is fixed at the
+	// classification it was materialized under, and only a semantic schema
+	// change — which materializes every environment — can move it.
+	if _, err := keySvc(t, db).Reclassify(t.Context(), caller, scopeProject(orgA, prjA1),
+		"key_fed_url", "secret"); err != nil {
+		t.Fatalf("reclassify: %v", err)
+	}
 	afterClass, err := del.FetchAs(t.Context(), caller, env, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterClass.ChangeToken == before.ChangeToken {
+	if afterClass.ChangeToken == afterValue.ChangeToken {
 		t.Fatal("reclassifying a key left the change token unchanged: the manifest does not cover classification")
 	}
 
-	// A PRESENCE RULE change for THIS environment moves it too. The `required`
-	// side is dropped first, because a key both required and forbidden in one
-	// environment is a rule that can never be satisfied — the catalogue refuses
-	// it at declaration and the delivery path refuses it loudly if it ever finds
-	// one, so the fixture must not manufacture the impossible state.
-	execRaw(t, db, `UPDATE keys SET required_mode = 'none', forbidden_mode = 'explicit' WHERE id = 'key_fed_url'`)
-	execRaw(t, db, `INSERT INTO key_presence_environments (org_id, project_id, key_id, environment_id, rule)
-	                VALUES ('org_a', 'prj_a1', 'key_fed_url', 'env_a1', 'forbidden')`)
+	// A PRESENCE RULE change does NOT move the token, and that inversion is the
+	// point. The token covers DELIVERED CONTENT ONLY (revision ADR § Revision
+	// identity): `required_in` governs what a future publish may commit, not
+	// what this snapshot delivers, so tightening it must not fire a rollout wave
+	// across every consumer. The environment still advances to a NEW REVISION —
+	// the validation guarantee moved, and that is recorded — which is exactly
+	// the ADR's "an unchanged manifest yields an unchanged token and no workload
+	// rollout, without disturbing anything".
+	revisionBefore := latestRevision(t, db, "env_a1")
+	if _, err := keySvc(t, db).UpdateDeclaration(t.Context(), caller, scopeProject(orgA, prjA1),
+		"key_fed_pw", service.KeyDeclarationUpdate{
+			Declaration: schema.Declaration{Rule: &schema.Rule{Type: schema.TypeString}},
+			// A REAL presence change: forbidden where the key has no value, so
+			// the rule is satisfiable and the only thing it moves is the
+			// pinned schema revision.
+			Presence: schema.PresenceRules{
+				Required:  schema.Presence{Mode: schema.PresenceNone},
+				Forbidden: schema.Presence{Mode: schema.PresenceExplicit, Environments: []string{string(envProd)}},
+			},
+		}); err != nil {
+		t.Fatalf("presence-rule change: %v", err)
+	}
 	afterPresence, err := del.FetchAs(t.Context(), caller, env, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if afterPresence.ChangeToken == afterClass.ChangeToken {
-		t.Fatal("changing a presence rule left the change token unchanged")
+	if afterPresence.ChangeToken != afterClass.ChangeToken {
+		t.Fatal("a presence-rule change moved the change token: the manifest must cover delivered content only")
+	}
+	if after := latestRevision(t, db, "env_a1"); after <= revisionBefore {
+		t.Fatalf("a semantic schema change did not advance the revision: %d -> %d", revisionBefore, after)
 	}
 
 	// The token is SCOPED: the same manifest in a different environment yields a
@@ -457,6 +500,16 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	if crossed.Current {
 		t.Fatal("a cursor from one environment was accepted as current in another")
 	}
+}
+
+// latestRevision reads one environment's newest published revision straight
+// from the datastore: the assertion is about what the pipeline recorded, so
+// reading it through the pipeline's own API would only prove the API agrees
+// with itself.
+func latestRevision(t *testing.T, db *store.DB, envID string) int64 {
+	t.Helper()
+	return queryInt(t, db,
+		"SELECT COALESCE(MAX(revision), 0) FROM snapshots WHERE environment_id = '"+envID+"'")
 }
 
 // deliverySvc builds the delivery surface with a live keyring. The change token

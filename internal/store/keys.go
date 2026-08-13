@@ -43,8 +43,24 @@ type KeyRepo interface {
 	AcquireHierarchyGeneration(ctx context.Context, pf authz.Proof) error
 	InsertMaster(ctx context.Context, pf authz.Proof, k crypto.WrappedKey) error
 	InsertTier3(ctx context.Context, pf authz.Proof, k crypto.WrappedKey) error
+	// RotateTokenKey retires the active root token key and installs its
+	// successor, both inside the hierarchy-generation fence.
+	//
+	// It is ONE store method rather than the three calls it performs, and that
+	// is a rule, not a convenience: `keys.AcquireHierarchyGeneration` and
+	// `keys.InsertTier3` are bound to the boot mint site, and a store method is
+	// grant-evaluated or site-bound, never both (invariant 6). A rotation is
+	// grant-evaluated -- an operator holding `rotate-dek` asks for it -- so it
+	// reaches the same rows through a door of its own.
+	RotateTokenKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error
 	InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error
 }
+
+// ErrRotationSuperseded reports a rotation losing the compare-and-swap: the
+// active key moved between prepare and commit because a concurrent rotation
+// committed first. The caller refuses loudly; retrying mints a fresh successor
+// against the new predecessor.
+var ErrRotationSuperseded = errors.New("store: token key rotation superseded by a concurrent rotation")
 
 func scopeGenerationKey(p crypto.Purpose, orgID, projectID string) string {
 	return fmt.Sprintf("tier3:%s:%s:%s", p, orgID, projectID)
@@ -208,6 +224,45 @@ func (k sqliteKeys) InsertTier3(ctx context.Context, pf authz.Proof, key crypto.
 	return err
 }
 
+func (k sqliteKeys) RotateTokenKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysRotateTokenKey, k.tok); err != nil {
+		return err
+	}
+	// The fence first, for the reason every other tier-3 write takes it: a
+	// master rotation must not slip between the retire and the insert.
+	if _, err := k.q.AcquireHierarchyGeneration(ctx); err != nil {
+		return err
+	}
+	// Compare-and-swap on the predecessor: the successor row was minted
+	// against version-1, and if the active key is no longer that version a
+	// concurrent rotation already won. Refusing here is what keeps the
+	// in-memory adopt and the datastore agreeing on which key is live.
+	retired, err := k.q.RetireTier3KeyAtVersion(ctx, sqlitegen.RetireTier3KeyAtVersionParams{
+		Purpose: string(crypto.PurposeToken), OrgID: "", ProjectID: "",
+		Version: int64(key.Version) - 1,
+	})
+	if err != nil {
+		return err
+	}
+	if retired != 1 {
+		return ErrRotationSuperseded
+	}
+	err = k.q.InsertTier3Key(ctx, sqlitegen.InsertTier3KeyParams{
+		ID:               key.ID,
+		Purpose:          string(key.Purpose),
+		OrgID:            key.OrgID,
+		ProjectID:        key.ProjectID,
+		Version:          int64(key.Version),
+		MasterKeyVersion: int64(key.MasterKeyVersion),
+		Blob:             key.Blob,
+		CreatedAt:        CanonTime(key.CreatedAt).Format(timeFormat),
+	})
+	if sqliteUniqueViolation(err) {
+		return crypto.ErrKeyExists
+	}
+	return err
+}
+
 func (k sqliteKeys) InsertScopeGeneration(ctx context.Context, pf authz.Proof, p crypto.Purpose, orgID, projectID string) error {
 	if _, err := authz.Verify(pf, authz.StoreKeysInsertScopeGeneration, k.tok); err != nil {
 		return err
@@ -339,6 +394,40 @@ func (k pgKeys) InsertTier3(ctx context.Context, pf authz.Proof, key crypto.Wrap
 		return err
 	}
 	err := k.q.InsertTier3Key(ctx, pggen.InsertTier3KeyParams{
+		ID:               key.ID,
+		Purpose:          string(key.Purpose),
+		OrgID:            key.OrgID,
+		ProjectID:        key.ProjectID,
+		Version:          int64(key.Version),
+		MasterKeyVersion: int64(key.MasterKeyVersion),
+		Blob:             key.Blob,
+		CreatedAt:        pgtype.Timestamptz{Time: CanonTime(key.CreatedAt), Valid: true},
+	})
+	if pgUniqueViolation(err) {
+		return crypto.ErrKeyExists
+	}
+	return err
+}
+
+func (k pgKeys) RotateTokenKey(ctx context.Context, pf authz.Proof, key crypto.WrappedKey) error {
+	if _, err := authz.Verify(pf, authz.StoreKeysRotateTokenKey, k.tok); err != nil {
+		return err
+	}
+	if _, err := k.q.AcquireHierarchyGeneration(ctx); err != nil {
+		return err
+	}
+	// Compare-and-swap on the predecessor: see the sqlite twin.
+	retired, err := k.q.RetireTier3KeyAtVersion(ctx, pggen.RetireTier3KeyAtVersionParams{
+		Purpose: string(crypto.PurposeToken), OrgID: "", ProjectID: "",
+		Version: int64(key.Version) - 1,
+	})
+	if err != nil {
+		return err
+	}
+	if retired != 1 {
+		return ErrRotationSuperseded
+	}
+	err = k.q.InsertTier3Key(ctx, pggen.InsertTier3KeyParams{
 		ID:               key.ID,
 		Purpose:          string(key.Purpose),
 		OrgID:            key.OrgID,

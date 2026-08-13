@@ -36,6 +36,45 @@ func (e AffectedCredentialReason) Valid() bool {
 	}
 }
 
+// Defines values for CellSignalPendingOperation.
+const (
+	CellSignalPendingOperationSet   CellSignalPendingOperation = "set"
+	CellSignalPendingOperationUnset CellSignalPendingOperation = "unset"
+)
+
+// Valid indicates whether the value is a known member of the CellSignalPendingOperation enum.
+func (e CellSignalPendingOperation) Valid() bool {
+	switch e {
+	case CellSignalPendingOperationSet:
+		return true
+	case CellSignalPendingOperationUnset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ChangedKeyChange.
+const (
+	Added   ChangedKeyChange = "added"
+	Edited  ChangedKeyChange = "edited"
+	Removed ChangedKeyChange = "removed"
+)
+
+// Valid indicates whether the value is a known member of the ChangedKeyChange enum.
+func (e ChangedKeyChange) Valid() bool {
+	switch e {
+	case Added:
+		return true
+	case Edited:
+		return true
+	case Removed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateScimBindingRequestProviderKind.
 const (
 	CreateScimBindingRequestProviderKindOidc CreateScimBindingRequestProviderKind = "oidc"
@@ -95,6 +134,7 @@ const (
 	DeliveredKeyPresenceForbidden DeliveredKeyPresence = "forbidden"
 	DeliveredKeyPresenceOptional  DeliveredKeyPresence = "optional"
 	DeliveredKeyPresenceRequired  DeliveredKeyPresence = "required"
+	DeliveredKeyPresenceSet       DeliveredKeyPresence = "set"
 )
 
 // Valid indicates whether the value is a known member of the DeliveredKeyPresence enum.
@@ -105,6 +145,8 @@ func (e DeliveredKeyPresence) Valid() bool {
 	case DeliveredKeyPresenceOptional:
 		return true
 	case DeliveredKeyPresenceRequired:
+		return true
+	case DeliveredKeyPresenceSet:
 		return true
 	default:
 		return false
@@ -333,6 +375,24 @@ func (e OidcStartRequestPurpose) Valid() bool {
 	case OidcStartRequestPurposeLogin:
 		return true
 	case OidcStartRequestPurposeReauth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PendingChangeOperation.
+const (
+	PendingChangeOperationSet   PendingChangeOperation = "set"
+	PendingChangeOperationUnset PendingChangeOperation = "unset"
+)
+
+// Valid indicates whether the value is a known member of the PendingChangeOperation enum.
+func (e PendingChangeOperation) Valid() bool {
+	switch e {
+	case PendingChangeOperationSet:
+		return true
+	case PendingChangeOperationUnset:
 		return true
 	default:
 		return false
@@ -709,6 +769,60 @@ type AuthMethods struct {
 // the contract additive as later tickets register their atoms.
 type Capability = string
 
+// CellSignal defines model for CellSignal.
+type CellSignal struct {
+	// ChangedInRevision Set to the environment's LATEST revision when this cell changed in it, absent otherwise. This is the revision ADR's "recently changed" signal, which names only the last published revision -- it is not a per-cell last-change history; older changes live in the revision list.
+	ChangedInRevision *int64 `json:"changed_in_revision,omitempty"`
+
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// PendingByOthers At least one OTHER principal holds a draft here. Write-presence and
+	// nothing more: no id, no owner, no operation.
+	PendingByOthers  bool                        `json:"pending_by_others"`
+	PendingOperation *CellSignalPendingOperation `json:"pending_operation,omitempty"`
+
+	// PendingVersionId A prefixed UUIDv7, e.g. `org_0198…`.
+	PendingVersionId *ID `json:"pending_version_id,omitempty"`
+}
+
+// CellSignalPendingOperation defines model for CellSignal.PendingOperation.
+type CellSignalPendingOperation string
+
+// ChangedKey One lineage row. It carries a key id, the key's name at that revision
+// and the transition - and nothing derived from a value.
+type ChangedKey struct {
+	Change ChangedKeyChange `json:"change"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+}
+
+// ChangedKeyChange defines model for ChangedKey.Change.
+type ChangedKeyChange string
+
 // CloneEnvironmentRequest defines model for CloneEnvironmentRequest.
 type CloneEnvironmentRequest struct {
 	// Name A display name for an organisation, project or environment. Identity is
@@ -1068,15 +1182,19 @@ type DeliveredKey struct {
 	Classification KeyClassification `json:"classification"`
 	Name           string            `json:"name"`
 
-	// Presence The key's declared presence for the addressed environment. When
-	// values land this enumeration gains `set`, and the change token starts
-	// moving with values.
+	// Presence What the fetch reports about this key in the addressed
+	// environment. `set` is a key the committed snapshot actually
+	// delivers (#51 -- values landed, and the change token moves with
+	// them); the other three are the declared presence rules for keys
+	// the snapshot does not carry.
 	Presence DeliveredKeyPresence `json:"presence"`
 }
 
-// DeliveredKeyPresence The key's declared presence for the addressed environment. When
-// values land this enumeration gains `set`, and the change token starts
-// moving with values.
+// DeliveredKeyPresence What the fetch reports about this key in the addressed
+// environment. `set` is a key the committed snapshot actually
+// delivers (#51 -- values landed, and the change token moves with
+// them); the other three are the declared presence rules for keys
+// the snapshot does not carry.
 type DeliveredKeyPresence string
 
 // DeliveryResponse Either the authorized projection, or the statement that the presented
@@ -1176,6 +1294,17 @@ type EnvironmentSettings struct {
 	ReauthWindowSeconds *int `json:"reauth_window_seconds,omitempty"`
 }
 
+// EnvironmentSignals defines model for EnvironmentSignals.
+type EnvironmentSignals struct {
+	Cells []CellSignal `json:"cells"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID `json:"environment_id"`
+
+	// Revision The environment's current published revision, 0 when never materialized.
+	Revision int64 `json:"revision"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
@@ -1206,6 +1335,47 @@ type EstablishCredentialRequest struct {
 	// no forced rotation (NIST SP 800-63B shape); checked against a
 	// bundled common-password list at set time only, never at login.
 	Password string `json:"password"`
+}
+
+// ExportValuesRequest defines model for ExportValuesRequest.
+type ExportValuesRequest struct {
+	// Reveal Ask for `secret` plaintext. Without it a `secret` key reports
+	// write-presence and no value; `config` values are returned either
+	// way, because classification IS the sensitivity boundary.
+	Reveal *bool `json:"reveal,omitempty"`
+
+	// Revision The revision to export; omitted means the latest.
+	Revision *int64 `json:"revision,omitempty"`
+}
+
+// ExportedValue defines model for ExportedValue.
+type ExportedValue struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name     KeyName `json:"name"`
+	Revealed bool    `json:"revealed"`
+
+	// Value Present only when `revealed` is true.
+	Value *string `json:"value,omitempty"`
+}
+
+// ExportedValues defines model for ExportedValues.
+type ExportedValues struct {
+	Count int             `json:"count"`
+	Items []ExportedValue `json:"items"`
+
+	// Revision The revision actually served.
+	Revision int64 `json:"revision"`
 }
 
 // ExternalIdentity defines model for ExternalIdentity.
@@ -1992,6 +2162,45 @@ type PasskeyList struct {
 	Passkeys []Passkey `json:"passkeys"`
 }
 
+// PendingChange One draft in the caller's own working state. `version_id` is the
+// IMMUTABLE id a selective publish names; editing the same cell mints a
+// new one and collects this row rather than mutating it.
+//
+// It never carries the staged value. A draft holds real material and that
+// material is reveal-gated exactly as a published one is.
+type PendingChange struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+	CreatedAt      time.Time         `json:"created_at"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// Operation What publishing this draft does to the cell.
+	Operation PendingChangeOperation `json:"operation"`
+
+	// StagedFromRevision The environment's published revision when the edit was staged.
+	// Provenance a client shows; the freshness check is per entry.
+	StagedFromRevision int64 `json:"staged_from_revision"`
+
+	// VersionId A prefixed UUIDv7, e.g. `org_0198…`.
+	VersionId ID `json:"version_id"`
+}
+
+// PendingChangeOperation What publishing this draft does to the cell.
+type PendingChangeOperation string
+
 // Principal defines model for Principal.
 type Principal struct {
 	// DisplayName For display only. Never a linking key, at any point, for any provider.
@@ -2031,6 +2240,44 @@ type ProjectList struct {
 // heard of, and every generated consumer must preserve and tolerate the
 // unknown value rather than reject the response.
 type ProtocolCapability = string
+
+// PublishRequest defines model for PublishRequest.
+type PublishRequest struct {
+	// VersionIds The pending-change version ids to commit. Naming an id the caller
+	// does not own, or one that has been superseded or already published,
+	// is refused loud rather than resolved to whatever the owner typed
+	// since.
+	VersionIds []ID `json:"version_ids"`
+}
+
+// PublishResult defines model for PublishResult.
+type PublishResult struct {
+	// ClosedIn The version ids key-group closure pulled in beyond what the caller
+	// named, so the caller can tell what it asked for from what the
+	// coupling required.
+	ClosedIn     []ID                   `json:"closed_in"`
+	Environments []PublishedEnvironment `json:"environments"`
+
+	// Published Every version id that committed, closure included.
+	Published []ID `json:"published"`
+}
+
+// PublishedEnvironment defines model for PublishedEnvironment.
+type PublishedEnvironment struct {
+	// ChangeToken The keyed, versioned change token for this snapshot. Non-secret by
+	// construction: it is an HMAC under a per-scope key, so it is
+	// unforgeable and un-invertible, which is why it may travel in pod
+	// annotations and logs.
+	ChangeToken string       `json:"change_token"`
+	ChangedKeys []ChangedKey `json:"changed_keys"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID    `json:"environment_id"`
+	Revision      int64 `json:"revision"`
+
+	// SchemaRevision The pinned schema revision this snapshot was validated at.
+	SchemaRevision int64 `json:"schema_revision"`
+}
 
 // ReauthPurpose The decision a disclosure ceremony authorizes. It is part of the SIGNED
 // binding, not a label: without it an assertion given to `reveal` would be
@@ -2188,6 +2435,40 @@ type RevealWindow struct {
 	// the effective window is `0`: TOTP cannot bind a challenge to the
 	// enumerated unit, so a passkey ceremony is the only path there.
 	TotpOffered bool `json:"totp_offered"`
+}
+
+// Revision defines model for Revision.
+type Revision struct {
+	ChangedKeys []ChangedKey `json:"changed_keys"`
+	PublishedAt time.Time    `json:"published_at"`
+
+	// PublishedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	PublishedBy    ID    `json:"published_by"`
+	Revision       int64 `json:"revision"`
+	SchemaRevision int64 `json:"schema_revision"`
+}
+
+// RevisionDetail defines model for RevisionDetail.
+type RevisionDetail struct {
+	ChangeToken string       `json:"change_token"`
+	ChangedKeys []ChangedKey `json:"changed_keys"`
+
+	// Keys The delivered key set of THIS revision, under the schema revision
+	// it pinned. Names and classifications only; values live behind the
+	// export verb and its formula.
+	Keys        []SnapshotKey `json:"keys"`
+	PublishedAt time.Time     `json:"published_at"`
+
+	// PublishedBy A prefixed UUIDv7, e.g. `org_0198…`.
+	PublishedBy    ID    `json:"published_by"`
+	Revision       int64 `json:"revision"`
+	SchemaRevision int64 `json:"schema_revision"`
+}
+
+// RevisionList defines model for RevisionList.
+type RevisionList struct {
+	Count int        `json:"count"`
+	Items []Revision `json:"items"`
 }
 
 // RoleTemplate The closed v1 role template set.
@@ -2716,8 +2997,37 @@ type SetValueRequest struct {
 	Value string `json:"value"`
 }
 
+// SnapshotKey defines model for SnapshotKey.
+type SnapshotKey struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+}
+
 // Timestamp RFC 3339 UTC, microsecond precision.
 type Timestamp = time.Time
+
+// TokenKeyRotation defines model for TokenKeyRotation.
+type TokenKeyRotation struct {
+	// TokenKeyVersion The new root token key version. Operator bookkeeping only - the
+	// change token's public contract carries the SCHEME version, never
+	// the key version, because a consumer that could tell key versions
+	// apart could tell a rotation from a content change.
+	TokenKeyVersion int64 `json:"token_key_version"`
+}
 
 // TotpCodeRequest defines model for TotpCodeRequest.
 type TotpCodeRequest struct {
@@ -3345,8 +3655,14 @@ type CreateEnvGrantJSONRequestBody = CreateGrantRequest
 // ApplyEnvTemplateJSONRequestBody defines body for ApplyEnvTemplate for application/json ContentType.
 type ApplyEnvTemplateJSONRequestBody = ApplyTemplateRequest
 
+// PublishPendingChangesJSONRequestBody defines body for PublishPendingChanges for application/json ContentType.
+type PublishPendingChangesJSONRequestBody = PublishRequest
+
 // SetEnvironmentSettingsJSONRequestBody defines body for SetEnvironmentSettings for application/json ContentType.
 type SetEnvironmentSettingsJSONRequestBody = EnvironmentSettings
+
+// ExportValuesJSONRequestBody defines body for ExportValues for application/json ContentType.
+type ExportValuesJSONRequestBody = ExportValuesRequest
 
 // SetValueJSONRequestBody defines body for SetValue for application/json ContentType.
 type SetValueJSONRequestBody = SetValueRequest
@@ -3590,6 +3906,9 @@ type ServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// RotateTokenKey Rotate the root change-token key.
+	// (POST /api/v1/instance/rotate-token-key)
+	RotateTokenKey(w http.ResponseWriter, r *http.Request)
 	// ListSamlProviders List configured SAML providers.
 	// (GET /api/v1/instance/saml-providers)
 	ListSamlProviders(w http.ResponseWriter, r *http.Request)
@@ -3701,33 +4020,51 @@ type ServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// PublishPendingChanges Publish a selection of your own pending changes.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
+	PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// GetRevealWindow The reveal guard's state for this environment and session.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
 	GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ListRevisions One environment's revision history, newest first.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions)
+	ListRevisions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// GetRevision One revision, with its change token.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
+	GetRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision string)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// SetEnvironmentSettings Set an environment's protection state and reauthentication window.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	SetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// GetEnvironmentSignals The matrix signals for one environment.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals)
+	GetEnvironmentSignals(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// ListValues The environment's resolved values.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values)
 	ListValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ExportValues Export one environment's resolved snapshot.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
+	ExportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// RevealValues The environment's values, with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal)
 	RevealValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
-	// ClearValue Clear a value to `absent`.
+	// ClearValue Stage a clear to `absent`.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	ClearValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName)
 	// GetValue Read one value cell.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	GetValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName)
-	// SetValue Set one value.
+	// SetValue Stage one value edit.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	SetValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName)
 	// RevealValue Read one cell with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal)
 	RevealValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName)
+	// WatchProjectEvents The advisory live-update stream (SSE).
+	// (GET /api/v1/orgs/{org}/projects/{project}/events)
+	WatchProjectEvents(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
 	// ListFolders List the project's folders.
 	// (GET /api/v1/orgs/{org}/projects/{project}/folders)
 	ListFolders(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -4205,6 +4542,12 @@ func (_ Unimplemented) PutOidcProvider(w http.ResponseWriter, r *http.Request, s
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RotateTokenKey Rotate the root change-token key.
+// (POST /api/v1/instance/rotate-token-key)
+func (_ Unimplemented) RotateTokenKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListSamlProviders List configured SAML providers.
 // (GET /api/v1/instance/saml-providers)
 func (_ Unimplemented) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
@@ -4427,9 +4770,27 @@ func (_ Unimplemented) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// PublishPendingChanges Publish a selection of your own pending changes.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
+func (_ Unimplemented) PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetRevealWindow The reveal guard's state for this environment and session.
 // (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
 func (_ Unimplemented) GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRevisions One environment's revision history, newest first.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions)
+func (_ Unimplemented) ListRevisions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRevision One revision, with its change token.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
+func (_ Unimplemented) GetRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4445,9 +4806,21 @@ func (_ Unimplemented) SetEnvironmentSettings(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetEnvironmentSignals The matrix signals for one environment.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals)
+func (_ Unimplemented) GetEnvironmentSignals(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListValues The environment's resolved values.
 // (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values)
 func (_ Unimplemented) ListValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ExportValues Export one environment's resolved snapshot.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
+func (_ Unimplemented) ExportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4457,7 +4830,7 @@ func (_ Unimplemented) RevealValues(w http.ResponseWriter, r *http.Request, org 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ClearValue Clear a value to `absent`.
+// ClearValue Stage a clear to `absent`.
 // (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 func (_ Unimplemented) ClearValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -4469,7 +4842,7 @@ func (_ Unimplemented) GetValue(w http.ResponseWriter, r *http.Request, org OrgI
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// SetValue Set one value.
+// SetValue Stage one value edit.
 // (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 func (_ Unimplemented) SetValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -4478,6 +4851,12 @@ func (_ Unimplemented) SetValue(w http.ResponseWriter, r *http.Request, org OrgI
 // RevealValue Read one cell with `secret` plaintext.
 // (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal)
 func (_ Unimplemented) RevealValue(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, key ValueKeyName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// WatchProjectEvents The advisory live-update stream (SSE).
+// (GET /api/v1/orgs/{org}/projects/{project}/events)
+func (_ Unimplemented) WatchProjectEvents(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5765,6 +6144,20 @@ func (siw *ServerInterfaceWrapper) PutOidcProvider(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// RotateTokenKey operation middleware
+func (siw *ServerInterfaceWrapper) RotateTokenKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RotateTokenKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSamlProviders operation middleware
 func (siw *ServerInterfaceWrapper) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
 
@@ -6906,6 +7299,50 @@ func (siw *ServerInterfaceWrapper) ApplyEnvTemplate(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// PublishPendingChanges operation middleware
+func (siw *ServerInterfaceWrapper) PublishPendingChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishPendingChanges(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRevealWindow operation middleware
 func (siw *ServerInterfaceWrapper) GetRevealWindow(w http.ResponseWriter, r *http.Request) {
 
@@ -6941,6 +7378,103 @@ func (siw *ServerInterfaceWrapper) GetRevealWindow(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRevealWindow(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRevisions(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRevision operation middleware
+func (siw *ServerInterfaceWrapper) GetRevision(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "revision" -------------
+	var revision string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "revision", chi.URLParam(r, "revision"), &revision, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revision", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRevision(w, r, org, project, environment, revision)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7038,6 +7572,50 @@ func (siw *ServerInterfaceWrapper) SetEnvironmentSettings(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
+// GetEnvironmentSignals operation middleware
+func (siw *ServerInterfaceWrapper) GetEnvironmentSignals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetEnvironmentSignals(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListValues operation middleware
 func (siw *ServerInterfaceWrapper) ListValues(w http.ResponseWriter, r *http.Request) {
 
@@ -7073,6 +7651,50 @@ func (siw *ServerInterfaceWrapper) ListValues(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListValues(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportValues operation middleware
+func (siw *ServerInterfaceWrapper) ExportValues(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportValues(w, r, org, project, environment)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7329,6 +7951,41 @@ func (siw *ServerInterfaceWrapper) RevealValue(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevealValue(w, r, org, project, environment, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// WatchProjectEvents operation middleware
+func (siw *ServerInterfaceWrapper) WatchProjectEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WatchProjectEvents(w, r, org, project)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10748,6 +11405,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search", wrapper.ScimSearchGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish", wrapper.PublishPendingChanges)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals", wrapper.GetEnvironmentSignals)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions", wrapper.ListRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}", wrapper.GetRevision)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export", wrapper.ExportValues)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/events", wrapper.WatchProjectEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/rotate-token-key", wrapper.RotateTokenKey)
 	})
 
 	return r
@@ -14386,6 +15064,84 @@ func (response PutOidcProvider500JSONResponse) VisitPutOidcProviderResponse(w ht
 	return err
 }
 
+type RotateTokenKeyRequestObject struct {
+}
+
+type RotateTokenKeyResponseObject interface {
+	VisitRotateTokenKeyResponse(w http.ResponseWriter) error
+}
+
+type RotateTokenKey200JSONResponse TokenKeyRotation
+
+func (response RotateTokenKey200JSONResponse) VisitRotateTokenKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateTokenKey401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RotateTokenKey401JSONResponse) VisitRotateTokenKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateTokenKey404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RotateTokenKey404JSONResponse) VisitRotateTokenKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateTokenKey429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RotateTokenKey429JSONResponse) VisitRotateTokenKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RotateTokenKey500JSONResponse struct{ InternalJSONResponse }
+
+func (response RotateTokenKey500JSONResponse) VisitRotateTokenKeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSamlProvidersRequestObject struct {
 }
 
@@ -17971,6 +18727,116 @@ func (response ApplyEnvTemplate500JSONResponse) VisitApplyEnvTemplateResponse(w 
 	return err
 }
 
+type PublishPendingChangesRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *PublishPendingChangesJSONRequestBody
+}
+
+type PublishPendingChangesResponseObject interface {
+	VisitPublishPendingChangesResponse(w http.ResponseWriter) error
+}
+
+type PublishPendingChanges200JSONResponse PublishResult
+
+func (response PublishPendingChanges200JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PublishPendingChanges400JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PublishPendingChanges401JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PublishPendingChanges404JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PublishPendingChanges409JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response PublishPendingChanges429JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PublishPendingChanges500JSONResponse struct{ InternalJSONResponse }
+
+func (response PublishPendingChanges500JSONResponse) VisitPublishPendingChangesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetRevealWindowRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -18041,6 +18907,169 @@ func (response GetRevealWindow429JSONResponse) VisitGetRevealWindowResponse(w ht
 type GetRevealWindow500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetRevealWindow500JSONResponse) VisitGetRevealWindowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type ListRevisionsResponseObject interface {
+	VisitListRevisionsResponse(w http.ResponseWriter) error
+}
+
+type ListRevisions200JSONResponse RevisionList
+
+func (response ListRevisions200JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListRevisions401JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListRevisions404JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListRevisions429JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisions500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListRevisions500JSONResponse) VisitListRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevisionRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Revision    string        `json:"revision"`
+}
+
+type GetRevisionResponseObject interface {
+	VisitGetRevisionResponse(w http.ResponseWriter) error
+}
+
+type GetRevision200JSONResponse RevisionDetail
+
+func (response GetRevision200JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetRevision401JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetRevision404JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetRevision429JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRevision500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetRevision500JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -18229,6 +19258,87 @@ func (response SetEnvironmentSettings500JSONResponse) VisitSetEnvironmentSetting
 	return err
 }
 
+type GetEnvironmentSignalsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type GetEnvironmentSignalsResponseObject interface {
+	VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error
+}
+
+type GetEnvironmentSignals200JSONResponse EnvironmentSignals
+
+func (response GetEnvironmentSignals200JSONResponse) VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSignals401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetEnvironmentSignals401JSONResponse) VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSignals404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetEnvironmentSignals404JSONResponse) VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSignals429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetEnvironmentSignals429JSONResponse) VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetEnvironmentSignals500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetEnvironmentSignals500JSONResponse) VisitGetEnvironmentSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListValuesRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -18299,6 +19409,116 @@ func (response ListValues429JSONResponse) VisitListValuesResponse(w http.Respons
 type ListValues500JSONResponse struct{ InternalJSONResponse }
 
 func (response ListValues500JSONResponse) VisitListValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValuesRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *ExportValuesJSONRequestBody
+}
+
+type ExportValuesResponseObject interface {
+	VisitExportValuesResponse(w http.ResponseWriter) error
+}
+
+type ExportValues200JSONResponse ExportedValues
+
+func (response ExportValues200JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ExportValues400JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ExportValues401JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ExportValues403JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExportValues404JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ExportValues429JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues500JSONResponse struct{ InternalJSONResponse }
+
+func (response ExportValues500JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -18416,12 +19636,18 @@ type ClearValueResponseObject interface {
 	VisitClearValueResponse(w http.ResponseWriter) error
 }
 
-type ClearValue204Response struct {
-}
+type ClearValue200JSONResponse PendingChange
 
-func (response ClearValue204Response) VisitClearValueResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
+func (response ClearValue200JSONResponse) VisitClearValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ClearValue400JSONResponse struct{ BadRequestJSONResponse }
@@ -18589,7 +19815,7 @@ type SetValueResponseObject interface {
 	VisitSetValueResponse(w http.ResponseWriter) error
 }
 
-type SetValue200JSONResponse ValueCell
+type SetValue200JSONResponse PendingChange
 
 func (response SetValue200JSONResponse) VisitSetValueResponse(w http.ResponseWriter) error {
 
@@ -18773,6 +19999,115 @@ func (response RevealValue429JSONResponse) VisitRevealValueResponse(w http.Respo
 type RevealValue500JSONResponse struct{ InternalJSONResponse }
 
 func (response RevealValue500JSONResponse) VisitRevealValueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchProjectEventsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type WatchProjectEventsResponseObject interface {
+	VisitWatchProjectEventsResponse(w http.ResponseWriter) error
+}
+
+type WatchProjectEvents200TexteventStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response WatchProjectEvents200TexteventStreamResponse) VisitWatchProjectEventsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+type WatchProjectEvents401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response WatchProjectEvents401JSONResponse) VisitWatchProjectEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchProjectEvents404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response WatchProjectEvents404JSONResponse) VisitWatchProjectEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchProjectEvents429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response WatchProjectEvents429JSONResponse) VisitWatchProjectEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type WatchProjectEvents500JSONResponse struct{ InternalJSONResponse }
+
+func (response WatchProjectEvents500JSONResponse) VisitWatchProjectEventsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -25547,6 +26882,9 @@ type StrictServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(ctx context.Context, request PutOidcProviderRequestObject) (PutOidcProviderResponseObject, error)
+	// RotateTokenKey Rotate the root change-token key.
+	// (POST /api/v1/instance/rotate-token-key)
+	RotateTokenKey(ctx context.Context, request RotateTokenKeyRequestObject) (RotateTokenKeyResponseObject, error)
 	// ListSamlProviders List configured SAML providers.
 	// (GET /api/v1/instance/saml-providers)
 	ListSamlProviders(ctx context.Context, request ListSamlProvidersRequestObject) (ListSamlProvidersResponseObject, error)
@@ -25658,33 +26996,51 @@ type StrictServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(ctx context.Context, request ApplyEnvTemplateRequestObject) (ApplyEnvTemplateResponseObject, error)
+	// PublishPendingChanges Publish a selection of your own pending changes.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
+	PublishPendingChanges(ctx context.Context, request PublishPendingChangesRequestObject) (PublishPendingChangesResponseObject, error)
 	// GetRevealWindow The reveal guard's state for this environment and session.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window)
 	GetRevealWindow(ctx context.Context, request GetRevealWindowRequestObject) (GetRevealWindowResponseObject, error)
+	// ListRevisions One environment's revision history, newest first.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions)
+	ListRevisions(ctx context.Context, request ListRevisionsRequestObject) (ListRevisionsResponseObject, error)
+	// GetRevision One revision, with its change token.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
+	GetRevision(ctx context.Context, request GetRevisionRequestObject) (GetRevisionResponseObject, error)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(ctx context.Context, request GetEnvironmentSettingsRequestObject) (GetEnvironmentSettingsResponseObject, error)
 	// SetEnvironmentSettings Set an environment's protection state and reauthentication window.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	SetEnvironmentSettings(ctx context.Context, request SetEnvironmentSettingsRequestObject) (SetEnvironmentSettingsResponseObject, error)
+	// GetEnvironmentSignals The matrix signals for one environment.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals)
+	GetEnvironmentSignals(ctx context.Context, request GetEnvironmentSignalsRequestObject) (GetEnvironmentSignalsResponseObject, error)
 	// ListValues The environment's resolved values.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values)
 	ListValues(ctx context.Context, request ListValuesRequestObject) (ListValuesResponseObject, error)
+	// ExportValues Export one environment's resolved snapshot.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
+	ExportValues(ctx context.Context, request ExportValuesRequestObject) (ExportValuesResponseObject, error)
 	// RevealValues The environment's values, with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal)
 	RevealValues(ctx context.Context, request RevealValuesRequestObject) (RevealValuesResponseObject, error)
-	// ClearValue Clear a value to `absent`.
+	// ClearValue Stage a clear to `absent`.
 	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	ClearValue(ctx context.Context, request ClearValueRequestObject) (ClearValueResponseObject, error)
 	// GetValue Read one value cell.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	GetValue(ctx context.Context, request GetValueRequestObject) (GetValueResponseObject, error)
-	// SetValue Set one value.
+	// SetValue Stage one value edit.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key})
 	SetValue(ctx context.Context, request SetValueRequestObject) (SetValueResponseObject, error)
 	// RevealValue Read one cell with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal)
 	RevealValue(ctx context.Context, request RevealValueRequestObject) (RevealValueResponseObject, error)
+	// WatchProjectEvents The advisory live-update stream (SSE).
+	// (GET /api/v1/orgs/{org}/projects/{project}/events)
+	WatchProjectEvents(ctx context.Context, request WatchProjectEventsRequestObject) (WatchProjectEventsResponseObject, error)
 	// ListFolders List the project's folders.
 	// (GET /api/v1/orgs/{org}/projects/{project}/folders)
 	ListFolders(ctx context.Context, request ListFoldersRequestObject) (ListFoldersResponseObject, error)
@@ -27229,6 +28585,30 @@ func (sh *strictHandler) PutOidcProvider(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// RotateTokenKey operation middleware
+func (sh *strictHandler) RotateTokenKey(w http.ResponseWriter, r *http.Request) {
+	var request RotateTokenKeyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RotateTokenKey(ctx, request.(RotateTokenKeyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RotateTokenKey")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RotateTokenKeyResponseObject); ok {
+		if err := validResponse.VisitRotateTokenKeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListSamlProviders operation middleware
 func (sh *strictHandler) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
 	var request ListSamlProvidersRequestObject
@@ -28306,6 +29686,41 @@ func (sh *strictHandler) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// PublishPendingChanges operation middleware
+func (sh *strictHandler) PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request PublishPendingChangesRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body PublishPendingChangesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PublishPendingChanges(ctx, request.(PublishPendingChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PublishPendingChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PublishPendingChangesResponseObject); ok {
+		if err := validResponse.VisitPublishPendingChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetRevealWindow operation middleware
 func (sh *strictHandler) GetRevealWindow(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	var request GetRevealWindowRequestObject
@@ -28327,6 +29742,63 @@ func (sh *strictHandler) GetRevealWindow(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRevealWindowResponseObject); ok {
 		if err := validResponse.VisitGetRevealWindowResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRevisions operation middleware
+func (sh *strictHandler) ListRevisions(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ListRevisionsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRevisions(ctx, request.(ListRevisionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRevisions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRevisionsResponseObject); ok {
+		if err := validResponse.VisitListRevisionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRevision operation middleware
+func (sh *strictHandler) GetRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision string) {
+	var request GetRevisionRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+	request.Revision = revision
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRevision(ctx, request.(GetRevisionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRevision")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRevisionResponseObject); ok {
+		if err := validResponse.VisitGetRevisionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -28397,6 +29869,34 @@ func (sh *strictHandler) SetEnvironmentSettings(w http.ResponseWriter, r *http.R
 	}
 }
 
+// GetEnvironmentSignals operation middleware
+func (sh *strictHandler) GetEnvironmentSignals(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request GetEnvironmentSignalsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetEnvironmentSignals(ctx, request.(GetEnvironmentSignalsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetEnvironmentSignals")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetEnvironmentSignalsResponseObject); ok {
+		if err := validResponse.VisitGetEnvironmentSignalsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListValues operation middleware
 func (sh *strictHandler) ListValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	var request ListValuesRequestObject
@@ -28418,6 +29918,41 @@ func (sh *strictHandler) ListValues(w http.ResponseWriter, r *http.Request, org 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListValuesResponseObject); ok {
 		if err := validResponse.VisitListValuesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportValues operation middleware
+func (sh *strictHandler) ExportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ExportValuesRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body ExportValuesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportValues(ctx, request.(ExportValuesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportValues")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportValuesResponseObject); ok {
+		if err := validResponse.VisitExportValuesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -28569,6 +30104,33 @@ func (sh *strictHandler) RevealValue(w http.ResponseWriter, r *http.Request, org
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevealValueResponseObject); ok {
 		if err := validResponse.VisitRevealValueResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// WatchProjectEvents operation middleware
+func (sh *strictHandler) WatchProjectEvents(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request WatchProjectEventsRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.WatchProjectEvents(ctx, request.(WatchProjectEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "WatchProjectEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(WatchProjectEventsResponseObject); ok {
+		if err := validResponse.VisitWatchProjectEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

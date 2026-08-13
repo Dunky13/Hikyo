@@ -123,6 +123,7 @@ type API struct {
 	Folders       FolderService
 	Keys          KeyService
 	Values        ValueService
+	Revisions     RevisionService
 	Reveal        RevealService
 	KeyGroups     KeyGroupService
 	Grants        GrantService

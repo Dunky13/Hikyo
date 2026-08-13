@@ -93,7 +93,7 @@ func (failingWriter) Write([]byte) (int, error) {
 
 func runAuditSuite(t *testing.T, db *store.DB) {
 	audits := &service.Audits{DB: db}
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: probeKeyring(t, db)}
 	projects := &service.Projects{DB: db}
 	orgsSvc := &service.Orgs{DB: db}
 
@@ -490,7 +490,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// survives a rollback — and the key rides in the ENVELOPE's object,
 		// because grant.denied's payload is a closed schema shared by every
 		// operation and must not grow a key field.
-		keys := &service.Keys{DB: db}
+		keys := &service.Keys{DB: db, Keyring: probeKeyring(t, db)}
 		scope := domain.Scope{Org: orgA, Project: prjA1}
 		// alice holds definitions-edit in org A and NOT reveal, which is the
 		// legal, supported grant shape the gate exists for.
@@ -868,7 +868,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	t.Helper()
 	ctx := tctx(t)
 	projects := &service.Projects{DB: db}
-	envs := &service.Environments{DB: db}
+	envs := &service.Environments{DB: db, Keyring: probeKeyring(t, db)}
 	folders := &service.Folders{DB: db}
 	orgs := &service.Orgs{DB: db}
 
@@ -957,7 +957,7 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 	t.Helper()
 	ctx := tctx(t)
 	kr := probeKeyring(t, db)
-	keys := &service.Keys{DB: db}
+	keys := &service.Keys{DB: db, Keyring: probeKeyring(t, db)}
 	envs := &service.Environments{DB: db, Keyring: kr}
 	values := &service.Values{DB: db, Keyring: kr}
 
@@ -982,7 +982,16 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := values.Set(ctx, actor, sourceScope, key.Name, "audited-material"); err != nil {
+	// STAGE then PUBLISH (#51): `values set` writes the caller's own working
+	// state and delivers nothing, so the two events are separate types and both
+	// need a real emitter behind them here — value.staged for the draft,
+	// revision.published for the materialization it commits.
+	revisions := &service.Revisions{DB: db, Keyring: kr}
+	staged, err := values.Set(ctx, actor, sourceScope, key.Name, "audited-material")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revisions.Publish(ctx, actor, sourceScope, []string{staged.VersionID}); err != nil {
 		t.Fatal(err)
 	}
 	// A revealing read: one disclosure event for the one `secret` key.
@@ -997,9 +1006,19 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 		t.Fatal(err)
 	}
 	for _, env := range []domain.Scope{sourceScope, destScope} {
-		if err := values.Clear(ctx, actor, env, key.Name); err != nil {
+		cleared, err := values.Unset(ctx, actor, env, key.Name)
+		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := revisions.Publish(ctx, actor, env, []string{cleared.VersionID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// `rotate-token-key` is the last registered type with no other emitter. It
+	// is instance-scoped, so it runs as the operator principal rather than the
+	// tenant actor this helper otherwise uses.
+	if _, err := revisions.RotateTokenKey(ctx, service.LocalPrincipal(root)); err != nil {
+		t.Fatal(err)
 	}
 	if err := keys.Delete(ctx, actor, scope, key.ID); err != nil {
 		t.Fatal(err)
@@ -1018,8 +1037,8 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 func runCatalogueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope) {
 	t.Helper()
 	ctx := tctx(t)
-	keys := &service.Keys{DB: db}
-	groups := &service.KeyGroups{DB: db}
+	keys := &service.Keys{DB: db, Keyring: probeKeyring(t, db)}
+	groups := &service.KeyGroups{DB: db, Keyring: probeKeyring(t, db)}
 
 	secret, err := keys.Create(ctx, actor, scope, service.KeySpec{
 		Name:           "AUDITED_SECRET",
