@@ -1,0 +1,56 @@
+---
+title: Self-hosting baseline
+description: Replace evaluation defaults with explicit production boundaries.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/self-hosting.mdx
+---
+
+Production startup is fail-closed. Hikyo refuses to serve without an explicit
+datastore and root-key source, and a non-loopback plaintext listener requires an
+explicit trusted-proxy boundary.
+
+## Required decisions
+
+| Boundary | Configure | Rule |
+| --- | --- | --- |
+| Datastore | `HIKYO_DB` | Use `sqlite:PATH` or an explicit PostgreSQL DSN. |
+| Root key | `--root-key-file` or a systemd credential | Use exactly one source; keep it outside the database backup. |
+| Public origin | `HIKYO_EXTERNAL_ORIGIN` | Set the canonical HTTPS origin seen by browsers. |
+| Network | reverse proxy and `HIKYO_TRUSTED_PROXY_CIDRS` | Terminate TLS before exposing a non-loopback listener. |
+| Backups | `HIKYO_BACKUP_RECIPIENTS` and `HIKYO_BACKUP_DIR` | Configure recipients and destination together. |
+
+## SQLite baseline
+
+```bash
+install -d -m 0700 /var/lib/hikyo /etc/hikyo
+openssl rand -hex 32 | install -m 0600 /dev/stdin /etc/hikyo/root.key
+
+HIKYO_DB=sqlite:/var/lib/hikyo/hikyo.db \
+HIKYO_EXTERNAL_ORIGIN=https://hikyo.example.com \
+HIKYO_TRUSTED_PROXY_CIDRS=127.0.0.1/32 \
+./hikyo server \
+  --listen 127.0.0.1:8080 \
+  --root-key-file /etc/hikyo/root.key
+```
+
+Terminate TLS at the reverse proxy and forward only from the CIDRs you list.
+Do not expose Hikyo's plaintext listener directly.
+
+<Callout type="warn" title="Back up two independent things">
+  A database backup without the root key cannot decrypt Hikyo data. A root key
+  without the database cannot reconstruct it. Store and test them through
+  separate recovery paths.
+</Callout>
+
+## PostgreSQL boundary
+
+Remote PostgreSQL DSNs must name the host explicitly and use `sslmode=verify-full`
+or `sslmode=verify-ca`. Plaintext connections to a non-loopback database host
+are refused.
+
+## Before real secret material
+
+1. Put Hikyo behind HTTPS and keep its listener private.
+2. Store the root key through your service manager's credential mechanism.
+3. Configure encrypted backups and perform a restore test.
+4. Create the first administrator on the server host.
+5. Review the [security](/hikyo/security/) and [support](/hikyo/support/) policies.

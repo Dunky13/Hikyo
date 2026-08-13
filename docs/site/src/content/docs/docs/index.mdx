@@ -1,0 +1,36 @@
+---
+title: Hikyo documentation
+description: Build, evaluate, and operate Hikyo without hidden configuration or paid production features.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/index.mdx
+---
+
+Hikyo is a self-hosted control plane for validated secrets and configuration.
+Every value is explicitly `set` or `absent` in every environment—no inheritance,
+no hidden fallback, and no paid operational core.
+
+<Cards>
+  <Card title="Getting started" href="/hikyo/docs/getting-started/">
+    Build the embedded web UI, run a local evaluation instance, and bootstrap its first administrator.
+  </Card>
+  <Card title="Core concepts" href="/hikyo/docs/core-concepts/">
+    Understand explicit values, secret disclosure, validation, and authorization boundaries.
+  </Card>
+  <Card title="Self-hosting" href="/hikyo/docs/self-hosting/">
+    Move from zero-config evaluation to an explicit datastore, root key, and network boundary.
+  </Card>
+  <Card title="Security policy" href="/hikyo/security/">
+    Report privately, understand the 90-day disclosure clock, and check supported versions.
+  </Card>
+</Cards>
+
+<Callout type="warn" title="0.x development">
+  Hikyo interfaces are not frozen until the `1.0.0` release gate passes.
+  Prerelease builds are unsupported.
+</Callout>
+
+## Load-bearing policy
+
+- [Security](/hikyo/security/) — private reporting and disclosure timelines.
+- [Support](/hikyo/support/) — exactly one supported release line.
+- [Governance](/hikyo/governance/) — public authority and amendment rules.
+- [License](/hikyo/license/) — MPL-2.0 and the permanent no-enterprise-directory pledge.

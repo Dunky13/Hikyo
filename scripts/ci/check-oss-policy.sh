@@ -117,7 +117,12 @@ require_text "$repo_root/SUPPORT.md" 'Prereleases are never supported.'
 
 for path in \
 	.well-known/security.txt \
+	api/search.json \
 	index.html \
+	docs/index.html \
+	docs/getting-started/index.html \
+	docs/core-concepts/index.html \
+	docs/self-hosting/index.html \
 	security/index.html \
 	support/index.html \
 	governance/index.html \
@@ -132,6 +137,13 @@ require_text "$site_root/index.html" 'Mozilla Public License 2.0'
 require_text "$site_root/index.html" 'href="/hikyo/docs/"'
 reject_text "$site_root/index.html" 'validated, inherited secrets'
 reject_text "$site_root/index.html" 'MIT licensed'
+
+require_text "$site_root/docs/index.html" 'Getting started'
+require_text "$site_root/docs/index.html" 'href="/hikyo/docs/getting-started/"'
+require_text "$site_root/docs/getting-started/index.html" 'Build Hikyo from source'
+require_text "$site_root/docs/getting-started/index.html" 'authority is single-use'
+require_text "$site_root/docs/core-concepts/index.html" 'Values do not inherit'
+require_text "$site_root/docs/self-hosting/index.html" 'Production startup is fail-closed'
 
 cmp "$security_txt" "$site_root/.well-known/security.txt" >/dev/null || {
 	printf 'OSS policy gate: served security.txt differs from its canonical source\n' >&2
