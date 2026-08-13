@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -1017,39 +1018,105 @@ func metadataIPIsNonPublic(address netip.Addr) bool {
 
 func publicMetadataHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// A proxy would perform DNS resolution outside the guarded dialer and could
-	// turn a public-looking hostname into a request to an internal service.
-	transport.Proxy = nil
-	transport.DialContext = dialPublicMetadata
 	transport.ResponseHeaderTimeout = 10 * time.Second
-	return &http.Client{Transport: transport, Timeout: 15 * time.Second}
+	return &http.Client{
+		Transport: &publicMetadataRoundTripper{base: transport, resolver: net.DefaultResolver},
+		Timeout:   15 * time.Second,
+	}
 }
 
-func dialPublicMetadata(ctx context.Context, network, address string) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
+type metadataResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+// publicMetadataRoundTripper resolves and validates the destination before
+// handing it to net/http. The request then names the approved IP, preventing a
+// second DNS lookup from rebinding it. The original hostname remains in Host
+// and TLS ServerName, preserving HTTP routing and certificate verification.
+//
+// Proxy selection deliberately happens before the URL is pinned. HTTP,
+// HTTPS, and SOCKS proxies therefore keep working, but CONNECT receives the
+// already-approved IP rather than a hostname the proxy could resolve privately.
+type publicMetadataRoundTripper struct {
+	base     *http.Transport
+	resolver metadataResolver
+}
+
+func (t *publicMetadataRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	pinned, transport, err := t.prepare(request)
 	if err != nil {
 		return nil, err
 	}
-	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	return transport.RoundTrip(pinned)
+}
+
+func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Request, *http.Transport, error) {
+	host := request.URL.Hostname()
+	addresses, err := t.resolver.LookupNetIP(request.Context(), "ip", host)
 	if err != nil || len(addresses) == 0 {
-		return nil, errors.New("service: SAML metadata host did not resolve")
+		return nil, nil, errors.New("service: SAML metadata host did not resolve")
 	}
 	for _, resolved := range addresses {
 		if metadataIPIsNonPublic(resolved) {
-			return nil, errors.New("service: SAML metadata host resolved to a non-public address")
+			return nil, nil, errors.New("service: SAML metadata host resolved to a non-public address")
 		}
 	}
 
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	var lastErr error
-	for _, resolved := range addresses {
-		connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(resolved.String(), port))
-		if dialErr == nil {
+	transport := t.base.Clone()
+	var proxyURL *url.URL
+	if transport.Proxy != nil {
+		proxyURL, err = transport.Proxy(request)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	transport.Proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	// One transport is built per request because its TLS identity and pinned IP
+	// are request-specific. Prevent it from retaining an unusable idle pool.
+	transport.DisableKeepAlives = true
+
+	port := request.URL.Port()
+	if port == "" {
+		port = "443"
+	}
+	pinned := request.Clone(request.Context())
+	pinnedURL := *request.URL
+	pinnedURL.Host = net.JoinHostPort(addresses[0].Unmap().String(), port)
+	pinned.URL = &pinnedURL
+	pinned.Host = request.Host
+	if pinned.Host == "" {
+		pinned.Host = request.URL.Host
+	}
+
+	targetTLS := &tls.Config{MinVersion: tls.VersionTLS12}
+	if transport.TLSClientConfig != nil {
+		targetTLS = transport.TLSClientConfig.Clone()
+	}
+	targetTLS.ServerName = host
+	transport.TLSClientConfig = targetTLS
+
+	// An HTTPS proxy needs a different TLS identity on the first hop. The
+	// transport uses targetTLS again only after CONNECT, for the nested TLS
+	// session whose ServerName must remain the original metadata hostname.
+	if proxyURL != nil && proxyURL.Scheme == "https" {
+		proxyHost := proxyURL.Hostname()
+		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		transport.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			raw, err := dialer.DialContext(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			proxyTLS := targetTLS.Clone()
+			proxyTLS.ServerName = proxyHost
+			connection := tls.Client(raw, proxyTLS)
+			if err := connection.HandshakeContext(ctx); err != nil {
+				raw.Close()
+				return nil, err
+			}
 			return connection, nil
 		}
-		lastErr = dialErr
 	}
-	return nil, lastErr
+	return pinned, transport, nil
 }
 
 type generatedSAMLSPKey struct {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -11,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -26,6 +28,12 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+type staticMetadataResolver []netip.Addr
+
+func (r staticMetadataResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return r, nil
 }
 
 func TestAssessSAMLMetadataReturnsCompleteDiffAndOnlyRequiresNewTrust(t *testing.T) {
@@ -268,6 +276,64 @@ func TestSAMLMetadataIPClassifierAllowsOnlyPublicAddresses(t *testing.T) {
 		if got := metadataIPIsNonPublic(address); got != test.nonPublic {
 			t.Errorf("metadataIPIsNonPublic(%s) = %v, want %v", address, got, test.nonPublic)
 		}
+	}
+}
+
+func TestSAMLMetadataTransportPinsPublicIPThroughConfiguredProxy(t *testing.T) {
+	proxyURL, err := url.Parse("https://proxy.internal:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = func(request *http.Request) (*url.URL, error) {
+		if request.URL.Host != "idp.example" {
+			t.Fatalf("proxy selection saw host %q, want original idp.example", request.URL.Host)
+		}
+		return proxyURL, nil
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guard := &publicMetadataRoundTripper{
+		base:     base,
+		resolver: staticMetadataResolver{netip.MustParseAddr("8.8.8.8")},
+	}
+	pinned, transport, err := guard.prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.URL.Host != "8.8.8.8:443" || pinned.Host != "idp.example" {
+		t.Fatalf("pinned request URL host = %q, Host = %q", pinned.URL.Host, pinned.Host)
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.ServerName != "idp.example" {
+		t.Fatalf("TLS server name = %#v, want idp.example", transport.TLSClientConfig)
+	}
+	selectedProxy, err := transport.Proxy(pinned)
+	if err != nil || selectedProxy.String() != proxyURL.String() {
+		t.Fatalf("selected proxy = %v, %v; want %s", selectedProxy, err, proxyURL)
+	}
+	if transport.DialTLSContext == nil {
+		t.Fatal("HTTPS proxy has no separate first-hop TLS verifier")
+	}
+}
+
+func TestSAMLMetadataTransportRefusesPrivateResolutionBeforeProxy(t *testing.T) {
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = func(*http.Request) (*url.URL, error) {
+		return url.Parse("http://proxy.internal:8080")
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := &publicMetadataRoundTripper{
+		base:     base,
+		resolver: staticMetadataResolver{netip.MustParseAddr("10.0.0.4")},
+	}
+	if _, _, err := guard.prepare(request); err == nil {
+		t.Fatal("private DNS result reached configured proxy")
 	}
 }
 
