@@ -36,7 +36,7 @@ hierarchy:
   hikyo project rename <project> --name <new-name>
   hikyo project delete <project> --confirm <project-name>   irreversible: shreds the key
   hikyo env list|show|create|rename|reorder|delete   --org/--project select the project
-  hikyo env create --name <name>
+  hikyo env create --name <name> [--clone-from <env>]   clone copies that env's values
   hikyo env rename <env> --name <new-name>
   hikyo env reorder <env-id,env-id,...>             the whole ordered set, once each
   hikyo folder list|show|create|rename|delete       --org/--project select the project
@@ -48,6 +48,15 @@ hierarchy:
   hikyo key declare <key> --declaration <json> [--required-in all|none|<ids>]
   hikyo key reclassify <key> --classification secret|config    the ceremony, never update
   hikyo key group list|show|create|rename|delete
+
+values:                                            --env selects the environment
+  hikyo values list [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values get <KEY> [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values set <KEY> (--stdin | --value-file PATH)   never a value on argv
+  hikyo values set <KEY> --clear                    clear to absent
+  hikyo values declare <KEY> --envs <env,env> (--stdin | --value-file PATH)
+  hikyo values diff --left <env> --right <env> [--reveal] [--output-file PATH | --dangerously-print]
+  hikyo values copy --from <env> --to <env,env> --keys <KEY,KEY> [--confirm-protected]
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

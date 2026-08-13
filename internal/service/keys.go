@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -1092,6 +1093,21 @@ func (s *Keys) Delete(ctx context.Context, actor Actor, scope domain.Scope, id s
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
 			return err
+		}
+		// A key any environment still holds a value for is REFUSED, naming
+		// those environments (#50). Deleting the declaration would destroy
+		// delivered material in every one of them, and the authority for that
+		// is per-affected-environment `publish` — which is the publish
+		// pipeline's to evaluate (#51), not this operation's to assume. The
+		// operator clears the values first, which is an act they can already
+		// authorize per environment.
+		envs, err := r.Values().EnvironmentsWithValue(ctx, p, id)
+		if err != nil {
+			return err
+		}
+		if len(envs) > 0 {
+			return fmt.Errorf("%w: key %q still holds values in environment(s) %s — clear them first",
+				domain.ErrConflict, before.Name, strings.Join(envs, ", "))
 		}
 		// The presence rows reference this key, so they go first: the composite
 		// foreign key would otherwise refuse the delete, which is the correct

@@ -77,6 +77,74 @@ const (
 	OpKeySecretRuleChange Operation = "key.secret-rule-change"
 	OpKeyDeclassify       Operation = "key.declassify"
 
+	// The flat value model (#50, flat-model ADR + permission-model ADR's
+	// locked formula table). Every operation addresses ENVIRONMENT depth: a
+	// value attaches to a (key, environment) and there are no other layers,
+	// so there is no shallower thing to address.
+	//
+	// The formulas, and why each is what it is:
+	//
+	//   - read      → `read(E)`. The permission ADR's `read` carries "the
+	//                 project key catalogue … validation status, diffs
+	//                 (write-presence only for `secret` keys); **`config`
+	//                 values**". Presence is write-presence; `config`
+	//                 plaintext rides `read` because classification IS the
+	//                 sensitivity boundary.
+	//   - reveal    → `read(E) ∧ reveal(E)`, the locked disclosure row for
+	//                 current `secret` material, with one audit event per
+	//                 disclosed key.
+	//   - write     → `edit(E) ∧ publish(E)`. `edit` alone is the ADR's
+	//                 working-state atom and "creates no revision"; this slice
+	//                 has no working state, so a write here IS delivered
+	//                 material the moment it commits. Requiring `publish` as
+	//                 well is the fail-closed reading of the same table that
+	//                 puts `publish(destination)` on every operation that
+	//                 makes an environment start delivering something. When
+	//                 #51 lands drafts, the draft write is `edit` alone and
+	//                 this pair moves to the publish step.
+	//   - copy      → the locked row, split across the two scopes it names,
+	//                 because a formula is evaluated against ONE addressed
+	//                 scope and this one spans two: `reveal(source E)` on the
+	//                 source and `reveal(destination E) ∧ publish(destination
+	//                 E)` on each destination. Clone-at-creation and
+	//                 bulk-apply are the same pair — the ADR's three
+	//                 ergonomic operations differ in what they copy, never in
+	//                 what authorizes it.
+	//
+	// `reveal-history(source E)` — the historical-material half of the locked
+	// row — has no operation here because this slice stores no historical
+	// material: revisions are #51's. It joins when its material does.
+	OpValueRead   Operation = "value.read"
+	OpValueList   Operation = "value.list"
+	OpValueReveal Operation = "value.reveal"
+	OpValueSet    Operation = "value.set"
+	OpValueClear  Operation = "value.clear"
+	// The copy pair. Both are reached by copy-to, bulk-apply AND
+	// clone-at-creation: one authorization story for every server-side
+	// duplication of stored material, which is exactly what the flat model's
+	// closed trigger list asks for.
+	OpValueCopySource      Operation = "value.copy-source"
+	OpValueCopyDestination Operation = "value.copy-destination"
+	// The destination leg for `config` material, which is NOT reveal-gated on
+	// either side. One surface, two registry rows, because one formula cannot
+	// express two authorization stories — the same shape credential-reset's
+	// org/instance pair takes.
+	//
+	// This is not a softening of the locked row; it is the only reading under
+	// which the locked row's own consequences are reachable. Grants inherit
+	// DOWNWARD only, so `reveal` on an environment that does not exist yet can
+	// come only from a project-or-wider grant — which necessarily covers every
+	// source environment in that project. Requiring destination `reveal` for
+	// `config` material would therefore make source-`reveal` always hold at a
+	// clone, and the flat-model ADR's "creation proceeds and the uncopied
+	// secrets land absent, enumerated by name" — and mvp-boundary C2's "a clone
+	// that would leave a `mode: all` required secret absent aborts naming the
+	// keys" — would be unreachable text. The gate is classification-scoped in
+	// its own wording ("begin delivering a **`secret`** value occurrence the
+	// publisher did not supply"), and the permission ADR puts `config` values
+	// under `read`.
+	OpValueCopyDestinationConfig Operation = "value.copy-destination-config"
+
 	OpKeyGroupCreate Operation = "key-group.create"
 	OpKeyGroupGet    Operation = "key-group.get"
 	OpKeyGroupList   Operation = "key-group.list"
@@ -276,6 +344,17 @@ const (
 	StoreFoldersRename StoreOp = "folders.Rename"
 	StoreFoldersDelete StoreOp = "folders.Delete"
 
+	// The flat value model (#50). `values.*` rather than `value.*` to match
+	// the CLI noun and to keep the prefix distinct from `catalogue.*` (the
+	// key DECLARATIONS) and `keys.*` (the KEYRING, #43) — three neighbouring
+	// senses of "key" that must never share a store-op prefix.
+	StoreValuesGet                   StoreOp = "values.Get"
+	StoreValuesList                  StoreOp = "values.List"
+	StoreValuesEnvironmentsWithValue StoreOp = "values.EnvironmentsWithValue"
+	StoreValuesPut                   StoreOp = "values.Put"
+	StoreValuesClear                 StoreOp = "values.Clear"
+	StoreValuesClearEnvironment      StoreOp = "values.ClearEnvironment"
+
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
 	// belongs to is part of its AAD, not a tenant predicate.
@@ -303,30 +382,33 @@ const (
 // op it can invoke is in this set. A wrongly listed op is caught by review
 // of this pinned table, exactly like the formula pins.
 var readOnlyStoreOps = map[StoreOp]bool{
-	StoreOrgsGet:                  true,
-	StoreOrgsList:                 true,
-	StoreOrgsCount:                true,
-	StoreProjectsGet:              true,
-	StoreProjectsList:             true,
-	StoreEnvironmentsGet:          true,
-	StoreEnvironmentsList:         true,
-	StoreEnvironmentsCount:        true,
-	StoreEnvironmentsNextOrder:    true,
-	StoreFoldersGet:               true,
-	StoreFoldersList:              true,
-	StoreEnvironmentsGetSettings:  true,
-	StoreCatalogueGet:             true,
-	StoreCatalogueList:            true,
-	StoreCatalogueCount:           true,
-	StoreCatalogueGroupGet:        true,
-	StoreCatalogueGroupList:       true,
-	StoreCatalogueGroupCount:      true,
-	StoreCataloguePresenceList:    true,
-	StoreCatalogueRevisionGet:     true,
-	StoreKeysActiveMasterWrappers: true,
-	StoreKeysActiveTier3:          true,
-	StoreAuditTenantPage:          true,
-	StoreAuditInstancePage:        true,
+	StoreOrgsGet:                     true,
+	StoreOrgsList:                    true,
+	StoreOrgsCount:                   true,
+	StoreProjectsGet:                 true,
+	StoreProjectsList:                true,
+	StoreEnvironmentsGet:             true,
+	StoreEnvironmentsList:            true,
+	StoreEnvironmentsCount:           true,
+	StoreEnvironmentsNextOrder:       true,
+	StoreFoldersGet:                  true,
+	StoreFoldersList:                 true,
+	StoreEnvironmentsGetSettings:     true,
+	StoreCatalogueGet:                true,
+	StoreCatalogueList:               true,
+	StoreCatalogueCount:              true,
+	StoreCatalogueGroupGet:           true,
+	StoreCatalogueGroupList:          true,
+	StoreCatalogueGroupCount:         true,
+	StoreCataloguePresenceList:       true,
+	StoreCatalogueRevisionGet:        true,
+	StoreValuesGet:                   true,
+	StoreValuesList:                  true,
+	StoreValuesEnvironmentsWithValue: true,
+	StoreKeysActiveMasterWrappers:    true,
+	StoreKeysActiveTier3:             true,
+	StoreAuditTenantPage:             true,
+	StoreAuditInstancePage:           true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -686,7 +768,12 @@ var operations = map[Operation]opSpec{
 			StoreCataloguePresenceList: true, StoreCataloguePresenceCascade: true,
 			StoreCatalogueList: true, StoreCatalogueUpdateDeclaration: true,
 			StoreCatalogueRevisionBump: true,
-			StoreEnvironmentsDelete:    true, StoreAuditTenantInsert: true,
+			// The environment's own values go with it (#50): they attach to
+			// this environment and nothing else, the composite foreign key
+			// would refuse the delete while they existed, and there is no
+			// other environment for them to survive in.
+			StoreValuesClearEnvironment: true,
+			StoreEnvironmentsDelete:     true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventEnvDeleted},
 	},
@@ -804,7 +891,13 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreProjectsLock: true, StoreCatalogueGet: true,
 			StoreCataloguePresenceReplace: true, StoreCatalogueDelete: true,
-			StoreCatalogueRevisionBump: true, StoreAuditTenantInsert: true,
+			// A key that any environment still holds a value for is REFUSED
+			// (#50), naming those environments: destroying delivered material
+			// needs the per-affected-environment `publish` leg, which is the
+			// publish pipeline's to define (#51). Reading which environments
+			// those are is what this store op is for.
+			StoreValuesEnvironmentsWithValue: true,
+			StoreCatalogueRevisionBump:       true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventKeyDeleted},
 	},
@@ -850,6 +943,152 @@ var operations = map[Operation]opSpec{
 		level:   domain.LevelProject,
 		formula: Formula{{Cap: domain.CapReveal, At: domain.LevelProject}},
 		events:  []audit.EventType{audit.EventKeyRevealGateAttempt},
+	},
+
+	// The flat value model (#50). Every mutation takes the project row first,
+	// for the same reason the catalogue does: a value is validated against the
+	// key's declaration, and a concurrent declaration change would otherwise
+	// let a value commit against rules that no longer exist. It costs
+	// per-project write serialization on values, which is the same ceiling the
+	// schema already pays and is nowhere near binding for the write rate a
+	// configuration store sees.
+	//
+	// Reads resolve the key by NAME through the catalogue list, so every value
+	// operation carries StoreCatalogueList: `values set DATABASE_URL` is the
+	// spelling the CLI ADR fixes, and the id is server vocabulary.
+	OpValueRead: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StoreValuesGet: true,
+		},
+		// Write-presence and `config` plaintext, mutating nothing: the exact
+		// shape the audited-none permit rule accepts. A `secret` plaintext
+		// read is NOT this operation — it is OpValueReveal, which audits.
+		auditedNone: true,
+	},
+	OpValueList: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			// Values().Get joins List because the `config` half of a copy and
+			// of a clone reads its material under THIS operation: `config`
+			// values are `read`-class material, so duplicating them needs no
+			// reveal-gated read anywhere.
+			StoreCatalogueList: true, StoreValuesList: true, StoreValuesGet: true,
+			// The presence rules are project schema, which the permission ADR
+			// puts under `read` along with the rest of the catalogue. The
+			// clone preflight reads them here to answer "would this leave a
+			// required secret absent?" before anything is written.
+			StoreCataloguePresenceList: true,
+		},
+		auditedNone: true,
+	},
+	// The disclosure operation. `read ∧ reveal` is the permission ADR's locked
+	// row for current `secret` material; the MFA-mandatory rule rides along
+	// automatically, because `reveal` is in MFAMandatory and the chokepoint
+	// evaluates that after the grant check.
+	OpValueReveal: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelEnv},
+			{Cap: domain.CapReveal, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StoreValuesGet: true, StoreValuesList: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueRevealed},
+	},
+	OpValueSet: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapEdit, At: domain.LevelEnv},
+			{Cap: domain.CapPublish, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreValuesPut: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueSet},
+	},
+	OpValueClear: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapEdit, At: domain.LevelEnv},
+			{Cap: domain.CapPublish, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			// A key `required_in` this environment refuses to be cleared, so
+			// the presence rows are an input to the clear as much as to the
+			// write.
+			StoreCataloguePresenceList: true,
+			StoreValuesClear:           true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueCleared},
+	},
+	// The source half of the locked copy row. It records one disclosure event
+	// per `secret` key whose plaintext it opened — the source-side fact the
+	// destination-side `value_copied` event does not carry. The open is always
+	// reached only once no in-transaction abort can roll it back: copy authorizes
+	// every destination (formula and protected-destination ceremony) BEFORE
+	// opening any source secret (see service.Copy), and clone runs its
+	// born-invalid abort against a plan that opens nothing, opening the material
+	// only after the abort cannot fire (see service.cloneInto). So this event is
+	// only ever written for material genuinely read, and never written-then-rolled-
+	// back. `config` material opens no event, because reading it discloses nothing
+	// beyond the `read` the caller has.
+	//
+	// It is NOT audited-none: the permit rule is bare `read` and nothing more,
+	// and this formula is `reveal`.
+	OpValueCopySource: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapReveal, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StoreValuesGet: true, StoreValuesList: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueRevealed},
+	},
+	// The destination half for SECRET material: `reveal ∧ publish` on the
+	// environment that is about to start delivering material its publisher did
+	// not supply. Reached by copy-to, bulk-apply and clone-at-creation alike.
+	OpValueCopyDestination: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapReveal, At: domain.LevelEnv},
+			{Cap: domain.CapPublish, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreEnvironmentsGetSettings: true,
+			StoreValuesPut: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueCopied},
+	},
+	// The destination half for CONFIG material: `publish` alone. Classification
+	// IS the sensitivity boundary, so duplicating a value that any reader of
+	// the destination could already read discloses nothing; what it does do is
+	// change what the environment delivers, which is `publish`.
+	OpValueCopyDestinationConfig: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapPublish, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreEnvironmentsGetSettings: true,
+			StoreValuesPut: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventValueCopied},
 	},
 
 	OpKeyGroupCreate: {

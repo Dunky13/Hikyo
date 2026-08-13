@@ -66,7 +66,7 @@ func RunMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger) error
 type Server struct {
 	Addr    string
 	db      *store.DB
-	keyring *crypto.Keyring // held for the process lifetime; consumed by later tickets
+	keyring *crypto.Keyring // held for the process lifetime
 	ln      net.Listener
 	handler http.Handler
 	log     *slog.Logger
@@ -197,13 +197,17 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	}
 
 	api := &server.API{
-		Auth:         authSvc,
-		SAMLAuth:     authSvc,
-		Orgs:         &service.Orgs{DB: db},
-		Projects:     &service.Projects{DB: db},
-		Environments: &service.Environments{DB: db},
+		Auth:     authSvc,
+		SAMLAuth: authSvc,
+		Orgs:     &service.Orgs{DB: db},
+		Projects: &service.Projects{DB: db},
+		// The keyring reaches the value surface (#50): clone-at-creation and
+		// every value write re-seal under the project data key, in the
+		// transaction that writes the row.
+		Environments: &service.Environments{DB: db, Keyring: kr},
 		Folders:      &service.Folders{DB: db},
 		Keys:         &service.Keys{DB: db},
+		Values:       &service.Values{DB: db, Keyring: kr},
 		KeyGroups:    &service.KeyGroups{DB: db},
 		// One Auth across the grant surface, the settings knob and the machine
 		// identity surface: the reauthentication conjunct a machine widening

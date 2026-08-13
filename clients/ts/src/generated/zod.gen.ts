@@ -265,6 +265,20 @@ export const zCreateEnvironmentRequest = z.object({
     name: zEntityName
 });
 
+export const zCloneEnvironmentRequest = z.object({
+    name: zEntityName,
+    source_environment_id: zId
+});
+
+export const zSetValueRequest = z.object({
+    value: z.string().max(65536)
+});
+
+export const zRevealDiffRequest = z.object({
+    left: zId,
+    right: zId
+});
+
 /**
  * An environment carries NO `base` pointer and no defaults layer, here or
  * anywhere: the flat-model ADR deleted both, and every value is explicit
@@ -546,6 +560,32 @@ export const zEnvironmentSettings = z.object({
  */
 export const zKeyName = z.string().min(1).max(128).regex(/^[A-Z_][A-Z0-9_]*$/);
 
+export const zClonedEnvironment = z.object({
+    environment: zEnvironment,
+    copied: z.array(zKeyName),
+    uncopied_secrets: z.array(zKeyName)
+});
+
+export const zDeclareValuesRequest = z.object({
+    key: zKeyName,
+    environment_ids: z.array(zId).min(1).max(50),
+    value: z.string().max(65536)
+});
+
+export const zCopyValuesRequest = z.object({
+    source_environment_id: zId,
+    keys: z.array(zKeyName).min(1).max(1000),
+    destination_environment_ids: z.array(zId).min(1).max(50),
+    confirm_protected: z.optional(z.boolean()).default(false)
+});
+
+export const zCopyValuesResult = z.object({
+    copied: z.array(z.object({
+        key: zKeyName,
+        destination_environment_id: zId
+    }))
+});
+
 /**
  * Classification IS the sensitivity boundary. A matrix row is uniformly
  * secret or config; it changes only through the reclassification
@@ -554,6 +594,47 @@ export const zKeyName = z.string().min(1).max(128).regex(/^[A-Z_][A-Z0-9_]*$/);
  *
  */
 export const zKeyClassification = z.enum(['secret', 'config']);
+
+/**
+ * One `(key, environment)` cell.
+ *
+ * PRESENCE IS THE SINGLE BOOLEAN `set`. That is the whole presence
+ * model: there is no mode, no enum with a third member, and nothing
+ * named `masked` anywhere in this contract - the flat-model ADR deleted
+ * that state with the inheritance it existed to explain. A cell that is
+ * not `set` carries no value from any source.
+ *
+ */
+export const zValueCell = z.object({
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    set: z.boolean(),
+    revealed: z.boolean(),
+    value: z.optional(z.string()),
+    updated_at: z.optional(zTimestamp),
+    updated_by: z.optional(z.string())
+});
+
+export const zValueList = z.object({
+    items: z.array(zValueCell),
+    count: z.int().gte(0)
+});
+
+export const zValueDiffRow = z.object({
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    left: zValueCell,
+    right: zValueCell,
+    equal: z.optional(z.boolean())
+});
+
+export const zValueDiff = z.object({
+    left_environment_id: zId,
+    right_environment_id: zId,
+    items: z.array(zValueDiffRow)
+});
 
 /**
  * The key's namespace within the project. Organizational only: a plain
@@ -1082,6 +1163,14 @@ export const zGrantCapability = zCapability;
 export const zKeyId = zId;
 
 /**
+ * The key's NAME, not its id. Values are addressed the way an operator
+ * holds them - `values set DATABASE_URL` - and the id is server
+ * vocabulary that appears only in responses and audit records.
+ *
+ */
+export const zValueKeyName = zKeyName;
+
+/**
  * Key group identifier.
  */
 export const zKeyGroupId = zId;
@@ -1388,6 +1477,20 @@ export const zCreateEnvironmentData = z.object({
  * The created environment.
  */
 export const zCreateEnvironmentResponse = zEnvironment;
+
+export const zCloneEnvironmentData = z.object({
+    body: zCloneEnvironmentRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created environment and what the clone carried.
+ */
+export const zCloneEnvironmentResponse = zClonedEnvironment;
 
 export const zReorderEnvironmentsData = z.object({
     body: zEnvironmentOrderRequest,
@@ -1965,6 +2068,159 @@ export const zRenameKeyGroupData = z.object({
  * The renamed group.
  */
 export const zRenameKeyGroupResponse = zKeyGroup;
+
+export const zListValuesData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment's resolved values.
+ */
+export const zListValuesResponse = zValueList;
+
+export const zClearValueData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        key: zKeyName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The cell is absent. Clearing an already-absent cell says the same thing.
+ */
+export const zClearValueResponse = z.void();
+
+export const zGetValueData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        key: zKeyName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The cell, `set` or `absent`.
+ */
+export const zGetValueResponse = zValueCell;
+
+export const zSetValueData = z.object({
+    body: zSetValueRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        key: zKeyName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The cell as stored. It never echoes the value back.
+ */
+export const zSetValueResponse = zValueCell;
+
+export const zDeclareValuesData = z.object({
+    body: zDeclareValuesRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The cells as stored, one per environment.
+ */
+export const zDeclareValuesResponse = zValueList;
+
+export const zCopyValuesData = z.object({
+    body: zCopyValuesRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * What landed, one entry per (key, destination).
+ */
+export const zCopyValuesResponse = zCopyValuesResult;
+
+export const zDiffValuesData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.object({
+        left: zId,
+        right: zId
+    })
+});
+
+/**
+ * One row per declared key.
+ */
+export const zDiffValuesResponse = zValueDiff;
+
+export const zRevealValuesData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The environment's resolved values, `secret` plaintext included.
+ */
+export const zRevealValuesResponse = zValueList;
+
+export const zRevealValueData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        key: zKeyName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The cell, plaintext included.
+ */
+export const zRevealValueResponse = zValueCell;
+
+export const zRevealValueDiffData = z.object({
+    body: zRevealDiffRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * One row per declared key, plaintext included.
+ */
+export const zRevealValueDiffResponse = zValueDiff;
 
 export const zAuthMethodsData = z.object({
     body: z.optional(z.never()),

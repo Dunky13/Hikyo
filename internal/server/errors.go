@@ -68,13 +68,20 @@ var statuses = map[apigen.ErrorCode]int{
 }
 
 // errorBody builds the wire body for a code. detail is honoured only for
-// bad_request; everywhere else it is dropped, because a uniform response with
-// a varying member is not uniform.
+// bad_request and conflict; everywhere else it is dropped, because a uniform
+// response with a varying member is not uniform.
+//
+// detail ONLY ever arrives from an explicit SafeDetail-carrying error (see
+// writeHandlerError). A plain conflict — one that wraps domain.ErrConflict with
+// no SafeDetail — carries no detail and stays byte-identical to every other
+// conflict. The single conflict that opts in is the protected-destination
+// refusal, whose detail is the caller's OWN destination id (post-authorization,
+// so naming it discloses nothing).
 func errorBody(code apigen.ErrorCode, detail string) apigen.Error {
 	var body apigen.Error
 	body.Error.Code = code
 	body.Error.Message = messages[code]
-	if code == apigen.ErrorCodeBadRequest && detail != "" {
+	if (code == apigen.ErrorCodeBadRequest || code == apigen.ErrorCodeConflict) && detail != "" {
 		body.Error.Detail = &detail
 	}
 	return body

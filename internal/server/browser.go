@@ -64,7 +64,7 @@ func browserCookiesFor(sessionToken, csrfToken string) []*http.Cookie {
 	if csrfToken != "" {
 		cookies = append(cookies, &http.Cookie{
 			Name: browserCSRFCookie, Value: csrfToken,
-			// Strict, not Lax: nothing navigates to wenv expecting to arrive
+			// Strict, not Lax: nothing navigates to hikyo expecting to arrive
 			// already able to mutate. The session cookie stays Lax because the
 			// OIDC callback is a top-level cross-site navigation that must
 			// carry it.

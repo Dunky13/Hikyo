@@ -1,6 +1,9 @@
 package schema
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Presence rules (schema-model ADR § Presence, as amended by the flat-model
 // ADR: presence resolves over `set | absent`, and the value a rule talks about
@@ -65,6 +68,25 @@ func CheckPresence(required, forbidden Presence) error {
 		return declErr("a key cannot be both `required_in` and `forbidden_in` the same environment (%s)", why)
 	}
 	return nil
+}
+
+// Covers answers whether this rule applies to one environment. `all` is
+// symbolic and therefore covers every environment including ones created after
+// the declaration was written — which is the whole reason the mode is stored
+// rather than expanded into ids.
+//
+// It is the value model's question (#50): "is this key forbidden here?" gates
+// a write, and "is it required here?" gates a clear. Both are decided against
+// the mode, never against a materialized id list.
+func (p Presence) Covers(envID string) bool {
+	switch p.Mode {
+	case PresenceAll:
+		return true
+	case PresenceExplicit:
+		return slices.Contains(p.Environments, envID)
+	default:
+		return false
+	}
 }
 
 // CheckGroupPresence is the same conflict across two members of one key group.

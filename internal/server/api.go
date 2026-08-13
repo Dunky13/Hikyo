@@ -118,6 +118,7 @@ type API struct {
 	Environments  EnvironmentService
 	Folders       FolderService
 	Keys          KeyService
+	Values        ValueService
 	KeyGroups     KeyGroupService
 	Grants        GrantService
 	Identities    IdentityService

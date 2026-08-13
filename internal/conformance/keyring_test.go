@@ -37,7 +37,10 @@ func newRoot(t *testing.T) []byte {
 // the ADR's distinct error.
 func scenarioKeyringLifecycle(t *testing.T, db *store.DB) {
 	ks := &keyring.Store{DB: db}
-	root := newRoot(t)
+	// The datastore's ONE root: whichever scenario loads the keyring first
+	// mints the hierarchy under it, and every later load in this corpus must
+	// present the same one (see sharedRoot).
+	root := sharedRoot(t, db)
 	rootCopy := bytes.Clone(root)
 
 	kr, err := crypto.LoadKeyring(t.Context(), ks, root)
@@ -127,14 +130,27 @@ func TestKnownPlaintextAbsentFromDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Scratch table standing in for the value rows of the flat-model ticket;
-	// the repository/crypto path under test is the real one.
-	if _, err := db.SQLiteWrite().ExecContext(t.Context(),
-		`CREATE TABLE dump_scratch (id TEXT PRIMARY KEY, ciphertext BLOB NOT NULL)`); err != nil {
-		t.Fatal(err)
+	// The REAL value row (#50), not a stand-in: the invariant is about what a
+	// datastore dump contains, so it has to be the table a dump would contain.
+	// The chain above it is seeded with raw SQL because this test is about
+	// bytes at rest, not about the service layer that normally writes them —
+	// the ciphertext itself came from the real sealer, sealed under the real
+	// AAD for this exact row.
+	for _, stmt := range []string{
+		`INSERT INTO orgs (id, name, active, metadata, created_at) VALUES ('org_dump', 'dump', TRUE, '{}', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO projects (id, org_id, name, created_at) VALUES ('prj_dump', 'org_dump', 'dump', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('org_dump', 'prj_dump', 0)`,
+		`INSERT INTO environments (id, org_id, project_id, name, note, display_order, created_at) VALUES ('env_1', 'org_dump', 'prj_dump', 'prod', '', 0, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at)
+		 VALUES ('key_db_password', 'org_dump', 'prj_dump', 'DB_PASSWORD', '', 'secret', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, '2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.SQLiteWrite().ExecContext(t.Context(), stmt); err != nil {
+			t.Fatalf("seed %q: %v", stmt, err)
+		}
 	}
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(),
-		`INSERT INTO dump_scratch (id, ciphertext) VALUES ('row_1', ?)`, ct); err != nil {
+		`INSERT INTO value_entries (id, org_id, project_id, environment_id, key_id, ciphertext, updated_at, updated_by)
+		 VALUES ('row_1', 'org_dump', 'prj_dump', 'env_1', 'key_db_password', ?, '2026-01-01T00:00:00Z', 'usr_dump')`, ct); err != nil {
 		t.Fatal(err)
 	}
 	// Merge the WAL into the main file so the dump is complete, then close.

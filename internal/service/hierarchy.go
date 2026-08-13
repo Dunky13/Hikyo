@@ -11,6 +11,7 @@ import (
 
 	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/store"
 	"github.com/Dunky13/hikyo/internal/store/tx"
@@ -581,8 +582,14 @@ func environmentOf(e store.Environment) Environment {
 }
 
 // Environments owns the environment surface.
+//
+// The Keyring is here only for clone-at-creation (#50): cloning re-seals every
+// copied value under the destination row's own AAD, and that has to happen in
+// the same transaction that creates the environment. A build without one can
+// still create environments; it refuses to clone, loudly.
 type Environments struct {
-	DB *store.DB
+	DB      *store.DB
+	Keyring *crypto.Keyring
 }
 
 // Environment methods address scope as a domain.Scope — the same shape
@@ -595,15 +602,54 @@ type Environments struct {
 // transaction as the insert, so the cap cannot be walked past by two
 // concurrent creates.
 func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Scope, name string) (Environment, error) {
+	env, _, err := s.create(ctx, actor, scope, name, "")
+	return env, err
+}
+
+// Clone is create-with-clone-at-creation (#50, flat-model ADR § Ergonomics):
+// the new environment is born holding a copy of another environment's values.
+//
+// It is ONE act. The environment row, every copied value and the audit records
+// for both commit together or not at all — the atomicity rule admits no
+// partially-valid creation, and a clone that aborted after creating the
+// environment would leave exactly that.
+//
+// The copy is preflighted, and the preflight can ABORT the creation: see
+// cloneInto. What could not be copied comes back enumerated by name, never
+// silently absent.
+func (s *Environments) Clone(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string) (Environment, CloneResult, error) {
+	if sourceEnvID == "" {
+		return Environment{}, CloneResult{}, fmt.Errorf("%w: clone names a source environment", domain.ErrInvalid)
+	}
+	return s.create(ctx, actor, scope, name, sourceEnvID)
+}
+
+func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Scope, name, sourceEnvID string) (Environment, CloneResult, error) {
 	if err := checkName("environment name", name); err != nil {
-		return Environment{}, err
+		return Environment{}, CloneResult{}, err
 	}
 	id, err := newID("env")
 	if err != nil {
-		return Environment{}, err
+		return Environment{}, CloneResult{}, err
+	}
+	// The sealer is resolved before the transaction opens: the keyring's store
+	// adapter runs transactions of its own, and sqlite serves writes on a
+	// single connection, so resolving it inside would wait on the connection
+	// this transaction holds. A plain create needs none.
+	var sealer *crypto.ProjectSealer
+	if sourceEnvID != "" {
+		// After authorization, never before: resolving a sealer MINTS the
+		// project data key on first use, and an unauthorized caller must not
+		// leave a wrapped-key row behind (see service.sealerFor).
+		sealer, err = sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpEnvCreate, scope)
+		if err != nil {
+			return Environment{}, CloneResult{}, err
+		}
 	}
 	var created store.NewEnvironment
+	var clone CloneResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		clone = CloneResult{}
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -651,16 +697,26 @@ func (s *Environments) Create(ctx context.Context, actor Actor, scope domain.Sco
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, ev)
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		if sourceEnvID == "" {
+			return nil
+		}
+		// The row exists now, so the destination half of the copy formula can
+		// be evaluated against the environment being created — which is what
+		// the ADR requires it to be evaluated against.
+		clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID)
+		return err
 	})
 	if err != nil {
-		return Environment{}, err
+		return Environment{}, CloneResult{}, err
 	}
 	return Environment{
 		ID: created.ID, OrgID: string(scope.Org), ProjectID: string(scope.Project),
 		Name: created.Name, Note: created.Note,
 		DisplayOrder: created.DisplayOrder, CreatedAt: created.CreatedAt,
-	}, nil
+	}, clone, nil
 }
 
 func (s *Environments) Get(ctx context.Context, actor Actor, scope domain.Scope) (Environment, error) {
@@ -861,6 +917,17 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 		// otherwise. It also collapses any explicit set it empties and moves
 		// the catalogue revision; see cascadeEnvironmentPresence.
 		if err := cascadeEnvironmentPresence(ctx, r, p, string(scope.Env)); err != nil {
+			return err
+		}
+		// The environment's values go with it (#50), in the same transaction
+		// and for the same structural reason: they attach to this environment
+		// and to nothing else, the composite foreign key would refuse the
+		// delete while they existed, and the flat model gives them nowhere
+		// else to live. Deleting an environment IS deleting its values; the
+		// alternative — refusing the delete until every cell is cleared by
+		// hand — makes an environment undeletable in proportion to how much it
+		// was used.
+		if err := r.Values().ClearEnvironment(ctx, p); err != nil {
 			return err
 		}
 		if err := r.Environments().Delete(ctx, p); err != nil {

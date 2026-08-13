@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -438,6 +438,39 @@ export const listEnvironments = <ThrowOnError extends boolean = false>(options: 
 export const createEnvironment = <ThrowOnError extends boolean = false>(options: Options<CreateEnvironmentData, ThrowOnError>) => (options.client ?? client).post<CreateEnvironmentResponses, CreateEnvironmentErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/projects/{project}/environments',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Create an environment holding a copy of another one's values.
+ *
+ * Clone-at-creation is ONE act: the environment row, every copied value
+ * and the audit records for both commit together or not at all - the
+ * atomicity rule admits no partially-valid creation.
+ *
+ * The copy is preflighted. `config` values copy freely (freely meaning
+ * without the reveal gate, not without authorization); `secret` values
+ * copy only where the source-material gate passes, and a caller who
+ * cannot read them is NOT refused the creation - what could not be
+ * copied comes back enumerated by name. The one exception is the abort:
+ * a `secret` that would be ABSENT in the new environment - the gate
+ * blocked it, or the source never held it - and is `required_in` it
+ * under a `mode: all` rule ABORTS the creation, naming the keys, because
+ * an environment born invalid is exactly what the atomicity rule
+ * forbids.
+ *
+ * It is a separate route rather than a flag on `createEnvironment`
+ * because its RESPONSE is different: a clone has to report what it could
+ * not take.
+ *
+ */
+export const cloneEnvironment = <ThrowOnError extends boolean = false>(options: Options<CloneEnvironmentData, ThrowOnError>) => (options.client ?? client).post<CloneEnvironmentResponses, CloneEnvironmentErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/clone',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -1044,6 +1077,186 @@ export const getKeyGroup = <ThrowOnError extends boolean = false>(options: Optio
 export const renameKeyGroup = <ThrowOnError extends boolean = false>(options: Options<RenameKeyGroupData, ThrowOnError>) => (options.client ?? client).patch<RenameKeyGroupResponses, RenameKeyGroupErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/projects/{project}/key-groups/{group}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The environment's resolved values.
+ *
+ * One row per DECLARED key, each `set` or `absent`. In the flat model
+ * this IS the resolution - a lookup per key with nothing underneath - so
+ * an absent row carries no value from any source.
+ *
+ */
+export const listValues = <ThrowOnError extends boolean = false>(options: Options<ListValuesData, ThrowOnError>) => (options.client ?? client).get<ListValuesResponses, ListValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values',
+    ...options
+});
+
+/**
+ * Clear a value to `absent`.
+ *
+ * With nothing to inherit from, this is the whole of "remove this value
+ * now": there is no layer underneath for it to fall back to. A key
+ * `required_in` this environment refuses to be cleared, naming key and
+ * environment.
+ *
+ */
+export const clearValue = <ThrowOnError extends boolean = false>(options: Options<ClearValueData, ThrowOnError>) => (options.client ?? client).delete<ClearValueResponses, ClearValueErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}',
+    ...options
+});
+
+/**
+ * Read one value cell.
+ */
+export const getValue = <ThrowOnError extends boolean = false>(options: Options<GetValueData, ThrowOnError>) => (options.client ?? client).get<GetValueResponses, GetValueErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}',
+    ...options
+});
+
+/**
+ * Set one value.
+ *
+ * The caller SUPPLIES the plaintext, so no reveal is involved on any
+ * side: the formula is `edit` AND `publish` on the environment that is
+ * about to deliver it. The value is validated against the key's
+ * declaration before it commits, because in this slice what commits is
+ * what the environment delivers.
+ *
+ * A key that is `forbidden_in` this environment refuses the write, by
+ * name. A key that is not declared refuses too - typing a name that does
+ * not exist is a key CREATION, an explicit act elsewhere.
+ *
+ */
+export const setValue = <ThrowOnError extends boolean = false>(options: Options<SetValueData, ThrowOnError>) => (options.client ?? client).put<SetValueResponses, SetValueErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Declare one supplied value into several environments.
+ *
+ * Inheritance's legitimate job was "I do not want to type this four
+ * times"; this is the explicit operation that does it. One plaintext the
+ * caller supplies, several environments, one transaction - and no
+ * relationship between the copies: editing one later changes nothing
+ * elsewhere, by design.
+ *
+ * Authorized per DESTINATION. Holding the write formula on two of three
+ * environments writes into none of them.
+ *
+ */
+export const declareValues = <ThrowOnError extends boolean = false>(options: Options<DeclareValuesData, ThrowOnError>) => (options.client ?? client).post<DeclareValuesResponses, DeclareValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/values/declare',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Copy stored values into other environments (copy-to / bulk-apply).
+ *
+ * Server-side duplication of STORED material, which the flat model calls
+ * authorized duplication and never supply. The locked formula, evaluated
+ * per side and per classification:
+ *
+ * secret material: reveal(source) AND reveal(destination) AND publish(destination)
+ * config material:   read(source) AND                          publish(destination)
+ *
+ * Every copy is an INDEPENDENT value: the ciphertext is never carried
+ * over, the plaintext is re-sealed under the destination row's own
+ * associated data, and editing the source later changes nothing
+ * downstream.
+ *
+ * A protected destination refuses the copy unless `confirm_protected`
+ * says so, by name.
+ *
+ */
+export const copyValues = <ThrowOnError extends boolean = false>(options: Options<CopyValuesData, ThrowOnError>) => (options.client ?? client).post<CopyValuesResponses, CopyValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/values/copy',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Compare two environments' values.
+ *
+ * An explicit, authorized, per-invocation comparison - NOT an ambient
+ * drift signal: divergence between environments is the point of the flat
+ * model, so equality is not a health signal and nothing watches it.
+ *
+ * Oracle rules: write-presence without the reveal gate, plaintext only
+ * with it. Where both sides are `set` and at least one is unreadable,
+ * `equal` is ABSENT rather than false - whether two secrets match is
+ * itself material. Authorized per side, so `read` on one environment
+ * says nothing about the other.
+ *
+ */
+export const diffValues = <ThrowOnError extends boolean = false>(options: Options<DiffValuesData, ThrowOnError>) => (options.client ?? client).get<DiffValuesResponses, DiffValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/values/diff',
+    ...options
+});
+
+/**
+ * The environment's values, with `secret` plaintext.
+ *
+ * The locked disclosure formula for current material: `read(E)` AND
+ * `reveal(E)`, with reauthentication and ONE audit event per disclosed
+ * key - never one row saying "revealed 40 secrets".
+ *
+ * It is a POST, and a route of its own rather than a flag on the read,
+ * for two reasons that are the same reason: disclosure is an ACT (it
+ * writes the audit records that make it accountable), and the ADR's rule
+ * is one verb per disclosure path, one gate.
+ *
+ */
+export const revealValues = <ThrowOnError extends boolean = false>(options: Options<RevealValuesData, ThrowOnError>) => (options.client ?? client).post<RevealValuesResponses, RevealValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal',
+    ...options
+});
+
+/**
+ * Read one cell with `secret` plaintext.
+ */
+export const revealValue = <ThrowOnError extends boolean = false>(options: Options<RevealValueData, ThrowOnError>) => (options.client ?? client).post<RevealValueResponses, RevealValueErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}/reveal',
+    ...options
+});
+
+/**
+ * Compare two environments with `secret` plaintext.
+ *
+ * The gated half of `values diff`. Authorized PER SIDE - `reveal` on
+ * staging says nothing about prod - and one disclosure event per key per
+ * side.
+ *
+ */
+export const revealValueDiff = <ThrowOnError extends boolean = false>(options: Options<RevealValueDiffData, ThrowOnError>) => (options.client ?? client).post<RevealValueDiffResponses, RevealValueDiffErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/values/diff/reveal',
     ...options,
     headers: {
         'Content-Type': 'application/json',
