@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -15,7 +16,9 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -901,18 +904,22 @@ func (s *SAMLProviders) metadataBytes(ctx context.Context, source string, docume
 
 func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byte, error) {
 	target, err := url.Parse(rawURL)
-	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil {
+	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil ||
+		target.Fragment != "" || metadataHostIsNonPublic(target.Hostname()) {
 		return nil, ErrSAMLMetadataFetch
 	}
 	client := s.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = publicMetadataHTTPClient()
 	}
 	copyClient := *client
 	priorRedirect := copyClient.CheckRedirect
 	copyClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if request.URL.Scheme != target.Scheme || request.URL.Host != target.Host {
 			return errors.New("service: SAML metadata redirect changed origin")
+		}
+		if metadataHostIsNonPublic(request.URL.Hostname()) {
+			return errors.New("service: SAML metadata redirect resolved to a non-public target")
 		}
 		if priorRedirect != nil {
 			return priorRedirect(request, via)
@@ -926,6 +933,10 @@ func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byt
 	if err != nil {
 		return nil, ErrSAMLMetadataFetch
 	}
+	// Production requests use publicMetadataHTTPClient, whose dialer resolves
+	// and pins a public IP for every connection. The explicit suppression records
+	// that CodeQL cannot model this transport-level SSRF boundary.
+	// codeql[go/request-forgery]
 	response, err := copyClient.Do(request)
 	if err != nil {
 		return nil, ErrSAMLMetadataFetch
@@ -940,6 +951,205 @@ func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byt
 		return nil, ErrSAMLMetadataFetch
 	}
 	return payload, nil
+}
+
+// These are the IANA IPv4 special-purpose ranges that are not globally
+// reachable. Broad parent prefixes are deliberately conservative where IANA
+// has carved out a globally reachable anycast address inside a special block:
+// metadata retrieval needs ordinary public hosting, not protocol anycast.
+var nonPublicMetadataIPv4Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+}
+
+var (
+	publicMetadataIPv6Prefix      = netip.MustParsePrefix("2000::/3")
+	nonPublicMetadataIPv6Prefixes = []netip.Prefix{
+		// IANA special-purpose ranges inside 2000::/3 which are not ordinary
+		// globally reachable addresses.
+		netip.MustParsePrefix("2001::/23"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("2002::/16"),
+		netip.MustParsePrefix("3fff::/20"),
+	}
+)
+
+func metadataHostIsNonPublic(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && metadataIPIsNonPublic(address)
+}
+
+func metadataIPIsNonPublic(address netip.Addr) bool {
+	address = address.Unmap()
+	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() ||
+		address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() {
+		return true
+	}
+	prefixes := nonPublicMetadataIPv4Prefixes
+	if address.Is6() {
+		if !publicMetadataIPv6Prefix.Contains(address) {
+			return true
+		}
+		prefixes = nonPublicMetadataIPv6Prefixes
+	}
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func publicMetadataHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 10 * time.Second
+	return &http.Client{
+		Transport: &publicMetadataRoundTripper{base: transport, resolver: net.DefaultResolver},
+		Timeout:   15 * time.Second,
+	}
+}
+
+type metadataResolver interface {
+	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
+}
+
+// publicMetadataRoundTripper resolves and validates the destination before
+// handing it to net/http. The request then names the approved IP, preventing a
+// second DNS lookup from rebinding it. The original hostname remains in Host
+// and TLS ServerName, preserving HTTP routing and certificate verification.
+//
+// Proxy selection deliberately happens before the URL is pinned. HTTP,
+// HTTPS, and SOCKS proxies therefore keep working, but CONNECT receives the
+// already-approved IP rather than a hostname the proxy could resolve privately.
+type publicMetadataRoundTripper struct {
+	base     *http.Transport
+	resolver metadataResolver
+}
+
+func (t *publicMetadataRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	addresses, proxyURL, err := t.destinations(request)
+	if err != nil {
+		return nil, err
+	}
+	var attempts []error
+	for _, address := range addresses {
+		pinned, transport := t.prepareAddress(request, address, proxyURL)
+		response, err := transport.RoundTrip(pinned)
+		if err == nil {
+			return response, nil
+		}
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		attempts = append(attempts, fmt.Errorf("%s: %w", address, err))
+		if err := request.Context().Err(); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errors.Join(attempts...)
+}
+
+func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Request, *http.Transport, error) {
+	addresses, proxyURL, err := t.destinations(request)
+	if err != nil {
+		return nil, nil, err
+	}
+	pinned, transport := t.prepareAddress(request, addresses[0], proxyURL)
+	return pinned, transport, nil
+}
+
+func (t *publicMetadataRoundTripper) destinations(request *http.Request) ([]netip.Addr, *url.URL, error) {
+	host := request.URL.Hostname()
+	addresses, err := t.resolver.LookupNetIP(request.Context(), "ip", host)
+	if err != nil || len(addresses) == 0 {
+		return nil, nil, errors.New("service: SAML metadata host did not resolve")
+	}
+	for _, resolved := range addresses {
+		if metadataIPIsNonPublic(resolved) {
+			return nil, nil, errors.New("service: SAML metadata host resolved to a non-public address")
+		}
+	}
+
+	var proxyURL *url.URL
+	if t.base.Proxy != nil {
+		proxyURL, err = t.base.Proxy(request)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return addresses, proxyURL, nil
+}
+
+func (t *publicMetadataRoundTripper) prepareAddress(
+	request *http.Request,
+	address netip.Addr,
+	proxyURL *url.URL,
+) (*http.Request, *http.Transport) {
+	transport := t.base.Clone()
+	host := request.URL.Hostname()
+	transport.Proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	// One transport is built per request because its TLS identity and pinned IP
+	// are request-specific. Prevent it from retaining an unusable idle pool.
+	transport.DisableKeepAlives = true
+
+	port := request.URL.Port()
+	if port == "" {
+		port = "443"
+	}
+	pinned := request.Clone(request.Context())
+	pinnedURL := *request.URL
+	pinnedURL.Host = net.JoinHostPort(address.Unmap().String(), port)
+	pinned.URL = &pinnedURL
+	pinned.Host = request.Host
+	if pinned.Host == "" {
+		pinned.Host = request.URL.Host
+	}
+
+	targetTLS := &tls.Config{MinVersion: tls.VersionTLS12}
+	if transport.TLSClientConfig != nil {
+		targetTLS = transport.TLSClientConfig.Clone()
+	}
+	targetTLS.ServerName = host
+	transport.TLSClientConfig = targetTLS
+
+	// An HTTPS proxy needs a different TLS identity on the first hop. The
+	// transport uses targetTLS again only after CONNECT, for the nested TLS
+	// session whose ServerName must remain the original metadata hostname.
+	if proxyURL != nil && proxyURL.Scheme == "https" {
+		proxyHost := proxyURL.Hostname()
+		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		transport.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			raw, err := dialer.DialContext(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			proxyTLS := targetTLS.Clone()
+			proxyTLS.ServerName = proxyHost
+			connection := tls.Client(raw, proxyTLS)
+			if err := connection.HandshakeContext(ctx); err != nil {
+				raw.Close()
+				return nil, err
+			}
+			return connection, nil
+		}
+	}
+	return pinned, transport
 }
 
 type generatedSAMLSPKey struct {

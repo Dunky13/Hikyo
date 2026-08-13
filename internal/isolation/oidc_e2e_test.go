@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +53,9 @@ func configureProvider(t *testing.T, auth *service.Auth, ctx context.Context, ad
 	t.Cleanup(idp.Close)
 	if auth.ExternalOrigin == "" {
 		auth.ExternalOrigin = "https://hikyo.test"
+	}
+	if err := idp.RegisterRedirectURI(strings.TrimRight(auth.ExternalOrigin, "/") + "/api/v1/auth/oidc/" + slug + "/callback"); err != nil {
+		t.Fatal(err)
 	}
 	providers := &service.Providers{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 	in.Issuer = idp.Issuer()
@@ -607,6 +611,11 @@ func runOIDCReauthProviderRebind(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(idp.Close)
+	for _, slug := range []string{"p1", "p2"} {
+		if err := idp.RegisterRedirectURI(strings.TrimRight(auth.ExternalOrigin, "/") + "/api/v1/auth/oidc/" + slug + "/callback"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	providers := &service.Providers{DB: auth.DB, Keyring: auth.Keyring, ExternalOrigin: auth.ExternalOrigin}
 	policy := strptr(`{"amr_sets":[["mfa"]]}`)
 	if _, err := providers.Put(ctx, service.LocalPrincipal(admin), "p1", service.ProviderInput{

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -195,6 +196,13 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		budget, err := uintEnv(getenv, "HIKYO_ADMISSION_BUDGET_MIB", 272)
 		if err != nil {
 			return nil, nil, err
+		}
+		// Admission consumes an int in the limiter. Keep the serialized config
+		// portable across architectures instead of allowing uint32-to-int wrap on
+		// a 32-bit build.
+		if budget > math.MaxInt32 {
+			return nil, nil, fmt.Errorf(
+				"HIKYO_ADMISSION_BUDGET_MIB: %d exceeds the largest portable integer", budget)
 		}
 		cfg.AdmissionBudgetMiB = int(budget)
 
