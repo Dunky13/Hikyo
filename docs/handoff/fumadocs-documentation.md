@@ -2,10 +2,10 @@
 
 ## Outcome
 
-The GitHub Pages site keeps the custom landing page at `/hikyo/` and replaces
-Starlight with Fumadocs for documentation, policy, and release-trust routes.
-Astro remains the static-site host; Fumadocs UI runs as a React island and the
-search index is generated at build time.
+The GitHub Pages site serves the custom landing page at `https://hikyo.app/`
+and Fumadocs at `/docs/`, with policy and release-trust routes at the same
+domain root. Astro remains the static-site host; Fumadocs UI runs as a React
+island and the search index is generated at build time.
 
 ## Routes
 
@@ -21,12 +21,12 @@ Operations, and Reference sections.
 - Operations: self-hosting, configuration, backup/restore, upgrades, and troubleshooting.
 - Reference: CLI command families and the HTTP API contract.
 
-Existing root policy routes and `/hikyo/release/signing/` remain stable.
+Existing root policy routes and `/release/signing/` remain stable.
 
 ## Implementation notes
 
 - `docs/site/src/lib/source.ts` adapts Astro content collections to the Fumadocs page tree.
-- `docs/site/src/lib/site.ts` owns base-path URLs and the shared theme persistence contract.
+- `docs/site/src/lib/site.ts` owns site URLs and the shared theme persistence contract.
 - `docs/site/src/pages/[...slug].astro` statically renders every documentation route.
 - `docs/site/src/pages/api/search.json.ts` exports the browser search index at an explicit JSON URL that works in dev and on GitHub Pages.
 - `docs/site/scripts/prepare-content.mjs` remains the canonical policy-copy boundary.
@@ -43,3 +43,5 @@ Existing root policy routes and `/hikyo/release/signing/` remain stable.
 - Mobile document width: 390px viewport and 390px scroll width.
 - Expanded manual: 23 internal docs routes resolve and all guide titles appear in search.
 - Fumadocs integrity: deleting a page named by `meta.json` fails the OSS policy gate.
+- Custom-domain regression: generated HTML rejects stale `/hikyo/` asset and navigation URLs.
+- Post-deploy gate: landing and docs CSS/JavaScript must resolve from `hikyo.app` with expected content types.
