@@ -752,6 +752,230 @@
     ]
   },
   {
+    "operation": "scim-binding.create",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-binding.delete",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-binding.get",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-binding.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-credential.get",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-credential.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-credential.mint",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-credential.revoke",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-directory.groups",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-directory.users",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-discovery.read",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.create",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.delete",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.get",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.patch",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-group.replace",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-mapping.create",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-mapping.delete",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-mapping.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-mapping.update",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "manage-members@org"
+    ]
+  },
+  {
+    "operation": "scim-unsupported.refuse",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.create",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.delete",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.get",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.list",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.patch",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
+    "operation": "scim-user.replace",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "scim-provision@org"
+    ]
+  },
+  {
     "operation": "value.clear",
     "class": "tenant",
     "level": "environment",

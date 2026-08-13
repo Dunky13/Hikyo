@@ -29,7 +29,10 @@
     "cli:values": "client transport for the tenant-scoped value routes, whose operations carry the audit mapping",
     "cli:access": "client transport for the /grants routes at every depth, whose operations carry the audit mapping (grant.created / grant.modified / grant.revoked / grant.template_applied / grant.membership_read)",
     "cli:project-settings": "client transport for the environment settings routes, whose operations carry the audit mapping (settings.protected_flag_changed / settings.reauthentication_window_changed / auth.effective_window_lowered)",
-    "cli:sa": "client transport for the project-scoped service-account and credential routes, whose operations carry the audit mapping (identity.service_account_created / identity.service_account_deleted / identity.credential_minted / identity.credential_revoked / identity.credentials_listed)"
+    "cli:sa": "client transport for the project-scoped service-account and credential routes, whose operations carry the audit mapping (identity.service_account_created / identity.service_account_deleted / identity.credential_minted / identity.credential_revoked / identity.credentials_listed)",
+    "cli:scim": "client transport for the /scim-bindings routes, whose operations carry the audit mapping (scim.binding_* / scim.mapping_* / scim.credential_* / scim.directory_read)"
   },
-  "operations": {}
+  "operations": {
+    "scim-discovery.read": "SCIM discovery (#73 ADR §10): the three static documents carry no tenant data, so no event type is declared. It cannot take `audited: none` under the default-deny permit rule (that rule admits only bare-`read`, non-mutating, tenant-class operations; this one authenticates a provisioning credential and records last-contact), so the ADR's demanded explicit annotation on the probe class is this pinned entry."
+  }
 }

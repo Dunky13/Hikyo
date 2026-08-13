@@ -86,6 +86,12 @@ type Actor struct {
 	bearer    string
 	principal domain.PrincipalID
 	federated *FederatedCaller
+	// scimToken and scimBinding are the SCIM wire's own authentication (#73
+	// §7-8). The credential presented must match the binding IN THE PATH —
+	// mismatch is a named authentication failure, audited, and there is no
+	// ambient routing by credential.
+	scimToken   string
+	scimBinding string
 }
 
 // Bearer is the network path: a presented session artifact, resolved at the
@@ -119,6 +125,15 @@ func LocalPrincipal(p domain.PrincipalID) Actor { return Actor{principal: p} }
 // not a resolved principal, and no Hikyo state was read to produce it.
 func FederatedActor(c FederatedCaller) Actor { return Actor{federated: &c} }
 
+// SCIMCredentialActor is the SCIM wire path: a presented provisioning
+// credential plus the binding the request addressed. Both are resolved inside
+// the operation's own transaction, exactly like a session bearer, so a
+// credential revoked between resolution and authorization cannot still
+// authorize the operation.
+func SCIMCredentialActor(presented, bindingID string) Actor {
+	return Actor{scimToken: presented, scimBinding: bindingID}
+}
+
 // resolve returns the caller's live Identity. A LocalPrincipal actor is local
 // host authority: it carries no session, so its Identity has an empty SessionID
 // and is exempt from the MFA-mandatory assurance check at authorize(). A bearer
@@ -129,6 +144,9 @@ func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Tim
 	}
 	if a.federated != nil {
 		return az.AuthenticateFederated(ctx, a.federated.IssuerID, a.federated.Subject, a.federated.Check, now)
+	}
+	if a.scimToken != "" {
+		return resolveSCIMCredential(ctx, az, a, now)
 	}
 	if a.bearer == "" {
 		return authz.Identity{}, domain.ErrUnauthenticated

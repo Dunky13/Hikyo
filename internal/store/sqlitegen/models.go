@@ -396,6 +396,94 @@ type SamlTransaction struct {
 	ConsumedAt          sql.NullString
 }
 
+type ScimAttention struct {
+	ID         string
+	OrgID      string
+	BindingID  string
+	State      string
+	SubjectRef string
+	Cause      string
+	EnteredAt  string
+}
+
+type ScimBinding struct {
+	ID                       string
+	OrgID                    string
+	ProviderKind             string
+	ProviderID               string
+	ProviderSlug             string
+	ProviderIssuer           string
+	SubjectSource            string
+	NameidFormat             string
+	NameidQualifier          string
+	NameidQualifierPresent   int64
+	NameidSpQualifier        string
+	NameidSpQualifierPresent int64
+	ConnectionPrincipalID    string
+	LastContactAt            sql.NullString
+	CreatedAt                string
+}
+
+type ScimCredential struct {
+	ID              string
+	OrgID           string
+	BindingID       string
+	PrincipalID     string
+	Verifier        []byte
+	CredentialEpoch int64
+	CreatedAt       string
+	ExpiresAt       sql.NullString
+	RevokedAt       sql.NullString
+	LastUsedAt      sql.NullString
+}
+
+type ScimGroup struct {
+	ID               string
+	OrgID            string
+	BindingID        string
+	DisplayName      string
+	DisplayNameLower string
+	ExternalID       string
+	CreatedAt        string
+	UpdatedAt        string
+}
+
+type ScimGroupMember struct {
+	ID        string
+	OrgID     string
+	BindingID string
+	GroupID   string
+	UserID    string
+	CreatedAt string
+}
+
+type ScimMapping struct {
+	ID             string
+	OrgID          string
+	BindingID      string
+	GroupID        string
+	Template       string
+	ScopeProjectID string
+	ScopeEnvID     string
+	Inert          int64
+	CreatedAt      string
+}
+
+type ScimUser struct {
+	ID            string
+	OrgID         string
+	BindingID     string
+	AccountID     string
+	UserName      string
+	UserNameLower string
+	ExternalID    string
+	Subject       string
+	Active        int64
+	Attributes    string
+	CreatedAt     string
+	UpdatedAt     string
+}
+
 type ServiceAccount struct {
 	ID          string
 	PrincipalID string

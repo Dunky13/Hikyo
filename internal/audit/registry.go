@@ -427,6 +427,80 @@ const (
 	// whose value was not disclosed would be a false record of a disclosure.
 	// #61's accepted disposition stands: the criterion transfers to the ticket
 	// that ships values.
+	// The same reasoning applies to a machine authentication-failure event.
+	// A failed machine presentation today rides the SAME silent path a failed
+	// human session does at the chokepoint; giving machines a failure event
+	// humans do not have would claim an asymmetry the system does not
+	// implement. Both land with the fetch surface and the pre-authentication
+	// admission wiring.
+
+	// scim.* — SCIM provisioning (#73, scim-provisioning ADR §10). The set is
+	// CLOSED at that ADR's lock, with a versioned v1 payload schema per entry
+	// declared here rather than deferred: every field required unless the
+	// schema says otherwise, ids are the rows' own ids, IdP-originated strings
+	// are sanitized and bounded free text, and the derived subject NEVER
+	// appears in plaintext — `subject_digest` is its SHA-256 hex.
+	//
+	// One entry the ADR table names is deliberately ABSENT: `scim.binding_updated`.
+	// See the handoff — the locked administration surface fixes no
+	// binding-mutation verb (the subject source and NameID profile are
+	// immutable at creation, §5.1, and the provider reference is read-only,
+	// §1), so the binding row has no field a human can address. Registering an
+	// event with no emitter is exactly what the registry-closure invariant
+	// forbids.
+	EventSCIMUserProvisioned   EventType = "scim.user_provisioned"
+	EventSCIMUserUpdated       EventType = "scim.user_updated"
+	EventSCIMUserDeprovisioned EventType = "scim.user_deprovisioned"
+	EventSCIMUserDeleted       EventType = "scim.user_deleted"
+
+	EventSCIMGroupCreated    EventType = "scim.group_created"
+	EventSCIMGroupUpdated    EventType = "scim.group_updated"
+	EventSCIMGroupDeleted    EventType = "scim.group_deleted"
+	EventSCIMGroupMembership EventType = "scim.group_membership_changed"
+
+	// The lockout pair (§2.4). Entry names the retained grant and the cause;
+	// the cure event is its own registered name, not a flag on the first.
+	EventSCIMLockoutRetention         EventType = "scim.lockout_retention"
+	EventSCIMLockoutRetentionReleased EventType = "scim.lockout_retention_released"
+
+	EventSCIMBindingCreated EventType = "scim.binding_created"
+	EventSCIMBindingDeleted EventType = "scim.binding_deleted"
+
+	EventSCIMMappingCreated EventType = "scim.mapping_created"
+	EventSCIMMappingUpdated EventType = "scim.mapping_updated"
+	EventSCIMMappingDeleted EventType = "scim.mapping_deleted"
+
+	// `scim.credential_rotated` is not a second verb: overlap rotation IS
+	// mint-new-then-revoke-old, so a mint that joins an already-live credential
+	// is the rotation and says so, while the first mint of a binding's life is
+	// a plain mint.
+	EventSCIMCredentialMinted  EventType = "scim.credential_minted"
+	EventSCIMCredentialRotated EventType = "scim.credential_rotated"
+	EventSCIMCredentialRevoked EventType = "scim.credential_revoked"
+
+	EventSCIMAttentionEntered EventType = "scim.attention_entered"
+	EventSCIMAttentionCleared EventType = "scim.attention_cleared"
+
+	// The authenticated read/list/filter stream. `access` class, like the fetch
+	// stream: the ADR withdraws by name the earlier claim that every SCIM
+	// operation is mutating. The discovery endpoints are the one SCIM surface
+	// carrying no tenant data and are annotated as a probe class rather than
+	// being silently unaudited.
+	EventSCIMDirectoryRead EventType = "scim.directory_read"
+
+	// scim.admin_read is the ADMINISTRATION surface's read stream. It is a
+	// separate name rather than a widened `scim.directory_read` because §10
+	// closes that event's `resource_type` to `{user, group, discovery}` — the
+	// identity provider's own wire — and a binding, mapping or credential
+	// listing is a human reading configuration, not the IdP walking a
+	// directory. Same `access` retention class.
+	EventSCIMAdminRead EventType = "scim.admin_read"
+
+	// scim.credential_refused records an authentication failure on the wire —
+	// today, the credential-versus-binding-path mismatch §8 requires to be
+	// audited. The RESPONSE is the uniform 401 either way; the trail is where
+	// the distinction lives, which is the whole point of auditing it.
+	EventSCIMCredentialRefused EventType = "scim.credential_refused"
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -1500,6 +1574,136 @@ var registry = map[EventType]TypeSpec{
 			"cursor_presented": {Kind: KindBool, Required: true},
 		},
 	},
+
+	// --- SCIM provisioning (#73) ---------------------------------------------
+	// §10's field list for these two is "org, provider ref, actor". `org` is on
+	// the payload as well as the envelope's chain because the trail is read
+	// per-event and the ADR names it; `provider_ref` is the provider ROW id,
+	// which is what §10's "provider row UUIDv7" means — a slug is a mutable
+	// address, and a binding whose provider was recreated under the same slug
+	// would otherwise read as if nothing had changed.
+	// §10's list for these two is exactly "org, provider ref, actor". The
+	// binding id is the event OBJECT, not a payload field, and the teardown
+	// counts that used to ride here are already in the `grant.*` events the
+	// teardown emits — recorded once, where the ADR puts them.
+	EventSCIMBindingCreated:    scimAdminEvent(scimBindingSchema),
+	EventSCIMBindingDeleted:    scimAdminEvent(scimBindingSchema),
+	EventSCIMMappingCreated:    scimAdminEvent(scimMappingSchema),
+	EventSCIMMappingUpdated:    scimAdminEvent(scimMappingSchema),
+	EventSCIMMappingDeleted:    scimAdminEvent(scimMappingSchema),
+	EventSCIMCredentialMinted:  scimAdminEvent(scimCredentialSchema),
+	EventSCIMCredentialRotated: scimAdminEvent(scimCredentialSchema),
+	EventSCIMCredentialRevoked: scimAdminEvent(scimCredentialSchema),
+
+	EventSCIMUserProvisioned: scimWireEvent(Schema{
+		"binding":     {Kind: KindString, Required: true},
+		"resource_id": {Kind: KindString, Required: true},
+		"account_id":  {Kind: KindString, Required: true},
+		// create | attach — the #23 oracle criteria turn on the two being
+		// byte-shape identical on the wire; the TRAIL still records which
+		// happened, because the operator is not the adversary.
+		"disposition": {Kind: KindString, Required: true, Enum: []string{"create", "attach"}},
+		// The SHA-256 hex of the derived subject. The subject itself is
+		// identity material and never appears in plaintext anywhere.
+		// §10: the subject never appears in plaintext; this is its SHA-256 hex,
+		// and the shape is enforced so a plaintext subject cannot be written here.
+		"subject_digest": {Kind: KindString, Required: true, Digest: true},
+	}),
+	EventSCIMUserUpdated: scimWireEvent(Schema{
+		"binding":     {Kind: KindString, Required: true},
+		"resource_id": {Kind: KindString, Required: true},
+		// Attribute NAMES only, never values: bounded at 50 entries, each
+		// sanitized and bounded by the emitter. `path` is not usable as a field
+		// name (the registry forbids it), and `attribute` says the same thing.
+		"changed_attributes": {Kind: KindStringList, Required: true, MaxLen: 50, MaxBytes: 256},
+	}),
+	EventSCIMUserDeprovisioned: scimWireEvent(scimDeprovisionSchema),
+	EventSCIMUserDeleted: scimWireEvent(merged(scimDeprovisionSchema, Schema{
+		"member_references_removed": {Kind: KindInt, Required: true, NonNegative: true},
+	})),
+	EventSCIMGroupCreated: scimWireEvent(scimGroupSchema),
+	EventSCIMGroupUpdated: scimWireEvent(scimGroupSchema),
+	EventSCIMGroupDeleted: scimWireEvent(scimGroupSchema),
+	EventSCIMGroupMembership: scimWireEvent(Schema{
+		"binding":  {Kind: KindString, Required: true},
+		"group_id": {Kind: KindString, Required: true},
+		// §10 caps these lists at 200 ids.
+		"added_accounts":   {Kind: KindStringList, Required: true, MaxLen: 200, MaxBytes: 256},
+		"removed_accounts": {Kind: KindStringList, Required: true, MaxLen: 200, MaxBytes: 256},
+	}),
+
+	// The lockout pair is registered for BOTH trails, unlike every other
+	// `scim.*` entry. A retention SURVIVES its binding (§6 step 2) and its cure
+	// can arrive from a path with no tenant proof at all — break-glass under
+	// local host authority, which is the way back into an org that has no
+	// member manager left. Same shape as `grant.created`/`grant.revoked`, which
+	// are on both trails for the same reason.
+	EventSCIMLockoutRetention: scimLockoutEvent(Schema{
+		"binding":   {Kind: KindString, Required: true},
+		"principal": {Kind: KindString, Required: true},
+		"grant_id":  {Kind: KindString, Required: true},
+		"cause": {Kind: KindString, Required: true, Enum: []string{
+			"deprovision", "user_deleted", "member_removed",
+			"group_deleted", "mapping_deleted", "binding_deleted",
+		}},
+	}),
+	EventSCIMLockoutRetentionReleased: scimLockoutEvent(Schema{
+		"binding":   {Kind: KindString, Required: true},
+		"principal": {Kind: KindString, Required: true},
+		"grant_id":  {Kind: KindString, Required: true},
+		"cause": {Kind: KindString, Required: true, Enum: []string{
+			"deprovision", "user_deleted", "member_removed",
+			"group_deleted", "mapping_deleted", "binding_deleted",
+		}},
+		// The grant whose creation cured the lockout — the other half of the
+		// pair, so a reader can join entry to exit without guessing.
+		"curing_grant_id": {Kind: KindString, Required: true},
+	}),
+
+	EventSCIMAttentionEntered: scimWireEvent(scimAttentionSchema),
+	EventSCIMAttentionCleared: scimWireEvent(scimAttentionSchema),
+
+	EventSCIMDirectoryRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"binding": {Kind: KindString, Required: true},
+			// CLOSED to the identity provider's own resources (§10).
+			"resource_type": {Kind: KindString, Required: true, Enum: []string{"user", "group", "discovery"}},
+			"filter_shape": {Kind: KindString, Required: true,
+				Enum: []string{"none", "userName_eq", "externalId_eq", "displayName_eq"}},
+			"page": {Kind: KindObject, Required: true, ObjectSchema: scimPageSchema},
+		},
+	},
+	EventSCIMCredentialRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		// Instance trail: a refused authentication has no proof and therefore
+		// no resolved tenant chain to write against.
+		Trails: map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"binding":       {Kind: KindString, Required: true},
+			"credential_id": {Kind: KindString, Required: true},
+			"cause": {Kind: KindString, Required: true,
+				Enum: []string{"binding-mismatch"}},
+		},
+	},
+	EventSCIMAdminRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"org":     {Kind: KindString, Required: true},
+			"binding": {Kind: KindString},
+			"resource_type": {Kind: KindString, Required: true,
+				Enum: []string{"binding", "mapping", "credential", "directory"}},
+			"row_count": {Kind: KindInt, Required: true},
+		},
+	},
 }
 
 // grantSchema is the shared shape of the three grant-lifecycle rows. The
@@ -1515,6 +1719,131 @@ var grantSchema = Schema{
 	"unheld":           {Kind: KindBool, Required: true},
 	"target_class":     {Kind: KindString, Required: true},
 	"template":         {Kind: KindString},
+	// Origin fields (#73, scim ADR §10): origin arithmetic on a SURVIVING row
+	// is visible — a `grant.modified` carrying these three says which binding,
+	// which mapping row and which IdP group moved. They are optional because a
+	// manual grant has no binding to name, and answering "why can they?" is
+	// exactly what they exist for.
+	"origin_binding":     {Kind: KindString},
+	"origin_mapping_row": {Kind: KindString},
+	"origin_group":       {Kind: KindString},
+}
+
+// scimAdminEvent is the shape of every SCIM event a HUMAN causes: binding,
+// mapping and credential lifecycle, administered under `manage-members(org)`.
+func scimAdminEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        schema,
+	}
+}
+
+// scimWireEvent is the shape of every SCIM event the PROVISIONING CONNECTION
+// causes, plus the origin-arithmetic events its releases produce. Same trail,
+// same retention; the actor is what differs, and the actor rides the envelope.
+func scimWireEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        schema,
+	}
+}
+
+// scimLockoutEvent is the lockout pair's shape: both trails, because the cure
+// can arrive from local host authority, which has no tenant proof to bind to.
+func scimLockoutEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true, TrailInstance: true},
+		Schema:        schema,
+	}
+}
+
+// scimScopeSchema is §10's `scope` type: a `(level, scope id)` pair. A rendered
+// string ("org/project/env") is lossy — a reader cannot tell which id is which
+// level without re-parsing a format nothing pins — so the SCIM rows carry the
+// pair. The `grant.*` rows keep #55's string spelling, which that ADR fixed.
+var scimScopeSchema = Schema{
+	"level":    {Kind: KindString, Required: true, Enum: []string{"org", "project", "environment"}},
+	"scope_id": {Kind: KindString, Required: true},
+}
+
+// §10: "binding, group id, template, scope, actor". The mapping row's own id is
+// the event OBJECT; the origins the authoring transaction created or released
+// are the `grant.*` events it emits in the same transaction.
+var scimMappingSchema = Schema{
+	"binding":  {Kind: KindString, Required: true},
+	"group_id": {Kind: KindString, Required: true},
+	"template": {Kind: KindString, Required: true},
+	"scope":    {Kind: KindObject, Required: true, ObjectSchema: scimScopeSchema},
+	"actor":    {Kind: KindString, Required: true},
+}
+
+// §10: "org, provider ref, actor".
+var scimBindingSchema = Schema{
+	"org":          {Kind: KindString, Required: true},
+	"provider_ref": {Kind: KindString, Required: true},
+	"actor":        {Kind: KindString, Required: true},
+}
+
+// §10: "binding, credential id, actor".
+var scimCredentialSchema = Schema{
+	"binding":       {Kind: KindString, Required: true},
+	"credential_id": {Kind: KindString, Required: true},
+	"actor":         {Kind: KindString, Required: true},
+}
+
+// §10: "binding, group id, displayName". What a group DELETE released and made
+// inert is carried by the `grant.*` and `scim.attention_entered` events it
+// emits in the same transaction, not duplicated here.
+var scimGroupSchema = Schema{
+	"binding":  {Kind: KindString, Required: true},
+	"group_id": {Kind: KindString, Required: true},
+	// IdP-supplied: sanitized, `ew_`-redacted and bounded by the emitter.
+	// §10 bounds IdP-originated strings at 256 bytes, tighter than the
+	// trail-wide free-text bound.
+	"display_name": {Kind: KindFreeText, Required: true, MaxBytes: 256},
+}
+
+var scimDeprovisionSchema = Schema{
+	"binding":               {Kind: KindString, Required: true},
+	"resource_id":           {Kind: KindString, Required: true},
+	"account_id":            {Kind: KindString, Required: true},
+	"released_origin_count": {Kind: KindInt, Required: true, NonNegative: true},
+	// The honest remainder (ADR §5.3): manual grants in this org survive,
+	// because the IdP was not their source, and a human must decide about them.
+	"manual_grants_remain": {Kind: KindBool, Required: true},
+}
+
+// §10: "binding, state, cause". WHICH object the state is about is the event
+// OBJECT — a grant for lockout retention, a mapping row for an inert mapping,
+// the binding itself for a binding-wide state.
+var scimAttentionSchema = Schema{
+	"binding": {Kind: KindString, Required: true},
+	"state": {Kind: KindString, Required: true, Enum: []string{
+		"provider_unavailable", "lockout_retention", "manual_grants_remain",
+		"inert_mapping", "stale", "post_restore",
+	}},
+	// "" is admitted beside the closed causes: several states (staleness, a
+	// disabled provider) have no single triggering operation. "reactivation"
+	// is an EXIT-only cause — no retention is created under it, so it appears
+	// here and not in the lockout schemas.
+	"cause": {Kind: KindString, Required: true, Enum: []string{
+		"", "deprovision", "user_deleted", "member_removed",
+		"group_deleted", "mapping_deleted", "binding_deleted", "reactivation",
+	}},
+}
+
+var scimPageSchema = Schema{
+	"start_index": {Kind: KindInt, Required: true, AtLeast: 1},
+	"count":       {Kind: KindInt, Required: true, NonNegative: true},
 }
 
 func samlCeremonyEvent() TypeSpec {

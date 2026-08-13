@@ -16,6 +16,7 @@ package authn
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -170,7 +171,21 @@ func nextEpoch(maxEpoch any) (int64, error) {
 // grants to force. It takes ONE principal id and returns whether that
 // principal existed; there is deliberately no variant taking a set, a filter
 // or an "all" flag, at any layer above or below this one.
+//
+// The commit covers `manual` origins ONLY (#73, scim-provisioning ADR section
+// 9.1). Every restored `scim` origin this principal holds is dropped in the
+// SAME act, and a grant row whose last origin that was is dropped with it — so
+// a user the identity provider deprovisioned after the backup was taken is
+// never re-authorized, not even for the window between restore and the IdP's
+// next cycle. Re-assertion rebuilds SCIM origins from live truth.
+//
+// The drop lives HERE, at the one statement every reconciliation routes
+// through, rather than in the service: a second commit path added later would
+// otherwise silently re-activate what this one refuses.
 func (r *Resolver) ReconcilePrincipal(ctx context.Context, p domain.PrincipalID) (bool, error) {
+	if err := r.dropRestoredSCIMOrigins(ctx, p); err != nil {
+		return false, err
+	}
 	var n int64
 	var err error
 	if r.sq != nil {
@@ -182,6 +197,46 @@ func (r *Resolver) ReconcilePrincipal(ctx context.Context, p domain.PrincipalID)
 		return false, fmt.Errorf("authn: reconcile principal: %w", err)
 	}
 	return n > 0, nil
+}
+
+// dropRestoredSCIMOrigins releases this principal's `scim` origins and deletes
+// any grant row they were the last hold on.
+//
+// It runs unconditionally, not only when a restore is outstanding: a
+// reconciliation that is not answering a restore reaches a principal holding
+// no restored origins, so the statements match nothing and the act is a no-op.
+// Gating it on the restore state would add a read whose only effect is to make
+// the guarantee conditional on a second fact being right.
+func (r *Resolver) dropRestoredSCIMOrigins(ctx context.Context, p domain.PrincipalID) error {
+	// The principal-row lock every grant writer takes (#54 B14): the origin
+	// arithmetic below is a read-modify-write over this principal's grant rows,
+	// and it has to serialize against every other one.
+	// An unknown principal is not an error HERE: ReconcilePrincipal's own row
+	// count is what answers "did this principal exist", and reporting it twice
+	// with two different shapes is how a caller ends up handling one of them.
+	switch err := r.LockPrincipalRow(ctx, p); {
+	case err == nil:
+	case errors.Is(err, domain.ErrNotFound):
+		return nil
+	default:
+		return err
+	}
+	if r.sq != nil {
+		if _, err := r.sq.DropRestoredSCIMOrigins(ctx, string(p)); err != nil {
+			return fmt.Errorf("authn: drop restored scim origins: %w", err)
+		}
+		if _, err := r.sq.DeleteOriginlessGrantsForPrincipal(ctx, string(p)); err != nil {
+			return fmt.Errorf("authn: delete originless grants: %w", err)
+		}
+		return nil
+	}
+	if _, err := r.pg.DropRestoredSCIMOrigins(ctx, string(p)); err != nil {
+		return fmt.Errorf("authn: drop restored scim origins: %w", err)
+	}
+	if _, err := r.pg.DeleteOriginlessGrantsForPrincipal(ctx, string(p)); err != nil {
+		return fmt.Errorf("authn: delete originless grants: %w", err)
+	}
+	return nil
 }
 
 // UnreconciledPrincipals lists who is still inert. Reading the outstanding

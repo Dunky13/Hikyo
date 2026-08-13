@@ -319,6 +319,64 @@ const (
 	// the ADR requires one immutable access record per fetch, including the
 	// conditional fetch that delivers nothing.
 	OpDeliveryFetch Operation = "delivery.fetch"
+	// SCIM provisioning (#73, scim-provisioning ADR). Two families, two
+	// formulas, one depth.
+	//
+	// The ADMINISTRATION family is `manage-members(org)` AT ORG SCOPE EXACTLY
+	// (§1): a mapping row causes grants the author need not hold, and
+	// unheld-capability granting is an org/instance power under the locked
+	// escalation asymmetry — a project-scope member manager must not reach it
+	// through SCIM. The atom sits at LevelOrg rather than the capability's own
+	// deepest level for exactly that reason.
+	//
+	// The WIRE family is `scim-provision(org)`, the machine-only atom the
+	// provisioning connection holds structurally. There is no ambient routing
+	// by credential: the presented credential must match the binding in the
+	// path, and the org in the path is what the formula resolves against.
+	OpSCIMBindingCreate Operation = "scim-binding.create"
+	OpSCIMBindingGet    Operation = "scim-binding.get"
+	OpSCIMBindingList   Operation = "scim-binding.list"
+	OpSCIMBindingDelete Operation = "scim-binding.delete"
+
+	OpSCIMMappingCreate Operation = "scim-mapping.create"
+	OpSCIMMappingUpdate Operation = "scim-mapping.update"
+	OpSCIMMappingDelete Operation = "scim-mapping.delete"
+	OpSCIMMappingList   Operation = "scim-mapping.list"
+
+	OpSCIMCredentialMint   Operation = "scim-credential.mint"
+	OpSCIMCredentialGet    Operation = "scim-credential.get"
+	OpSCIMCredentialList   Operation = "scim-credential.list"
+	OpSCIMCredentialRevoke Operation = "scim-credential.revoke"
+
+	OpSCIMDirectoryUsers  Operation = "scim-directory.users"
+	OpSCIMDirectoryGroups Operation = "scim-directory.groups"
+
+	OpSCIMUserCreate  Operation = "scim-user.create"
+	OpSCIMUserGet     Operation = "scim-user.get"
+	OpSCIMUserList    Operation = "scim-user.list"
+	OpSCIMUserReplace Operation = "scim-user.replace"
+	OpSCIMUserPatch   Operation = "scim-user.patch"
+	OpSCIMUserDelete  Operation = "scim-user.delete"
+
+	OpSCIMGroupCreate  Operation = "scim-group.create"
+	OpSCIMGroupGet     Operation = "scim-group.get"
+	OpSCIMGroupList    Operation = "scim-group.list"
+	OpSCIMGroupReplace Operation = "scim-group.replace"
+	OpSCIMGroupPatch   Operation = "scim-group.patch"
+	OpSCIMGroupDelete  Operation = "scim-group.delete"
+
+	// Discovery (ServiceProviderConfig / ResourceTypes / Schemas) is static
+	// protocol documentation carrying no tenant data, but it still runs under
+	// the binding's authentication and admission — so it is an operation like
+	// any other rather than an unauthenticated hole in the mount.
+	OpSCIMDiscovery Operation = "scim-discovery.read"
+
+	// OpSCIMUnsupported is the authenticated refusal of Bulk, /Me and the
+	// `.search` POST query. They are routes rather than 404s because the ADR
+	// requires each to be refused with the RFC 7644 error shape, and they
+	// authenticate like every other wire operation so an unauthenticated caller
+	// gets the uniform refusal rather than a 501 confirming the binding exists.
+	OpSCIMUnsupported Operation = "scim-unsupported.refuse"
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -417,6 +475,74 @@ const (
 	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
 	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
 	StoreAuditInstancePage   StoreOp = "audit.PageInstance"
+
+	// SCIM provisioning (#73). One StoreOp per method on store.SCIMRepo, as
+	// invariant 6 requires: the registry is reflected against the repository
+	// bundle, so a method without a row here — or a row here without a method —
+	// fails the build. Grouping several methods behind one coarse op would have
+	// been shorter and would have let an operation authorized to read the
+	// directory write it.
+	StoreSCIMLockBinding StoreOp = "scim.LockBinding"
+
+	StoreSCIMCreateCredential            StoreOp = "scim.CreateCredential"
+	StoreSCIMCredential                  StoreOp = "scim.Credential"
+	StoreSCIMCredentials                 StoreOp = "scim.Credentials"
+	StoreSCIMRevokeCredential            StoreOp = "scim.RevokeCredential"
+	StoreSCIMRevokeCredentialsForBinding StoreOp = "scim.RevokeCredentialsForBinding"
+	StoreSCIMDeleteCredentialsForBinding StoreOp = "scim.DeleteCredentialsForBinding"
+
+	StoreSCIMCreateBinding StoreOp = "scim.CreateBinding"
+	StoreSCIMBinding       StoreOp = "scim.Binding"
+	StoreSCIMBindings      StoreOp = "scim.Bindings"
+	StoreSCIMTouchBinding  StoreOp = "scim.TouchBinding"
+	StoreSCIMDeleteBinding StoreOp = "scim.DeleteBinding"
+	// StoreSCIMRetireConnection removes a binding's provisioning connection,
+	// scoped by the proof's org AND the binding row that owns it.
+	StoreSCIMRetireConnection StoreOp = "scim.RetireConnectionPrincipal"
+
+	StoreSCIMCreateMapping            StoreOp = "scim.CreateMapping"
+	StoreSCIMMapping                  StoreOp = "scim.Mapping"
+	StoreSCIMMappings                 StoreOp = "scim.Mappings"
+	StoreSCIMMappingsForGroup         StoreOp = "scim.MappingsForGroup"
+	StoreSCIMSetMappingInert          StoreOp = "scim.SetMappingInert"
+	StoreSCIMUpdateMappingTemplate    StoreOp = "scim.UpdateMappingTemplate"
+	StoreSCIMDeleteMapping            StoreOp = "scim.DeleteMapping"
+	StoreSCIMDeleteMappingsForBinding StoreOp = "scim.DeleteMappingsForBinding"
+
+	StoreSCIMCreateUser            StoreOp = "scim.CreateUser"
+	StoreSCIMUser                  StoreOp = "scim.User"
+	StoreSCIMUserByUserName        StoreOp = "scim.UserByUserName"
+	StoreSCIMUsersByExternalID     StoreOp = "scim.UsersByExternalID"
+	StoreSCIMPageUsers             StoreOp = "scim.PageUsers"
+	StoreSCIMUserBySubject         StoreOp = "scim.UserBySubject"
+	StoreSCIMUserByAccount         StoreOp = "scim.UserByAccount"
+	StoreSCIMUsers                 StoreOp = "scim.Users"
+	StoreSCIMUpdateUser            StoreOp = "scim.UpdateUser"
+	StoreSCIMDeleteUser            StoreOp = "scim.DeleteUser"
+	StoreSCIMDeleteUsersForBinding StoreOp = "scim.DeleteUsersForBinding"
+
+	StoreSCIMCreateGroup            StoreOp = "scim.CreateGroup"
+	StoreSCIMGroup                  StoreOp = "scim.Group"
+	StoreSCIMGroupsByDisplayName    StoreOp = "scim.GroupsByDisplayName"
+	StoreSCIMGroupsByExternalID     StoreOp = "scim.GroupsByExternalID"
+	StoreSCIMPageGroups             StoreOp = "scim.PageGroups"
+	StoreSCIMGroups                 StoreOp = "scim.Groups"
+	StoreSCIMUpdateGroup            StoreOp = "scim.UpdateGroup"
+	StoreSCIMDeleteGroup            StoreOp = "scim.DeleteGroup"
+	StoreSCIMDeleteGroupsForBinding StoreOp = "scim.DeleteGroupsForBinding"
+
+	StoreSCIMAddGroupMember               StoreOp = "scim.AddGroupMember"
+	StoreSCIMGroupMembers                 StoreOp = "scim.GroupMembers"
+	StoreSCIMMembershipsForUser           StoreOp = "scim.MembershipsForUser"
+	StoreSCIMRemoveGroupMember            StoreOp = "scim.RemoveGroupMember"
+	StoreSCIMClearGroupMembers            StoreOp = "scim.ClearGroupMembers"
+	StoreSCIMRemoveMembershipsForUser     StoreOp = "scim.RemoveMembershipsForUser"
+	StoreSCIMDeleteGroupMembersForBinding StoreOp = "scim.DeleteGroupMembersForBinding"
+
+	StoreSCIMEnterAttention            StoreOp = "scim.EnterAttention"
+	StoreSCIMAttention                 StoreOp = "scim.Attention"
+	StoreSCIMClearAttention            StoreOp = "scim.ClearAttention"
+	StoreSCIMDeleteAttentionForBinding StoreOp = "scim.DeleteAttentionForBinding"
 )
 
 // readOnlyStoreOps pins which store operations mutate nothing — the
@@ -1312,10 +1438,12 @@ var operations = map[Operation]opSpec{
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
-		events: []audit.EventType{
+		storeOps: withCure(map[StoreOp]bool{StoreAuditTenantInsert: true}),
+		// §2.4's deterministic cure runs inside this transaction, so its
+		// events are reachable from this operation.
+		events: append([]audit.EventType{
 			audit.EventGrantCreated, audit.EventGrantModified,
-		},
+		}, grantCureEvents...),
 	},
 	OpGrantCreateProject: {
 		class:    ClassTenant,
@@ -1347,9 +1475,11 @@ var operations = map[Operation]opSpec{
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
-		events: []audit.EventType{
+		// §2.4's deterministic cure runs inside this transaction; an
+		// INSTANCE-scope `manage-members` grant cures every org at once.
+		events: append([]audit.EventType{
 			audit.EventGrantCreated, audit.EventGrantModified,
-		},
+		}, grantCureEvents...),
 	},
 
 	OpGrantRevokeOrg: {
@@ -1422,10 +1552,12 @@ var operations = map[Operation]opSpec{
 		class:    ClassTenant,
 		level:    domain.LevelOrg,
 		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}},
-		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
-		events: []audit.EventType{
+		storeOps: withCure(map[StoreOp]bool{StoreAuditTenantInsert: true}),
+		// §2.4's deterministic cure runs inside this transaction, so its
+		// events are reachable from this operation.
+		events: append([]audit.EventType{
 			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
-		},
+		}, grantCureEvents...),
 	},
 	OpTemplateApplyProject: {
 		class:    ClassTenant,
@@ -1455,9 +1587,11 @@ var operations = map[Operation]opSpec{
 		class:    ClassInstance,
 		formula:  Formula{{Cap: domain.CapManageMembers, At: domain.LevelNone}},
 		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
-		events: []audit.EventType{
+		// §2.4's deterministic cure runs inside this transaction; an
+		// INSTANCE-scope `manage-members` grant cures every org at once.
+		events: append([]audit.EventType{
 			audit.EventGrantTemplateApplied, audit.EventGrantCreated, audit.EventGrantModified,
-		},
+		}, grantCureEvents...),
 	},
 
 	// The protected flag and the per-environment reauthentication window.
@@ -1633,6 +1767,341 @@ var operations = map[Operation]opSpec{
 		},
 		events: []audit.EventType{audit.EventDeliveryFetched},
 	},
+	// --- SCIM provisioning (#73) ---------------------------------------------
+	//
+	// Every row below is ClassTenant at org depth: a binding a caller may not
+	// reach answers byte-identically to one that is not there, which is what
+	// keeps the mount from being a cross-org oracle.
+	//
+	// The store-op sets are COMPOSED from named groups rather than enumerated
+	// per row. One SCIM operation touches a dozen store methods — the binding
+	// read, the attention bookkeeping every path shares, the directory reads a
+	// render needs — and enumerating them per row is how one row silently ends
+	// up narrower than the code it authorizes, which shows up as a runtime
+	// boundary refusal rather than a compile error.
+
+	OpSCIMBindingCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimAttentionReadOps, map[StoreOp]bool{StoreSCIMCreateBinding: true}),
+		events: []audit.EventType{
+			audit.EventSCIMBindingCreated, audit.EventGrantCreated,
+			audit.EventSCIMAttentionEntered,
+		},
+	},
+	OpSCIMBindingGet: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimAttentionReadOps),
+		events:   []audit.EventType{audit.EventSCIMAdminRead, audit.EventSCIMAttentionEntered, audit.EventSCIMAttentionCleared},
+	},
+	OpSCIMBindingList: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimAttentionReadOps, map[StoreOp]bool{StoreSCIMBindings: true}),
+		events:   []audit.EventType{audit.EventSCIMAdminRead, audit.EventSCIMAttentionEntered, audit.EventSCIMAttentionCleared},
+	},
+	// The §6 state machine, in one transaction and in the ADR's order:
+	// credentials dead, origins released, connection retired, directory and
+	// mapping table gone, binding row gone. Identity links are untouched — they
+	// are account property, exactly as they would be had the user been invited.
+	OpSCIMBindingDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps, scimTeardownOps, scimCredentialOps),
+		events: []audit.EventType{
+			audit.EventSCIMBindingDeleted, audit.EventGrantRevoked, audit.EventGrantModified,
+			audit.EventSCIMLockoutRetention, audit.EventSCIMAttentionEntered,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+
+	// Mapping authoring is where the blast-radius moment lives (§3): the same
+	// transaction that shows the human the consequence language creates the
+	// origins for every member the group ALREADY has.
+	OpSCIMMappingCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps, scimMappingWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMMappingCreated, audit.EventGrantCreated, audit.EventGrantModified,
+			audit.EventSCIMLockoutRetentionReleased, audit.EventSCIMAttentionCleared,
+		},
+	},
+	OpSCIMMappingUpdate: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps, scimMappingWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMMappingUpdated, audit.EventGrantCreated, audit.EventGrantModified,
+			audit.EventGrantRevoked, audit.EventSCIMLockoutRetention,
+			audit.EventSCIMLockoutRetentionReleased, audit.EventSCIMAttentionEntered,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+	OpSCIMMappingDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps, scimMappingWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMMappingDeleted, audit.EventGrantRevoked, audit.EventGrantModified,
+			audit.EventSCIMLockoutRetention, audit.EventSCIMAttentionEntered,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+	OpSCIMMappingList: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, map[StoreOp]bool{StoreSCIMMappings: true}),
+		events:   []audit.EventType{audit.EventSCIMAdminRead},
+	},
+
+	// Credential administration. The credential rows are class=authn and ride
+	// the resolution surface after this gate — the same shape OIDC and SAML
+	// provider administration take — so the store ops here are the binding read
+	// and the attention bookkeeping, plus the audit write.
+	OpSCIMCredentialMint: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimCredentialOps),
+		events: []audit.EventType{
+			audit.EventSCIMCredentialMinted, audit.EventSCIMCredentialRotated,
+		},
+	},
+	OpSCIMCredentialGet: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimCredentialOps),
+		events:   []audit.EventType{audit.EventSCIMAdminRead},
+	},
+	OpSCIMCredentialList: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimCredentialOps),
+		events:   []audit.EventType{audit.EventSCIMAdminRead},
+	},
+	OpSCIMCredentialRevoke: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimCredentialOps),
+		events:   []audit.EventType{audit.EventSCIMCredentialRevoked},
+	},
+
+	OpSCIMDirectoryUsers: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMAdminRead},
+	},
+	OpSCIMDirectoryGroups: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimAdminFormula,
+		storeOps: scimOps(scimBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMAdminRead},
+	},
+
+	// --- the wire ------------------------------------------------------------
+
+	OpSCIMUserCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimUserWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMUserProvisioned, audit.EventGrantCreated, audit.EventGrantModified,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+	OpSCIMUserGet: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMDirectoryRead, audit.EventSCIMAttentionCleared},
+	},
+	OpSCIMUserList: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMDirectoryRead, audit.EventSCIMAttentionCleared},
+	},
+	OpSCIMUserReplace: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimUserWriteOps),
+		events:   scimUserMutationEvents,
+	},
+	OpSCIMUserPatch: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimUserWriteOps),
+		events:   scimUserMutationEvents,
+	},
+	OpSCIMUserDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimUserWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMUserDeleted, audit.EventGrantRevoked, audit.EventGrantModified,
+			audit.EventSCIMLockoutRetention, audit.EventSCIMAttentionEntered,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+
+	OpSCIMGroupCreate: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimGroupWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMGroupCreated, audit.EventSCIMGroupMembership,
+			audit.EventGrantCreated, audit.EventGrantModified, audit.EventSCIMAttentionCleared,
+		},
+	},
+	OpSCIMGroupGet: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMDirectoryRead, audit.EventSCIMAttentionCleared},
+	},
+	OpSCIMGroupList: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps),
+		events:   []audit.EventType{audit.EventSCIMDirectoryRead, audit.EventSCIMAttentionCleared},
+	},
+	OpSCIMGroupReplace: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimGroupWriteOps),
+		events:   scimGroupMutationEvents,
+	},
+	OpSCIMGroupPatch: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimGroupWriteOps),
+		events:   scimGroupMutationEvents,
+	},
+	OpSCIMGroupDelete: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase, scimDirectoryOps, scimGroupWriteOps, scimMappingWriteOps),
+		events: []audit.EventType{
+			audit.EventSCIMGroupDeleted, audit.EventSCIMGroupMembership,
+			audit.EventGrantRevoked, audit.EventGrantModified,
+			audit.EventSCIMLockoutRetention, audit.EventSCIMAttentionEntered,
+			audit.EventSCIMAttentionCleared,
+		},
+	},
+
+	// Discovery carries no tenant data, but it is neither unaudited nor
+	// unauthenticated: it runs under the binding's credential and its read is
+	// recorded with `resource_type: discovery`, which is the explicit registry
+	// annotation the ADR asks for instead of silence.
+	OpSCIMUnsupported: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimOps(scimBase, scimWireBase),
+		events:   []audit.EventType{audit.EventSCIMDirectoryRead, audit.EventSCIMAttentionCleared},
+	},
+	// Discovery is the ONE SCIM operation that emits nothing (ADR §10): the
+	// three documents are static protocol documentation carrying no tenant data,
+	// so a `scim.directory_read` per probe would record the server's own manual
+	// being read. It cannot take `auditedNone` — the default-deny permit rule
+	// admits only bare-`read` non-mutating operations, and this one authenticates
+	// a provisioning credential and records contact — so the ADR's "explicit
+	// registry annotation on their probe class, not silence" is the name-pinned
+	// exemption entry: one for this operation and one per discovery route, each
+	// carrying its reason, each failing the build if removed without a mapping.
+	OpSCIMDiscovery: {
+		class:    ClassTenant,
+		level:    domain.LevelOrg,
+		formula:  scimWireFormula,
+		storeOps: scimDiscoveryOps(),
+	},
+}
+
+// scimAdminFormula is `manage-members` AT ORG SCOPE EXACTLY (ADR §1). The atom
+// sits at LevelOrg rather than at `manage-members`' own deepest level because
+// a project-scope member manager must not reach the SCIM surface: a mapping row
+// causes grants its author need not hold, which is an org/instance power.
+var scimAdminFormula = Formula{{Cap: domain.CapManageMembers, At: domain.LevelOrg}}
+
+// scimWireFormula is the machine-only atom the provisioning connection holds
+// structurally. No human session can hold it (the grant API refuses it by
+// name), and no other principal class may (the normative allowlist has one row).
+var scimWireFormula = Formula{{Cap: domain.CapSCIMProvision, At: domain.LevelOrg}}
+
+// grantCureEvents are the events §2.4's DETERMINISTIC CURE emits from inside
+// whatever transaction created a `manage-members` grant. A grant writer is the
+// only thing that can cure a lockout retention, so these ride every grant
+// operation that can create one — and without them the audit write boundary
+// (VerifyEvent binds event type to the minting operation) refuses the cure's
+// own record, failing the very transaction §2.4 requires to succeed.
+var grantCureEvents = []audit.EventType{
+	audit.EventSCIMLockoutRetentionReleased,
+	audit.EventSCIMAttentionCleared,
+	audit.EventGrantRevoked,
+}
+
+// grantCureStoreOps is the cure's OTHER reach: it clears the binding's
+// `lockout_retention` attention row through the audited exit path, in the same
+// transaction, so a warning cannot outlive the retention it describes.
+var grantCureStoreOps = map[StoreOp]bool{
+	StoreSCIMAttention:      true,
+	StoreSCIMClearAttention: true,
+}
+
+func withCure(base map[StoreOp]bool) map[StoreOp]bool {
+	out := make(map[StoreOp]bool, len(base)+len(grantCureStoreOps))
+	for k := range base {
+		out[k] = true
+	}
+	for k := range grantCureStoreOps {
+		out[k] = true
+	}
+	return out
+}
+
+var scimUserMutationEvents = []audit.EventType{
+	audit.EventSCIMUserUpdated, audit.EventSCIMUserDeprovisioned,
+	audit.EventGrantCreated, audit.EventGrantModified, audit.EventGrantRevoked,
+	audit.EventSCIMLockoutRetention, audit.EventSCIMAttentionEntered,
+	audit.EventSCIMAttentionCleared,
+}
+
+// PUT and PATCH reach exactly the same state and therefore the same events:
+// both apply desired state to one resource, and the transition table (§5.4) is
+// written about the STATE they reach, never about which verb reached it.
+var scimGroupMutationEvents = []audit.EventType{
+	audit.EventSCIMGroupUpdated, audit.EventSCIMGroupMembership,
+	audit.EventGrantCreated, audit.EventGrantModified, audit.EventGrantRevoked,
+	audit.EventSCIMLockoutRetention, audit.EventSCIMLockoutRetentionReleased,
+	audit.EventSCIMAttentionEntered, audit.EventSCIMAttentionCleared,
 }
 
 // SystemSite is a SystemProof mint site. The set is closed by the
@@ -1798,4 +2267,119 @@ func (RegistryFacts) FormulaPins() []FormulaPin {
 	}
 	slices.SortFunc(out, func(a, b FormulaPin) int { return strings.Compare(a.Operation, b.Operation) })
 	return out
+}
+
+// scimOps unions the named store-op groups one SCIM operation reaches. The
+// audit write is in every set because every SCIM operation is audited: the ADR
+// permits no `audited: none` here, and the discovery endpoints are annotated
+// rather than silent.
+func scimOps(groups ...map[StoreOp]bool) map[StoreOp]bool {
+	out := map[StoreOp]bool{StoreAuditTenantInsert: true}
+	for _, g := range groups {
+		for op := range g {
+			out[op] = true
+		}
+	}
+	return out
+}
+
+// scimCredentialOps is the administration surface's credential access.
+var scimCredentialOps = map[StoreOp]bool{
+	StoreSCIMCreateCredential:            true,
+	StoreSCIMCredential:                  true,
+	StoreSCIMCredentials:                 true,
+	StoreSCIMRevokeCredential:            true,
+	StoreSCIMRevokeCredentialsForBinding: true,
+	StoreSCIMDeleteCredentialsForBinding: true,
+}
+
+// scimBase is what EVERY SCIM operation touches: the binding read that proves
+// the addressed binding is this org's, plus the attention bookkeeping that
+// keeps §9's states honest in both directions.
+var scimBase = map[StoreOp]bool{
+	StoreSCIMLockBinding:    true,
+	StoreSCIMBinding:        true,
+	StoreSCIMAttention:      true,
+	StoreSCIMEnterAttention: true,
+	StoreSCIMClearAttention: true,
+}
+
+// scimAttentionReadOps is what refreshBindingAttention reads on every
+// administration view of a binding: the credential set, so §9.1's post-restore
+// state can be raised from the one observable trace a restore leaves (every
+// credential minted under an older instance epoch), and nothing else.
+var scimAttentionReadOps = map[StoreOp]bool{StoreSCIMCredentials: true}
+
+// scimWireBase is what every WIRE operation additionally touches: the
+// last-contact record that makes the staleness warning mean something.
+var scimWireBase = map[StoreOp]bool{StoreSCIMTouchBinding: true}
+
+// scimDiscoveryOps is the discovery probe's whole store surface, declared apart
+// from scimOps because it is the one SCIM operation that inserts no audit row:
+// the binding read that proves the addressed binding is this org's, and the
+// contact record that makes staleness mean something. No attention write, no
+// directory read, no audit insert.
+func scimDiscoveryOps() map[StoreOp]bool {
+	return map[StoreOp]bool{StoreSCIMBinding: true, StoreSCIMTouchBinding: true}
+}
+
+// scimDirectoryOps is every directory READ. A render needs the resource, its
+// memberships and the groups they name; a filter needs the lookup columns.
+var scimDirectoryOps = map[StoreOp]bool{
+	// The mapping surface's ancestry check (§1): a row naming a project outside
+	// the binding's org is refused at authoring AND at every sync.
+	StoreProjectsList:            true,
+	StoreSCIMUser:                true,
+	StoreSCIMUsers:               true,
+	StoreSCIMUserByUserName:      true,
+	StoreSCIMUsersByExternalID:   true,
+	StoreSCIMPageUsers:           true,
+	StoreSCIMUserBySubject:       true,
+	StoreSCIMUserByAccount:       true,
+	StoreSCIMGroup:               true,
+	StoreSCIMGroups:              true,
+	StoreSCIMGroupsByDisplayName: true,
+	StoreSCIMGroupsByExternalID:  true,
+	StoreSCIMPageGroups:          true,
+	StoreSCIMGroupMembers:        true,
+	StoreSCIMMembershipsForUser:  true,
+	StoreSCIMMappings:            true,
+	StoreSCIMMappingsForGroup:    true,
+	StoreSCIMMapping:             true,
+}
+
+var scimUserWriteOps = map[StoreOp]bool{
+	StoreSCIMCreateUser:               true,
+	StoreSCIMUpdateUser:               true,
+	StoreSCIMDeleteUser:               true,
+	StoreSCIMRemoveMembershipsForUser: true,
+}
+
+var scimGroupWriteOps = map[StoreOp]bool{
+	StoreSCIMCreateGroup:       true,
+	StoreSCIMUpdateGroup:       true,
+	StoreSCIMDeleteGroup:       true,
+	StoreSCIMAddGroupMember:    true,
+	StoreSCIMRemoveGroupMember: true,
+	StoreSCIMClearGroupMembers: true,
+}
+
+var scimMappingWriteOps = map[StoreOp]bool{
+	StoreSCIMCreateMapping:         true,
+	StoreSCIMUpdateMappingTemplate: true,
+	StoreSCIMDeleteMapping:         true,
+	StoreSCIMSetMappingInert:       true,
+}
+
+// scimTeardownOps is §6's step-by-step demolition, which no other operation
+// may reach: a binding's whole directory going away is a lifecycle act, not a
+// side effect of editing it.
+var scimTeardownOps = map[StoreOp]bool{
+	StoreSCIMDeleteGroupMembersForBinding: true,
+	StoreSCIMDeleteGroupsForBinding:       true,
+	StoreSCIMDeleteUsersForBinding:        true,
+	StoreSCIMDeleteMappingsForBinding:     true,
+	StoreSCIMDeleteAttentionForBinding:    true,
+	StoreSCIMDeleteBinding:                true,
+	StoreSCIMRetireConnection:             true,
 }

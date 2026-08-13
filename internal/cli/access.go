@@ -414,7 +414,7 @@ func renderGrantScope(s apigen.GrantScope) string {
 func renderOrigins(origins []apigen.GrantOrigin) string {
 	chips := make([]string, 0, len(origins))
 	for _, o := range origins {
-		if o.Kind == apigen.Manual {
+		if o.Kind == apigen.GrantOriginKindManual {
 			chips = append(chips, "manual("+o.Subject+")")
 			continue
 		}

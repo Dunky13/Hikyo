@@ -125,6 +125,22 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 	}
 	validArtifacts := map[string]bool{
 		"none": true, "human-session": true, "machine-credential": true, "local": true,
+		// `scim-credential` is the SCIM provisioning connection's own artifact
+		// class (#73 §7): the machine-identity ADR's closed token-type list
+		// gains `scim` by the scim-provisioning amendment, and this is that
+		// type's eligibility name.
+		//
+		// It stays SEPARATE from `machine-credential` now that #61 has landed.
+		// #61 serves the service-account taxonomy — `wl`/`au` values against
+		// service-account rows, minted under the environment-keyed disclosure
+		// and reauthentication conjuncts — and it declares that class on NO
+		// route (isolation.TestContractSecuredOperationsTakeAnArtifact still
+		// refuses it, and still passes). A provisioning connection is a
+		// different principal class with a different formula, a different
+		// lifetime story and a different mint ceremony; collapsing the two
+		// eligibility names would say the SCIM wire accepts a service-account
+		// token, which it does not.
+		"scim-credential": true,
 	}
 	for id, op := range ops {
 		if !validClasses[op.Class] {

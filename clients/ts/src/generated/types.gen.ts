@@ -1781,6 +1781,267 @@ export type Passkey = {
     last_used_at: Timestamp;
 };
 
+export type CreateScimBindingRequest = {
+    provider_kind: 'oidc' | 'saml';
+    provider_slug: string;
+    /**
+     * `externalId` or a declared enterprise/custom extension path.
+     * `userName` is refused by name: RFC 7643 defines it
+     * `caseExact: false` and server-unique, which contradicts byte-exact
+     * identity material.
+     *
+     */
+    subject_source: string;
+    /**
+     * SAML bindings only. A scalar SCIM attribute cannot carry the locked
+     * SAML subject, so the binding declares the NameID PROFILE and the
+     * subject-source attribute supplies the NameID value alone.
+     *
+     */
+    nameid_format?: string;
+    nameid_qualifier?: string;
+    /**
+     * Presence is carried separately from value because an absent
+     * qualifier and an empty one are different inputs to the injective
+     * encoder, and collapsing them would make two SAML subjects collide.
+     *
+     */
+    nameid_qualifier_present?: boolean;
+    nameid_sp_qualifier?: string;
+    nameid_sp_qualifier_present?: boolean;
+};
+
+export type MintScimCredentialRequest = {
+    /**
+     * The reauthentication proof: a TOTP code, or the account password
+     * where no factor is enrolled. Minting a provisioning credential is
+     * `manage-members(org)` AND reauthentication, so a stolen elevated
+     * session cannot issue a durable bearer on its own.
+     *
+     */
+    proof?: string;
+    /**
+     * Requires the instance opt-in, which is default-off. Without it an
+     * indefinite credential is refused by name.
+     *
+     */
+    indefinite?: boolean;
+};
+
+/**
+ * One raised attention state on a binding. Each names its cause AND a
+ * server-authored remediation: a state that only says something is wrong
+ * makes the binding view a puzzle.
+ *
+ */
+export type ScimAttention = {
+    /**
+     * provider_unavailable | lockout_retention | manual_grants_remain |
+     * inert_mapping | stale | post_restore
+     *
+     */
+    state: 'provider_unavailable' | 'lockout_retention' | 'manual_grants_remain' | 'inert_mapping' | 'stale' | 'post_restore';
+    /**
+     * Which object the state is about; empty for a binding-wide state.
+     */
+    subject_ref: string;
+    /**
+     * The triggering operation, empty where the state has no single trigger.
+     */
+    cause: string;
+    entered_at: Timestamp;
+    /**
+     * Server-authored — what to do about it.
+     */
+    remediation: string;
+};
+
+export type ScimBinding = {
+    id: Id;
+    org_id: Id;
+    provider_kind: 'oidc' | 'saml';
+    provider_slug: string;
+    /**
+     * Frozen at creation. A provider whose issuer moved under a binding
+     * is a rebinding hazard, not a rename to follow silently.
+     *
+     */
+    provider_issuer: string;
+    /**
+     * The SCIM attribute path carrying identity material, immutable after
+     * creation. `userName` is refused by name.
+     *
+     */
+    subject_source: string;
+    /**
+     * The SAML NameID profile's Format URI; empty for an OIDC binding.
+     */
+    nameid_format?: string;
+    /**
+     * The SAML NameID profile's fixed NameQualifier.
+     */
+    nameid_qualifier?: string;
+    /**
+     * Whether the assertion carries a NameQualifier at all. Presence is
+     * reported separately from value because an absent qualifier and an
+     * empty one are different inputs to the injective subject encoder.
+     *
+     */
+    nameid_qualifier_present?: boolean;
+    /**
+     * The SAML NameID profile's fixed SPNameQualifier.
+     */
+    nameid_sp_qualifier?: string;
+    nameid_sp_qualifier_present?: boolean;
+    connection_principal_id: Id;
+    last_contact_at?: Timestamp;
+    created_at: Timestamp;
+    attention: Array<ScimAttention>;
+};
+
+export type ScimBindingList = {
+    items: Array<ScimBinding>;
+    count: number;
+};
+
+/**
+ * Server-authored consequence language. It is authored on the server, not
+ * in a client, because the locked rule is about what the human is TOLD,
+ * and a client rendering its own wording is a second, unreviewed policy.
+ *
+ */
+export type ScimBlastWarning = {
+    code: 'org_scope' | 'reveal_expanding' | 'production_environment' | 'populated_group';
+    severity: 'warning' | 'critical';
+    message: string;
+};
+
+export type ScimCredential = {
+    id: Id;
+    binding_id: Id;
+    created_at: Timestamp;
+    expires_at?: Timestamp;
+    revoked_at?: Timestamp;
+    last_used_at?: Timestamp;
+    live: boolean;
+};
+
+export type ScimCredentialList = {
+    items: Array<ScimCredential>;
+    count: number;
+};
+
+export type ScimDirectoryGroup = {
+    id: Id;
+    display_name: string;
+    external_id?: string;
+    member_count: number;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+};
+
+export type ScimDirectoryGroupList = {
+    items: Array<ScimDirectoryGroup>;
+    count: number;
+};
+
+export type ScimDirectoryUser = {
+    id: Id;
+    user_name: string;
+    external_id?: string;
+    account_id: Id;
+    active: boolean;
+    groups: Array<Id>;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+    attention: Array<ScimAttention>;
+};
+
+export type ScimDirectoryUserList = {
+    items: Array<ScimDirectoryUser>;
+    count: number;
+};
+
+export type ScimMapping = {
+    id: Id;
+    binding_id: Id;
+    group_id: Id;
+    template: string;
+    project_id?: string;
+    environment_id?: string;
+    /**
+     * The group this row names no longer exists at the identity provider.
+     * An inert row grants nothing and is never removed automatically.
+     *
+     */
+    inert: boolean;
+    created_at: Timestamp;
+    /**
+     * What the row expands into. Expansion at sync time is expansion at
+     * grant time, so this is exactly the set a human applying the same
+     * template at the same scope would create.
+     *
+     */
+    capabilities: Array<string>;
+};
+
+export type ScimMappingList = {
+    items: Array<ScimMapping>;
+    count: number;
+};
+
+export type ScimMappingRequest = {
+    group_id: Id;
+    template: string;
+    /**
+     * Absent means org scope, which is the WIDEST a binding can reach.
+     * Nothing preselects a scope for you, least of all a production
+     * environment.
+     *
+     */
+    project_id?: string;
+    environment_id?: string;
+};
+
+export type ScimMappingResult = {
+    mapping: ScimMapping;
+    warnings: Array<ScimBlastWarning>;
+    members_affected: number;
+    grants_created: number;
+    origins_released: number;
+};
+
+export type ScimMintResult = {
+    credential: ScimCredential;
+    /**
+     * Display-once. It is in this response and nowhere else, ever: only
+     * the SHA-256 verifier was stored.
+     *
+     */
+    token: string;
+    /**
+     * This mint joined an already-live credential. That IS overlap
+     * rotation — mint-new, update the identity provider, revoke-old, with
+     * identical authority throughout.
+     *
+     */
+    rotated: boolean;
+};
+
+/**
+ * A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
+ * deliberately open: identity providers send and expect attributes this
+ * provider stores as round-tripped display metadata, and pinning the
+ * shape here would make a conformant IdP's request a contract violation.
+ * What IS closed lives in the server: the subject source, the filter
+ * grammar, the PATCH matrix and the error mapping, each with its own
+ * named refusal.
+ *
+ */
+export type ScimResource = {
+    [key: string]: unknown;
+};
+
 /**
  * Organisation identifier.
  */
@@ -1881,6 +2142,71 @@ export type FederationIssuerId = Id;
  *
  */
 export type DeliveryCursor = string;
+
+/**
+ * SCIM binding identifier.
+ */
+export type ScimBindingId = Id;
+
+/**
+ * Desired page size. It is a REQUEST: a value above this provider's bound
+ * is answered with the bound rather than refused.
+ *
+ * Typed `string` and unconstrained for the same reason as `startIndex`.
+ *
+ */
+export type ScimCount = string;
+
+/**
+ * An RFC 7644 filter, closed to `attribute eq "value"` over the four
+ * probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+ *
+ * Deliberately unconstrained HERE. Contract validation runs BEFORE the
+ * provisioning credential is authenticated, so any constraint declared on
+ * a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+ * instead of the uniform 401 — telling them something about their request
+ * before they have proved they may ask. Every bound and every grammar
+ * refusal for this parameter lives in the protocol layer, after
+ * authentication, where it is rendered as an RFC 7644 error.
+ *
+ */
+export type ScimFilter = string;
+
+/**
+ * A server-minted resource identifier. The identity provider can only
+ * reference ids this server minted.
+ *
+ */
+export type ScimResourceId = Id;
+
+/**
+ * Present only so its presence can be REFUSED by name with 501. Sorting
+ * is advertised absent in ServiceProviderConfig and is not
+ * half-implemented. Unconstrained: see `filter`.
+ *
+ */
+export type ScimSortBy = string;
+
+/**
+ * Present only so its presence can be REFUSED by name with 501, exactly
+ * like `sortBy`. Refusing one and ignoring the other would be the
+ * half-implementation the ADR forbids. Unconstrained: see `filter`.
+ *
+ */
+export type ScimSortOrder = string;
+
+/**
+ * 1-based index of the first result; a value below 1 is read as 1, per
+ * RFC 7644 §3.4.2.4.
+ *
+ * Typed `string`, not `integer`, and carrying no `minimum`: see the note
+ * on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+ * which is both an unauthenticated refusal and a contradiction of the
+ * RFC's own "read as 1". Parsing and clamping happen in the protocol
+ * layer after authentication.
+ *
+ */
+export type ScimStartIndex = string;
 
 export type GetMetaData = {
     body?: never;
@@ -9562,3 +9888,2327 @@ export type FetchDeliveryResponses = {
 };
 
 export type FetchDeliveryResponse = FetchDeliveryResponses[keyof FetchDeliveryResponses];
+
+export type ListScimBindingsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings';
+};
+
+export type ListScimBindingsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListScimBindingsError = ListScimBindingsErrors[keyof ListScimBindingsErrors];
+
+export type ListScimBindingsResponses = {
+    /**
+     * The organisation's bindings.
+     */
+    200: ScimBindingList;
+};
+
+export type ListScimBindingsResponse = ListScimBindingsResponses[keyof ListScimBindingsResponses];
+
+export type CreateScimBindingData = {
+    body: CreateScimBindingRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings';
+};
+
+export type CreateScimBindingErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateScimBindingError = CreateScimBindingErrors[keyof CreateScimBindingErrors];
+
+export type CreateScimBindingResponses = {
+    /**
+     * The created binding.
+     */
+    200: ScimBinding;
+};
+
+export type CreateScimBindingResponse = CreateScimBindingResponses[keyof CreateScimBindingResponses];
+
+export type DeleteScimBindingData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}';
+};
+
+export type DeleteScimBindingErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteScimBindingError = DeleteScimBindingErrors[keyof DeleteScimBindingErrors];
+
+export type DeleteScimBindingResponses = {
+    /**
+     * The binding and everything it owned are gone.
+     */
+    204: void;
+};
+
+export type DeleteScimBindingResponse = DeleteScimBindingResponses[keyof DeleteScimBindingResponses];
+
+export type GetScimBindingData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}';
+};
+
+export type GetScimBindingErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetScimBindingError = GetScimBindingErrors[keyof GetScimBindingErrors];
+
+export type GetScimBindingResponses = {
+    /**
+     * The binding.
+     */
+    200: ScimBinding;
+};
+
+export type GetScimBindingResponse = GetScimBindingResponses[keyof GetScimBindingResponses];
+
+export type DeleteScimMappingData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query: {
+        /**
+         * The server-minted SCIM group id the row names.
+         */
+        group: Id;
+        /**
+         * The row's project scope, absent for an org-scoped row.
+         */
+        project?: Id;
+        /**
+         * The row's environment scope.
+         */
+        environment?: Id;
+    };
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings';
+};
+
+export type DeleteScimMappingErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteScimMappingError = DeleteScimMappingErrors[keyof DeleteScimMappingErrors];
+
+export type DeleteScimMappingResponses = {
+    /**
+     * The deleted row and the origin count it released.
+     */
+    200: ScimMappingResult;
+};
+
+export type DeleteScimMappingResponse = DeleteScimMappingResponses[keyof DeleteScimMappingResponses];
+
+export type ListScimMappingsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings';
+};
+
+export type ListScimMappingsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListScimMappingsError = ListScimMappingsErrors[keyof ListScimMappingsErrors];
+
+export type ListScimMappingsResponses = {
+    /**
+     * The mapping table.
+     */
+    200: ScimMappingList;
+};
+
+export type ListScimMappingsResponse = ListScimMappingsResponses[keyof ListScimMappingsResponses];
+
+export type CreateScimMappingData = {
+    body: ScimMappingRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings';
+};
+
+export type CreateScimMappingErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateScimMappingError = CreateScimMappingErrors[keyof CreateScimMappingErrors];
+
+export type CreateScimMappingResponses = {
+    /**
+     * The row, its consequence language, and what it granted.
+     */
+    200: ScimMappingResult;
+};
+
+export type CreateScimMappingResponse = CreateScimMappingResponses[keyof CreateScimMappingResponses];
+
+export type UpdateScimMappingData = {
+    body: ScimMappingRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/mappings';
+};
+
+export type UpdateScimMappingErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateScimMappingError = UpdateScimMappingErrors[keyof UpdateScimMappingErrors];
+
+export type UpdateScimMappingResponses = {
+    /**
+     * The row, its consequence language, and what it changed.
+     */
+    200: ScimMappingResult;
+};
+
+export type UpdateScimMappingResponse = UpdateScimMappingResponses[keyof UpdateScimMappingResponses];
+
+export type ListScimCredentialsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials';
+};
+
+export type ListScimCredentialsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListScimCredentialsError = ListScimCredentialsErrors[keyof ListScimCredentialsErrors];
+
+export type ListScimCredentialsResponses = {
+    /**
+     * The binding's credentials.
+     */
+    200: ScimCredentialList;
+};
+
+export type ListScimCredentialsResponse = ListScimCredentialsResponses[keyof ListScimCredentialsResponses];
+
+export type MintScimCredentialData = {
+    body: MintScimCredentialRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials';
+};
+
+export type MintScimCredentialErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type MintScimCredentialError = MintScimCredentialErrors[keyof MintScimCredentialErrors];
+
+export type MintScimCredentialResponses = {
+    /**
+     * The credential and its display-once token.
+     */
+    200: ScimMintResult;
+};
+
+export type MintScimCredentialResponse = MintScimCredentialResponses[keyof MintScimCredentialResponses];
+
+export type RevokeScimCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}';
+};
+
+export type RevokeScimCredentialErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevokeScimCredentialError = RevokeScimCredentialErrors[keyof RevokeScimCredentialErrors];
+
+export type RevokeScimCredentialResponses = {
+    /**
+     * The credential is dead.
+     */
+    204: void;
+};
+
+export type RevokeScimCredentialResponse = RevokeScimCredentialResponses[keyof RevokeScimCredentialResponses];
+
+export type GetScimCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}';
+};
+
+export type GetScimCredentialErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetScimCredentialError = GetScimCredentialErrors[keyof GetScimCredentialErrors];
+
+export type GetScimCredentialResponses = {
+    /**
+     * The credential.
+     */
+    200: ScimCredential;
+};
+
+export type GetScimCredentialResponse = GetScimCredentialResponses[keyof GetScimCredentialResponses];
+
+export type ListScimDirectoryUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/directory/users';
+};
+
+export type ListScimDirectoryUsersErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListScimDirectoryUsersError = ListScimDirectoryUsersErrors[keyof ListScimDirectoryUsersErrors];
+
+export type ListScimDirectoryUsersResponses = {
+    /**
+     * The provisioned users.
+     */
+    200: ScimDirectoryUserList;
+};
+
+export type ListScimDirectoryUsersResponse = ListScimDirectoryUsersResponses[keyof ListScimDirectoryUsersResponses];
+
+export type ListScimDirectoryGroupsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups';
+};
+
+export type ListScimDirectoryGroupsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListScimDirectoryGroupsError = ListScimDirectoryGroupsErrors[keyof ListScimDirectoryGroupsErrors];
+
+export type ListScimDirectoryGroupsResponses = {
+    /**
+     * The provisioned groups.
+     */
+    200: ScimDirectoryGroupList;
+};
+
+export type ListScimDirectoryGroupsResponse = ListScimDirectoryGroupsResponses[keyof ListScimDirectoryGroupsResponses];
+
+export type ScimServiceProviderConfigData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig';
+};
+
+export type ScimServiceProviderConfigErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimServiceProviderConfigError = ScimServiceProviderConfigErrors[keyof ScimServiceProviderConfigErrors];
+
+export type ScimServiceProviderConfigResponses = {
+    /**
+     * The ServiceProviderConfig resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimServiceProviderConfigResponse = ScimServiceProviderConfigResponses[keyof ScimServiceProviderConfigResponses];
+
+export type ScimResourceTypesData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes';
+};
+
+export type ScimResourceTypesErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimResourceTypesError = ScimResourceTypesErrors[keyof ScimResourceTypesErrors];
+
+export type ScimResourceTypesResponses = {
+    /**
+     * The ResourceTypes list.
+     */
+    200: ScimResource;
+};
+
+export type ScimResourceTypesResponse = ScimResourceTypesResponses[keyof ScimResourceTypesResponses];
+
+export type ScimSchemasData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Schemas';
+};
+
+export type ScimSchemasErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimSchemasError = ScimSchemasErrors[keyof ScimSchemasErrors];
+
+export type ScimSchemasResponses = {
+    /**
+     * The Schemas list.
+     */
+    200: ScimResource;
+};
+
+export type ScimSchemasResponse = ScimSchemasResponses[keyof ScimSchemasResponses];
+
+export type ScimListUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: {
+        /**
+         * An RFC 7644 filter, closed to `attribute eq "value"` over the four
+         * probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+         *
+         * Deliberately unconstrained HERE. Contract validation runs BEFORE the
+         * provisioning credential is authenticated, so any constraint declared on
+         * a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+         * instead of the uniform 401 — telling them something about their request
+         * before they have proved they may ask. Every bound and every grammar
+         * refusal for this parameter lives in the protocol layer, after
+         * authentication, where it is rendered as an RFC 7644 error.
+         *
+         */
+        filter?: string;
+        /**
+         * 1-based index of the first result; a value below 1 is read as 1, per
+         * RFC 7644 §3.4.2.4.
+         *
+         * Typed `string`, not `integer`, and carrying no `minimum`: see the note
+         * on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+         * which is both an unauthenticated refusal and a contradiction of the
+         * RFC's own "read as 1". Parsing and clamping happen in the protocol
+         * layer after authentication.
+         *
+         */
+        startIndex?: string;
+        /**
+         * Desired page size. It is a REQUEST: a value above this provider's bound
+         * is answered with the bound rather than refused.
+         *
+         * Typed `string` and unconstrained for the same reason as `startIndex`.
+         *
+         */
+        count?: string;
+        /**
+         * Present only so its presence can be REFUSED by name with 501. Sorting
+         * is advertised absent in ServiceProviderConfig and is not
+         * half-implemented. Unconstrained: see `filter`.
+         *
+         */
+        sortBy?: string;
+        /**
+         * Present only so its presence can be REFUSED by name with 501, exactly
+         * like `sortBy`. Refusing one and ignoring the other would be the
+         * half-implementation the ADR forbids. Unconstrained: see `filter`.
+         *
+         */
+        sortOrder?: string;
+    };
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users';
+};
+
+export type ScimListUsersErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimListUsersError = ScimListUsersErrors[keyof ScimListUsersErrors];
+
+export type ScimListUsersResponses = {
+    /**
+     * An RFC 7644 ListResponse.
+     */
+    200: ScimResource;
+};
+
+export type ScimListUsersResponse = ScimListUsersResponses[keyof ScimListUsersResponses];
+
+export type ScimCreateUserData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users';
+};
+
+export type ScimCreateUserErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimCreateUserError = ScimCreateUserErrors[keyof ScimCreateUserErrors];
+
+export type ScimCreateUserResponses = {
+    /**
+     * The provisioned User resource.
+     */
+    201: ScimResource;
+};
+
+export type ScimCreateUserResponse = ScimCreateUserResponses[keyof ScimCreateUserResponses];
+
+export type ScimDeleteUserData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}';
+};
+
+export type ScimDeleteUserErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimDeleteUserError = ScimDeleteUserErrors[keyof ScimDeleteUserErrors];
+
+export type ScimDeleteUserResponses = {
+    /**
+     * The directory entry is gone.
+     */
+    204: void;
+};
+
+export type ScimDeleteUserResponse = ScimDeleteUserResponses[keyof ScimDeleteUserResponses];
+
+export type ScimGetUserData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}';
+};
+
+export type ScimGetUserErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimGetUserError = ScimGetUserErrors[keyof ScimGetUserErrors];
+
+export type ScimGetUserResponses = {
+    /**
+     * The User resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimGetUserResponse = ScimGetUserResponses[keyof ScimGetUserResponses];
+
+export type ScimPatchUserData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}';
+};
+
+export type ScimPatchUserErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimPatchUserError = ScimPatchUserErrors[keyof ScimPatchUserErrors];
+
+export type ScimPatchUserResponses = {
+    /**
+     * The patched User resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimPatchUserResponse = ScimPatchUserResponses[keyof ScimPatchUserResponses];
+
+export type ScimReplaceUserData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}';
+};
+
+export type ScimReplaceUserErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimReplaceUserError = ScimReplaceUserErrors[keyof ScimReplaceUserErrors];
+
+export type ScimReplaceUserResponses = {
+    /**
+     * The replaced User resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimReplaceUserResponse = ScimReplaceUserResponses[keyof ScimReplaceUserResponses];
+
+export type ScimListGroupsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: {
+        /**
+         * An RFC 7644 filter, closed to `attribute eq "value"` over the four
+         * probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+         *
+         * Deliberately unconstrained HERE. Contract validation runs BEFORE the
+         * provisioning credential is authenticated, so any constraint declared on
+         * a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+         * instead of the uniform 401 — telling them something about their request
+         * before they have proved they may ask. Every bound and every grammar
+         * refusal for this parameter lives in the protocol layer, after
+         * authentication, where it is rendered as an RFC 7644 error.
+         *
+         */
+        filter?: string;
+        /**
+         * 1-based index of the first result; a value below 1 is read as 1, per
+         * RFC 7644 §3.4.2.4.
+         *
+         * Typed `string`, not `integer`, and carrying no `minimum`: see the note
+         * on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+         * which is both an unauthenticated refusal and a contradiction of the
+         * RFC's own "read as 1". Parsing and clamping happen in the protocol
+         * layer after authentication.
+         *
+         */
+        startIndex?: string;
+        /**
+         * Desired page size. It is a REQUEST: a value above this provider's bound
+         * is answered with the bound rather than refused.
+         *
+         * Typed `string` and unconstrained for the same reason as `startIndex`.
+         *
+         */
+        count?: string;
+        /**
+         * Present only so its presence can be REFUSED by name with 501. Sorting
+         * is advertised absent in ServiceProviderConfig and is not
+         * half-implemented. Unconstrained: see `filter`.
+         *
+         */
+        sortBy?: string;
+        /**
+         * Present only so its presence can be REFUSED by name with 501, exactly
+         * like `sortBy`. Refusing one and ignoring the other would be the
+         * half-implementation the ADR forbids. Unconstrained: see `filter`.
+         *
+         */
+        sortOrder?: string;
+    };
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups';
+};
+
+export type ScimListGroupsErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimListGroupsError = ScimListGroupsErrors[keyof ScimListGroupsErrors];
+
+export type ScimListGroupsResponses = {
+    /**
+     * An RFC 7644 ListResponse.
+     */
+    200: ScimResource;
+};
+
+export type ScimListGroupsResponse = ScimListGroupsResponses[keyof ScimListGroupsResponses];
+
+export type ScimCreateGroupData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups';
+};
+
+export type ScimCreateGroupErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimCreateGroupError = ScimCreateGroupErrors[keyof ScimCreateGroupErrors];
+
+export type ScimCreateGroupResponses = {
+    /**
+     * The provisioned Group resource.
+     */
+    201: ScimResource;
+};
+
+export type ScimCreateGroupResponse = ScimCreateGroupResponses[keyof ScimCreateGroupResponses];
+
+export type ScimDeleteGroupData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}';
+};
+
+export type ScimDeleteGroupErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimDeleteGroupError = ScimDeleteGroupErrors[keyof ScimDeleteGroupErrors];
+
+export type ScimDeleteGroupResponses = {
+    /**
+     * The group is gone.
+     */
+    204: void;
+};
+
+export type ScimDeleteGroupResponse = ScimDeleteGroupResponses[keyof ScimDeleteGroupResponses];
+
+export type ScimGetGroupData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}';
+};
+
+export type ScimGetGroupErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimGetGroupError = ScimGetGroupErrors[keyof ScimGetGroupErrors];
+
+export type ScimGetGroupResponses = {
+    /**
+     * The Group resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimGetGroupResponse = ScimGetGroupResponses[keyof ScimGetGroupResponses];
+
+export type ScimPatchGroupData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}';
+};
+
+export type ScimPatchGroupErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimPatchGroupError = ScimPatchGroupErrors[keyof ScimPatchGroupErrors];
+
+export type ScimPatchGroupResponses = {
+    /**
+     * The patched Group resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimPatchGroupResponse = ScimPatchGroupResponses[keyof ScimPatchGroupResponses];
+
+export type ScimReplaceGroupData = {
+    body: ScimResource;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+        /**
+         * A server-minted resource identifier. The identity provider can only
+         * reference ids this server minted.
+         *
+         */
+        id: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}';
+};
+
+export type ScimReplaceGroupErrors = {
+    /**
+     * An RFC 7644 error body. `scimType` carries the closed 400-class mapping: `invalidFilter`, `invalidPath`, `invalidValue`, `invalidSyntax`, `mutability`, `noTarget`.
+     *
+     */
+    400: ScimResource;
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * A uniqueness violation - duplicate userName, displayName or subject.
+     *
+     */
+    409: ScimResource;
+    /**
+     * The request body exceeds this service provider's bound.
+     *
+     */
+    413: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+};
+
+export type ScimReplaceGroupError = ScimReplaceGroupErrors[keyof ScimReplaceGroupErrors];
+
+export type ScimReplaceGroupResponses = {
+    /**
+     * The replaced Group resource.
+     */
+    200: ScimResource;
+};
+
+export type ScimReplaceGroupResponse = ScimReplaceGroupResponses[keyof ScimReplaceGroupResponses];
+
+export type ScimBulkData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Bulk';
+};
+
+export type ScimBulkErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimBulkError = ScimBulkErrors[keyof ScimBulkErrors];
+
+export type ScimMeData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Me';
+};
+
+export type ScimMeErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimMeError = ScimMeErrors[keyof ScimMeErrors];
+
+export type ScimSearchUsersData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Users/.search';
+};
+
+export type ScimSearchUsersErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimSearchUsersError = ScimSearchUsersErrors[keyof ScimSearchUsersErrors];
+
+export type ScimSearchGroupsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * SCIM binding identifier.
+         */
+        binding: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search';
+};
+
+export type ScimSearchGroupsErrors = {
+    /**
+     * Authentication failed. Unknown, malformed, revoked, expired, epoch-superseded and wrong-binding credentials all answer this, so presentation reveals nothing about which credentials exist. A credential that does not match the binding in the path is an authentication failure, NEVER a SCIM 400.
+     *
+     */
+    401: ScimResource;
+    /**
+     * A resource this binding did not mint, or a binding this caller cannot reach.
+     *
+     */
+    404: ScimResource;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An internal error, in the RFC 7644 shape. The SCIM surface answers
+     * its own error dialect for every status: an identity provider that
+     * met one Hikyo envelope among SCIM bodies would have to parse two.
+     *
+     */
+    500: ScimResource;
+    /**
+     * A feature this service provider advertises as absent. It carries NO `scimType`: that field is a 400-class discriminator, and putting one on a 501 would name a code RFC 7644 does not define.
+     *
+     */
+    501: ScimResource;
+};
+
+export type ScimSearchGroupsError = ScimSearchGroupsErrors[keyof ScimSearchGroupsErrors];

@@ -275,7 +275,7 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// the token must not.
 		tokens := []string{
 			"hik_1_wl_" + strings.Repeat("Ab3", 15),
-			"ew_1_wl_" + strings.Repeat("Cd4", 15),
+			"hik_1_wl_" + strings.Repeat("Cd4", 15),
 		}
 		for _, token := range tokens {
 			wired := audit.WithContext(tctx(t), audit.Context{
@@ -458,6 +458,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// OIDC federation and the delivery surface (#62): the same obligation, one
 		// ticket later.
 		runFederationLifecycle(t, db)
+		// SCIM provisioning (#73): every `scim.*` type gets a real emitter —
+		// binding, credential, user, group, mapping, attention and the lockout
+		// pair — before the trails are read.
+		runSCIMLifecycle(t, db)
 		// The operator lifecycle (#76): every backup.* and restore.* type gets
 		// a real emitter. It runs LAST of the lifecycles because it advances
 		// the restore epoch and then reconciles the principals it made inert,

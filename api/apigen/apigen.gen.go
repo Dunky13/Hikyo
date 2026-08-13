@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -29,6 +30,24 @@ func (e AffectedCredentialReason) Valid() bool {
 	case Clamped:
 		return true
 	case IndefiniteWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateScimBindingRequestProviderKind.
+const (
+	CreateScimBindingRequestProviderKindOidc CreateScimBindingRequestProviderKind = "oidc"
+	CreateScimBindingRequestProviderKindSaml CreateScimBindingRequestProviderKind = "saml"
+)
+
+// Valid indicates whether the value is a known member of the CreateScimBindingRequestProviderKind enum.
+func (e CreateScimBindingRequestProviderKind) Valid() bool {
+	switch e {
+	case CreateScimBindingRequestProviderKindOidc:
+		return true
+	case CreateScimBindingRequestProviderKindSaml:
 		return true
 	default:
 		return false
@@ -130,25 +149,25 @@ func (e ErrorCode) Valid() bool {
 
 // Defines values for GrantOriginKind.
 const (
-	BreakGlass       GrantOriginKind = "break-glass"
-	LockoutRetention GrantOriginKind = "lockout-retention"
-	Manual           GrantOriginKind = "manual"
-	Scim             GrantOriginKind = "scim"
-	Structural       GrantOriginKind = "structural"
+	GrantOriginKindBreakGlass       GrantOriginKind = "break-glass"
+	GrantOriginKindLockoutRetention GrantOriginKind = "lockout-retention"
+	GrantOriginKindManual           GrantOriginKind = "manual"
+	GrantOriginKindScim             GrantOriginKind = "scim"
+	GrantOriginKindStructural       GrantOriginKind = "structural"
 )
 
 // Valid indicates whether the value is a known member of the GrantOriginKind enum.
 func (e GrantOriginKind) Valid() bool {
 	switch e {
-	case BreakGlass:
+	case GrantOriginKindBreakGlass:
 		return true
-	case LockoutRetention:
+	case GrantOriginKindLockoutRetention:
 		return true
-	case Manual:
+	case GrantOriginKindManual:
 		return true
-	case Scim:
+	case GrantOriginKindScim:
 		return true
-	case Structural:
+	case GrantOriginKindStructural:
 		return true
 	default:
 		return false
@@ -512,6 +531,96 @@ func (e SamlStartRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for ScimAttentionState.
+const (
+	ScimAttentionStateInertMapping        ScimAttentionState = "inert_mapping"
+	ScimAttentionStateLockoutRetention    ScimAttentionState = "lockout_retention"
+	ScimAttentionStateManualGrantsRemain  ScimAttentionState = "manual_grants_remain"
+	ScimAttentionStatePostRestore         ScimAttentionState = "post_restore"
+	ScimAttentionStateProviderUnavailable ScimAttentionState = "provider_unavailable"
+	ScimAttentionStateStale               ScimAttentionState = "stale"
+)
+
+// Valid indicates whether the value is a known member of the ScimAttentionState enum.
+func (e ScimAttentionState) Valid() bool {
+	switch e {
+	case ScimAttentionStateInertMapping:
+		return true
+	case ScimAttentionStateLockoutRetention:
+		return true
+	case ScimAttentionStateManualGrantsRemain:
+		return true
+	case ScimAttentionStatePostRestore:
+		return true
+	case ScimAttentionStateProviderUnavailable:
+		return true
+	case ScimAttentionStateStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScimBindingProviderKind.
+const (
+	ScimBindingProviderKindOidc ScimBindingProviderKind = "oidc"
+	ScimBindingProviderKindSaml ScimBindingProviderKind = "saml"
+)
+
+// Valid indicates whether the value is a known member of the ScimBindingProviderKind enum.
+func (e ScimBindingProviderKind) Valid() bool {
+	switch e {
+	case ScimBindingProviderKindOidc:
+		return true
+	case ScimBindingProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScimBlastWarningCode.
+const (
+	OrgScope              ScimBlastWarningCode = "org_scope"
+	PopulatedGroup        ScimBlastWarningCode = "populated_group"
+	ProductionEnvironment ScimBlastWarningCode = "production_environment"
+	RevealExpanding       ScimBlastWarningCode = "reveal_expanding"
+)
+
+// Valid indicates whether the value is a known member of the ScimBlastWarningCode enum.
+func (e ScimBlastWarningCode) Valid() bool {
+	switch e {
+	case OrgScope:
+		return true
+	case PopulatedGroup:
+		return true
+	case ProductionEnvironment:
+		return true
+	case RevealExpanding:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ScimBlastWarningSeverity.
+const (
+	ScimBlastWarningSeverityCritical ScimBlastWarningSeverity = "critical"
+	ScimBlastWarningSeverityWarning  ScimBlastWarningSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the ScimBlastWarningSeverity enum.
+func (e ScimBlastWarningSeverity) Valid() bool {
+	switch e {
+	case ScimBlastWarningSeverityCritical:
+		return true
+	case ScimBlastWarningSeverityWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ServiceAccountKind.
 const (
 	Automation ServiceAccountKind = "automation"
@@ -849,6 +958,33 @@ type CreateProjectRequest struct {
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
 }
+
+// CreateScimBindingRequest defines model for CreateScimBindingRequest.
+type CreateScimBindingRequest struct {
+	// NameidFormat SAML bindings only. A scalar SCIM attribute cannot carry the locked
+	// SAML subject, so the binding declares the NameID PROFILE and the
+	// subject-source attribute supplies the NameID value alone.
+	NameidFormat    *string `json:"nameid_format,omitempty"`
+	NameidQualifier *string `json:"nameid_qualifier,omitempty"`
+
+	// NameidQualifierPresent Presence is carried separately from value because an absent
+	// qualifier and an empty one are different inputs to the injective
+	// encoder, and collapsing them would make two SAML subjects collide.
+	NameidQualifierPresent   *bool                                `json:"nameid_qualifier_present,omitempty"`
+	NameidSpQualifier        *string                              `json:"nameid_sp_qualifier,omitempty"`
+	NameidSpQualifierPresent *bool                                `json:"nameid_sp_qualifier_present,omitempty"`
+	ProviderKind             CreateScimBindingRequestProviderKind `json:"provider_kind"`
+	ProviderSlug             string                               `json:"provider_slug"`
+
+	// SubjectSource `externalId` or a declared enterprise/custom extension path.
+	// `userName` is refused by name: RFC 7643 defines it
+	// `caseExact: false` and server-unique, which contradicts byte-exact
+	// identity material.
+	SubjectSource string `json:"subject_source"`
+}
+
+// CreateScimBindingRequestProviderKind defines model for CreateScimBindingRequest.ProviderKind.
+type CreateScimBindingRequestProviderKind string
 
 // CreateServiceAccountRequest defines model for CreateServiceAccountRequest.
 type CreateServiceAccountRequest struct {
@@ -1728,6 +1864,19 @@ type MintCredentialResult struct {
 	Value string `json:"value"`
 }
 
+// MintScimCredentialRequest defines model for MintScimCredentialRequest.
+type MintScimCredentialRequest struct {
+	// Indefinite Requires the instance opt-in, which is default-off. Without it an
+	// indefinite credential is refused by name.
+	Indefinite *bool `json:"indefinite,omitempty"`
+
+	// Proof The reauthentication proof: a TOTP code, or the account password
+	// where no factor is enrolled. Minting a provisioning credential is
+	// `manage-members(org)` AND reauthentication, so a stolen elevated
+	// session cannot issue a durable bearer on its own.
+	Proof *string `json:"proof,omitempty"`
+}
+
 // MyOrg An organisation as a navigation destination: what the caller needs to
 // show it and route to it, and nothing else. Deliberately narrower than
 // `Org` — `metadata` and `active` are operator-set state that belongs to
@@ -2227,6 +2376,254 @@ type SamlStartResult struct {
 	RedirectUrl string `json:"redirect_url"`
 }
 
+// ScimAttention One raised attention state on a binding. Each names its cause AND a
+// server-authored remediation: a state that only says something is wrong
+// makes the binding view a puzzle.
+type ScimAttention struct {
+	// Cause The triggering operation, empty where the state has no single trigger.
+	Cause string `json:"cause"`
+
+	// EnteredAt RFC 3339 UTC, microsecond precision.
+	EnteredAt Timestamp `json:"entered_at"`
+
+	// Remediation Server-authored — what to do about it.
+	Remediation string `json:"remediation"`
+
+	// State provider_unavailable | lockout_retention | manual_grants_remain |
+	// inert_mapping | stale | post_restore
+	State ScimAttentionState `json:"state"`
+
+	// SubjectRef Which object the state is about; empty for a binding-wide state.
+	SubjectRef string `json:"subject_ref"`
+}
+
+// ScimAttentionState provider_unavailable | lockout_retention | manual_grants_remain |
+// inert_mapping | stale | post_restore
+type ScimAttentionState string
+
+// ScimBinding defines model for ScimBinding.
+type ScimBinding struct {
+	Attention []ScimAttention `json:"attention"`
+
+	// ConnectionPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	ConnectionPrincipalId ID `json:"connection_principal_id"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// LastContactAt RFC 3339 UTC, microsecond precision.
+	LastContactAt *Timestamp `json:"last_contact_at,omitempty"`
+
+	// NameidFormat The SAML NameID profile's Format URI; empty for an OIDC binding.
+	NameidFormat *string `json:"nameid_format,omitempty"`
+
+	// NameidQualifier The SAML NameID profile's fixed NameQualifier.
+	NameidQualifier *string `json:"nameid_qualifier,omitempty"`
+
+	// NameidQualifierPresent Whether the assertion carries a NameQualifier at all. Presence is
+	// reported separately from value because an absent qualifier and an
+	// empty one are different inputs to the injective subject encoder.
+	NameidQualifierPresent *bool `json:"nameid_qualifier_present,omitempty"`
+
+	// NameidSpQualifier The SAML NameID profile's fixed SPNameQualifier.
+	NameidSpQualifier        *string `json:"nameid_sp_qualifier,omitempty"`
+	NameidSpQualifierPresent *bool   `json:"nameid_sp_qualifier_present,omitempty"`
+
+	// OrgId A prefixed UUIDv7, e.g. `org_0198…`.
+	OrgId ID `json:"org_id"`
+
+	// ProviderIssuer Frozen at creation. A provider whose issuer moved under a binding
+	// is a rebinding hazard, not a rename to follow silently.
+	ProviderIssuer string                  `json:"provider_issuer"`
+	ProviderKind   ScimBindingProviderKind `json:"provider_kind"`
+	ProviderSlug   string                  `json:"provider_slug"`
+
+	// SubjectSource The SCIM attribute path carrying identity material, immutable after
+	// creation. `userName` is refused by name.
+	SubjectSource string `json:"subject_source"`
+}
+
+// ScimBindingProviderKind defines model for ScimBinding.ProviderKind.
+type ScimBindingProviderKind string
+
+// ScimBindingList defines model for ScimBindingList.
+type ScimBindingList struct {
+	Count int           `json:"count"`
+	Items []ScimBinding `json:"items"`
+}
+
+// ScimBlastWarning Server-authored consequence language. It is authored on the server, not
+// in a client, because the locked rule is about what the human is TOLD,
+// and a client rendering its own wording is a second, unreviewed policy.
+type ScimBlastWarning struct {
+	Code     ScimBlastWarningCode     `json:"code"`
+	Message  string                   `json:"message"`
+	Severity ScimBlastWarningSeverity `json:"severity"`
+}
+
+// ScimBlastWarningCode defines model for ScimBlastWarning.Code.
+type ScimBlastWarningCode string
+
+// ScimBlastWarningSeverity defines model for ScimBlastWarning.Severity.
+type ScimBlastWarningSeverity string
+
+// ScimCredential defines model for ScimCredential.
+type ScimCredential struct {
+	// BindingId A prefixed UUIDv7, e.g. `org_0198…`.
+	BindingId ID `json:"binding_id"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt *Timestamp `json:"expires_at,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// LastUsedAt RFC 3339 UTC, microsecond precision.
+	LastUsedAt *Timestamp `json:"last_used_at,omitempty"`
+	Live       bool       `json:"live"`
+
+	// RevokedAt RFC 3339 UTC, microsecond precision.
+	RevokedAt *Timestamp `json:"revoked_at,omitempty"`
+}
+
+// ScimCredentialList defines model for ScimCredentialList.
+type ScimCredentialList struct {
+	Count int              `json:"count"`
+	Items []ScimCredential `json:"items"`
+}
+
+// ScimDirectoryGroup defines model for ScimDirectoryGroup.
+type ScimDirectoryGroup struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt   Timestamp `json:"created_at"`
+	DisplayName string    `json:"display_name"`
+	ExternalId  *string   `json:"external_id,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id          ID  `json:"id"`
+	MemberCount int `json:"member_count"`
+
+	// UpdatedAt RFC 3339 UTC, microsecond precision.
+	UpdatedAt Timestamp `json:"updated_at"`
+}
+
+// ScimDirectoryGroupList defines model for ScimDirectoryGroupList.
+type ScimDirectoryGroupList struct {
+	Count int                  `json:"count"`
+	Items []ScimDirectoryGroup `json:"items"`
+}
+
+// ScimDirectoryUser defines model for ScimDirectoryUser.
+type ScimDirectoryUser struct {
+	// AccountId A prefixed UUIDv7, e.g. `org_0198…`.
+	AccountId ID              `json:"account_id"`
+	Active    bool            `json:"active"`
+	Attention []ScimAttention `json:"attention"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt  Timestamp `json:"created_at"`
+	ExternalId *string   `json:"external_id,omitempty"`
+	Groups     []ID      `json:"groups"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// UpdatedAt RFC 3339 UTC, microsecond precision.
+	UpdatedAt Timestamp `json:"updated_at"`
+	UserName  string    `json:"user_name"`
+}
+
+// ScimDirectoryUserList defines model for ScimDirectoryUserList.
+type ScimDirectoryUserList struct {
+	Count int                 `json:"count"`
+	Items []ScimDirectoryUser `json:"items"`
+}
+
+// ScimMapping defines model for ScimMapping.
+type ScimMapping struct {
+	// BindingId A prefixed UUIDv7, e.g. `org_0198…`.
+	BindingId ID `json:"binding_id"`
+
+	// Capabilities What the row expands into. Expansion at sync time is expansion at
+	// grant time, so this is exactly the set a human applying the same
+	// template at the same scope would create.
+	Capabilities []string `json:"capabilities"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt     Timestamp `json:"created_at"`
+	EnvironmentId *string   `json:"environment_id,omitempty"`
+
+	// GroupId A prefixed UUIDv7, e.g. `org_0198…`.
+	GroupId ID `json:"group_id"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Inert The group this row names no longer exists at the identity provider.
+	// An inert row grants nothing and is never removed automatically.
+	Inert     bool    `json:"inert"`
+	ProjectId *string `json:"project_id,omitempty"`
+	Template  string  `json:"template"`
+}
+
+// ScimMappingList defines model for ScimMappingList.
+type ScimMappingList struct {
+	Count int           `json:"count"`
+	Items []ScimMapping `json:"items"`
+}
+
+// ScimMappingRequest defines model for ScimMappingRequest.
+type ScimMappingRequest struct {
+	EnvironmentId *string `json:"environment_id,omitempty"`
+
+	// GroupId A prefixed UUIDv7, e.g. `org_0198…`.
+	GroupId ID `json:"group_id"`
+
+	// ProjectId Absent means org scope, which is the WIDEST a binding can reach.
+	// Nothing preselects a scope for you, least of all a production
+	// environment.
+	ProjectId *string `json:"project_id,omitempty"`
+	Template  string  `json:"template"`
+}
+
+// ScimMappingResult defines model for ScimMappingResult.
+type ScimMappingResult struct {
+	GrantsCreated   int                `json:"grants_created"`
+	Mapping         ScimMapping        `json:"mapping"`
+	MembersAffected int                `json:"members_affected"`
+	OriginsReleased int                `json:"origins_released"`
+	Warnings        []ScimBlastWarning `json:"warnings"`
+}
+
+// ScimMintResult defines model for ScimMintResult.
+type ScimMintResult struct {
+	Credential ScimCredential `json:"credential"`
+
+	// Rotated This mint joined an already-live credential. That IS overlap
+	// rotation — mint-new, update the identity provider, revoke-old, with
+	// identical authority throughout.
+	Rotated bool `json:"rotated"`
+
+	// Token Display-once. It is in this response and nowhere else, ever: only
+	// the SHA-256 verifier was stored.
+	Token string `json:"token"`
+}
+
+// ScimResource A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
+// deliberately open: identity providers send and expect attributes this
+// provider stores as round-tripped display metadata, and pinning the
+// shape here would make a conformant IdP's request a contract violation.
+// What IS closed lives in the server: the subject source, the filter
+// grammar, the PATCH matrix and the error mapping, each with its own
+// named refusal.
+type ScimResource map[string]interface{}
+
 // ServiceAccount defines model for ServiceAccount.
 type ServiceAccount struct {
 	// CreatedAt RFC 3339 UTC, microsecond precision.
@@ -2610,6 +3007,27 @@ type ProviderSlugPath = string
 // ResetTargetPrincipal A prefixed UUIDv7, e.g. `org_0198…`.
 type ResetTargetPrincipal = ID
 
+// ScimBindingID A prefixed UUIDv7, e.g. `org_0198…`.
+type ScimBindingID = ID
+
+// ScimCount defines model for ScimCount.
+type ScimCount = string
+
+// ScimFilter defines model for ScimFilter.
+type ScimFilter = string
+
+// ScimResourceID A prefixed UUIDv7, e.g. `org_0198…`.
+type ScimResourceID = ID
+
+// ScimSortBy defines model for ScimSortBy.
+type ScimSortBy = string
+
+// ScimSortOrder defines model for ScimSortOrder.
+type ScimSortOrder = string
+
+// ScimStartIndex defines model for ScimStartIndex.
+type ScimStartIndex = string
+
 // ServiceAccountID A prefixed UUIDv7, e.g. `org_0198…`.
 type ServiceAccountID = ID
 
@@ -2705,6 +3123,100 @@ type DiffValuesParams struct {
 
 	// Right The right environment.
 	Right ID `form:"right" json:"right"`
+}
+
+// DeleteScimMappingParams defines parameters for DeleteScimMapping.
+type DeleteScimMappingParams struct {
+	// Group The server-minted SCIM group id the row names.
+	Group ID `form:"group" json:"group"`
+
+	// Project The row's project scope, absent for an org-scoped row.
+	Project *ID `form:"project,omitempty" json:"project,omitempty"`
+
+	// Environment The row's environment scope.
+	Environment *ID `form:"environment,omitempty" json:"environment,omitempty"`
+}
+
+// ScimListGroupsParams defines parameters for ScimListGroups.
+type ScimListGroupsParams struct {
+	// Filter An RFC 7644 filter, closed to `attribute eq "value"` over the four
+	// probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+	//
+	// Deliberately unconstrained HERE. Contract validation runs BEFORE the
+	// provisioning credential is authenticated, so any constraint declared on
+	// a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+	// instead of the uniform 401 — telling them something about their request
+	// before they have proved they may ask. Every bound and every grammar
+	// refusal for this parameter lives in the protocol layer, after
+	// authentication, where it is rendered as an RFC 7644 error.
+	Filter *ScimFilter `form:"filter,omitempty" json:"filter,omitempty"`
+
+	// StartIndex 1-based index of the first result; a value below 1 is read as 1, per
+	// RFC 7644 §3.4.2.4.
+	//
+	// Typed `string`, not `integer`, and carrying no `minimum`: see the note
+	// on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+	// which is both an unauthenticated refusal and a contradiction of the
+	// RFC's own "read as 1". Parsing and clamping happen in the protocol
+	// layer after authentication.
+	StartIndex *ScimStartIndex `form:"startIndex,omitempty" json:"startIndex,omitempty"`
+
+	// Count Desired page size. It is a REQUEST: a value above this provider's bound
+	// is answered with the bound rather than refused.
+	//
+	// Typed `string` and unconstrained for the same reason as `startIndex`.
+	Count *ScimCount `form:"count,omitempty" json:"count,omitempty"`
+
+	// SortBy Present only so its presence can be REFUSED by name with 501. Sorting
+	// is advertised absent in ServiceProviderConfig and is not
+	// half-implemented. Unconstrained: see `filter`.
+	SortBy *ScimSortBy `form:"sortBy,omitempty" json:"sortBy,omitempty"`
+
+	// SortOrder Present only so its presence can be REFUSED by name with 501, exactly
+	// like `sortBy`. Refusing one and ignoring the other would be the
+	// half-implementation the ADR forbids. Unconstrained: see `filter`.
+	SortOrder *ScimSortOrder `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
+}
+
+// ScimListUsersParams defines parameters for ScimListUsers.
+type ScimListUsersParams struct {
+	// Filter An RFC 7644 filter, closed to `attribute eq "value"` over the four
+	// probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+	//
+	// Deliberately unconstrained HERE. Contract validation runs BEFORE the
+	// provisioning credential is authenticated, so any constraint declared on
+	// a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+	// instead of the uniform 401 — telling them something about their request
+	// before they have proved they may ask. Every bound and every grammar
+	// refusal for this parameter lives in the protocol layer, after
+	// authentication, where it is rendered as an RFC 7644 error.
+	Filter *ScimFilter `form:"filter,omitempty" json:"filter,omitempty"`
+
+	// StartIndex 1-based index of the first result; a value below 1 is read as 1, per
+	// RFC 7644 §3.4.2.4.
+	//
+	// Typed `string`, not `integer`, and carrying no `minimum`: see the note
+	// on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+	// which is both an unauthenticated refusal and a contradiction of the
+	// RFC's own "read as 1". Parsing and clamping happen in the protocol
+	// layer after authentication.
+	StartIndex *ScimStartIndex `form:"startIndex,omitempty" json:"startIndex,omitempty"`
+
+	// Count Desired page size. It is a REQUEST: a value above this provider's bound
+	// is answered with the bound rather than refused.
+	//
+	// Typed `string` and unconstrained for the same reason as `startIndex`.
+	Count *ScimCount `form:"count,omitempty" json:"count,omitempty"`
+
+	// SortBy Present only so its presence can be REFUSED by name with 501. Sorting
+	// is advertised absent in ServiceProviderConfig and is not
+	// half-implemented. Unconstrained: see `filter`.
+	SortBy *ScimSortBy `form:"sortBy,omitempty" json:"sortBy,omitempty"`
+
+	// SortOrder Present only so its presence can be REFUSED by name with 501, exactly
+	// like `sortBy`. Refusing one and ignoring the other would be the
+	// half-implementation the ADR forbids. Unconstrained: see `filter`.
+	SortOrder *ScimSortOrder `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
 }
 
 // EstablishCredentialJSONRequestBody defines body for EstablishCredential for application/json ContentType.
@@ -2892,6 +3404,54 @@ type DeclareValuesJSONRequestBody = DeclareValuesRequest
 
 // RevealValueDiffJSONRequestBody defines body for RevealValueDiff for application/json ContentType.
 type RevealValueDiffJSONRequestBody = RevealDiffRequest
+
+// CreateScimBindingJSONRequestBody defines body for CreateScimBinding for application/json ContentType.
+type CreateScimBindingJSONRequestBody = CreateScimBindingRequest
+
+// MintScimCredentialJSONRequestBody defines body for MintScimCredential for application/json ContentType.
+type MintScimCredentialJSONRequestBody = MintScimCredentialRequest
+
+// CreateScimMappingJSONRequestBody defines body for CreateScimMapping for application/json ContentType.
+type CreateScimMappingJSONRequestBody = ScimMappingRequest
+
+// UpdateScimMappingJSONRequestBody defines body for UpdateScimMapping for application/json ContentType.
+type UpdateScimMappingJSONRequestBody = ScimMappingRequest
+
+// ScimCreateGroupJSONRequestBody defines body for ScimCreateGroup for application/json ContentType.
+type ScimCreateGroupJSONRequestBody = ScimResource
+
+// ScimCreateGroupApplicationScimPlusJSONRequestBody defines body for ScimCreateGroup for application/scim+json ContentType.
+type ScimCreateGroupApplicationScimPlusJSONRequestBody = ScimResource
+
+// ScimPatchGroupJSONRequestBody defines body for ScimPatchGroup for application/json ContentType.
+type ScimPatchGroupJSONRequestBody = ScimResource
+
+// ScimPatchGroupApplicationScimPlusJSONRequestBody defines body for ScimPatchGroup for application/scim+json ContentType.
+type ScimPatchGroupApplicationScimPlusJSONRequestBody = ScimResource
+
+// ScimReplaceGroupJSONRequestBody defines body for ScimReplaceGroup for application/json ContentType.
+type ScimReplaceGroupJSONRequestBody = ScimResource
+
+// ScimReplaceGroupApplicationScimPlusJSONRequestBody defines body for ScimReplaceGroup for application/scim+json ContentType.
+type ScimReplaceGroupApplicationScimPlusJSONRequestBody = ScimResource
+
+// ScimCreateUserJSONRequestBody defines body for ScimCreateUser for application/json ContentType.
+type ScimCreateUserJSONRequestBody = ScimResource
+
+// ScimCreateUserApplicationScimPlusJSONRequestBody defines body for ScimCreateUser for application/scim+json ContentType.
+type ScimCreateUserApplicationScimPlusJSONRequestBody = ScimResource
+
+// ScimPatchUserJSONRequestBody defines body for ScimPatchUser for application/json ContentType.
+type ScimPatchUserJSONRequestBody = ScimResource
+
+// ScimPatchUserApplicationScimPlusJSONRequestBody defines body for ScimPatchUser for application/scim+json ContentType.
+type ScimPatchUserApplicationScimPlusJSONRequestBody = ScimResource
+
+// ScimReplaceUserJSONRequestBody defines body for ScimReplaceUser for application/json ContentType.
+type ScimReplaceUserJSONRequestBody = ScimResource
+
+// ScimReplaceUserApplicationScimPlusJSONRequestBody defines body for ScimReplaceUser for application/scim+json ContentType.
+type ScimReplaceUserApplicationScimPlusJSONRequestBody = ScimResource
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -3270,6 +3830,105 @@ type ServerInterface interface {
 	// RevealValueDiff Compare two environments with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 	RevealValueDiff(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// ListScimBindings List this organisation's SCIM bindings.
+	// (GET /api/v1/orgs/{org}/scim-bindings)
+	ListScimBindings(w http.ResponseWriter, r *http.Request, org OrgID)
+	// CreateScimBinding Create the organisation's SCIM binding for one identity provider.
+	// (POST /api/v1/orgs/{org}/scim-bindings)
+	CreateScimBinding(w http.ResponseWriter, r *http.Request, org OrgID)
+	// DeleteScimBinding Delete a SCIM binding, running its atomic teardown.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding})
+	DeleteScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// GetScimBinding Read one SCIM binding and its attention states.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding})
+	GetScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ListScimCredentials List the binding's provisioning credentials.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+	ListScimCredentials(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// MintScimCredential Mint a NEW provisioning credential; several may be live at once.
+	// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+	MintScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// RevokeScimCredential Revoke one provisioning credential.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+	RevokeScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// GetScimCredential Read one provisioning credential's metadata.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+	GetScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ListScimDirectoryGroups The provisioned group directory.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups)
+	ListScimDirectoryGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ListScimDirectoryUsers The provisioned user directory, with per-user attention flags.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users)
+	ListScimDirectoryUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// DeleteScimMapping Delete an addressed mapping row and release every origin it holds.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	DeleteScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params DeleteScimMappingParams)
+	// ListScimMappings List the binding's group-to-template mapping table.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	ListScimMappings(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// CreateScimMapping Add a mapping row, granting the group's current members immediately.
+	// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	CreateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// UpdateScimMapping Retarget an addressed mapping row's template.
+	// (PUT /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	UpdateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimBulk Refused — Bulk is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Bulk)
+	ScimBulk(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimListGroups List or filter provisioned groups.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+	ScimListGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListGroupsParams)
+	// ScimCreateGroup Provision a group.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+	ScimCreateGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimSearchGroups Refused — the .search POST query is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search)
+	ScimSearchGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimDeleteGroup Delete a provisioned group.
+	// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimDeleteGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimGetGroup Read one provisioned group.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimGetGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimPatchGroup Patch a provisioned group through the closed operation matrix.
+	// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimPatchGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimReplaceGroup Replace a provisioned group (RFC replacement).
+	// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimReplaceGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimMe Refused — /Me is not implemented.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Me)
+	ScimMe(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimResourceTypes The resource types this service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes)
+	ScimResourceTypes(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimSchemas The schemas this service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas)
+	ScimSchemas(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimServiceProviderConfig Advertise what this SCIM service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig)
+	ScimServiceProviderConfig(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimListUsers List or filter provisioned users.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+	ScimListUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListUsersParams)
+	// ScimCreateUser Provision a user, pre-linked and with zero grants.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+	ScimCreateUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimSearchUsers Refused — the .search POST query is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search)
+	ScimSearchUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID)
+	// ScimDeleteUser Deprovision and remove a user from this binding's directory.
+	// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimDeleteUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimGetUser Read one provisioned user.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimGetUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimPatchUser Patch a provisioned user through the closed operation matrix.
+	// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimPatchUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
+	// ScimReplaceUser Replace a provisioned user (RFC replacement).
+	// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimReplaceUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -4023,6 +4682,204 @@ func (_ Unimplemented) DiffValues(w http.ResponseWriter, r *http.Request, org Or
 // RevealValueDiff Compare two environments with `secret` plaintext.
 // (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 func (_ Unimplemented) RevealValueDiff(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListScimBindings List this organisation's SCIM bindings.
+// (GET /api/v1/orgs/{org}/scim-bindings)
+func (_ Unimplemented) ListScimBindings(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateScimBinding Create the organisation's SCIM binding for one identity provider.
+// (POST /api/v1/orgs/{org}/scim-bindings)
+func (_ Unimplemented) CreateScimBinding(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteScimBinding Delete a SCIM binding, running its atomic teardown.
+// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding})
+func (_ Unimplemented) DeleteScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetScimBinding Read one SCIM binding and its attention states.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding})
+func (_ Unimplemented) GetScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListScimCredentials List the binding's provisioning credentials.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+func (_ Unimplemented) ListScimCredentials(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// MintScimCredential Mint a NEW provisioning credential; several may be live at once.
+// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+func (_ Unimplemented) MintScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeScimCredential Revoke one provisioning credential.
+// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+func (_ Unimplemented) RevokeScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetScimCredential Read one provisioning credential's metadata.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+func (_ Unimplemented) GetScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListScimDirectoryGroups The provisioned group directory.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups)
+func (_ Unimplemented) ListScimDirectoryGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListScimDirectoryUsers The provisioned user directory, with per-user attention flags.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users)
+func (_ Unimplemented) ListScimDirectoryUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteScimMapping Delete an addressed mapping row and release every origin it holds.
+// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+func (_ Unimplemented) DeleteScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params DeleteScimMappingParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListScimMappings List the binding's group-to-template mapping table.
+// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+func (_ Unimplemented) ListScimMappings(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateScimMapping Add a mapping row, granting the group's current members immediately.
+// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+func (_ Unimplemented) CreateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateScimMapping Retarget an addressed mapping row's template.
+// (PUT /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+func (_ Unimplemented) UpdateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimBulk Refused — Bulk is not implemented.
+// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Bulk)
+func (_ Unimplemented) ScimBulk(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimListGroups List or filter provisioned groups.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+func (_ Unimplemented) ScimListGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListGroupsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimCreateGroup Provision a group.
+// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+func (_ Unimplemented) ScimCreateGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimSearchGroups Refused — the .search POST query is not implemented.
+// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search)
+func (_ Unimplemented) ScimSearchGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimDeleteGroup Delete a provisioned group.
+// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+func (_ Unimplemented) ScimDeleteGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimGetGroup Read one provisioned group.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+func (_ Unimplemented) ScimGetGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimPatchGroup Patch a provisioned group through the closed operation matrix.
+// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+func (_ Unimplemented) ScimPatchGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimReplaceGroup Replace a provisioned group (RFC replacement).
+// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+func (_ Unimplemented) ScimReplaceGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimMe Refused — /Me is not implemented.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Me)
+func (_ Unimplemented) ScimMe(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimResourceTypes The resource types this service provider implements.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes)
+func (_ Unimplemented) ScimResourceTypes(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimSchemas The schemas this service provider implements.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas)
+func (_ Unimplemented) ScimSchemas(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimServiceProviderConfig Advertise what this SCIM service provider implements.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig)
+func (_ Unimplemented) ScimServiceProviderConfig(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimListUsers List or filter provisioned users.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+func (_ Unimplemented) ScimListUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListUsersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimCreateUser Provision a user, pre-linked and with zero grants.
+// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+func (_ Unimplemented) ScimCreateUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimSearchUsers Refused — the .search POST query is not implemented.
+// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search)
+func (_ Unimplemented) ScimSearchUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimDeleteUser Deprovision and remove a user from this binding's directory.
+// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+func (_ Unimplemented) ScimDeleteUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimGetUser Read one provisioned user.
+// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+func (_ Unimplemented) ScimGetUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimPatchUser Patch a provisioned user through the closed operation matrix.
+// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+func (_ Unimplemented) ScimPatchUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ScimReplaceUser Replace a provisioned user (RFC replacement).
+// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+func (_ Unimplemented) ScimReplaceUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7900,6 +8757,1411 @@ func (siw *ServerInterfaceWrapper) RevealValueDiff(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListScimBindings operation middleware
+func (siw *ServerInterfaceWrapper) ListScimBindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListScimBindings(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateScimBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreateScimBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateScimBinding(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteScimBinding operation middleware
+func (siw *ServerInterfaceWrapper) DeleteScimBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteScimBinding(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetScimBinding operation middleware
+func (siw *ServerInterfaceWrapper) GetScimBinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetScimBinding(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListScimCredentials operation middleware
+func (siw *ServerInterfaceWrapper) ListScimCredentials(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListScimCredentials(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MintScimCredential operation middleware
+func (siw *ServerInterfaceWrapper) MintScimCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MintScimCredential(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeScimCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeScimCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeScimCredential(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetScimCredential operation middleware
+func (siw *ServerInterfaceWrapper) GetScimCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetScimCredential(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListScimDirectoryGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListScimDirectoryGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListScimDirectoryGroups(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListScimDirectoryUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListScimDirectoryUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListScimDirectoryUsers(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteScimMapping operation middleware
+func (siw *ServerInterfaceWrapper) DeleteScimMapping(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteScimMappingParams
+
+	// ------------- Required query parameter "group" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "group", r.URL.Query(), &params.Group, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "project" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "project", r.URL.Query(), &params.Project, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "project"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "environment" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "environment", r.URL.Query(), &params.Environment, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "environment"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteScimMapping(w, r, org, binding, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListScimMappings operation middleware
+func (siw *ServerInterfaceWrapper) ListScimMappings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListScimMappings(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateScimMapping operation middleware
+func (siw *ServerInterfaceWrapper) CreateScimMapping(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateScimMapping(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateScimMapping operation middleware
+func (siw *ServerInterfaceWrapper) UpdateScimMapping(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateScimMapping(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimBulk operation middleware
+func (siw *ServerInterfaceWrapper) ScimBulk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimBulk(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimListGroups operation middleware
+func (siw *ServerInterfaceWrapper) ScimListGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ScimListGroupsParams
+
+	// ------------- Optional query parameter "filter" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "filter", r.URL.Query(), &params.Filter, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "filter"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "filter", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "startIndex" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "startIndex", r.URL.Query(), &params.StartIndex, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "startIndex"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "startIndex", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "count" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "count", r.URL.Query(), &params.Count, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "count"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "count", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sortBy" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sortBy", r.URL.Query(), &params.SortBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sortBy"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sortBy", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sortOrder" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sortOrder", r.URL.Query(), &params.SortOrder, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sortOrder"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sortOrder", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimListGroups(w, r, org, binding, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimCreateGroup operation middleware
+func (siw *ServerInterfaceWrapper) ScimCreateGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimCreateGroup(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimSearchGroups operation middleware
+func (siw *ServerInterfaceWrapper) ScimSearchGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimSearchGroups(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimDeleteGroup operation middleware
+func (siw *ServerInterfaceWrapper) ScimDeleteGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimDeleteGroup(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimGetGroup operation middleware
+func (siw *ServerInterfaceWrapper) ScimGetGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimGetGroup(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimPatchGroup operation middleware
+func (siw *ServerInterfaceWrapper) ScimPatchGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimPatchGroup(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimReplaceGroup operation middleware
+func (siw *ServerInterfaceWrapper) ScimReplaceGroup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimReplaceGroup(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimMe operation middleware
+func (siw *ServerInterfaceWrapper) ScimMe(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimMe(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimResourceTypes operation middleware
+func (siw *ServerInterfaceWrapper) ScimResourceTypes(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimResourceTypes(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimSchemas operation middleware
+func (siw *ServerInterfaceWrapper) ScimSchemas(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimSchemas(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimServiceProviderConfig operation middleware
+func (siw *ServerInterfaceWrapper) ScimServiceProviderConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimServiceProviderConfig(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ScimListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ScimListUsersParams
+
+	// ------------- Optional query parameter "filter" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "filter", r.URL.Query(), &params.Filter, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "filter"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "filter", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "startIndex" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "startIndex", r.URL.Query(), &params.StartIndex, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "startIndex"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "startIndex", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "count" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "count", r.URL.Query(), &params.Count, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "count"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "count", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sortBy" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sortBy", r.URL.Query(), &params.SortBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sortBy"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sortBy", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "sortOrder" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sortOrder", r.URL.Query(), &params.SortOrder, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sortOrder"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sortOrder", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimListUsers(w, r, org, binding, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimCreateUser operation middleware
+func (siw *ServerInterfaceWrapper) ScimCreateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimCreateUser(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimSearchUsers operation middleware
+func (siw *ServerInterfaceWrapper) ScimSearchUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimSearchUsers(w, r, org, binding)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimDeleteUser operation middleware
+func (siw *ServerInterfaceWrapper) ScimDeleteUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimDeleteUser(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimGetUser operation middleware
+func (siw *ServerInterfaceWrapper) ScimGetUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimGetUser(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimPatchUser operation middleware
+func (siw *ServerInterfaceWrapper) ScimPatchUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimPatchUser(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScimReplaceUser operation middleware
+func (siw *ServerInterfaceWrapper) ScimReplaceUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "binding" -------------
+	var binding ScimBindingID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "binding", chi.URLParam(r, "binding"), &binding, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "binding", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "id" -------------
+	var id ScimResourceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScimReplaceUser(w, r, org, binding, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -8387,6 +10649,105 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery", wrapper.FetchDelivery)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings", wrapper.ListScimBindings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings", wrapper.CreateScimBinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}", wrapper.DeleteScimBinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}", wrapper.GetScimBinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/mappings", wrapper.DeleteScimMapping)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/mappings", wrapper.ListScimMappings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/mappings", wrapper.CreateScimMapping)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/mappings", wrapper.UpdateScimMapping)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/credentials", wrapper.ListScimCredentials)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/credentials", wrapper.MintScimCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}", wrapper.RevokeScimCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id}", wrapper.GetScimCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/directory/users", wrapper.ListScimDirectoryUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups", wrapper.ListScimDirectoryGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig", wrapper.ScimServiceProviderConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes", wrapper.ScimResourceTypes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Schemas", wrapper.ScimSchemas)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users", wrapper.ScimListUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users", wrapper.ScimCreateUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}", wrapper.ScimDeleteUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}", wrapper.ScimGetUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}", wrapper.ScimPatchUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users/{id}", wrapper.ScimReplaceUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups", wrapper.ScimListGroups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups", wrapper.ScimCreateGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}", wrapper.ScimDeleteGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}", wrapper.ScimGetGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}", wrapper.ScimPatchGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id}", wrapper.ScimReplaceGroup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Bulk", wrapper.ScimBulk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Me", wrapper.ScimMe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Users/.search", wrapper.ScimSearchUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search", wrapper.ScimSearchGroups)
 	})
 
 	return r
@@ -19762,6 +22123,3293 @@ func (response RevealValueDiff500JSONResponse) VisitRevealValueDiffResponse(w ht
 	return err
 }
 
+type ListScimBindingsRequestObject struct {
+	Org OrgID `json:"org"`
+}
+
+type ListScimBindingsResponseObject interface {
+	VisitListScimBindingsResponse(w http.ResponseWriter) error
+}
+
+type ListScimBindings200JSONResponse ScimBindingList
+
+func (response ListScimBindings200JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimBindings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListScimBindings401JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimBindings403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListScimBindings403JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimBindings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListScimBindings404JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimBindings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListScimBindings429JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimBindings500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListScimBindings500JSONResponse) VisitListScimBindingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBindingRequestObject struct {
+	Org  OrgID `json:"org"`
+	Body *CreateScimBindingJSONRequestBody
+}
+
+type CreateScimBindingResponseObject interface {
+	VisitCreateScimBindingResponse(w http.ResponseWriter) error
+}
+
+type CreateScimBinding200JSONResponse ScimBinding
+
+func (response CreateScimBinding200JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateScimBinding400JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateScimBinding401JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateScimBinding403JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateScimBinding404JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateScimBinding409JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateScimBinding429JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimBinding500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateScimBinding500JSONResponse) VisitCreateScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimBindingRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type DeleteScimBindingResponseObject interface {
+	VisitDeleteScimBindingResponse(w http.ResponseWriter) error
+}
+
+type DeleteScimBinding204Response struct {
+}
+
+func (response DeleteScimBinding204Response) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteScimBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteScimBinding401JSONResponse) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimBinding403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteScimBinding403JSONResponse) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteScimBinding404JSONResponse) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimBinding429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteScimBinding429JSONResponse) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimBinding500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteScimBinding500JSONResponse) VisitDeleteScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBindingRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type GetScimBindingResponseObject interface {
+	VisitGetScimBindingResponse(w http.ResponseWriter) error
+}
+
+type GetScimBinding200JSONResponse ScimBinding
+
+func (response GetScimBinding200JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBinding401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetScimBinding401JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBinding403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetScimBinding403JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBinding404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetScimBinding404JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBinding429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetScimBinding429JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimBinding500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetScimBinding500JSONResponse) VisitGetScimBindingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentialsRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ListScimCredentialsResponseObject interface {
+	VisitListScimCredentialsResponse(w http.ResponseWriter) error
+}
+
+type ListScimCredentials200JSONResponse ScimCredentialList
+
+func (response ListScimCredentials200JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentials401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListScimCredentials401JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentials403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListScimCredentials403JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentials404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListScimCredentials404JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentials429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListScimCredentials429JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimCredentials500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListScimCredentials500JSONResponse) VisitListScimCredentialsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredentialRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Body    *MintScimCredentialJSONRequestBody
+}
+
+type MintScimCredentialResponseObject interface {
+	VisitMintScimCredentialResponse(w http.ResponseWriter) error
+}
+
+type MintScimCredential200JSONResponse ScimMintResult
+
+func (response MintScimCredential200JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response MintScimCredential400JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MintScimCredential401JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response MintScimCredential403JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response MintScimCredential404JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response MintScimCredential409JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response MintScimCredential429JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintScimCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response MintScimCredential500JSONResponse) VisitMintScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeScimCredentialRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type RevokeScimCredentialResponseObject interface {
+	VisitRevokeScimCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeScimCredential204Response struct {
+}
+
+func (response RevokeScimCredential204Response) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeScimCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeScimCredential401JSONResponse) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeScimCredential403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeScimCredential403JSONResponse) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeScimCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeScimCredential404JSONResponse) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeScimCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeScimCredential429JSONResponse) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeScimCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeScimCredential500JSONResponse) VisitRevokeScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredentialRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type GetScimCredentialResponseObject interface {
+	VisitGetScimCredentialResponse(w http.ResponseWriter) error
+}
+
+type GetScimCredential200JSONResponse ScimCredential
+
+func (response GetScimCredential200JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetScimCredential401JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredential403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetScimCredential403JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetScimCredential404JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredential429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetScimCredential429JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetScimCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetScimCredential500JSONResponse) VisitGetScimCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroupsRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ListScimDirectoryGroupsResponseObject interface {
+	VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListScimDirectoryGroups200JSONResponse ScimDirectoryGroupList
+
+func (response ListScimDirectoryGroups200JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroups401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListScimDirectoryGroups401JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroups403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListScimDirectoryGroups403JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroups404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListScimDirectoryGroups404JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroups429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListScimDirectoryGroups429JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryGroups500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListScimDirectoryGroups500JSONResponse) VisitListScimDirectoryGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsersRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ListScimDirectoryUsersResponseObject interface {
+	VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error
+}
+
+type ListScimDirectoryUsers200JSONResponse ScimDirectoryUserList
+
+func (response ListScimDirectoryUsers200JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsers401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListScimDirectoryUsers401JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsers403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListScimDirectoryUsers403JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsers404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListScimDirectoryUsers404JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsers429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListScimDirectoryUsers429JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimDirectoryUsers500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListScimDirectoryUsers500JSONResponse) VisitListScimDirectoryUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMappingRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Params  DeleteScimMappingParams
+}
+
+type DeleteScimMappingResponseObject interface {
+	VisitDeleteScimMappingResponse(w http.ResponseWriter) error
+}
+
+type DeleteScimMapping200JSONResponse ScimMappingResult
+
+func (response DeleteScimMapping200JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DeleteScimMapping400JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteScimMapping401JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteScimMapping403JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteScimMapping404JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteScimMapping409JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response DeleteScimMapping429JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteScimMapping500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteScimMapping500JSONResponse) VisitDeleteScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappingsRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ListScimMappingsResponseObject interface {
+	VisitListScimMappingsResponse(w http.ResponseWriter) error
+}
+
+type ListScimMappings200JSONResponse ScimMappingList
+
+func (response ListScimMappings200JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappings401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListScimMappings401JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappings403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListScimMappings403JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappings404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListScimMappings404JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappings429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListScimMappings429JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListScimMappings500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListScimMappings500JSONResponse) VisitListScimMappingsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMappingRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Body    *CreateScimMappingJSONRequestBody
+}
+
+type CreateScimMappingResponseObject interface {
+	VisitCreateScimMappingResponse(w http.ResponseWriter) error
+}
+
+type CreateScimMapping200JSONResponse ScimMappingResult
+
+func (response CreateScimMapping200JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateScimMapping400JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateScimMapping401JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateScimMapping403JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateScimMapping404JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateScimMapping409JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateScimMapping429JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateScimMapping500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateScimMapping500JSONResponse) VisitCreateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMappingRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Body    *UpdateScimMappingJSONRequestBody
+}
+
+type UpdateScimMappingResponseObject interface {
+	VisitUpdateScimMappingResponse(w http.ResponseWriter) error
+}
+
+type UpdateScimMapping200JSONResponse ScimMappingResult
+
+func (response UpdateScimMapping200JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateScimMapping400JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateScimMapping401JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateScimMapping403JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateScimMapping404JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateScimMapping409JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response UpdateScimMapping429JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateScimMapping500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateScimMapping500JSONResponse) VisitUpdateScimMappingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimBulkRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimBulkResponseObject interface {
+	VisitScimBulkResponse(w http.ResponseWriter) error
+}
+
+type ScimBulk401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimBulk401ApplicationScimPlusJSONResponse) VisitScimBulkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimBulk404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimBulk404ApplicationScimPlusJSONResponse) VisitScimBulkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimBulk429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimBulk429JSONResponse) VisitScimBulkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimBulk500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimBulk500ApplicationScimPlusJSONResponse) VisitScimBulkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimBulk501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimBulk501ApplicationScimPlusJSONResponse) VisitScimBulkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroupsRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Params  ScimListGroupsParams
+}
+
+type ScimListGroupsResponseObject interface {
+	VisitScimListGroupsResponse(w http.ResponseWriter) error
+}
+
+type ScimListGroups200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups200ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups400ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups401ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups404ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimListGroups429JSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups500ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListGroups501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListGroups501ApplicationScimPlusJSONResponse) VisitScimListGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroupRequestObject struct {
+	Org                         OrgID         `json:"org"`
+	Binding                     ScimBindingID `json:"binding"`
+	JSONBody                    *ScimCreateGroupJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimCreateGroupApplicationScimPlusJSONRequestBody
+}
+
+type ScimCreateGroupResponseObject interface {
+	VisitScimCreateGroupResponse(w http.ResponseWriter) error
+}
+
+type ScimCreateGroup201ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup201ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup400ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup401ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup404ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup409ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup413ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimCreateGroup429JSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateGroup500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateGroup500ApplicationScimPlusJSONResponse) VisitScimCreateGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchGroupsRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimSearchGroupsResponseObject interface {
+	VisitScimSearchGroupsResponse(w http.ResponseWriter) error
+}
+
+type ScimSearchGroups401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchGroups401ApplicationScimPlusJSONResponse) VisitScimSearchGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchGroups404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchGroups404ApplicationScimPlusJSONResponse) VisitScimSearchGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchGroups429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimSearchGroups429JSONResponse) VisitScimSearchGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchGroups500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchGroups500ApplicationScimPlusJSONResponse) VisitScimSearchGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchGroups501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchGroups501ApplicationScimPlusJSONResponse) VisitScimSearchGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteGroupRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type ScimDeleteGroupResponseObject interface {
+	VisitScimDeleteGroupResponse(w http.ResponseWriter) error
+}
+
+type ScimDeleteGroup204Response struct {
+}
+
+func (response ScimDeleteGroup204Response) VisitScimDeleteGroupResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ScimDeleteGroup401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteGroup401ApplicationScimPlusJSONResponse) VisitScimDeleteGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteGroup404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteGroup404ApplicationScimPlusJSONResponse) VisitScimDeleteGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimDeleteGroup429JSONResponse) VisitScimDeleteGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteGroup500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteGroup500ApplicationScimPlusJSONResponse) VisitScimDeleteGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetGroupRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type ScimGetGroupResponseObject interface {
+	VisitScimGetGroupResponse(w http.ResponseWriter) error
+}
+
+type ScimGetGroup200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetGroup200ApplicationScimPlusJSONResponse) VisitScimGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetGroup401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetGroup401ApplicationScimPlusJSONResponse) VisitScimGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetGroup404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetGroup404ApplicationScimPlusJSONResponse) VisitScimGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimGetGroup429JSONResponse) VisitScimGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetGroup500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetGroup500ApplicationScimPlusJSONResponse) VisitScimGetGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroupRequestObject struct {
+	Org                         OrgID          `json:"org"`
+	Binding                     ScimBindingID  `json:"binding"`
+	Id                          ScimResourceID `json:"id"`
+	JSONBody                    *ScimPatchGroupJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimPatchGroupApplicationScimPlusJSONRequestBody
+}
+
+type ScimPatchGroupResponseObject interface {
+	VisitScimPatchGroupResponse(w http.ResponseWriter) error
+}
+
+type ScimPatchGroup200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup200ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup400ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup401ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup404ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup409ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup413ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimPatchGroup429JSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchGroup500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchGroup500ApplicationScimPlusJSONResponse) VisitScimPatchGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroupRequestObject struct {
+	Org                         OrgID          `json:"org"`
+	Binding                     ScimBindingID  `json:"binding"`
+	Id                          ScimResourceID `json:"id"`
+	JSONBody                    *ScimReplaceGroupJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimReplaceGroupApplicationScimPlusJSONRequestBody
+}
+
+type ScimReplaceGroupResponseObject interface {
+	VisitScimReplaceGroupResponse(w http.ResponseWriter) error
+}
+
+type ScimReplaceGroup200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup200ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup400ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup401ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup404ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup409ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup413ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimReplaceGroup429JSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceGroup500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceGroup500ApplicationScimPlusJSONResponse) VisitScimReplaceGroupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimMeRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimMeResponseObject interface {
+	VisitScimMeResponse(w http.ResponseWriter) error
+}
+
+type ScimMe401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimMe401ApplicationScimPlusJSONResponse) VisitScimMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimMe404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimMe404ApplicationScimPlusJSONResponse) VisitScimMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimMe429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimMe429JSONResponse) VisitScimMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimMe500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimMe500ApplicationScimPlusJSONResponse) VisitScimMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimMe501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimMe501ApplicationScimPlusJSONResponse) VisitScimMeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimResourceTypesRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimResourceTypesResponseObject interface {
+	VisitScimResourceTypesResponse(w http.ResponseWriter) error
+}
+
+type ScimResourceTypes200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimResourceTypes200ApplicationScimPlusJSONResponse) VisitScimResourceTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimResourceTypes401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimResourceTypes401ApplicationScimPlusJSONResponse) VisitScimResourceTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimResourceTypes404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimResourceTypes404ApplicationScimPlusJSONResponse) VisitScimResourceTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimResourceTypes429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimResourceTypes429JSONResponse) VisitScimResourceTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimResourceTypes500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimResourceTypes500ApplicationScimPlusJSONResponse) VisitScimResourceTypesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSchemasRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimSchemasResponseObject interface {
+	VisitScimSchemasResponse(w http.ResponseWriter) error
+}
+
+type ScimSchemas200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSchemas200ApplicationScimPlusJSONResponse) VisitScimSchemasResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSchemas401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSchemas401ApplicationScimPlusJSONResponse) VisitScimSchemasResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSchemas404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSchemas404ApplicationScimPlusJSONResponse) VisitScimSchemasResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSchemas429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimSchemas429JSONResponse) VisitScimSchemasResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSchemas500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSchemas500ApplicationScimPlusJSONResponse) VisitScimSchemasResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimServiceProviderConfigRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimServiceProviderConfigResponseObject interface {
+	VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error
+}
+
+type ScimServiceProviderConfig200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimServiceProviderConfig200ApplicationScimPlusJSONResponse) VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimServiceProviderConfig401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimServiceProviderConfig401ApplicationScimPlusJSONResponse) VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimServiceProviderConfig404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimServiceProviderConfig404ApplicationScimPlusJSONResponse) VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimServiceProviderConfig429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimServiceProviderConfig429JSONResponse) VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimServiceProviderConfig500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimServiceProviderConfig500ApplicationScimPlusJSONResponse) VisitScimServiceProviderConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsersRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+	Params  ScimListUsersParams
+}
+
+type ScimListUsersResponseObject interface {
+	VisitScimListUsersResponse(w http.ResponseWriter) error
+}
+
+type ScimListUsers200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers200ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers400ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers401ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers404ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimListUsers429JSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers500ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimListUsers501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimListUsers501ApplicationScimPlusJSONResponse) VisitScimListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUserRequestObject struct {
+	Org                         OrgID         `json:"org"`
+	Binding                     ScimBindingID `json:"binding"`
+	JSONBody                    *ScimCreateUserJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimCreateUserApplicationScimPlusJSONRequestBody
+}
+
+type ScimCreateUserResponseObject interface {
+	VisitScimCreateUserResponse(w http.ResponseWriter) error
+}
+
+type ScimCreateUser201ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser201ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser400ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser401ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser404ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser409ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser413ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimCreateUser429JSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimCreateUser500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimCreateUser500ApplicationScimPlusJSONResponse) VisitScimCreateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchUsersRequestObject struct {
+	Org     OrgID         `json:"org"`
+	Binding ScimBindingID `json:"binding"`
+}
+
+type ScimSearchUsersResponseObject interface {
+	VisitScimSearchUsersResponse(w http.ResponseWriter) error
+}
+
+type ScimSearchUsers401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchUsers401ApplicationScimPlusJSONResponse) VisitScimSearchUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchUsers404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchUsers404ApplicationScimPlusJSONResponse) VisitScimSearchUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchUsers429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimSearchUsers429JSONResponse) VisitScimSearchUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchUsers500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchUsers500ApplicationScimPlusJSONResponse) VisitScimSearchUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimSearchUsers501ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimSearchUsers501ApplicationScimPlusJSONResponse) VisitScimSearchUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(501)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteUserRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type ScimDeleteUserResponseObject interface {
+	VisitScimDeleteUserResponse(w http.ResponseWriter) error
+}
+
+type ScimDeleteUser204Response struct {
+}
+
+func (response ScimDeleteUser204Response) VisitScimDeleteUserResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ScimDeleteUser401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteUser401ApplicationScimPlusJSONResponse) VisitScimDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteUser404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteUser404ApplicationScimPlusJSONResponse) VisitScimDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteUser429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimDeleteUser429JSONResponse) VisitScimDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimDeleteUser500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimDeleteUser500ApplicationScimPlusJSONResponse) VisitScimDeleteUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetUserRequestObject struct {
+	Org     OrgID          `json:"org"`
+	Binding ScimBindingID  `json:"binding"`
+	Id      ScimResourceID `json:"id"`
+}
+
+type ScimGetUserResponseObject interface {
+	VisitScimGetUserResponse(w http.ResponseWriter) error
+}
+
+type ScimGetUser200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetUser200ApplicationScimPlusJSONResponse) VisitScimGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetUser401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetUser401ApplicationScimPlusJSONResponse) VisitScimGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetUser404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetUser404ApplicationScimPlusJSONResponse) VisitScimGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetUser429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimGetUser429JSONResponse) VisitScimGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimGetUser500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimGetUser500ApplicationScimPlusJSONResponse) VisitScimGetUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUserRequestObject struct {
+	Org                         OrgID          `json:"org"`
+	Binding                     ScimBindingID  `json:"binding"`
+	Id                          ScimResourceID `json:"id"`
+	JSONBody                    *ScimPatchUserJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimPatchUserApplicationScimPlusJSONRequestBody
+}
+
+type ScimPatchUserResponseObject interface {
+	VisitScimPatchUserResponse(w http.ResponseWriter) error
+}
+
+type ScimPatchUser200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser200ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser400ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser401ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser404ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser409ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser413ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimPatchUser429JSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimPatchUser500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimPatchUser500ApplicationScimPlusJSONResponse) VisitScimPatchUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUserRequestObject struct {
+	Org                         OrgID          `json:"org"`
+	Binding                     ScimBindingID  `json:"binding"`
+	Id                          ScimResourceID `json:"id"`
+	JSONBody                    *ScimReplaceUserJSONRequestBody
+	ApplicationScimPlusJSONBody *ScimReplaceUserApplicationScimPlusJSONRequestBody
+}
+
+type ScimReplaceUserResponseObject interface {
+	VisitScimReplaceUserResponse(w http.ResponseWriter) error
+}
+
+type ScimReplaceUser200ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser200ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser400ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser400ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser401ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser401ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser404ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser404ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser409ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser409ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser413ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser413ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ScimReplaceUser429JSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ScimReplaceUser500ApplicationScimPlusJSONResponse ScimResource
+
+func (response ScimReplaceUser500ApplicationScimPlusJSONResponse) VisitScimReplaceUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/scim+json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
@@ -20139,6 +25787,105 @@ type StrictServerInterface interface {
 	// RevealValueDiff Compare two environments with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 	RevealValueDiff(ctx context.Context, request RevealValueDiffRequestObject) (RevealValueDiffResponseObject, error)
+	// ListScimBindings List this organisation's SCIM bindings.
+	// (GET /api/v1/orgs/{org}/scim-bindings)
+	ListScimBindings(ctx context.Context, request ListScimBindingsRequestObject) (ListScimBindingsResponseObject, error)
+	// CreateScimBinding Create the organisation's SCIM binding for one identity provider.
+	// (POST /api/v1/orgs/{org}/scim-bindings)
+	CreateScimBinding(ctx context.Context, request CreateScimBindingRequestObject) (CreateScimBindingResponseObject, error)
+	// DeleteScimBinding Delete a SCIM binding, running its atomic teardown.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding})
+	DeleteScimBinding(ctx context.Context, request DeleteScimBindingRequestObject) (DeleteScimBindingResponseObject, error)
+	// GetScimBinding Read one SCIM binding and its attention states.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding})
+	GetScimBinding(ctx context.Context, request GetScimBindingRequestObject) (GetScimBindingResponseObject, error)
+	// ListScimCredentials List the binding's provisioning credentials.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+	ListScimCredentials(ctx context.Context, request ListScimCredentialsRequestObject) (ListScimCredentialsResponseObject, error)
+	// MintScimCredential Mint a NEW provisioning credential; several may be live at once.
+	// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/credentials)
+	MintScimCredential(ctx context.Context, request MintScimCredentialRequestObject) (MintScimCredentialResponseObject, error)
+	// RevokeScimCredential Revoke one provisioning credential.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+	RevokeScimCredential(ctx context.Context, request RevokeScimCredentialRequestObject) (RevokeScimCredentialResponseObject, error)
+	// GetScimCredential Read one provisioning credential's metadata.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/credentials/{id})
+	GetScimCredential(ctx context.Context, request GetScimCredentialRequestObject) (GetScimCredentialResponseObject, error)
+	// ListScimDirectoryGroups The provisioned group directory.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/groups)
+	ListScimDirectoryGroups(ctx context.Context, request ListScimDirectoryGroupsRequestObject) (ListScimDirectoryGroupsResponseObject, error)
+	// ListScimDirectoryUsers The provisioned user directory, with per-user attention flags.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/directory/users)
+	ListScimDirectoryUsers(ctx context.Context, request ListScimDirectoryUsersRequestObject) (ListScimDirectoryUsersResponseObject, error)
+	// DeleteScimMapping Delete an addressed mapping row and release every origin it holds.
+	// (DELETE /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	DeleteScimMapping(ctx context.Context, request DeleteScimMappingRequestObject) (DeleteScimMappingResponseObject, error)
+	// ListScimMappings List the binding's group-to-template mapping table.
+	// (GET /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	ListScimMappings(ctx context.Context, request ListScimMappingsRequestObject) (ListScimMappingsResponseObject, error)
+	// CreateScimMapping Add a mapping row, granting the group's current members immediately.
+	// (POST /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	CreateScimMapping(ctx context.Context, request CreateScimMappingRequestObject) (CreateScimMappingResponseObject, error)
+	// UpdateScimMapping Retarget an addressed mapping row's template.
+	// (PUT /api/v1/orgs/{org}/scim-bindings/{binding}/mappings)
+	UpdateScimMapping(ctx context.Context, request UpdateScimMappingRequestObject) (UpdateScimMappingResponseObject, error)
+	// ScimBulk Refused — Bulk is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Bulk)
+	ScimBulk(ctx context.Context, request ScimBulkRequestObject) (ScimBulkResponseObject, error)
+	// ScimListGroups List or filter provisioned groups.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+	ScimListGroups(ctx context.Context, request ScimListGroupsRequestObject) (ScimListGroupsResponseObject, error)
+	// ScimCreateGroup Provision a group.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups)
+	ScimCreateGroup(ctx context.Context, request ScimCreateGroupRequestObject) (ScimCreateGroupResponseObject, error)
+	// ScimSearchGroups Refused — the .search POST query is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search)
+	ScimSearchGroups(ctx context.Context, request ScimSearchGroupsRequestObject) (ScimSearchGroupsResponseObject, error)
+	// ScimDeleteGroup Delete a provisioned group.
+	// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimDeleteGroup(ctx context.Context, request ScimDeleteGroupRequestObject) (ScimDeleteGroupResponseObject, error)
+	// ScimGetGroup Read one provisioned group.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimGetGroup(ctx context.Context, request ScimGetGroupRequestObject) (ScimGetGroupResponseObject, error)
+	// ScimPatchGroup Patch a provisioned group through the closed operation matrix.
+	// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimPatchGroup(ctx context.Context, request ScimPatchGroupRequestObject) (ScimPatchGroupResponseObject, error)
+	// ScimReplaceGroup Replace a provisioned group (RFC replacement).
+	// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Groups/{id})
+	ScimReplaceGroup(ctx context.Context, request ScimReplaceGroupRequestObject) (ScimReplaceGroupResponseObject, error)
+	// ScimMe Refused — /Me is not implemented.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Me)
+	ScimMe(ctx context.Context, request ScimMeRequestObject) (ScimMeResponseObject, error)
+	// ScimResourceTypes The resource types this service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ResourceTypes)
+	ScimResourceTypes(ctx context.Context, request ScimResourceTypesRequestObject) (ScimResourceTypesResponseObject, error)
+	// ScimSchemas The schemas this service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Schemas)
+	ScimSchemas(ctx context.Context, request ScimSchemasRequestObject) (ScimSchemasResponseObject, error)
+	// ScimServiceProviderConfig Advertise what this SCIM service provider implements.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/ServiceProviderConfig)
+	ScimServiceProviderConfig(ctx context.Context, request ScimServiceProviderConfigRequestObject) (ScimServiceProviderConfigResponseObject, error)
+	// ScimListUsers List or filter provisioned users.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+	ScimListUsers(ctx context.Context, request ScimListUsersRequestObject) (ScimListUsersResponseObject, error)
+	// ScimCreateUser Provision a user, pre-linked and with zero grants.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users)
+	ScimCreateUser(ctx context.Context, request ScimCreateUserRequestObject) (ScimCreateUserResponseObject, error)
+	// ScimSearchUsers Refused — the .search POST query is not implemented.
+	// (POST /api/v1/orgs/{org}/scim/v2/{binding}/Users/.search)
+	ScimSearchUsers(ctx context.Context, request ScimSearchUsersRequestObject) (ScimSearchUsersResponseObject, error)
+	// ScimDeleteUser Deprovision and remove a user from this binding's directory.
+	// (DELETE /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimDeleteUser(ctx context.Context, request ScimDeleteUserRequestObject) (ScimDeleteUserResponseObject, error)
+	// ScimGetUser Read one provisioned user.
+	// (GET /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimGetUser(ctx context.Context, request ScimGetUserRequestObject) (ScimGetUserResponseObject, error)
+	// ScimPatchUser Patch a provisioned user through the closed operation matrix.
+	// (PATCH /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimPatchUser(ctx context.Context, request ScimPatchUserRequestObject) (ScimPatchUserResponseObject, error)
+	// ScimReplaceUser Replace a provisioned user (RFC replacement).
+	// (PUT /api/v1/orgs/{org}/scim/v2/{binding}/Users/{id})
+	ScimReplaceUser(ctx context.Context, request ScimReplaceUserRequestObject) (ScimReplaceUserResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -23887,6 +29634,1056 @@ func (sh *strictHandler) RevealValueDiff(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevealValueDiffResponseObject); ok {
 		if err := validResponse.VisitRevealValueDiffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListScimBindings operation middleware
+func (sh *strictHandler) ListScimBindings(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request ListScimBindingsRequestObject
+
+	request.Org = org
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListScimBindings(ctx, request.(ListScimBindingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListScimBindings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListScimBindingsResponseObject); ok {
+		if err := validResponse.VisitListScimBindingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateScimBinding operation middleware
+func (sh *strictHandler) CreateScimBinding(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request CreateScimBindingRequestObject
+
+	request.Org = org
+
+	var body CreateScimBindingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateScimBinding(ctx, request.(CreateScimBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateScimBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateScimBindingResponseObject); ok {
+		if err := validResponse.VisitCreateScimBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteScimBinding operation middleware
+func (sh *strictHandler) DeleteScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request DeleteScimBindingRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteScimBinding(ctx, request.(DeleteScimBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteScimBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteScimBindingResponseObject); ok {
+		if err := validResponse.VisitDeleteScimBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetScimBinding operation middleware
+func (sh *strictHandler) GetScimBinding(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request GetScimBindingRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetScimBinding(ctx, request.(GetScimBindingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetScimBinding")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetScimBindingResponseObject); ok {
+		if err := validResponse.VisitGetScimBindingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListScimCredentials operation middleware
+func (sh *strictHandler) ListScimCredentials(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ListScimCredentialsRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListScimCredentials(ctx, request.(ListScimCredentialsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListScimCredentials")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListScimCredentialsResponseObject); ok {
+		if err := validResponse.VisitListScimCredentialsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MintScimCredential operation middleware
+func (sh *strictHandler) MintScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request MintScimCredentialRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	var body MintScimCredentialJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MintScimCredential(ctx, request.(MintScimCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MintScimCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MintScimCredentialResponseObject); ok {
+		if err := validResponse.VisitMintScimCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeScimCredential operation middleware
+func (sh *strictHandler) RevokeScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request RevokeScimCredentialRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeScimCredential(ctx, request.(RevokeScimCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeScimCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeScimCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeScimCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetScimCredential operation middleware
+func (sh *strictHandler) GetScimCredential(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request GetScimCredentialRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetScimCredential(ctx, request.(GetScimCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetScimCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetScimCredentialResponseObject); ok {
+		if err := validResponse.VisitGetScimCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListScimDirectoryGroups operation middleware
+func (sh *strictHandler) ListScimDirectoryGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ListScimDirectoryGroupsRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListScimDirectoryGroups(ctx, request.(ListScimDirectoryGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListScimDirectoryGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListScimDirectoryGroupsResponseObject); ok {
+		if err := validResponse.VisitListScimDirectoryGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListScimDirectoryUsers operation middleware
+func (sh *strictHandler) ListScimDirectoryUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ListScimDirectoryUsersRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListScimDirectoryUsers(ctx, request.(ListScimDirectoryUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListScimDirectoryUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListScimDirectoryUsersResponseObject); ok {
+		if err := validResponse.VisitListScimDirectoryUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteScimMapping operation middleware
+func (sh *strictHandler) DeleteScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params DeleteScimMappingParams) {
+	var request DeleteScimMappingRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteScimMapping(ctx, request.(DeleteScimMappingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteScimMapping")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteScimMappingResponseObject); ok {
+		if err := validResponse.VisitDeleteScimMappingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListScimMappings operation middleware
+func (sh *strictHandler) ListScimMappings(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ListScimMappingsRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListScimMappings(ctx, request.(ListScimMappingsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListScimMappings")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListScimMappingsResponseObject); ok {
+		if err := validResponse.VisitListScimMappingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateScimMapping operation middleware
+func (sh *strictHandler) CreateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request CreateScimMappingRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	var body CreateScimMappingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateScimMapping(ctx, request.(CreateScimMappingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateScimMapping")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateScimMappingResponseObject); ok {
+		if err := validResponse.VisitCreateScimMappingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateScimMapping operation middleware
+func (sh *strictHandler) UpdateScimMapping(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request UpdateScimMappingRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	var body UpdateScimMappingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateScimMapping(ctx, request.(UpdateScimMappingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateScimMapping")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateScimMappingResponseObject); ok {
+		if err := validResponse.VisitUpdateScimMappingResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimBulk operation middleware
+func (sh *strictHandler) ScimBulk(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimBulkRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimBulk(ctx, request.(ScimBulkRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimBulk")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimBulkResponseObject); ok {
+		if err := validResponse.VisitScimBulkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimListGroups operation middleware
+func (sh *strictHandler) ScimListGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListGroupsParams) {
+	var request ScimListGroupsRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimListGroups(ctx, request.(ScimListGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimListGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimListGroupsResponseObject); ok {
+		if err := validResponse.VisitScimListGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimCreateGroup operation middleware
+func (sh *strictHandler) ScimCreateGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimCreateGroupRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimCreateGroupJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimCreateGroupApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimCreateGroup(ctx, request.(ScimCreateGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimCreateGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimCreateGroupResponseObject); ok {
+		if err := validResponse.VisitScimCreateGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimSearchGroups operation middleware
+func (sh *strictHandler) ScimSearchGroups(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimSearchGroupsRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimSearchGroups(ctx, request.(ScimSearchGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimSearchGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimSearchGroupsResponseObject); ok {
+		if err := validResponse.VisitScimSearchGroupsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimDeleteGroup operation middleware
+func (sh *strictHandler) ScimDeleteGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimDeleteGroupRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimDeleteGroup(ctx, request.(ScimDeleteGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimDeleteGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimDeleteGroupResponseObject); ok {
+		if err := validResponse.VisitScimDeleteGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimGetGroup operation middleware
+func (sh *strictHandler) ScimGetGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimGetGroupRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimGetGroup(ctx, request.(ScimGetGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimGetGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimGetGroupResponseObject); ok {
+		if err := validResponse.VisitScimGetGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimPatchGroup operation middleware
+func (sh *strictHandler) ScimPatchGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimPatchGroupRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimPatchGroupJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimPatchGroupApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimPatchGroup(ctx, request.(ScimPatchGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimPatchGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimPatchGroupResponseObject); ok {
+		if err := validResponse.VisitScimPatchGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimReplaceGroup operation middleware
+func (sh *strictHandler) ScimReplaceGroup(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimReplaceGroupRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimReplaceGroupJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimReplaceGroupApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimReplaceGroup(ctx, request.(ScimReplaceGroupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimReplaceGroup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimReplaceGroupResponseObject); ok {
+		if err := validResponse.VisitScimReplaceGroupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimMe operation middleware
+func (sh *strictHandler) ScimMe(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimMeRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimMe(ctx, request.(ScimMeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimMe")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimMeResponseObject); ok {
+		if err := validResponse.VisitScimMeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimResourceTypes operation middleware
+func (sh *strictHandler) ScimResourceTypes(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimResourceTypesRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimResourceTypes(ctx, request.(ScimResourceTypesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimResourceTypes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimResourceTypesResponseObject); ok {
+		if err := validResponse.VisitScimResourceTypesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimSchemas operation middleware
+func (sh *strictHandler) ScimSchemas(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimSchemasRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimSchemas(ctx, request.(ScimSchemasRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimSchemas")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimSchemasResponseObject); ok {
+		if err := validResponse.VisitScimSchemasResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimServiceProviderConfig operation middleware
+func (sh *strictHandler) ScimServiceProviderConfig(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimServiceProviderConfigRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimServiceProviderConfig(ctx, request.(ScimServiceProviderConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimServiceProviderConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimServiceProviderConfigResponseObject); ok {
+		if err := validResponse.VisitScimServiceProviderConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimListUsers operation middleware
+func (sh *strictHandler) ScimListUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, params ScimListUsersParams) {
+	var request ScimListUsersRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimListUsers(ctx, request.(ScimListUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimListUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimListUsersResponseObject); ok {
+		if err := validResponse.VisitScimListUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimCreateUser operation middleware
+func (sh *strictHandler) ScimCreateUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimCreateUserRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimCreateUserJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimCreateUserApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimCreateUser(ctx, request.(ScimCreateUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimCreateUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimCreateUserResponseObject); ok {
+		if err := validResponse.VisitScimCreateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimSearchUsers operation middleware
+func (sh *strictHandler) ScimSearchUsers(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID) {
+	var request ScimSearchUsersRequestObject
+
+	request.Org = org
+	request.Binding = binding
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimSearchUsers(ctx, request.(ScimSearchUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimSearchUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimSearchUsersResponseObject); ok {
+		if err := validResponse.VisitScimSearchUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimDeleteUser operation middleware
+func (sh *strictHandler) ScimDeleteUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimDeleteUserRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimDeleteUser(ctx, request.(ScimDeleteUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimDeleteUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimDeleteUserResponseObject); ok {
+		if err := validResponse.VisitScimDeleteUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimGetUser operation middleware
+func (sh *strictHandler) ScimGetUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimGetUserRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimGetUser(ctx, request.(ScimGetUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimGetUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimGetUserResponseObject); ok {
+		if err := validResponse.VisitScimGetUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimPatchUser operation middleware
+func (sh *strictHandler) ScimPatchUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimPatchUserRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimPatchUserJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimPatchUserApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimPatchUser(ctx, request.(ScimPatchUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimPatchUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimPatchUserResponseObject); ok {
+		if err := validResponse.VisitScimPatchUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ScimReplaceUser operation middleware
+func (sh *strictHandler) ScimReplaceUser(w http.ResponseWriter, r *http.Request, org OrgID, binding ScimBindingID, id ScimResourceID) {
+	var request ScimReplaceUserRequestObject
+
+	request.Org = org
+	request.Binding = binding
+	request.Id = id
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+
+		var body ScimReplaceUserJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.JSONBody = &body
+
+	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/scim+json") {
+
+		var body ScimReplaceUserApplicationScimPlusJSONRequestBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+		request.ApplicationScimPlusJSONBody = &body
+
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ScimReplaceUser(ctx, request.(ScimReplaceUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ScimReplaceUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ScimReplaceUserResponseObject); ok {
+		if err := validResponse.VisitScimReplaceUserResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

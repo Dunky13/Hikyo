@@ -187,6 +187,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteOriginlessGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "a3995eb06a94904a81ecd77108d1e41c59a7780fbe45a91777e409dd71b7c5ec"
+  },
+  {
+    "engine": "postgres",
     "name": "DeletePendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "de3e3cf0a2de5c05ab5ec340129598cf840929bc37c322ce0a77360a779df451"
@@ -214,6 +220,12 @@
     "name": "DeleteSAMLProvider",
     "annotation": "authn-resolution",
     "hash": "d01b50344ff24566f970b6bb1a73ca733a62bab2eeacae3973263db07de7356e"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSCIMCredentialsForBinding",
+    "annotation": "authn-resolution",
+    "hash": "9a70dad320cb8dd76593651e0bbaf352b70324c0e88e27849ac81faca00983ea"
   },
   {
     "engine": "postgres",
@@ -268,6 +280,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "848f0fe3ce8a4f1ca5d8f819696cb66997d72de72efbac64e3090050460a8df0"
+  },
+  {
+    "engine": "postgres",
+    "name": "DropRestoredSCIMOrigins",
+    "annotation": "authn-resolution",
+    "hash": "3d2bf22b6f70735b2b08b42a658d01242a18f8eec720809866bd9888b612c04f"
   },
   {
     "engine": "postgres",
@@ -469,6 +487,18 @@
   },
   {
     "engine": "postgres",
+    "name": "GetSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "e16e46ac0c2f3b5a5758fc8c5eb778ff408eb74173d424f753876f21ab60675e"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetSCIMCredentialByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "8a4ec2b5caca72e1fa21ec5bb175a945bf3df9651ec85b1cb064be2130ddebb0"
+  },
+  {
+    "engine": "postgres",
     "name": "GetServiceAccount",
     "annotation": "authn-resolution",
     "hash": "537135ac9e23d915b3d657b2126de8574cf153a30a73e16cc417551f686ff680"
@@ -643,6 +673,12 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "99d305cdeaff630d725fb2ff67e31fef55256d212e867c2658ca3aa2a9ae4f1c"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertServiceAccount",
     "annotation": "authn-resolution",
     "hash": "59d9747badc2c781b4a9637b9f2dac0fe813548887090d1002eed7819c12ada5"
@@ -703,6 +739,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListGrantOriginsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "e0036d0f27b8c8522557e5d04dd23c949a04c53dd811bd942df7f5c8d6c21d81"
+  },
+  {
+    "engine": "postgres",
     "name": "ListGrantRowsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "71e1cacc7ace789b67fece7952f6418a2adb152804dcbc9f4162f9d8f7a749b8"
@@ -745,6 +787,18 @@
   },
   {
     "engine": "postgres",
+    "name": "ListLockoutRetentionOrigins",
+    "annotation": "authn-resolution",
+    "hash": "0ea3a89bd963a49290e9754d3a80305083fd49525fdcb5de4ba5a7e7184be6f4"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListLockoutRetentionOriginsInOrg",
+    "annotation": "authn-resolution",
+    "hash": "d82ad9c07b6cbe095c602c0a36af340dfcf297c710b54557bcf909d1a9db63b9"
+  },
+  {
+    "engine": "postgres",
     "name": "ListMachineCredentials",
     "annotation": "authn-resolution",
     "hash": "4f070bd0e263a733cc37357480c0a6fa37a892f651e4be9143b4248f91ae9498"
@@ -784,6 +838,12 @@
     "name": "ListSAMLSPKeys",
     "annotation": "authn-resolution",
     "hash": "77f8c3d9e1f516626df74b6bf5c1d4631a1cce7ea07009e6d879143d99c4c6c7"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListSCIMCredentials",
+    "annotation": "authn-resolution",
+    "hash": "060c7640ba41cbaebd0167ec77757913ae68fb237bb70afc9b3779e0063d3239"
   },
   {
     "engine": "postgres",
@@ -849,7 +909,7 @@
     "engine": "postgres",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
-    "hash": "bcc965f2855da3601f60cdfd2208dc7559ecb6935a789ee3f1a1cb65168021af"
+    "hash": "c5bcba5a8487e50eaa30338a56804d824cbc7c7325ccd3c3f2862be2f6e92388"
   },
   {
     "engine": "postgres",
@@ -901,6 +961,18 @@
   },
   {
     "engine": "postgres",
+    "name": "RevokeSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "709759f4803b905681d4e514a7c71df4f8ea734bf868298689304eb88afc2d77"
+  },
+  {
+    "engine": "postgres",
+    "name": "RevokeSCIMCredentialsForBinding",
+    "annotation": "authn-resolution",
+    "hash": "d09508a43506b1863f59781cf44b98b2c0e41663d7722ef1ec61c9e374d4d094"
+  },
+  {
+    "engine": "postgres",
     "name": "RotateSessionFactors",
     "annotation": "authn-resolution",
     "hash": "923e9ee53ea03a85a0c33d5584f419c19a6d1596962d994f9274bf04516f8c15"
@@ -940,6 +1012,12 @@
     "name": "TouchMachineCredential",
     "annotation": "authn-resolution",
     "hash": "446f83bec49606ce3821d4b660aa3b2f4591b39d4a34b55b2ac0cbaadfa318f4"
+  },
+  {
+    "engine": "postgres",
+    "name": "TouchSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "4abaf21b0bc223eaa68bdac73810bb7c60ae3e5cc2ac10e67e8d60d92219b119"
   },
   {
     "engine": "postgres",
@@ -1165,6 +1243,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteOriginlessGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "66f3008c7296dec9a50911b490f1d5c6f3a4b2e04b7188f47c3b014842483f67"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeletePendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "9cac0a620bc7fa2b5289015dddd8be9beb8d4c0c5166617f25c6bfffe0351904"
@@ -1192,6 +1276,12 @@
     "name": "DeleteSAMLProvider",
     "annotation": "authn-resolution",
     "hash": "b7770091c2529fbce9b91be2aa7735f8618ab43de5eb4c03772c950a7653c43e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSCIMCredentialsForBinding",
+    "annotation": "authn-resolution",
+    "hash": "8ea8649f03eeb49181538e505a6fd52c7dd2dd5be3a7e8aa62c7837021f42602"
   },
   {
     "engine": "sqlite",
@@ -1246,6 +1336,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "8b28aa8f530e6ef3ef812866a0daa85c83c7f6092d35ed2357dd959ab3603435"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DropRestoredSCIMOrigins",
+    "annotation": "authn-resolution",
+    "hash": "865e04d6b5541dd33657a310569dcccf05ca85561f25eccfef5edded1d13ff96"
   },
   {
     "engine": "sqlite",
@@ -1447,6 +1543,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "84a00596c780d4bfb65c9d8a194c6ad59862d082c449eb412c21e25995a87893"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetSCIMCredentialByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "b52ec134279a86d5bc767790425f2d54768cef99ca11232e4ee4bf0ebe28d037"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetServiceAccount",
     "annotation": "authn-resolution",
     "hash": "cb112e0f7ef3984388b343a912b040ea6e57fe84801af4c1e4fa92ff9df7826a"
@@ -1621,6 +1729,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "8b54a3d82a89340217bddacad26f44bdfacf1da1eba419108bc6645eaef34509"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertServiceAccount",
     "annotation": "authn-resolution",
     "hash": "baf1d749412358d1e0886249b0fb597222c73c1826e66857f95a1809addec5e2"
@@ -1681,6 +1795,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListGrantOriginsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "830b3479408acc5c8132473414a5e6d8230cdf95129ce652ac29e7f0290e3521"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListGrantRowsForPrincipal",
     "annotation": "authn-resolution",
     "hash": "105b2cf763752fd26186c680bbb427bc809439e574f1f93a220e7dbf42eb8135"
@@ -1723,6 +1843,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListLockoutRetentionOrigins",
+    "annotation": "authn-resolution",
+    "hash": "0ea3a89bd963a49290e9754d3a80305083fd49525fdcb5de4ba5a7e7184be6f4"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListLockoutRetentionOriginsInOrg",
+    "annotation": "authn-resolution",
+    "hash": "be999a664bc5dfa77a27ac086337d37500fdd04e84ce31404537e35b95afab02"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListMachineCredentials",
     "annotation": "authn-resolution",
     "hash": "e771adf3d2972f9fbf73a467876fc26f0d77eea3092f3ccb93c27dba4179f9a4"
@@ -1762,6 +1894,12 @@
     "name": "ListSAMLSPKeys",
     "annotation": "authn-resolution",
     "hash": "77f8c3d9e1f516626df74b6bf5c1d4631a1cce7ea07009e6d879143d99c4c6c7"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListSCIMCredentials",
+    "annotation": "authn-resolution",
+    "hash": "0d5380d405392b7666382f96bba7a7855a539ec07659256316059afae24c38f4"
   },
   {
     "engine": "sqlite",
@@ -1827,7 +1965,7 @@
     "engine": "sqlite",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
-    "hash": "f383c912996548ac51227f8498725e4fb230a527819836d5b5efacfbacc9ce62"
+    "hash": "74e889e4da1949c2356d7f0f84589dcde8b4de5b732038df22bf8a349e648360"
   },
   {
     "engine": "sqlite",
@@ -1879,6 +2017,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "RevokeSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "03616d77304be5e93fbf580b269c3177f2811e4518b53e374744e4f975826a25"
+  },
+  {
+    "engine": "sqlite",
+    "name": "RevokeSCIMCredentialsForBinding",
+    "annotation": "authn-resolution",
+    "hash": "e759526e686fe10bd6a2cb1f5b1dc4b9bfeebed9bf1b38e8ebcee09a3a8b666a"
+  },
+  {
+    "engine": "sqlite",
     "name": "RotateSessionFactors",
     "annotation": "authn-resolution",
     "hash": "309615e6b1914ebde4c26a3d2ace561f9fe2c1256a182caca3196a1247f82352"
@@ -1918,6 +2068,12 @@
     "name": "TouchMachineCredential",
     "annotation": "authn-resolution",
     "hash": "84ebc938f02f3e1a16ce0857f0e0c714fec00a43f0875f5c13446e9b8dd5249e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "TouchSCIMCredential",
+    "annotation": "authn-resolution",
+    "hash": "736c10540773ec180948aa83388c2b7b322c66d12b0e2f7e66ff7190df9cf63b"
   },
   {
     "engine": "sqlite",

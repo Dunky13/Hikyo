@@ -854,7 +854,72 @@ const (
 	testKeyGroupID = "kgr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f88"
 	// The grant target for the access-surface uniformity routes (#55).
 	testPrincipalID = "usr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f99"
+	// The SCIM administration uniformity routes (#73).
+	testBindingID   = "scb_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f88"
+	testSCIMGroupID = "scg_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f99"
+	testSCIMCredID  = "scr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0faa"
 )
+
+// stubSCIM is the SCIM administration surface's uniformity fixture (#73). Like
+// every other stub here it answers ONE outcome for everything, so the
+// uniformity tests differ only in which sentinel the service returned.
+type stubSCIM struct{ stubHierarchy }
+
+func (s stubSCIM) CreateBinding(context.Context, service.Actor, domain.OrgID, service.SCIMBindingInput) (service.SCIMBindingView, error) {
+	return service.SCIMBindingView{}, s.outcome()
+}
+
+func (s stubSCIM) ListBindings(context.Context, service.Actor, domain.OrgID) ([]service.SCIMBindingView, error) {
+	return nil, s.outcome()
+}
+
+func (s stubSCIM) GetBinding(context.Context, service.Actor, domain.OrgID, string) (service.SCIMBindingView, error) {
+	return service.SCIMBindingView{}, s.outcome()
+}
+
+func (s stubSCIM) DeleteBinding(context.Context, service.Actor, domain.OrgID, string) error {
+	return s.outcome()
+}
+
+func (s stubSCIM) CreateMapping(context.Context, service.Actor, domain.OrgID, string, service.SCIMMappingSpec) (service.SCIMMappingResult, error) {
+	return service.SCIMMappingResult{}, s.outcome()
+}
+
+func (s stubSCIM) UpdateMapping(context.Context, service.Actor, domain.OrgID, string, service.SCIMMappingSpec) (service.SCIMMappingResult, error) {
+	return service.SCIMMappingResult{}, s.outcome()
+}
+
+func (s stubSCIM) DeleteMapping(context.Context, service.Actor, domain.OrgID, string, service.SCIMMappingSpec) (service.SCIMMappingResult, error) {
+	return service.SCIMMappingResult{}, s.outcome()
+}
+
+func (s stubSCIM) ListMappings(context.Context, service.Actor, domain.OrgID, string) ([]service.SCIMMappingView, error) {
+	return nil, s.outcome()
+}
+
+func (s stubSCIM) MintCredential(context.Context, service.Actor, domain.OrgID, string, bool, string) (service.SCIMMintResult, error) {
+	return service.SCIMMintResult{}, s.outcome()
+}
+
+func (s stubSCIM) ListCredentials(context.Context, service.Actor, domain.OrgID, string) ([]service.SCIMCredentialView, error) {
+	return nil, s.outcome()
+}
+
+func (s stubSCIM) GetCredential(context.Context, service.Actor, domain.OrgID, string, string) (service.SCIMCredentialView, error) {
+	return service.SCIMCredentialView{}, s.outcome()
+}
+
+func (s stubSCIM) RevokeCredential(context.Context, service.Actor, domain.OrgID, string, string) error {
+	return s.outcome()
+}
+
+func (s stubSCIM) DirectoryUsers(context.Context, service.Actor, domain.OrgID, string) ([]service.SCIMDirectoryUser, error) {
+	return nil, s.outcome()
+}
+
+func (s stubSCIM) DirectoryGroups(context.Context, service.Actor, domain.OrgID, string) ([]service.SCIMDirectoryGroup, error) {
+	return nil, s.outcome()
+}
 
 // stubGrants and stubSettings are the access surface's uniformity fixtures
 // (#55). Like the hierarchy stubs they answer one outcome for everything, so
@@ -898,6 +963,7 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 		KeyGroups: stubKeyGroups{stubHierarchy{err: outcome}},
 		Grants:    stubGrants{stubHierarchy{err: outcome}},
 		Settings:  stubSettings{stubHierarchy{err: outcome}},
+		SCIM:      stubSCIM{stubHierarchy{err: outcome}},
 		Version:   "test",
 	}, nil))
 	t.Cleanup(srv.Close)
@@ -916,6 +982,9 @@ func hierarchyRoutes() []struct {
 	rename := apigen.RenameRequest{Name: "renamed"}
 	grantBody := apigen.CreateGrantRequest{Principal: testPrincipalID, Capability: "read"}
 	templateBody := apigen.ApplyTemplateRequest{Principal: testPrincipalID, Template: apigen.Viewer}
+	scimBase := base + "/scim-bindings"
+	scimBinding := scimBase + "/" + testBindingID
+	mappingBody := apigen.ScimMappingRequest{GroupId: testSCIMGroupID, Template: "viewer"}
 	return []struct {
 		method string
 		path   string
@@ -985,6 +1054,31 @@ func hierarchyRoutes() []struct {
 		{http.MethodGet, project + "/key-groups/" + testKeyGroupID, nil},
 		{http.MethodPatch, project + "/key-groups/" + testKeyGroupID, apigen.RenameKeyGroupRequest{Name: "g2"}},
 		{http.MethodDelete, project + "/key-groups/" + testKeyGroupID, nil},
+
+		// The SCIM ADMINISTRATION surface (#73). It joins the same byte-shape
+		// assertion rather than getting a weaker one: a binding the caller may
+		// not reach must answer exactly like one that is not there, or the
+		// mount becomes an oracle for "does this org have SCIM configured?".
+		//
+		// The WIRE routes are deliberately absent from this table. They answer
+		// the RFC 7644 error shape, not the Hikyo envelope — that is the ADR's
+		// requirement, not an omission — and their uniformity is asserted in
+		// internal/scimproto and in the isolation suite instead.
+		{http.MethodGet, scimBase, nil},
+		{http.MethodPost, scimBase, apigen.CreateScimBindingRequest{
+			ProviderKind: "oidc", ProviderSlug: "okta", SubjectSource: "externalId"}},
+		{http.MethodGet, scimBinding, nil},
+		{http.MethodDelete, scimBinding, nil},
+		{http.MethodGet, scimBinding + "/mappings", nil},
+		{http.MethodPost, scimBinding + "/mappings", mappingBody},
+		{http.MethodPut, scimBinding + "/mappings", mappingBody},
+		{http.MethodDelete, scimBinding + "/mappings?group=" + testSCIMGroupID, nil},
+		{http.MethodGet, scimBinding + "/credentials", nil},
+		{http.MethodPost, scimBinding + "/credentials", apigen.MintScimCredentialRequest{}},
+		{http.MethodGet, scimBinding + "/credentials/" + testSCIMCredID, nil},
+		{http.MethodDelete, scimBinding + "/credentials/" + testSCIMCredID, nil},
+		{http.MethodGet, scimBinding + "/directory/users", nil},
+		{http.MethodGet, scimBinding + "/directory/groups", nil},
 	}
 }
 
@@ -1194,7 +1288,7 @@ func (e safeDetailErr) SafeDetail() string { return e.detail }
 func TestCloneAbortBodyCarriesTheStrandedKeys(t *testing.T) {
 	const detail = "cloning env_src would leave required secret(s) absent in the new environment: REQUIRED_TOKEN"
 	srv := newValueServer(t, stubEnvs{stubHierarchy{err: safeDetailErr{detail: detail}}}, stubValues{})
-	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+cloneRoutePath, "ew_1_cli_x",
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+cloneRoutePath, "hik_1_cli_x",
 		map[string]any{"name": "clone-x", "source_environment_id": testEnvID})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", resp.StatusCode)
@@ -1215,7 +1309,7 @@ func TestCloneAbortBodyCarriesTheStrandedKeys(t *testing.T) {
 func TestUnconfirmedProtectedDestinationIs409NotFault(t *testing.T) {
 	refusal := service.ProtectedDestinationRefusal(domain.EnvID(testEnvID2))
 	srv := newValueServer(t, stubEnvs{}, stubValues{stubHierarchy{err: refusal}})
-	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+copyRoutePath, "ew_1_cli_x",
+	resp, payload := call(t, srv, http.MethodPost, api.PathPrefix+copyRoutePath, "hik_1_cli_x",
 		map[string]any{
 			"source_environment_id":       testEnvID,
 			"keys":                        []string{"TOKEN"},
@@ -1236,7 +1330,7 @@ func TestUnconfirmedProtectedDestinationIs409NotFault(t *testing.T) {
 	// must stay uniform: errorBody keys on an explicit detail carrier, not on the
 	// code, so widening detail to conflict did not leak every conflict body.
 	plain := newValueServer(t, stubEnvs{}, stubValues{stubHierarchy{err: domain.ErrConflict}})
-	resp2, payload2 := call(t, plain, http.MethodPost, api.PathPrefix+copyRoutePath, "ew_1_cli_x",
+	resp2, payload2 := call(t, plain, http.MethodPost, api.PathPrefix+copyRoutePath, "hik_1_cli_x",
 		map[string]any{
 			"source_environment_id":       testEnvID,
 			"keys":                        []string{"TOKEN"},

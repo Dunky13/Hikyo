@@ -186,6 +186,26 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"CreateProvider": true,
 	"UpdateProvider": true,
 	"DeleteProvider": true,
+	// SCIM provisioning (#73). The credential writers are here for the same
+	// reason the session writers are: a SCIM wire request presents a credential
+	// BEFORE any operation is authorized, so the artifact that decides who the
+	// caller is cannot itself be written under a proof. The two principal
+	// writers join them because the provisioning connection is created with its
+	// binding and retired with it by the ADR's §6 state machine, in the same
+	// transaction as the structural grant it holds — `principals` is
+	// instance-class and has no chain to bind a proof against.
+	// Only the two writes that genuinely cannot hold a proof remain here. A
+	// SCIM request presents its credential BEFORE any operation is authorized,
+	// so recording its use is part of authentication; and the provisioning
+	// principal is created with, and retired with, its binding — `principals`
+	// is instance-class and has no chain for a proof to bind against.
+	//
+	// Credential MINT, LIST, SHOW, REVOKE and DELETE are deliberately NOT here:
+	// they all run after `manage-members(org)` is proved and live on the
+	// proof-carrying repository, where the org predicate comes from the proof.
+	"TouchSCIMCredential":           true,
+	"CreateProvisioningPrincipal":   true,
+	"RetireSCIMConnectionPrincipal": true,
 	// SAML (#72): provider administration, request/replay lifecycle, SP-key
 	// rotation and provider-bound session lifecycle. Each writer is explicit so
 	// growth of the proof-free SAML surface remains a reviewed change.
@@ -274,6 +294,9 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// route, and the classification-totality invariant keeps that true.
 	"AdvanceRestoreEpoch": true,
 	"ReconcilePrincipal":  true,
+	// #73 section 9.1: the reconciliation commit drops restored `scim` origins
+	// and any grant row they were the last hold on, in the same act.
+	"dropRestoredSCIMOrigins": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,

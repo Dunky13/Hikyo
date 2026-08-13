@@ -1314,6 +1314,179 @@ export const zPasskeyList = z.object({
     passkeys: z.array(zPasskey)
 });
 
+export const zCreateScimBindingRequest = z.object({
+    provider_kind: z.enum(['oidc', 'saml']),
+    provider_slug: z.string().max(256),
+    subject_source: z.string().max(256),
+    nameid_format: z.optional(z.string().max(256)),
+    nameid_qualifier: z.optional(z.string().max(256)),
+    nameid_qualifier_present: z.optional(z.boolean()),
+    nameid_sp_qualifier: z.optional(z.string().max(256)),
+    nameid_sp_qualifier_present: z.optional(z.boolean())
+});
+
+export const zMintScimCredentialRequest = z.object({
+    proof: z.optional(z.string().max(512)),
+    indefinite: z.optional(z.boolean())
+});
+
+/**
+ * One raised attention state on a binding. Each names its cause AND a
+ * server-authored remediation: a state that only says something is wrong
+ * makes the binding view a puzzle.
+ *
+ */
+export const zScimAttention = z.object({
+    state: z.enum([
+        'provider_unavailable',
+        'lockout_retention',
+        'manual_grants_remain',
+        'inert_mapping',
+        'stale',
+        'post_restore'
+    ]),
+    subject_ref: z.string(),
+    cause: z.string(),
+    entered_at: zTimestamp,
+    remediation: z.string()
+});
+
+export const zScimBinding = z.object({
+    id: zId,
+    org_id: zId,
+    provider_kind: z.enum(['oidc', 'saml']),
+    provider_slug: z.string(),
+    provider_issuer: z.string(),
+    subject_source: z.string(),
+    nameid_format: z.optional(z.string()),
+    nameid_qualifier: z.optional(z.string()),
+    nameid_qualifier_present: z.optional(z.boolean()),
+    nameid_sp_qualifier: z.optional(z.string()),
+    nameid_sp_qualifier_present: z.optional(z.boolean()),
+    connection_principal_id: zId,
+    last_contact_at: z.optional(zTimestamp),
+    created_at: zTimestamp,
+    attention: z.array(zScimAttention)
+});
+
+export const zScimBindingList = z.object({
+    items: z.array(zScimBinding),
+    count: z.int()
+});
+
+/**
+ * Server-authored consequence language. It is authored on the server, not
+ * in a client, because the locked rule is about what the human is TOLD,
+ * and a client rendering its own wording is a second, unreviewed policy.
+ *
+ */
+export const zScimBlastWarning = z.object({
+    code: z.enum([
+        'org_scope',
+        'reveal_expanding',
+        'production_environment',
+        'populated_group'
+    ]),
+    severity: z.enum(['warning', 'critical']),
+    message: z.string()
+});
+
+export const zScimCredential = z.object({
+    id: zId,
+    binding_id: zId,
+    created_at: zTimestamp,
+    expires_at: z.optional(zTimestamp),
+    revoked_at: z.optional(zTimestamp),
+    last_used_at: z.optional(zTimestamp),
+    live: z.boolean()
+});
+
+export const zScimCredentialList = z.object({
+    items: z.array(zScimCredential),
+    count: z.int()
+});
+
+export const zScimDirectoryGroup = z.object({
+    id: zId,
+    display_name: z.string(),
+    external_id: z.optional(z.string()),
+    member_count: z.int(),
+    created_at: zTimestamp,
+    updated_at: zTimestamp
+});
+
+export const zScimDirectoryGroupList = z.object({
+    items: z.array(zScimDirectoryGroup),
+    count: z.int()
+});
+
+export const zScimDirectoryUser = z.object({
+    id: zId,
+    user_name: z.string(),
+    external_id: z.optional(z.string()),
+    account_id: zId,
+    active: z.boolean(),
+    groups: z.array(zId),
+    created_at: zTimestamp,
+    updated_at: zTimestamp,
+    attention: z.array(zScimAttention)
+});
+
+export const zScimDirectoryUserList = z.object({
+    items: z.array(zScimDirectoryUser),
+    count: z.int()
+});
+
+export const zScimMapping = z.object({
+    id: zId,
+    binding_id: zId,
+    group_id: zId,
+    template: z.string(),
+    project_id: z.optional(z.string()),
+    environment_id: z.optional(z.string()),
+    inert: z.boolean(),
+    created_at: zTimestamp,
+    capabilities: z.array(z.string())
+});
+
+export const zScimMappingList = z.object({
+    items: z.array(zScimMapping),
+    count: z.int()
+});
+
+export const zScimMappingRequest = z.object({
+    group_id: zId,
+    template: z.string().max(64),
+    project_id: z.optional(z.string().max(64)),
+    environment_id: z.optional(z.string().max(64))
+});
+
+export const zScimMappingResult = z.object({
+    mapping: zScimMapping,
+    warnings: z.array(zScimBlastWarning),
+    members_affected: z.int(),
+    grants_created: z.int(),
+    origins_released: z.int()
+});
+
+export const zScimMintResult = z.object({
+    credential: zScimCredential,
+    token: z.string(),
+    rotated: z.boolean()
+});
+
+/**
+ * A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
+ * deliberately open: identity providers send and expect attributes this
+ * provider stores as round-tripped display metadata, and pinning the
+ * shape here would make a conformant IdP's request a contract violation.
+ * What IS closed lives in the server: the subject source, the filter
+ * grammar, the PATCH matrix and the error mapping, each with its own
+ * named refusal.
+ *
+ */
+export const zScimResource = z.record(z.string(), z.unknown());
+
 /**
  * Organisation identifier.
  */
@@ -1414,6 +1587,71 @@ export const zFederationIssuerId = zId;
  *
  */
 export const zDeliveryCursor = z.string().max(128);
+
+/**
+ * SCIM binding identifier.
+ */
+export const zScimBindingId = zId;
+
+/**
+ * Desired page size. It is a REQUEST: a value above this provider's bound
+ * is answered with the bound rather than refused.
+ *
+ * Typed `string` and unconstrained for the same reason as `startIndex`.
+ *
+ */
+export const zScimCount = z.string();
+
+/**
+ * An RFC 7644 filter, closed to `attribute eq "value"` over the four
+ * probes Okta and Entra actually issue. Anything else is `invalidFilter`.
+ *
+ * Deliberately unconstrained HERE. Contract validation runs BEFORE the
+ * provisioning credential is authenticated, so any constraint declared on
+ * a SCIM wire parameter answers an unauthenticated caller with a Hikyo 400
+ * instead of the uniform 401 — telling them something about their request
+ * before they have proved they may ask. Every bound and every grammar
+ * refusal for this parameter lives in the protocol layer, after
+ * authentication, where it is rendered as an RFC 7644 error.
+ *
+ */
+export const zScimFilter = z.string();
+
+/**
+ * A server-minted resource identifier. The identity provider can only
+ * reference ids this server minted.
+ *
+ */
+export const zScimResourceId = zId;
+
+/**
+ * Present only so its presence can be REFUSED by name with 501. Sorting
+ * is advertised absent in ServiceProviderConfig and is not
+ * half-implemented. Unconstrained: see `filter`.
+ *
+ */
+export const zScimSortBy = z.string();
+
+/**
+ * Present only so its presence can be REFUSED by name with 501, exactly
+ * like `sortBy`. Refusing one and ignoring the other would be the
+ * half-implementation the ADR forbids. Unconstrained: see `filter`.
+ *
+ */
+export const zScimSortOrder = z.string();
+
+/**
+ * 1-based index of the first result; a value below 1 is read as 1, per
+ * RFC 7644 §3.4.2.4.
+ *
+ * Typed `string`, not `integer`, and carrying no `minimum`: see the note
+ * on `filter`. `minimum: 1` made `startIndex=0` a pre-authentication 400,
+ * which is both an unauthenticated refusal and a contradiction of the
+ * RFC's own "read as 1". Parsing and clamping happen in the protocol
+ * layer after authentication.
+ *
+ */
+export const zScimStartIndex = z.string();
 
 export const zGetMetaData = z.object({
     body: z.optional(z.never()),
@@ -3081,3 +3319,469 @@ export const zFetchDeliveryData = z.object({
  * The authorized projection, or the statement that the cursor is current.
  */
 export const zFetchDeliveryResponse = zDeliveryResponse;
+
+export const zListScimBindingsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The organisation's bindings.
+ */
+export const zListScimBindingsResponse = zScimBindingList;
+
+export const zCreateScimBindingData = z.object({
+    body: zCreateScimBindingRequest,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created binding.
+ */
+export const zCreateScimBindingResponse = zScimBinding;
+
+export const zDeleteScimBindingData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The binding and everything it owned are gone.
+ */
+export const zDeleteScimBindingResponse = z.void();
+
+export const zGetScimBindingData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The binding.
+ */
+export const zGetScimBindingResponse = zScimBinding;
+
+export const zDeleteScimMappingData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.object({
+        group: zId,
+        project: z.optional(zId),
+        environment: z.optional(zId)
+    })
+});
+
+/**
+ * The deleted row and the origin count it released.
+ */
+export const zDeleteScimMappingResponse = zScimMappingResult;
+
+export const zListScimMappingsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The mapping table.
+ */
+export const zListScimMappingsResponse = zScimMappingList;
+
+export const zCreateScimMappingData = z.object({
+    body: zScimMappingRequest,
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The row, its consequence language, and what it granted.
+ */
+export const zCreateScimMappingResponse = zScimMappingResult;
+
+export const zUpdateScimMappingData = z.object({
+    body: zScimMappingRequest,
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The row, its consequence language, and what it changed.
+ */
+export const zUpdateScimMappingResponse = zScimMappingResult;
+
+export const zListScimCredentialsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The binding's credentials.
+ */
+export const zListScimCredentialsResponse = zScimCredentialList;
+
+export const zMintScimCredentialData = z.object({
+    body: zMintScimCredentialRequest,
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The credential and its display-once token.
+ */
+export const zMintScimCredentialResponse = zScimMintResult;
+
+export const zRevokeScimCredentialData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The credential is dead.
+ */
+export const zRevokeScimCredentialResponse = z.void();
+
+export const zGetScimCredentialData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The credential.
+ */
+export const zGetScimCredentialResponse = zScimCredential;
+
+export const zListScimDirectoryUsersData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The provisioned users.
+ */
+export const zListScimDirectoryUsersResponse = zScimDirectoryUserList;
+
+export const zListScimDirectoryGroupsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The provisioned groups.
+ */
+export const zListScimDirectoryGroupsResponse = zScimDirectoryGroupList;
+
+export const zScimServiceProviderConfigData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The ServiceProviderConfig resource.
+ */
+export const zScimServiceProviderConfigResponse = zScimResource;
+
+export const zScimResourceTypesData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The ResourceTypes list.
+ */
+export const zScimResourceTypesResponse = zScimResource;
+
+export const zScimSchemasData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The Schemas list.
+ */
+export const zScimSchemasResponse = zScimResource;
+
+export const zScimListUsersData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.object({
+        filter: z.optional(z.string()),
+        startIndex: z.optional(z.string()),
+        count: z.optional(z.string()),
+        sortBy: z.optional(z.string()),
+        sortOrder: z.optional(z.string())
+    }))
+});
+
+/**
+ * An RFC 7644 ListResponse.
+ */
+export const zScimListUsersResponse = zScimResource;
+
+export const zScimCreateUserData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The provisioned User resource.
+ */
+export const zScimCreateUserResponse = zScimResource;
+
+export const zScimDeleteUserData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The directory entry is gone.
+ */
+export const zScimDeleteUserResponse = z.void();
+
+export const zScimGetUserData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The User resource.
+ */
+export const zScimGetUserResponse = zScimResource;
+
+export const zScimPatchUserData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The patched User resource.
+ */
+export const zScimPatchUserResponse = zScimResource;
+
+export const zScimReplaceUserData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The replaced User resource.
+ */
+export const zScimReplaceUserResponse = zScimResource;
+
+export const zScimListGroupsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.object({
+        filter: z.optional(z.string()),
+        startIndex: z.optional(z.string()),
+        count: z.optional(z.string()),
+        sortBy: z.optional(z.string()),
+        sortOrder: z.optional(z.string())
+    }))
+});
+
+/**
+ * An RFC 7644 ListResponse.
+ */
+export const zScimListGroupsResponse = zScimResource;
+
+export const zScimCreateGroupData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The provisioned Group resource.
+ */
+export const zScimCreateGroupResponse = zScimResource;
+
+export const zScimDeleteGroupData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The group is gone.
+ */
+export const zScimDeleteGroupResponse = z.void();
+
+export const zScimGetGroupData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The Group resource.
+ */
+export const zScimGetGroupResponse = zScimResource;
+
+export const zScimPatchGroupData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The patched Group resource.
+ */
+export const zScimPatchGroupResponse = zScimResource;
+
+export const zScimReplaceGroupData = z.object({
+    body: zScimResource,
+    path: z.object({
+        org: zId,
+        binding: zId,
+        id: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The replaced Group resource.
+ */
+export const zScimReplaceGroupResponse = zScimResource;
+
+export const zScimBulkData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+export const zScimMeData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+export const zScimSearchUsersData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});
+
+export const zScimSearchGroupsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        binding: zId
+    }),
+    query: z.optional(z.never())
+});

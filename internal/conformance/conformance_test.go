@@ -168,6 +168,17 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
 		// so they drop first — a stale one fails the next re-migration's CREATE.
 		"webauthn_ceremonies", "webauthn_credentials",
+		// SCIM (#73, migration 00018): children before scim_bindings, which
+		// itself references orgs and principals.
+		"scim_group_members", "scim_groups", "scim_users",
+		"scim_attention", "scim_mappings", "scim_credentials", "scim_bindings",
+		// SAML (#72, migration 00010). These were missing from this list while
+		// the isolation harness carried them, so a second postgres conformance
+		// run in the same database re-created tables migration 00010 had
+		// already left behind and died with "relation already exists". Found
+		// while adding the SCIM block; fixed here rather than filed, because a
+		// drop list that is right in one harness and wrong in the other is a
+		// trap for whoever adds the next migration.
 		"saml_transactions", "saml_replay", "saml_sp_keys",
 		"oidc_transactions", "external_identities",
 		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
@@ -185,7 +196,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// drops before either.
 		"value_entries",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
-		// OIDC federation (#62, migration 00017): machine_credentials gained a
+		// OIDC federation (#62, migration 00018): machine_credentials gained a
 		// foreign key to federation_issuers, so the issuers drop AFTER it;
 		// pin_generations references principals.
 		"pin_generations",
@@ -195,6 +206,7 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		"federation_issuers",
 		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
 		// goes first of the pair.
+		"auth_instance_state",
 		"grant_origins", "grants", "folders", "environments", "projects", "principals",
 		"tier3_keys", "master_keys", "key_generations",
 		"audit_tenant_events", "audit_instance_events",

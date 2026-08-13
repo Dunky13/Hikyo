@@ -214,6 +214,26 @@ func (q *Queries) DeleteExternalIdentity(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteOriginlessGrantsForPrincipal = `-- name: DeleteOriginlessGrantsForPrincipal :execrows
+DELETE FROM grants
+WHERE grants.principal_id = $1
+  AND NOT EXISTS (SELECT 1 FROM grant_origins AS o WHERE o.grant_id = grants.id)
+`
+
+// A row whose only restored origins were `scim` is not re-activated: with its
+// last origin gone the grant row goes too, which is the same arithmetic every
+// other origin release performs. A row that also carried a `manual` origin
+// survives on that origin alone, which is what "the commit covers manual
+// origins only" means in the affirmative.
+// hikyo:authn-resolution
+func (q *Queries) DeleteOriginlessGrantsForPrincipal(ctx context.Context, principalID string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOriginlessGrantsForPrincipal, principalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deletePendingTOTPForAccount = `-- name: DeletePendingTOTPForAccount :exec
 DELETE FROM totp_credentials WHERE account_id = $1 AND confirmed_at IS NULL
 `
@@ -285,6 +305,59 @@ DELETE FROM totp_credentials WHERE account_id = $1
 func (q *Queries) DeleteTOTPForAccount(ctx context.Context, accountID string) error {
 	_, err := q.db.Exec(ctx, deleteTOTPForAccount, accountID)
 	return err
+}
+
+const dropRestoredSCIMOrigins = `-- name: DropRestoredSCIMOrigins :execrows
+DELETE FROM grant_origins
+WHERE grant_origins.kind = 'scim'
+  AND grant_origins.grant_id IN (SELECT g.id FROM grants AS g WHERE g.principal_id = $1)
+  AND grant_origins.created_at <= (
+    SELECT s.reactivated_at FROM auth_instance_state AS s WHERE s.id = 1
+  )
+`
+
+// The operator's commit covers `manual` origins ONLY (#73, scim-provisioning
+// ADR section 9.1). A restored `scim` origin is a claim about what an identity
+// provider asserted BEFORE the backup was taken, and the whole point of the
+// rule is that the restore must not re-activate it: the IdP's own next
+// re-assertion recreates SCIM origins from live truth, so a user it no longer
+// asserts is never re-authorized, not even for a window.
+//
+// `structural` and `lockout-retention` survive deliberately. A structural
+// origin holds a provisioning connection's own grant and is created with the
+// binding, not by the identity provider, so nothing would ever recreate it; a
+// retention exists precisely to keep an org administrable, and dropping it at
+// restore would lock out the org the moment it most needs administering.
+//
+// ARCHIVED, not merely `scim`. The reconciliation commit refuses archived
+// truth; it does not get to destroy LIVE truth. A restore leaves every
+// principal inert, but the operator reconciles the binding's provisioning
+// connection first (that is the only way the wire comes back), so the identity
+// provider's next cycle can assert something new about a user who is still
+// unreconciled. Those origins are current truth. Filtering on kind and
+// principal alone dropped them with the archived ones, and the originless
+// cleanup below then deleted grants the IdP was asserting right then --
+// access lost until the next cycle, roughly forty minutes later, for a user
+// whose authority never lapsed.
+//
+// Provenance is `created_at` against `auth_instance_state.reactivated_at`, the
+// instant the restored instance came back. It is #76's own anchor, used the
+// same way the machine-identity ADR uses it for the federated `iat` floor: a
+// row stamped at or before the restore came out of the archive, a row stamped
+// after it was written by this instance since. NULL means this datastore was
+// never restored, the comparison is NULL, and the statement matches nothing --
+// which is right, because a reconciliation with no restore behind it has no
+// archived rows to refuse. The boundary is `<=` rather than `<` so an
+// ambiguous stamp is treated as ARCHIVED: dropping a live origin costs one
+// IdP cycle, re-activating an archived one is the security failure this rule
+// exists to prevent.
+// hikyo:authn-resolution
+func (q *Queries) DropRestoredSCIMOrigins(ctx context.Context, principalID string) (int64, error) {
+	result, err := q.db.Exec(ctx, dropRestoredSCIMOrigins, principalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const environmentChainByID = `-- name: EnvironmentChainByID :one
@@ -1557,6 +1630,7 @@ SELECT MAX(e) AS max_epoch FROM (
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM reauth_windows
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM recovery_codes
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM saml_transactions
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM scim_credentials
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM sessions
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_challenges
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_credentials

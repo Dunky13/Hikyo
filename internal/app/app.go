@@ -232,6 +232,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		DB: db, Auth: authSvc, Admission: limiter,
 		Cache: &oidcfed.Cache{Limiter: limiter},
 	}
+	scimSvc := &service.SCIM{DB: db, Auth: authSvc}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -271,9 +272,16 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the
 		// window the reveal guard reads cannot come from two configurations.
-		Settings:       &service.ProjectSettings{DB: db, Auth: authSvc},
-		Providers:      &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
-		SAMLProviders:  samlProviders,
+		Settings:      &service.ProjectSettings{DB: db, Auth: authSvc},
+		Providers:     &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
+		SAMLProviders: samlProviders,
+		// ONE SCIM service behind both surfaces: the administration verbs and
+		// the identity provider's wire read the same bindings, the same mapping
+		// table and the same bounds. Two instances would let the wire clamp a
+		// page against a different number than the one the discovery document
+		// advertises.
+		SCIM:           scimSvc,
+		SCIMWire:       scimSvc,
 		Admission:      limiter,
 		Version:        Version,
 		Log:            log,

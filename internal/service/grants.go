@@ -196,7 +196,13 @@ func (s *Grants) Create(ctx context.Context, actor Actor, spec GrantSpec) (Grant
 			return err
 		}
 		out = res
-		return insertGrantEvent(ctx, r, p, caller.Principal, level, evs...)
+		// §2.4's deterministic cure runs in the SAME transaction as any grant
+		// write that could have cured a lockout retention (#73).
+		_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), spec.Capability, spec.Scope, res)
+		if err != nil {
+			return err
+		}
+		return insertGrantEvent(ctx, r, p, caller.Principal, level, append(evs, cured...)...)
 	})
 	return out, err
 }
@@ -760,18 +766,25 @@ func (s *Grants) Revoke(ctx context.Context, actor Actor, spec GrantSpec) error 
 			return ErrNoSuchGrant
 		}
 
-		// The lockout invariant, evaluated BEFORE the release: removing the
-		// last `manage-members` holder at org scope, or at instance scope, is
-		// refused. The census locks every current holder's principal row in a
-		// deterministic order first, so two concurrent revokes of the last two
-		// holders cannot each count the other as remaining.
-		if err := s.checkLockout(ctx, az, spec); err != nil {
-			return err
-		}
-
 		origins, err := az.GrantOriginsFor(ctx, existing.ID)
 		if err != nil {
 			return err
+		}
+
+		// The lockout invariant, evaluated BEFORE the release — but only when
+		// this release would actually REMOVE the row. A row this surface can
+		// only partly release (a `scim` or `lockout-retention` origin survives
+		// beside the manual one) keeps the capability held, so refusing here
+		// would refuse an act that takes nothing away and leave the
+		// administrator unable to tidy their own origin off a row that stays.
+		//
+		// The census locks every current holder's principal row in a
+		// deterministic order first, so two concurrent revokes of the last two
+		// holders cannot each count the other as remaining.
+		if wouldEmptyRow(origins) {
+			if err := s.checkLockout(ctx, az, spec); err != nil {
+				return err
+			}
 		}
 		var releasedKinds []string
 		for _, o := range origins {
@@ -791,7 +804,12 @@ func (s *Grants) Revoke(ctx context.Context, actor Actor, spec GrantSpec) error 
 			}
 		}
 		if len(releasedKinds) == 0 {
-			return ErrNoSuchGrant
+			// The row EXISTS and the caller may revoke — this surface just owns
+			// none of the origins holding it. Answering ErrNoSuchGrant here
+			// would send an administrator looking for a grant that is visible
+			// on the membership line in front of them, so each system origin
+			// refuses BY NAME and states its own lever (#73 §4).
+			return systemOriginRefusal(origins)
 		}
 		slices.Sort(releasedKinds)
 		remaining, err := az.GrantOriginCount(ctx, existing.ID)
@@ -853,9 +871,30 @@ func (s *Grants) checkLockout(ctx context.Context, az *authz.TxAuthorizer, spec 
 	if level != domain.LevelNone && level != domain.LevelOrg {
 		return nil
 	}
-	holders, err := az.ManageMembersHolders(ctx, string(spec.Scope.Org))
+	remaining, err := remainingMemberManagers(ctx, az, spec.Target, spec.Scope)
 	if err != nil {
 		return err
+	}
+	if remaining == 0 {
+		return ErrLastMemberManager
+	}
+	return nil
+}
+
+// remainingMemberManagers counts the `manage-members` holders that would remain
+// at `scope` once the target's grant AT THAT EXACT SCOPE is gone.
+//
+// It is shared by the human revoke path — where a zero is the locked REFUSAL —
+// and by the SCIM release algorithm (#73 §2.4), where a zero is the trigger for
+// the lockout-retention CONVERSION and a non-zero is what cures one. The two
+// answers must be computed from the same census or "the moment the org gains
+// another holder" and "the moment it would lose its last" would disagree.
+func remainingMemberManagers(
+	ctx context.Context, az *authz.TxAuthorizer, target domain.PrincipalID, scope domain.Scope,
+) (int, error) {
+	holders, err := az.ManageMembersHolders(ctx, string(scope.Org))
+	if err != nil {
+		return 0, err
 	}
 	// Lock every holder's row in a deterministic order BEFORE counting, so
 	// two concurrent revocations of the last two holders serialize instead of
@@ -866,7 +905,7 @@ func (s *Grants) checkLockout(ctx context.Context, az *authz.TxAuthorizer, spec 
 		if err := az.LockTargetPrincipal(ctx, h); errors.Is(err, domain.ErrNotFound) {
 			continue // the holder's principal row went away; the re-read below is authoritative
 		} else if err != nil {
-			return err
+			return 0, err
 		}
 	}
 	// Re-read UNDER the locks. Counting from the pre-lock list is the bug the
@@ -874,9 +913,9 @@ func (s *Grants) checkLockout(ctx context.Context, az *authz.TxAuthorizer, spec 
 	// would each see the other as remaining. Every grant writer takes the
 	// target's row lock, so nothing that can change this census is still in
 	// flight once the locks are held.
-	holders, err = az.ManageMembersHolders(ctx, string(spec.Scope.Org))
+	holders, err = az.ManageMembersHolders(ctx, string(scope.Org))
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Count the holders that REMAIN AFTER this revocation, which is not the
@@ -888,24 +927,21 @@ func (s *Grants) checkLockout(ctx context.Context, az *authz.TxAuthorizer, spec 
 	var targetRows []authz.GrantRow
 	remaining := 0
 	for _, h := range holders {
-		if h != spec.Target {
+		if h != target {
 			remaining++
 			continue
 		}
 		if targetRows == nil {
-			targetRows, err = az.GrantRowsForPrincipal(ctx, spec.Target)
+			targetRows, err = az.GrantRowsForPrincipal(ctx, target)
 			if err != nil {
-				return err
+				return 0, err
 			}
 		}
-		if retainsMemberManagement(targetRows, spec.Scope) {
+		if retainsMemberManagement(targetRows, scope) {
 			remaining++
 		}
 	}
-	if remaining == 0 {
-		return ErrLastMemberManager
-	}
-	return nil
+	return remaining, nil
 }
 
 // retainsMemberManagement reports whether the target still manages members at
@@ -1001,6 +1037,13 @@ func (s *Grants) ApplyTemplate(ctx context.Context, actor Actor, template domain
 				"self_grant":       target == caller.Principal,
 				"capabilities":     strings.Join(names, ","),
 			},
+		}
+		for i, capability := range caps {
+			_, cured, err := cureIfMemberManagement(ctx, az, retentionAttentionClearer(r, p), capability, scope, results[i])
+			if err != nil {
+				return err
+			}
+			events = append(events, cured...)
 		}
 		return insertGrantEvent(ctx, r, p, caller.Principal, level, append([]grantEventInput{summary}, events...)...)
 	})
@@ -1226,7 +1269,7 @@ func renderScope(s domain.Scope) string {
 // for after an incident.
 func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResult, error) {
 	var out GrantResult
-	err := tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+	err := tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		level, err := spec.Scope.Level()
 		if err != nil {
 			return fmt.Errorf("%w: %s", domain.ErrInvalid, err)
@@ -1246,6 +1289,27 @@ func (s *Grants) BreakGlassGrant(ctx context.Context, spec GrantSpec) (GrantResu
 			authz.Origin{Kind: domain.OriginBreakGlass, Subject: breakGlassSubject}, s.now())
 		if err != nil {
 			return err
+		}
+		// A recovery grant of `manage-members` is exactly the cure §2.4
+		// describes, and the retention must not outlive it: the whole point of
+		// break-glass is an org that has no member manager left.
+		// No clearer: break-glass has NO principal and mints no tenant proof,
+		// so the binding's attention row is reconciled by
+		// refreshBindingAttention on the next administration read — the same
+		// audited exit path, under the org admin's own proof. The RELEASE
+		// itself is unconditional.
+		_, cured, err := cureIfMemberManagement(ctx, az, nil, spec.Capability, spec.Scope, out)
+		if err != nil {
+			return err
+		}
+		for _, ev := range cured {
+			e, err := domainEvent(ctx, ev.typ, "", ev.object, ev.payload)
+			if err != nil {
+				return err
+			}
+			if err := az.RecordAuthEvent(ctx, e); err != nil {
+				return err
+			}
 		}
 
 		// The durable recovery record. It rides RecordAuthEvent (the
@@ -1299,4 +1363,79 @@ func revokePayload(spec GrantSpec, actor domain.PrincipalID, releasedKinds []str
 		p["sessions_revoked"] = true
 	}
 	return p
+}
+
+// systemOriginRefusal names WHICH system origin is holding a row a human tried
+// to revoke, so the refusal states the lever that actually removes it (#73 §4).
+func systemOriginRefusal(origins []authz.Origin) error {
+	var scim, retention, structural bool
+	for _, o := range origins {
+		switch o.Kind {
+		case domain.OriginSCIM:
+			scim = true
+		case domain.OriginLockoutRetention:
+			retention = true
+		case domain.OriginStructural:
+			structural = true
+		}
+	}
+	switch {
+	case scim:
+		return ErrSCIMOriginOnly
+	case retention:
+		return ErrLockoutRetained
+	case structural:
+		return ErrStructuralGrant
+	default:
+		return ErrNoSuchGrant
+	}
+}
+
+// cureIfMemberManagement runs §2.4's deterministic release after a grant write,
+// but only when the write could possibly have cured something: a NEW
+// `manage-members` row. An origin joining a row the principal already held
+// changes no census, and neither does any other capability.
+func cureIfMemberManagement(
+	ctx context.Context, az *authz.TxAuthorizer, clear clearRetentionAttention,
+	capability domain.Capability, scope domain.Scope, res GrantResult,
+) ([]CureResult, []grantEventInput, error) {
+	if capability != domain.CapManageMembers || !res.Created {
+		return nil, nil, nil
+	}
+	return cureLockoutRetentions(ctx, az, clear, res.GrantID, scope)
+}
+
+// retentionAttentionClearer builds the cure's audited exit path for a caller
+// that holds a tenant proof: it lowers the binding's `lockout_retention` state
+// in the SAME transaction that released the retention, so a warning cannot
+// outlive the thing it describes.
+func retentionAttentionClearer(r store.Repos, p authz.Proof) clearRetentionAttention {
+	return func(ctx context.Context, binding, grantID string) ([]grantEventInput, error) {
+		n, err := r.SCIM().ClearAttention(ctx, p, binding,
+			string(domain.AttentionLockoutRetention), grantID)
+		if err != nil || n == 0 {
+			return nil, err
+		}
+		return []grantEventInput{{
+			typ:    audit.EventSCIMAttentionCleared,
+			object: audit.Object{Type: "grant", ID: grantID},
+			payload: audit.Payload{
+				"binding": binding,
+				"state":   string(domain.AttentionLockoutRetention),
+				"cause":   string(domain.CauseReactivation),
+			},
+		}}, nil
+	}
+}
+
+// wouldEmptyRow reports whether releasing every origin THIS surface owns would
+// leave the row with none — i.e. whether the revoke is a real revocation rather
+// than the release of one origin among several.
+func wouldEmptyRow(origins []authz.Origin) bool {
+	for _, o := range origins {
+		if !domain.IsMintableOrigin(o.Kind) {
+			return false
+		}
+	}
+	return true
 }

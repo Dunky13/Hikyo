@@ -247,6 +247,12 @@ type Repos interface {
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
 	Audit() AuditRepo
+	// SCIM is the provisioning surface (#73). It is on the WRITE bundle only:
+	// every SCIM read the product performs happens inside a transaction that
+	// also writes — the wire reads emit `scim.directory_read`, and the
+	// administration reads run beside their own lifecycle events — so a
+	// read-only twin would be a surface with no caller.
+	SCIM() SCIMRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
@@ -266,6 +272,16 @@ type ReadRepos interface {
 // ErrNotFound is the canonical cross-engine "no such row" — aliased from
 // domain so every layer shares one sentinel for the unauthorized ≡
 // nonexistent rule without importing the store.
+// ErrRetrySerialization marks an error a caller has classified as a TRANSIENT
+// race that the bounded retry loop should re-run the whole transaction for.
+//
+// It exists because the engine-level classifier cannot tell a race from a real
+// conflict: postgres answers both with 23505. The SCIM provisioning create is
+// the one caller today — §5.2's "the loser retries and attaches" — and the
+// loser cannot simply re-read, because its failed statement has already
+// aborted the transaction.
+var ErrRetrySerialization = errors.New("store: transient race; retry the transaction")
+
 var ErrNotFound = domain.ErrNotFound
 
 // ErrConflict is the canonical cross-engine constraint refusal — a duplicate

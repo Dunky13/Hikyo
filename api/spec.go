@@ -13,9 +13,12 @@
 package api
 
 import (
+	"bytes"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -47,6 +50,10 @@ const Revision = 1
 // explicitly does not plan one.
 const PathPrefix = "/api/v1"
 
+// scimMediaType is RFC 7644's content type. It is spelled here rather than
+// imported from internal/scimproto because api may not depend on internal.
+const scimMediaType = "application/scim+json"
+
 // Extension keys. Each is cross-checked against a Go registry in CI, so the
 // document cannot describe an authorization posture the code does not have.
 const (
@@ -69,7 +76,50 @@ var (
 	loadErr  error
 )
 
+// scimJSONDecoder teaches the request validator to read `application/scim+json`
+// (RFC 7644 §3.1). kin-openapi ships decoders for `application/json` and a few
+// others and refuses anything else outright, so without this every SCIM request
+// is rejected as an unsupported content type before its schema is even
+// consulted — a 400 that looks like the identity provider's fault and is not.
+//
+// The bytes ARE JSON; only the media type differs, so the decoder is the JSON
+// one. It is registered once, beside the document load, because the validator
+// is a package-level singleton and a decoder registered later would apply to
+// some requests and not others.
+func scimJSONDecoder(body io.Reader, _ http.Header, _ *openapi3.SchemaRef, _ openapi3filter.EncodingFn) (any, error) {
+	// The protocol's own 1 MiB bound applies LATER, in the handler. Contract
+	// validation runs first and materializes the whole body, so without a bound
+	// here a pre-auth request could exhaust memory before anything checked its
+	// size. Read one byte past the bound: a short read proves it fits.
+	limited := io.LimitReader(body, SCIMBodyBound+1)
+	raw, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > SCIMBodyBound {
+		return nil, errors.New("api: the SCIM request body exceeds the bound")
+	}
+	var decoded any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&decoded); err != nil {
+		return nil, err
+	}
+	// A single Decode stops at the end of the first JSON value, so
+	// `{"a":1}{"b":2}` would validate as `{"a":1}` and the handler would parse
+	// something the contract never saw. Require the reader to be spent.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("api: trailing content after the SCIM request body")
+	}
+	return decoded, nil
+}
+
+// SCIMBodyBound is the largest SCIM request body this server accepts. It is
+// declared here, at the FIRST place that materializes one, and re-stated by the
+// protocol package's own check so the two cannot drift apart silently.
+const SCIMBodyBound = 1 << 20
+
 func load() {
+	openapi3filter.RegisterBodyDecoder(scimMediaType, scimJSONDecoder)
 	// The bound profile is checked HERE, not only in tests: kin-openapi's
 	// generic validation happily accepts a prohibited dialect or a legacy
 	// `nullable`, so without this the runtime would enforce a document the
@@ -205,12 +255,41 @@ func ValidateRequest(r *http.Request) error {
 		Route:      route,
 		Options: &openapi3filter.Options{
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+			// The SCIM WIRE routes' bodies are validated by the protocol layer,
+			// after the provisioning credential authenticates — not here.
+			//
+			// Contract validation runs before any credential is resolved, so a
+			// body check here answers an unauthenticated caller with a Wenv 400
+			// describing what is wrong with their request. The wire's contract
+			// is that nothing about a request is answered before the caller has
+			// proved they may ask; the uniform 401 is the whole answer.
+			//
+			// Nothing is lost: the SCIM body schema is deliberately open
+			// (`additionalProperties: true`, no required members), so this
+			// check only ever rejected "not a JSON object" — which
+			// `scimproto.DecodeUser`/`DecodeGroup`/`ParsePatch` reject
+			// themselves, post-auth, as an RFC 7644 `invalidSyntax`.
+			ExcludeRequestBody: IsSCIMWireOperation(route.Operation.OperationID),
 		},
 	}
 	if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
 		return &ValidationError{Member: offendingMember(err), Err: err}
 	}
 	return nil
+}
+
+// IsSCIMWireOperation reports whether a contract operation is one of the
+// identity provider's own protocol endpoints, as opposed to the SCIM
+// ADMINISTRATION surface (which is ordinary domain surface under a human
+// session and is validated pre-auth like everything else).
+//
+// The two families are told apart by their operation-id shape, which is a
+// convention this function makes load-bearing: wire operations are
+// `scim<Verb>`, administration operations are `<verb>Scim<Noun>`. The contract
+// cross-check test pins that both families are non-empty, so a renamed
+// operation cannot silently move a route from one side to the other.
+func IsSCIMWireOperation(operationID string) bool {
+	return strings.HasPrefix(operationID, "scim")
 }
 
 // ValidateResponse checks a recorded response against the contract. This is

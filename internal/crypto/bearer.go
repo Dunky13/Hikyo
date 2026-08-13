@@ -65,6 +65,14 @@ const (
 	// workload credential.
 	ArtifactWorkload   ArtifactType = "wl"
 	ArtifactAutomation ArtifactType = "au"
+	// ArtifactSCIM is a SCIM provisioning connection's credential — the
+	// machine-identity ADR's closed type list gaining `scim` by the
+	// scim-provisioning amendment (#73 §7). One scanner family is preserved:
+	// everything else about it (>=256-bit body, checksum, unsalted SHA-256
+	// verifier, overlap rotation, lifetime ceiling, revocation at next request,
+	// credential epoch, restored verifiers permanently dead) inherits unchanged
+	// from the locked machine-credential mechanics.
+	ArtifactSCIM ArtifactType = "scim"
 )
 
 // artifactFormatVersion is the grammar's `version` field. It exists so a

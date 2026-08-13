@@ -251,6 +251,14 @@ func flushOnce(ctx context.Context, db *store.DB, denials []authz.Denial) error 
 // sqlite SQLITE_BUSY / SQLITE_LOCKED including extended codes such as
 // SQLITE_BUSY_SNAPSHOT.
 func retryable(engine store.Engine, err error) bool {
+	// A caller that has itself classified an error as a transient race — the
+	// SCIM provisioning create's identity-uniqueness loser, today — opts in
+	// explicitly. The engine cannot tell that race from a real conflict:
+	// postgres answers both 23505, and widening the classifier to every unique
+	// violation would make a genuine duplicate spin the full retry budget.
+	if errors.Is(err, store.ErrRetrySerialization) {
+		return true
+	}
 	if engine == store.EnginePostgres {
 		var pgErr *pgconn.PgError
 		return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")

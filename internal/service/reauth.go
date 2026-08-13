@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -426,3 +427,145 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 	}
 	return out, nil
 }
+
+// ReauthEvidence is a VERIFIED but NOT YET CONSUMED reauthentication proof.
+//
+// Verification is an Argon2 or TOTP check and must not hold a write
+// transaction open, so it runs first and hands back this. Consumption — the
+// single-use CAS on the TOTP row, and the binding of the evidence to the
+// principal the transaction actually authenticated — happens INSIDE the
+// operation's own transaction, so evidence and act commit together and a code
+// cannot be replayed against a second mint.
+type ReauthEvidence struct {
+	// Principal is who the proof was verified FOR. The consuming transaction
+	// compares it against the principal IT authenticated, so a proof obtained
+	// on one session cannot be spent by another.
+	Principal domain.PrincipalID
+	// exempt marks local host authority: nothing to reauthenticate, nothing to
+	// consume.
+	exempt bool
+	// The TOTP row and step to CAS. A password proof has no step: a password is
+	// a long-lived secret and "single use" is not a property it can have — the
+	// factor is what carries replay resistance, and an account holding one must
+	// use it (VerifyReauthProof prefers TOTP whenever it is confirmed).
+	totpID     string
+	rowVersion int64
+	step       int64
+	hasTOTP    bool
+}
+
+// ConsumeReauthEvidence spends the proof inside the caller's transaction. It
+// fails closed on a replayed TOTP step and on evidence belonging to a different
+// principal than the one this transaction authenticated.
+func (s *Auth) ConsumeReauthEvidence(ctx context.Context, az *authz.TxAuthorizer, ev ReauthEvidence, caller domain.PrincipalID) error {
+	if ev.exempt {
+		return nil
+	}
+	if ev.Principal != caller {
+		return domain.ErrUnauthenticated
+	}
+	if !ev.hasTOTP {
+		return nil
+	}
+	// CAS on the row whose seed was verified, so a code proved against a
+	// since-replaced factor cannot apply to its successor — and a code already
+	// spent cannot be spent again.
+	consumed, err := az.AdvanceTOTPStep(ctx, ev.totpID, ev.rowVersion, ev.step)
+	if err != nil {
+		return err
+	}
+	if !consumed {
+		return domain.ErrUnauthenticated
+	}
+	return nil
+}
+
+// VerifyReauthProof re-proves the acting human inside a request that performs a
+// REAUTHENTICATION-GATED operation whose scope is not an environment.
+//
+// The environment-keyed window machinery above is the disclosure gate: it keys
+// on (session, environment) because that is what a reveal addresses. An
+// org-scoped act like minting a provisioning credential has no environment, so
+// it takes the shape the account-security mutations already use — a proof
+// presented WITH the request and verified in it, `GenerateRecoveryCodes`'s
+// pattern, extracted here so there is one implementation rather than two.
+//
+// A caller with no session is LOCAL HOST AUTHORITY (the fixtures, and the
+// below-the-network paths). It has nothing to reauthenticate and is exempt, the
+// same exemption authorize() already makes for the MFA-mandatory rule.
+func (s *Auth) VerifyReauthProof(ctx context.Context, presented, proof string) (ReauthEvidence, error) {
+	if presented == "" {
+		return ReauthEvidence{exempt: true}, nil
+	}
+	if proof == "" {
+		return ReauthEvidence{}, ErrReauthProofRequired
+	}
+	var (
+		account   authz.Account
+		cred      authz.PasswordCredential
+		confirmed authz.TOTPCredential
+		hasTOTP   bool
+	)
+	if err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+		id, err := az.Authenticate(ctx, presented, s.now())
+		if err != nil {
+			return err
+		}
+		account, err = az.AccountByPrincipal(ctx, id.Principal)
+		if err != nil {
+			return err
+		}
+		confirmed, err = az.ConfirmedTOTP(ctx, account.ID)
+		switch {
+		case err == nil:
+			hasTOTP = true
+			return nil
+		case errors.Is(err, domain.ErrNotFound):
+			cred, err = az.PasswordCredentialFor(ctx, account.ID)
+			if errors.Is(err, domain.ErrNotFound) {
+				return ErrNoProofCredential
+			}
+			return err
+		default:
+			return err
+		}
+	}); err != nil {
+		return ReauthEvidence{}, err
+	}
+
+	// A bad proof here is a takeover primitive on a stolen session, so it is
+	// throttled exactly like the account-security mutations are.
+	release, err := s.enterFactorBudget(ctx, account.ID)
+	if err != nil {
+		return ReauthEvidence{}, err
+	}
+	defer release()
+
+	out := ReauthEvidence{Principal: account.PrincipalID}
+	if hasTOTP {
+		seed, oerr := s.Keyring.ForInstance().OpenField(totpSeedAAD(confirmed.ID), confirmed.Seed)
+		if oerr != nil {
+			s.logFault(ctx, "opening a TOTP seed failed", oerr, account.ID)
+			return ReauthEvidence{}, domain.ErrUnauthenticated
+		}
+		step, ok := crypto.ValidateTOTP(seed, proof, s.now(), crypto.TOTPSkewSteps)
+		crypto.Zero(seed)
+		if !ok {
+			s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
+			return ReauthEvidence{}, domain.ErrUnauthenticated
+		}
+		out.hasTOTP, out.totpID, out.rowVersion, out.step = true, confirmed.ID, confirmed.RowVersion, step
+	} else if !s.verifyPassword(ctx, account.ID, cred, proof) {
+		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
+		return ReauthEvidence{}, domain.ErrUnauthenticated
+	}
+	s.Admission.RecordSuccess(account.ID)
+	return out, nil
+}
+
+// ErrReauthProofRequired refuses a reauthentication-gated operation presented
+// without its proof. It is `invalid`, not `unauthenticated`: the session is
+// fine, the request is incomplete.
+var ErrReauthProofRequired = fmt.Errorf(
+	"%w: service: this operation requires reauthentication; present your TOTP code, or your password if you have no factor",
+	domain.ErrInvalid)
