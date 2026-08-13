@@ -424,6 +424,14 @@
     ]
   },
   {
+    "operation": "import.presence",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
     "operation": "key-group.create",
     "class": "tenant",
     "level": "project",
@@ -1007,6 +1015,16 @@
     "level": "environment",
     "formula": [
       "reveal@environment"
+    ]
+  },
+  {
+    "operation": "value.import",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@project",
+      "edit@environment",
+      "publish@environment"
     ]
   },
   {

@@ -2785,6 +2785,137 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: listValueOccurrences
+      tags: [values]
+      summary: Import phase 1 - declared keys, presence, and occurrence tokens.
+      description: |
+        The ONLY server contact an `import` phase 1 makes. It returns, for one
+        environment: the project's definitions revision, and per key its
+        classification, its declared type, whether it is `set` or `absent`, and
+        a SERVER-MINTED OPAQUE OCCURRENCE TOKEN naming the exact resolved state
+        observed.
+
+        It is a POST because it carries a body, not because it acts:
+        `candidates` names the keys and exact declarations the run intends to
+        propose. Every one of them
+        gets a token, INCLUDING names the project does not declare yet - those
+        are exactly the keys an import is about to create, and a manifest row
+        without a server-minted token is the one row an edited manifest could
+        forge freely. An undeclared candidate answers `declared: false`, `set:
+        false` and a token naming that state.
+
+        The token is what binds phase 1 to phase 2. A bucket label cannot do
+        the job: `set` to `set` with a changed value preserves the bucket, so a
+        bucket-checked "reviewed overwrite" would still clobber the newer
+        value. The token is computed over the value row id, which is minted per
+        write and never reused, so an edit advances it and the match fails.
+
+        It is opaque by construction: there is nothing inside it to parse, and
+        a caller cannot construct one for a state they have not been served. An
+        unrecognized token is exactly as informative as a stale one.
+
+        It never requires `reveal`, never compares values and never writes.
+        Human-only: `import` joins the human-only verb list.
+      x-hikyo-class: tenant
+      x-hikyo-operation: import.presence
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValueOccurrencesRequest"
+      responses:
+        "200":
+          description: The environment's keys, presence and occurrence tokens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValueOccurrenceList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: importValues
+      tags: [values]
+      summary: Import phase 2 - a strict, human-only batch value write.
+      description: |
+        Consumes one environment's values file. Strict closed schema: an
+        undeclared key rejects the run BY NAME rather than being created, and
+        the whole run is one transaction.
+
+        Collisions bucket on the target environment's state. A key already
+        `set` is SKIPPED BY DEFAULT and listed by name; `overwrite` is an
+        enumerated opt-in list, never a blanket flag. Skip-by-default is what
+        makes a re-run naturally idempotent.
+
+        `precondition` is the one declared additive input, consumed from an
+        import run manifest. When present, the server re-evaluates phase 1's
+        read formula - `read@project AND read@environment` for every environment
+        the manifest names - inside this same transaction and ON TOP of this
+        verb's own formula, and only then compares the definitions revision and
+        each written key's occurrence token. A caller lacking either read atom receives the plain
+        authorization failure and no precondition result: the precondition is
+        not an oracle. Any movement rejects those keys by name and writes
+        nothing.
+
+        Human-only, per the locked human-only verb list.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.import
+      x-hikyo-formula: [read@project, edit@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportValuesRequest"
+      responses:
+        "200":
+          description: What landed and what was skipped by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportValuesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -7302,6 +7433,171 @@ components:
                 $ref: "#/components/schemas/KeyName"
               destination_environment_id:
                 $ref: "#/components/schemas/ID"
+
+    ValueOccurrencesRequest:
+      type: object
+      additionalProperties: false
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          maxItems: 5000
+          uniqueItems: true
+          description: |
+            The candidate declarations this run intends to propose. Names the
+            project already declares are answered from the catalogue; names it
+            does not are answered as `declared: false` with a token binding the
+            undeclared-and-absent state to the intended classification and type.
+          items:
+            $ref: "#/components/schemas/ValueOccurrenceCandidate"
+
+    ValueOccurrenceCandidate:
+      type: object
+      additionalProperties: false
+      required: [name, intended_classification, intended_type]
+      properties:
+        name:
+          $ref: "#/components/schemas/KeyName"
+        intended_classification:
+          $ref: "#/components/schemas/KeyClassification"
+        intended_type:
+          type: string
+          enum: [string, integer, boolean, enum, url, json]
+
+    ValueOccurrence:
+      type: object
+      required: [name, declared, set, token]
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        declared:
+          type: boolean
+          description: |
+            Whether the project declares this key at all. False for a candidate
+            the run proposes that does not exist yet.
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        declared_type:
+          type: string
+          description: |
+            The key catalogue's canonical textual type expression: a primitive,
+            or `any_of(branch|branch)`. An importer uses the full expression to
+            check its effective primitive against every permitted branch.
+        set:
+          type: boolean
+          description: |
+            The whole presence model: `set` or `absent`. There is no third
+            state.
+        token:
+          type: string
+          description: |
+            The server-minted OPAQUE occurrence token for this
+            (key, environment). Copy it into the run manifest; never parse it.
+            It is keyed and scoped, so it is meaningful only within the
+            environment that produced it, and a fabricated one is exactly as
+            informative as a stale one.
+
+    ValueOccurrenceList:
+      type: object
+      required: [items, definitions_revision, environment_id]
+      properties:
+        environment_id:
+          $ref: "#/components/schemas/ID"
+        definitions_revision:
+          type: integer
+          format: int64
+          description: |
+            The project's key-catalogue revision as phase 1 observed it. The
+            run manifest pins it, and phase 2 refuses a run whose declarations
+            moved.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValueOccurrence"
+
+    ImportValuesRequest:
+      type: object
+      additionalProperties: false
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          description: |
+            The values file's entries. A key named twice is refused: it is one
+            logical cell requested twice.
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key:
+                $ref: "#/components/schemas/KeyName"
+              value:
+                type: string
+        overwrite:
+          type: array
+          uniqueItems: true
+          description: |
+            The enumerated `set`-bucket consent. Skip-by-default otherwise.
+            Naming a key this import does not carry is refused: a typo in a
+            consent list is the one place a silent no-op is dangerous.
+          items:
+            $ref: "#/components/schemas/KeyName"
+        precondition:
+          $ref: "#/components/schemas/ImportPrecondition"
+
+    ImportPrecondition:
+      type: object
+      additionalProperties: false
+      required: [definitions_revision, environment_ids, occurrences]
+      description: |
+        The run manifest's expected-state half - the one declared additive
+        input `values import` gained. Verified inside the import's own
+        authorized transaction, after `read@project AND read@environment` is
+        re-evaluated for every environment named here.
+      properties:
+        definitions_revision:
+          type: integer
+          format: int64
+        environment_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ID"
+        occurrences:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, environment_id, token]
+            properties:
+              key:
+                $ref: "#/components/schemas/KeyName"
+              environment_id:
+                $ref: "#/components/schemas/ID"
+              token:
+                type: string
+
+    ImportValuesResult:
+      type: object
+      required: [imported, skipped]
+      properties:
+        imported:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyName"
+        skipped:
+          type: array
+          description: |
+            Keys already `set` in the target environment that no enumerated
+            overwrite named. Listed by name, never silently dropped.
+          items:
+            $ref: "#/components/schemas/KeyName"
 
     ValueDiff:
       type: object

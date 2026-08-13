@@ -313,6 +313,15 @@ const (
 	// publisher did not supply" is the fact the re-delivery gate exists to
 	// make auditable.
 	EventValueCopied EventType = "disclosure.value_copied"
+	// value.imported records one `values import` RUN against one environment
+	// (#68). It sits BESIDE the per-key value.set events the run's writes emit,
+	// not instead of them: "who set this value" must be answerable without
+	// knowing how the value arrived, and "was there a migration, when, from
+	// what, against which reviewed state" must be answerable without
+	// reconstructing it from a burst of writes. The payload is the run's shape
+	// — how many keys landed, how many were skipped, whether a manifest bound
+	// the run — and never a key's material.
+	EventValueImported EventType = "value.imported"
 
 	EventKeyGroupCreated EventType = "settings.key_group_created"
 	EventKeyGroupRenamed EventType = "settings.key_group_renamed"
@@ -1090,6 +1099,15 @@ var registry = map[EventType]TypeSpec{
 		"classification":        {Kind: KindString, Required: true},
 		"source_environment_id": {Kind: KindString, Required: true},
 		"operation":             {Kind: KindString, Required: true},
+	}),
+	// One `values import` run (#68). Counts and shape, never key material: the
+	// per-key record is the value.set beside it. `manifest_bound` is the fact
+	// that matters at incident time — an import that verified occurrence tokens
+	// against reviewed state is a different act from one that did not.
+	EventValueImported: hierarchyEvent(Schema{
+		"imported_count": {Kind: KindInt, Required: true},
+		"skipped_count":  {Kind: KindInt, Required: true},
+		"manifest_bound": {Kind: KindBool, Required: true},
 	}),
 
 	EventKeyGroupCreated: hierarchyEvent(Schema{"name": {Kind: KindFreeText, Required: true}}),

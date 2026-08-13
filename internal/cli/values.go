@@ -45,9 +45,17 @@ var valueColumns = []string{"KEY", "CLASS", "PRESENCE", "VALUE"}
 
 // runValues is the `values` family.
 func runValues(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("values", args, "list", "get", "set", "declare", "diff", "copy")
+	sub, rest, err := subverb("values", args, "list", "get", "set", "declare", "diff", "copy", "import")
 	if err != nil {
 		return err
+	}
+	// `values import` is its own verb in every way that matters — a strict,
+	// human-only, per-environment batch write with a precondition — so it takes
+	// its own flag set rather than sharing this one's. It rides the `values`
+	// family because the api-cli-surface ADR spells it `values import` and the
+	// noun-verb taxonomy is closed.
+	if sub == "import" {
+		return runValuesImport(ctx, ios, rest)
 	}
 
 	var format, valueFile, left, right, source, destinations, keyNames, environments string

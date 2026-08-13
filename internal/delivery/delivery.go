@@ -140,3 +140,78 @@ func appendField(dst []byte, s string) []byte {
 	dst = binary.AppendUvarint(dst, uint64(len(s)))
 	return append(dst, s...)
 }
+
+// ---------------------------------------------------------------------------
+// Import occurrence tokens (#68, import-paths ADR § Binding phase 1 to phase 2)
+// ---------------------------------------------------------------------------
+
+// OccurrenceVersion is the occurrence encoding's version, inside the signed
+// bytes for the same reason ManifestVersion is.
+const OccurrenceVersion = "v1"
+
+// Occurrence is what a phase-1 presence read observed for one
+// `(key, environment)`, and what phase 2 recomputes to decide whether anything
+// moved. Each component closes a distinct movement the ADR names:
+//
+//	KeyID           the declaration this name resolves to. A key deleted and
+//	                re-created under the same name is a different key.
+//	EntryID         WHICH value occurrence is in effect, or "" for `absent`.
+//	                Value row ids are minted per write and never reused, so an
+//	                edit advances this and the token stops matching — which is
+//	                precisely what a bucket label cannot do, since `set` → `set`
+//	                with a changed value preserves the bucket.
+//	Classification  a reclassification moved what the key IS.
+//	Declaration     the declaration digest: a changed rule is a changed
+//	                declaration, and consent was given against the old one.
+//	Name            the key's NAME. For an undeclared key it is the only
+//	                identity there is; for a declared one it rides along so the
+//	                two encodings can never collide.
+//	Declared        whether the project declares this key at all. An import
+//	                proposes keys that do not exist yet, and phase 2 must be
+//	                able to check those did not move either — so they get a
+//	                token naming "undeclared and absent" rather than no token,
+//	                which is the one row an edited manifest could otherwise
+//	                forge freely.
+//	IntendedClassification
+//	IntendedType    for an undeclared key, exactly what the emitted bundle line
+//	                will declare. Phase 2 accepts the expected undeclared ->
+//	                declared transition only when both still match.
+type Occurrence struct {
+	Declared               bool
+	Name                   string
+	KeyID                  string
+	EntryID                string
+	Classification         string
+	Declaration            string
+	IntendedClassification string
+	IntendedType           string
+}
+
+// EncodeOccurrence renders one occurrence canonically. Length-prefixed
+// throughout, so the encoding is injective and "recompute and compare" is a
+// sound test: a caller cannot construct bytes for a state they were not served.
+//
+// The declared/undeclared discriminator is a FIELD, not an absence: encoding
+// the undeclared case as "the declared case with empty ids" would let a key
+// whose declaration was somehow empty collide with one that has none.
+func EncodeOccurrence(o Occurrence) []byte {
+	kind := "undeclared"
+	if o.Declared {
+		kind = "declared"
+	}
+	out := appendField(nil, OccurrenceVersion)
+	out = appendField(out, kind)
+	out = appendField(out, o.Name)
+	if !o.Declared {
+		// Bind the one declaration transition this reviewed run authorizes.
+		// These are not observations; they are the exact intended fields the
+		// client will emit in its additive bundle.
+		out = appendField(out, o.IntendedClassification)
+		out = appendField(out, o.IntendedType)
+		return out
+	}
+	out = appendField(out, o.KeyID)
+	out = appendField(out, o.EntryID)
+	out = appendField(out, o.Classification)
+	return appendField(out, o.Declaration)
+}

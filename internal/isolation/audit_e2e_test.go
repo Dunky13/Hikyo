@@ -1001,6 +1001,31 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 			t.Fatal(err)
 		}
 	}
+	// A `values import` run (#68), so value.imported has a real emitter. It
+	// carries the manifest precondition, which is the shape that matters to the
+	// trail: `manifest_bound` is the fact an investigator reads first.
+	presence, err := values.Occurrences(ctx, actor, sourceScope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre := service.ImportPrecondition{
+		DefinitionsRevision: presence.DefinitionsRevision,
+		Environments:        []string{source.ID},
+	}
+	for _, k := range presence.Keys {
+		pre.Occurrences = append(pre.Occurrences, service.ImportOccurrenceRef{
+			Key: k.Name, Environment: source.ID, Token: k.Token,
+		})
+	}
+	if _, err := values.Import(ctx, actor, sourceScope, service.ImportRequest{
+		Entries:      []service.ImportEntry{{Key: key.Name, Value: "imported-material"}},
+		Precondition: &pre,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := values.Clear(ctx, actor, sourceScope, key.Name); err != nil {
+		t.Fatal(err)
+	}
 	if err := keys.Delete(ctx, actor, scope, key.ID); err != nil {
 		t.Fatal(err)
 	}

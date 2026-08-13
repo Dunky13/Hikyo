@@ -56,13 +56,20 @@ func TestInvariantAuditCompleteness(t *testing.T) {
 			if exempt {
 				t.Errorf("%s: audited-none AND exemption-pinned — the fixture must carry only silent operations", op)
 			}
-			// The default-deny permit rule: tenant class, formula exactly
-			// bare `read`, mutating nothing.
+			// The default-deny permit rule: tenant class, a non-empty
+			// conjunction made only of `read` atoms, mutating nothing. The
+			// import presence read has separate project-structure and
+			// environment-presence atoms, but remains a pure read.
 			if m.Class != authz.ClassTenant {
 				t.Errorf("%s: audited-none on a non-tenant operation — refused (default-deny)", op)
 			}
-			if len(m.Formula) != 1 || m.Formula[0].Cap != domain.CapRead {
-				t.Errorf("%s: audited-none with formula beyond bare read — refused (default-deny)", op)
+			if len(m.Formula) == 0 {
+				t.Errorf("%s: audited-none with an empty formula — refused (default-deny)", op)
+			}
+			for _, atom := range m.Formula {
+				if atom.Cap != domain.CapRead {
+					t.Errorf("%s: audited-none with formula beyond read-only atoms — refused (default-deny)", op)
+				}
 			}
 			if !m.ReadOnly {
 				t.Errorf("%s: audited-none on a mutating operation — refused (default-deny)", op)

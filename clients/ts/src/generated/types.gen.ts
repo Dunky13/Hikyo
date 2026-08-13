@@ -487,6 +487,116 @@ export type CopyValuesResult = {
     }>;
 };
 
+export type ValueOccurrencesRequest = {
+    /**
+     * The candidate declarations this run intends to propose. Names the
+     * project already declares are answered from the catalogue; names it
+     * does not are answered as `declared: false` with a token binding the
+     * undeclared-and-absent state to the intended classification and type.
+     *
+     */
+    candidates: Array<ValueOccurrenceCandidate>;
+};
+
+export type ValueOccurrenceCandidate = {
+    name: KeyName;
+    intended_classification: KeyClassification;
+    intended_type: 'string' | 'integer' | 'boolean' | 'enum' | 'url' | 'json';
+};
+
+export type ValueOccurrence = {
+    key_id?: Id;
+    name: KeyName;
+    /**
+     * Whether the project declares this key at all. False for a candidate
+     * the run proposes that does not exist yet.
+     *
+     */
+    declared: boolean;
+    classification?: KeyClassification;
+    /**
+     * The key catalogue's canonical textual type expression: a primitive,
+     * or `any_of(branch|branch)`. An importer uses the full expression to
+     * check its effective primitive against every permitted branch.
+     *
+     */
+    declared_type?: string;
+    /**
+     * The whole presence model: `set` or `absent`. There is no third
+     * state.
+     *
+     */
+    set: boolean;
+    /**
+     * The server-minted OPAQUE occurrence token for this
+     * (key, environment). Copy it into the run manifest; never parse it.
+     * It is keyed and scoped, so it is meaningful only within the
+     * environment that produced it, and a fabricated one is exactly as
+     * informative as a stale one.
+     *
+     */
+    token: string;
+};
+
+export type ValueOccurrenceList = {
+    environment_id: Id;
+    /**
+     * The project's key-catalogue revision as phase 1 observed it. The
+     * run manifest pins it, and phase 2 refuses a run whose declarations
+     * moved.
+     *
+     */
+    definitions_revision: number;
+    items: Array<ValueOccurrence>;
+};
+
+export type ImportValuesRequest = {
+    /**
+     * The values file's entries. A key named twice is refused: it is one
+     * logical cell requested twice.
+     *
+     */
+    entries: Array<{
+        key: KeyName;
+        value: string;
+    }>;
+    /**
+     * The enumerated `set`-bucket consent. Skip-by-default otherwise.
+     * Naming a key this import does not carry is refused: a typo in a
+     * consent list is the one place a silent no-op is dangerous.
+     *
+     */
+    overwrite?: Array<KeyName>;
+    precondition?: ImportPrecondition;
+};
+
+/**
+ * The run manifest's expected-state half - the one declared additive
+ * input `values import` gained. Verified inside the import's own
+ * authorized transaction, after `read@project AND read@environment` is
+ * re-evaluated for every environment named here.
+ *
+ */
+export type ImportPrecondition = {
+    definitions_revision: number;
+    environment_ids: Array<Id>;
+    occurrences: Array<{
+        key: KeyName;
+        environment_id: Id;
+        token: string;
+    }>;
+};
+
+export type ImportValuesResult = {
+    imported: Array<KeyName>;
+    /**
+     * Keys already `set` in the target environment that no enumerated
+     * overwrite named. Listed by name, never silently dropped.
+     *
+     */
+    skipped: Array<KeyName>;
+};
+
 export type ValueDiff = {
     left_environment_id: Id;
     right_environment_id: Id;
@@ -6858,6 +6968,177 @@ export type GetRevealWindowResponses = {
 };
 
 export type GetRevealWindowResponse = GetRevealWindowResponses[keyof GetRevealWindowResponses];
+
+export type ListValueOccurrencesData = {
+    body: ValueOccurrencesRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences';
+};
+
+export type ListValueOccurrencesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListValueOccurrencesError = ListValueOccurrencesErrors[keyof ListValueOccurrencesErrors];
+
+export type ListValueOccurrencesResponses = {
+    /**
+     * The environment's keys, presence and occurrence tokens.
+     */
+    200: ValueOccurrenceList;
+};
+
+export type ListValueOccurrencesResponse = ListValueOccurrencesResponses[keyof ListValueOccurrencesResponses];
+
+export type ImportValuesData = {
+    body: ImportValuesRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import';
+};
+
+export type ImportValuesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ImportValuesError = ImportValuesErrors[keyof ImportValuesErrors];
+
+export type ImportValuesResponses = {
+    /**
+     * What landed and what was skipped by name.
+     */
+    200: ImportValuesResult;
+};
+
+export type ImportValuesResponse = ImportValuesResponses[keyof ImportValuesResponses];
 
 export type RevealValuesData = {
     body?: never;

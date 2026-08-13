@@ -33,6 +33,82 @@ type ValueService interface {
 	Declare(ctx context.Context, actor service.Actor, scope domain.Scope, envIDs []string, keyName, value string) ([]service.ValueCell, error)
 	Copy(ctx context.Context, actor service.Actor, scope domain.Scope, req service.CopyRequest) (service.CopyResult, error)
 	Diff(ctx context.Context, actor service.Actor, scope domain.Scope, left, right string, reveal bool) ([]service.DiffRow, error)
+	Occurrences(ctx context.Context, actor service.Actor, scope domain.Scope, candidates []service.ImportCandidate) (service.ImportPresence, error)
+	Import(ctx context.Context, actor service.Actor, scope domain.Scope, req service.ImportRequest) (service.ImportResult, error)
+}
+
+// The import pair (#68). Same discipline as the rest: this file TRANSLATES.
+// The occurrence token crosses the wire as an opaque string in both directions
+// and is never interpreted here — interpreting it anywhere but the service that
+// minted it would be a second place the phase-1/phase-2 binding could drift.
+
+func (a *API) ListValueOccurrences(ctx context.Context, req apigen.ListValueOccurrencesRequestObject) (apigen.ListValueOccurrencesResponseObject, error) {
+	candidates := make([]service.ImportCandidate, 0, len(req.Body.Candidates))
+	for _, candidate := range req.Body.Candidates {
+		candidates = append(candidates, service.ImportCandidate{
+			Name: candidate.Name, IntendedClassification: string(candidate.IntendedClassification),
+			IntendedType: string(candidate.IntendedType),
+		})
+	}
+	presence, err := a.Values.Occurrences(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), candidates)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]apigen.ValueOccurrence, 0, len(presence.Keys))
+	for _, k := range presence.Keys {
+		row := apigen.ValueOccurrence{
+			Name:     k.Name,
+			Declared: k.Declared,
+			Set:      k.Set,
+			Token:    k.Token,
+		}
+		if k.Declared {
+			keyID, class := k.KeyID, apigen.KeyClassification(k.Classification)
+			row.KeyId = &keyID
+			row.Classification = &class
+		}
+		if k.Type != "" {
+			declaredType := k.Type
+			row.DeclaredType = &declaredType
+		}
+		items = append(items, row)
+	}
+	return apigen.ListValueOccurrences200JSONResponse(apigen.ValueOccurrenceList{
+		EnvironmentId:       presence.Environment,
+		DefinitionsRevision: presence.DefinitionsRevision,
+		Items:               items,
+	}), nil
+}
+
+func (a *API) ImportValues(ctx context.Context, req apigen.ImportValuesRequestObject) (apigen.ImportValuesResponseObject, error) {
+	in := service.ImportRequest{}
+	for _, e := range req.Body.Entries {
+		in.Entries = append(in.Entries, service.ImportEntry{Key: e.Key, Value: e.Value})
+	}
+	if req.Body.Overwrite != nil {
+		in.Overwrite = *req.Body.Overwrite
+	}
+	if p := req.Body.Precondition; p != nil {
+		pre := service.ImportPrecondition{
+			DefinitionsRevision: p.DefinitionsRevision,
+			Environments:        p.EnvironmentIds,
+		}
+		for _, o := range p.Occurrences {
+			pre.Occurrences = append(pre.Occurrences, service.ImportOccurrenceRef{
+				Key: o.Key, Environment: o.EnvironmentId, Token: o.Token,
+			})
+		}
+		in.Precondition = &pre
+	}
+	result, err := a.Values.Import(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), in)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.ImportValues200JSONResponse(apigen.ImportValuesResult{
+		Imported: nonNil(result.Imported), Skipped: nonNil(result.Skipped),
+	}), nil
 }
 
 func (a *API) ListValues(ctx context.Context, req apigen.ListValuesRequestObject) (apigen.ListValuesResponseObject, error) {
@@ -164,22 +240,22 @@ func (a *API) CloneEnvironment(ctx context.Context, req apigen.CloneEnvironmentR
 	if err != nil {
 		return nil, err
 	}
-	// Both lists are non-nil on the wire: `[]` says "nothing was blocked",
-	// and a JSON null would read as "unknown" for a fact the server knows
-	// exactly.
-	copied := result.Copied
-	if copied == nil {
-		copied = []string{}
-	}
-	uncopied := result.UncopiedSecrets
-	if uncopied == nil {
-		uncopied = []string{}
-	}
 	return apigen.CloneEnvironment201JSONResponse{
 		Environment:     wireEnvironment(env),
-		Copied:          copied,
-		UncopiedSecrets: uncopied,
+		Copied:          nonNil(result.Copied),
+		UncopiedSecrets: nonNil(result.UncopiedSecrets),
 	}, nil
+}
+
+// nonNil renders a nil slice as an empty one on the wire. `[]` says "nothing
+// here"; a JSON null would read as "unknown" for a fact the server knows
+// exactly — which for a clone's uncopied-secrets list is the difference between
+// "nothing was blocked" and "we did not check".
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 func wireValueCell(c service.ValueCell) apigen.ValueCell {

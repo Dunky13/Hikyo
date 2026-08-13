@@ -1,0 +1,30 @@
+{
+  "definitions_revision": 7,
+  "environment_id": "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+  "items": [
+    {
+      "classification": "secret",
+      "declared": true,
+      "declared_type": "string",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55",
+      "name": "DATABASE_URL",
+      "set": true,
+      "token": "v1:sBn6Q0m2Yy1a9m0nGm9nX0cD4rQ7pS2tU5vW8xY1zA0"
+    },
+    {
+      "classification": "config",
+      "declared": true,
+      "declared_type": "boolean",
+      "key_id": "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f57",
+      "name": "FEATURE_FLAG",
+      "set": false,
+      "token": "v1:Tq3Lm7Nn2Pp9Rr4Ss6Uu8Vv0Ww1Xx3Yy5Zz7Aa9Bb2"
+    },
+    {
+      "declared": false,
+      "name": "NEW_FROM_IMPORT",
+      "set": false,
+      "token": "v1:Cc4Dd6Ee8Ff0Gg2Hh4Ii6Jj8Kk0Ll2Mm4Nn6Oo8Pp0"
+    }
+  ]
+}

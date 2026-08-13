@@ -73,6 +73,15 @@ var webauthnrpImporters = map[string]bool{
 	module + "/internal/app":          true, // construction wiring only
 }
 
+// sopsImporters confines the getsops/sops v3 library behind the import
+// framework (#68). It is a large dependency tree — every KMS backend the
+// library supports rides in with it — and it parses and decrypts FOREIGN
+// material, which is the strongest reason to keep its blast radius to one
+// package: nothing outside internal/importer may hand it bytes.
+var sopsImporters = map[string]bool{
+	module + "/internal/importer": true,
+}
+
 // forbidden direct edges: importer prefix -> banned import prefix.
 var forbidden = []struct{ importer, imports, why string }{
 	{module + "/internal/server", module + "/internal/store", "handlers cannot reach the datastore directly"},
@@ -264,6 +273,18 @@ func TestAuthnImportAllowlist(t *testing.T) {
 			}
 			if p.ImportPath == authn && strings.HasPrefix(imp, module+"/") && !allowedImports[imp] {
 				t.Errorf("%s imports %s: the resolution surface builds on generated queries and domain only", p.ImportPath, imp)
+			}
+		}
+	}
+}
+
+// TestSOPSImportAllowlist confines the SOPS library (and the key-service
+// backends it drags in) to the import framework.
+func TestSOPSImportAllowlist(t *testing.T) {
+	for _, p := range loadPackages(t) {
+		for _, imp := range allImports(p) {
+			if strings.HasPrefix(imp, "github.com/getsops/sops/") && !sopsImporters[p.ImportPath] {
+				t.Errorf("%s imports %s: the SOPS library is confined to internal/importer", p.ImportPath, imp)
 			}
 		}
 	}

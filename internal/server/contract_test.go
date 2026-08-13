@@ -758,6 +758,14 @@ func (s stubValues) Diff(context.Context, service.Actor, domain.Scope, string, s
 	return nil, s.outcome()
 }
 
+func (s stubValues) Occurrences(context.Context, service.Actor, domain.Scope, []service.ImportCandidate) (service.ImportPresence, error) {
+	return service.ImportPresence{}, s.outcome()
+}
+
+func (s stubValues) Import(context.Context, service.Actor, domain.Scope, service.ImportRequest) (service.ImportResult, error) {
+	return service.ImportResult{}, s.outcome()
+}
+
 // stubKeys and stubKeyGroups are the key catalogue's uniformity fixtures
 // (#49). Every method answers the SAME injected outcome, which is what makes
 // the uniformity test meaningful: the transport is given no way to tell a
