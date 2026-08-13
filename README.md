@@ -67,10 +67,13 @@ hikyo admin create --username admin   # host-only: bootstrap first authority
 hikyo backup export | restore run     # host-only backup/restore
 
 # Client (day to day)
-hikyo login <instance-url> --as <user>
-hikyo org create      | project create | env create
+hikyo login <instance-url> --local --as <user>
+hikyo org create --name <name>
+hikyo project create --name <name> --org <org-id>
+hikyo env create --name <name> --org <org-id> --project <project-id>
 hikyo context create <name> --instance <url> --org <id> --project <id> --env <id>
-hikyo key create      --context <ctx> --name NAME --classification config|secret ...
+hikyo key create --context <ctx> --name NAME --classification config|secret \
+  --declaration '{"rule":{"type":"string"}}'
 hikyo values set NAME --context <ctx> --value-file PATH   # or --stdin / --clear
 hikyo values get NAME --context <ctx>                     # presence + metadata
 hikyo values get NAME --context <ctx> --reveal --output-file PATH   # plaintext
