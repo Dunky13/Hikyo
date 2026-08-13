@@ -43,7 +43,7 @@ type oidcStartResponse struct {
 
 func (r oidcStartResponse) VisitOidcStartResponse(w http.ResponseWriter) error {
 	if r.cookie != nil {
-		http.SetCookie(w, r.cookie)
+		writeHTTPOnlyCookie(w, r.cookie)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
