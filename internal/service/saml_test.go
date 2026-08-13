@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -334,6 +335,33 @@ func TestSAMLMetadataTransportRefusesPrivateResolutionBeforeProxy(t *testing.T) 
 	}
 	if _, _, err := guard.prepare(request); err == nil {
 		t.Fatal("private DNS result reached configured proxy")
+	}
+}
+
+func TestSAMLMetadataTransportFallsBackAcrossValidatedAddresses(t *testing.T) {
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil
+	var attempted []string
+	base.DialContext = func(_ context.Context, _, address string) (net.Conn, error) {
+		attempted = append(attempted, address)
+		return nil, errors.New("test address unreachable")
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := &publicMetadataRoundTripper{
+		base: base,
+		resolver: staticMetadataResolver{
+			netip.MustParseAddr("8.8.8.8"),
+			netip.MustParseAddr("1.1.1.1"),
+		},
+	}
+	if _, err := guard.RoundTrip(request); err == nil {
+		t.Fatal("all unreachable addresses unexpectedly succeeded")
+	}
+	if want := []string{"8.8.8.8:443", "1.1.1.1:443"}; !slices.Equal(attempted, want) {
+		t.Fatalf("attempted addresses = %v, want %v", attempted, want)
 	}
 }
 

@@ -1043,14 +1043,38 @@ type publicMetadataRoundTripper struct {
 }
 
 func (t *publicMetadataRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
-	pinned, transport, err := t.prepare(request)
+	addresses, proxyURL, err := t.destinations(request)
 	if err != nil {
 		return nil, err
 	}
-	return transport.RoundTrip(pinned)
+	var attempts []error
+	for _, address := range addresses {
+		pinned, transport := t.prepareAddress(request, address, proxyURL)
+		response, err := transport.RoundTrip(pinned)
+		if err == nil {
+			return response, nil
+		}
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		attempts = append(attempts, fmt.Errorf("%s: %w", address, err))
+		if err := request.Context().Err(); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errors.Join(attempts...)
 }
 
 func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Request, *http.Transport, error) {
+	addresses, proxyURL, err := t.destinations(request)
+	if err != nil {
+		return nil, nil, err
+	}
+	pinned, transport := t.prepareAddress(request, addresses[0], proxyURL)
+	return pinned, transport, nil
+}
+
+func (t *publicMetadataRoundTripper) destinations(request *http.Request) ([]netip.Addr, *url.URL, error) {
 	host := request.URL.Hostname()
 	addresses, err := t.resolver.LookupNetIP(request.Context(), "ip", host)
 	if err != nil || len(addresses) == 0 {
@@ -1062,14 +1086,23 @@ func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Reque
 		}
 	}
 
-	transport := t.base.Clone()
 	var proxyURL *url.URL
-	if transport.Proxy != nil {
-		proxyURL, err = transport.Proxy(request)
+	if t.base.Proxy != nil {
+		proxyURL, err = t.base.Proxy(request)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
+	return addresses, proxyURL, nil
+}
+
+func (t *publicMetadataRoundTripper) prepareAddress(
+	request *http.Request,
+	address netip.Addr,
+	proxyURL *url.URL,
+) (*http.Request, *http.Transport) {
+	transport := t.base.Clone()
+	host := request.URL.Hostname()
 	transport.Proxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
 	// One transport is built per request because its TLS identity and pinned IP
 	// are request-specific. Prevent it from retaining an unusable idle pool.
@@ -1081,7 +1114,7 @@ func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Reque
 	}
 	pinned := request.Clone(request.Context())
 	pinnedURL := *request.URL
-	pinnedURL.Host = net.JoinHostPort(addresses[0].Unmap().String(), port)
+	pinnedURL.Host = net.JoinHostPort(address.Unmap().String(), port)
 	pinned.URL = &pinnedURL
 	pinned.Host = request.Host
 	if pinned.Host == "" {
@@ -1116,7 +1149,7 @@ func (t *publicMetadataRoundTripper) prepare(request *http.Request) (*http.Reque
 			return connection, nil
 		}
 	}
-	return pinned, transport, nil
+	return pinned, transport
 }
 
 type generatedSAMLSPKey struct {
