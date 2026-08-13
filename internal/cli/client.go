@@ -83,6 +83,9 @@ func NewClient(entry TrustEntry, bearer string) (*Client, error) {
 						"If the change is legitimate, re-establish the instance deliberately",
 					entry.Origin, shortPin(pin))
 			},
+			// Chain verification is intentionally replaced by the exact leaf
+			// SPKI check above so operator-issued certificates remain usable.
+			// codeql[go/disabled-certificate-check]
 			InsecureSkipVerify: true, //nolint:gosec // replaced by the leaf public-key pin above, which a valid chain alone cannot satisfy
 		}
 	} else if !isLoopbackOrigin(entry.Origin) {

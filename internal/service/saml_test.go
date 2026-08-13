@@ -1,14 +1,21 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
+	"io"
 	"math/big"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +24,18 @@ import (
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/samlsp"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+type staticMetadataResolver []netip.Addr
+
+func (r staticMetadataResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return r, nil
+}
 
 func TestAssessSAMLMetadataReturnsCompleteDiffAndOnlyRequiresNewTrust(t *testing.T) {
 	oldCertificate := testSAMLCertificate(t, "old")
@@ -198,6 +217,151 @@ func TestSAMLMetadataURLRequiresHTTPS(t *testing.T) {
 		if _, err := providers.fetchMetadata(t.Context(), rawURL); !errors.Is(err, ErrSAMLMetadataFetch) {
 			t.Errorf("fetchMetadata(%q) error = %v, want ErrSAMLMetadataFetch", rawURL, err)
 		}
+	}
+}
+
+func TestSAMLMetadataURLRefusesPrivateNetworkTargets(t *testing.T) {
+	requests := 0
+	providers := &SAMLProviders{HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("<EntityDescriptor/>")),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	for _, rawURL := range []string{
+		"https://localhost/metadata",
+		"https://127.0.0.1/metadata",
+		"https://10.0.0.1/metadata",
+		"https://169.254.169.254/latest/meta-data",
+		"https://100.64.0.1/metadata",
+		"https://[::1]/metadata",
+		"https://[fd00::1]/metadata",
+	} {
+		if _, err := providers.fetchMetadata(t.Context(), rawURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+			t.Errorf("fetchMetadata(%q) error = %v, want ErrSAMLMetadataFetch", rawURL, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("private metadata URLs made %d outbound requests, want 0", requests)
+	}
+}
+
+func TestSAMLMetadataIPClassifierAllowsOnlyPublicAddresses(t *testing.T) {
+	for _, test := range []struct {
+		address   string
+		nonPublic bool
+	}{
+		{"8.8.8.8", false},
+		{"2606:4700:4700::1111", false},
+		{"127.0.0.1", true},
+		{"10.0.0.1", true},
+		{"169.254.169.254", true},
+		{"100.64.0.1", true},
+		{"192.0.2.1", true},
+		{"198.51.100.1", true},
+		{"203.0.113.1", true},
+		{"::1", true},
+		{"fd00::1", true},
+		{"64:ff9b:1::1", true},
+		{"100::1", true},
+		{"2001:2::1", true},
+		{"2001:db8::1", true},
+		{"2002::1", true},
+		{"3fff::1", true},
+		{"5f00::1", true},
+	} {
+		address := netip.MustParseAddr(test.address)
+		if got := metadataIPIsNonPublic(address); got != test.nonPublic {
+			t.Errorf("metadataIPIsNonPublic(%s) = %v, want %v", address, got, test.nonPublic)
+		}
+	}
+}
+
+func TestSAMLMetadataTransportPinsPublicIPThroughConfiguredProxy(t *testing.T) {
+	proxyURL, err := url.Parse("https://proxy.internal:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = func(request *http.Request) (*url.URL, error) {
+		if request.URL.Host != "idp.example" {
+			t.Fatalf("proxy selection saw host %q, want original idp.example", request.URL.Host)
+		}
+		return proxyURL, nil
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	guard := &publicMetadataRoundTripper{
+		base:     base,
+		resolver: staticMetadataResolver{netip.MustParseAddr("8.8.8.8")},
+	}
+	pinned, transport, err := guard.prepare(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinned.URL.Host != "8.8.8.8:443" || pinned.Host != "idp.example" {
+		t.Fatalf("pinned request URL host = %q, Host = %q", pinned.URL.Host, pinned.Host)
+	}
+	if transport.TLSClientConfig == nil || transport.TLSClientConfig.ServerName != "idp.example" {
+		t.Fatalf("TLS server name = %#v, want idp.example", transport.TLSClientConfig)
+	}
+	selectedProxy, err := transport.Proxy(pinned)
+	if err != nil || selectedProxy.String() != proxyURL.String() {
+		t.Fatalf("selected proxy = %v, %v; want %s", selectedProxy, err, proxyURL)
+	}
+	if transport.DialTLSContext == nil {
+		t.Fatal("HTTPS proxy has no separate first-hop TLS verifier")
+	}
+}
+
+func TestSAMLMetadataTransportRefusesPrivateResolutionBeforeProxy(t *testing.T) {
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = func(*http.Request) (*url.URL, error) {
+		return url.Parse("http://proxy.internal:8080")
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := &publicMetadataRoundTripper{
+		base:     base,
+		resolver: staticMetadataResolver{netip.MustParseAddr("10.0.0.4")},
+	}
+	if _, _, err := guard.prepare(request); err == nil {
+		t.Fatal("private DNS result reached configured proxy")
+	}
+}
+
+func TestSAMLMetadataTransportFallsBackAcrossValidatedAddresses(t *testing.T) {
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil
+	var attempted []string
+	base.DialContext = func(_ context.Context, _, address string) (net.Conn, error) {
+		attempted = append(attempted, address)
+		return nil, errors.New("test address unreachable")
+	}
+	request, err := http.NewRequest(http.MethodGet, "https://idp.example/metadata", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := &publicMetadataRoundTripper{
+		base: base,
+		resolver: staticMetadataResolver{
+			netip.MustParseAddr("8.8.8.8"),
+			netip.MustParseAddr("1.1.1.1"),
+		},
+	}
+	if _, err := guard.RoundTrip(request); err == nil {
+		t.Fatal("all unreachable addresses unexpectedly succeeded")
+	}
+	if want := []string{"8.8.8.8:443", "1.1.1.1:443"}; !slices.Equal(attempted, want) {
+		t.Fatalf("attempted addresses = %v, want %v", attempted, want)
 	}
 }
 

@@ -24,7 +24,7 @@ type samlStartResponse struct {
 
 func (r samlStartResponse) VisitSamlStartResponse(w http.ResponseWriter) error {
 	if r.cookie != nil {
-		http.SetCookie(w, r.cookie)
+		writeHTTPOnlyCookie(w, r.cookie)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -94,10 +94,10 @@ type samlACSResponse struct {
 
 func (r samlACSResponse) VisitSamlACSResponse(w http.ResponseWriter) error {
 	if r.clearCookie != nil {
-		http.SetCookie(w, r.clearCookie)
+		writeHTTPOnlyCookie(w, r.clearCookie)
 	}
 	if r.sessionCookie != nil {
-		http.SetCookie(w, r.sessionCookie)
+		writeHTTPOnlyCookie(w, r.sessionCookie)
 	}
 	return r.inner.VisitSamlACSResponse(w)
 }
