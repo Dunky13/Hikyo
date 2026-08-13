@@ -119,10 +119,6 @@ for path in \
 	.well-known/security.txt \
 	api/search.json \
 	index.html \
-	docs/index.html \
-	docs/getting-started/index.html \
-	docs/core-concepts/index.html \
-	docs/self-hosting/index.html \
 	security/index.html \
 	support/index.html \
 	governance/index.html \
@@ -131,6 +127,24 @@ for path in \
 	license/index.html; do
 	require_file "$site_root/$path"
 done
+
+docs_meta="$repo_root/docs/site/src/content/docs/docs/meta.json"
+require_file "$docs_meta"
+docs_pages=$(
+	"$NODE_BIN" -e '
+const fs = require("node:fs");
+const meta = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+for (const page of meta.pages) {
+  if (page.startsWith("---")) continue;
+  console.log(page === "index" ? "docs/index.html" : `docs/${page}/index.html`);
+}
+' "$docs_meta"
+)
+while IFS= read -r path; do
+	require_file "$site_root/$path"
+done <<EOF
+$docs_pages
+EOF
 
 require_text "$site_root/index.html" 'Every value is explicit'
 require_text "$site_root/index.html" 'Mozilla Public License 2.0'

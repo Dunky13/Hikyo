@@ -1,0 +1,63 @@
+---
+title: Upgrades
+description: Upgrade a Hikyo instance with an encrypted rollback artifact and explicit schema control.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/upgrades.mdx
+---
+
+Hikyo migrations move forward only. A downgrade means restoring a pre-upgrade
+archive with a compatible binary, not running a down migration.
+
+## Before the change
+
+1. Read the release notes and support status.
+2. Record the running binary version and datastore engine.
+3. Confirm the root key and backup identity are available through separate paths.
+4. Run `hikyo backup export` and copy the archive off-host.
+5. Verify recent restore-drill evidence.
+
+Do not begin when you can create an archive but cannot prove which root key will
+boot it.
+
+## Automatic migration
+
+`hikyo server` applies pending migrations by default. When backup recipients and
+a destination are configured, it exports the old schema before changing it.
+
+A configured export failure stops startup. An unconfigured policy records a loud
+skip and continues, leaving no rollback archive.
+
+## Controlled migration
+
+For a maintenance window:
+
+1. Stop the server.
+2. Take and retain a manual export.
+3. Install the new reviewed binary.
+4. Run `hikyo migrate` with the production `HIKYO_DB`.
+5. Start `hikyo server --auto-migrate=false` and check both probes.
+
+With automatic migration disabled, the server refuses to serve when a migration
+is pending or the database schema is newer than the binary.
+
+## Verify the upgrade
+
+```bash
+curl --fail http://127.0.0.1:8080/healthz
+curl --fail http://127.0.0.1:8080/readyz
+hikyo doctor --instance hikyo.example.com
+hikyo whoami --instance hikyo.example.com
+```
+
+Also verify one authorized metadata read and one representative workload. A
+health response alone does not prove authentication, authorization, or delivery.
+
+## Roll back
+
+Stop the failed instance. Restore the pre-upgrade archive into an empty target
+with a binary that supports its schema, then follow the full reconciliation
+procedure.
+
+Restoring invalidates all old authenticators. Include human recovery and machine
+credential redistribution in the rollback time estimate.
+
+See [backup and restore](/hikyo/docs/backup-and-restore/) for the complete flow.

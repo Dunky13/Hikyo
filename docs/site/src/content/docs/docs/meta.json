@@ -1,4 +1,29 @@
 {
   "title": "Documentation",
-  "pages": ["index", "getting-started", "core-concepts", "self-hosting"]
+  "pages": [
+    "index",
+    "getting-started",
+    "---Understand Hikyo---",
+    "core-concepts",
+    "architecture",
+    "hierarchy",
+    "values-and-secrets",
+    "identity-and-access",
+    "---Use Hikyo---",
+    "contexts",
+    "values-workflows",
+    "machine-identities",
+    "account-security",
+    "saml",
+    "scim",
+    "---Operate Hikyo---",
+    "self-hosting",
+    "configuration",
+    "backup-and-restore",
+    "upgrades",
+    "troubleshooting",
+    "---Reference---",
+    "cli-reference",
+    "http-api"
+  ]
 }

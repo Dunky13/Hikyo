@@ -7,6 +7,14 @@ editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/d
 Hikyo is designed around a small set of rules that stay visible in the API,
 browser UI, CLI, audit trail, and storage model.
 
+## The short version
+
+1. Scope every value to one organisation, project, and environment.
+2. Declare a key before writing its value.
+3. Treat `absent` as real state, not a missing default.
+4. Reveal secret plaintext only through an explicit disclosure action.
+5. Grant narrow capabilities to a principal at a named scope.
+
 ## Values do not inherit
 
 A key declaration defines what a value means. Each environment then records its
@@ -39,3 +47,10 @@ resources that do not exist.
 Security-sensitive events record the actor, object, outcome, and decision
 context without recording secret material. Local-host recovery actions remain
 distinguishable from ordinary network-authorized changes.
+
+## Go deeper
+
+- [Architecture](/hikyo/docs/architecture/) explains the process and trust boundaries.
+- [Hierarchy](/hikyo/docs/hierarchy/) explains organisations, projects, and environments.
+- [Values and secrets](/hikyo/docs/values-and-secrets/) explains declarations and disclosure.
+- [Identity and access](/hikyo/docs/identity-and-access/) explains principals and capabilities.

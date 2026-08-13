@@ -8,6 +8,9 @@ Production startup is fail-closed. Hikyo refuses to serve without an explicit
 datastore and root-key source, and a non-loopback plaintext listener requires an
 explicit trusted-proxy boundary.
 
+This page is the production checklist. Use the linked pages for the full
+configuration and recovery procedures.
+
 ## Required decisions
 
 | Boundary | Configure | Rule |
@@ -17,6 +20,21 @@ explicit trusted-proxy boundary.
 | Public origin | `HIKYO_EXTERNAL_ORIGIN` | Set the canonical HTTPS origin seen by browsers. |
 | Network | reverse proxy and `HIKYO_TRUSTED_PROXY_CIDRS` | Terminate TLS before exposing a non-loopback listener. |
 | Backups | `HIKYO_BACKUP_RECIPIENTS` and `HIKYO_BACKUP_DIR` | Configure recipients and destination together. |
+
+## Build the production binary
+
+Until Hikyo publishes a stable release, build from a reviewed commit:
+
+```bash
+corepack enable
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web build
+go build -trimpath -tags ui -o ./hikyo ./cmd/hikyo
+./hikyo version
+```
+
+Record the commit beside the deployed binary. Do not describe an unversioned
+development build as a supported release.
 
 ## SQLite baseline
 
@@ -35,6 +53,16 @@ HIKYO_TRUSTED_PROXY_CIDRS=127.0.0.1/32 \
 Terminate TLS at the reverse proxy and forward only from the CIDRs you list.
 Do not expose Hikyo's plaintext listener directly.
 
+Check both probes through the private listener:
+
+```bash
+curl --fail http://127.0.0.1:8080/healthz
+curl --fail http://127.0.0.1:8080/readyz
+```
+
+Then check the public HTTPS origin from outside the host. A local probe does
+not prove DNS, TLS, or reverse-proxy routing.
+
 <Callout type="warn" title="Back up two independent things">
   A database backup without the root key cannot decrypt Hikyo data. A root key
   without the database cannot reconstruct it. Store and test them through
@@ -47,6 +75,19 @@ Remote PostgreSQL DSNs must name the host explicitly and use `sslmode=verify-ful
 or `sslmode=verify-ca`. Plaintext connections to a non-loopback database host
 are refused.
 
+Use a dedicated database and role. Back up the Hikyo archive through
+`hikyo backup export`; a generic PostgreSQL dump does not replace Hikyo's
+encrypted export and restore reconciliation workflow.
+
+## Root-key custody
+
+The root key is exactly 32 random bytes encoded as 64 hexadecimal characters.
+Hikyo refuses a file readable by group or other.
+
+Prefer a service-manager credential mounted for the process. A fixed protected
+file is the next tier. `HIKYO_ROOT_KEY` is the weakest tier because the value
+remains in the process environment.
+
 ## Before real secret material
 
 1. Put Hikyo behind HTTPS and keep its listener private.
@@ -54,3 +95,6 @@ are refused.
 3. Configure encrypted backups and perform a restore test.
 4. Create the first administrator on the server host.
 5. Review the [security](/hikyo/security/) and [support](/hikyo/support/) policies.
+
+Continue with [server configuration](/hikyo/docs/configuration/) and
+[backup and restore](/hikyo/docs/backup-and-restore/).

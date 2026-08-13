@@ -1,0 +1,67 @@
+---
+title: Architecture
+description: Understand Hikyo's process, storage, API, and trust boundaries.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/architecture.mdx
+---
+
+Hikyo ships as one Go binary. The same binary serves the web app and API, runs
+migrations, performs host-only recovery, and provides the client CLI.
+
+## Runtime shape
+
+```text
+browser or CLI
+      | HTTPS
+      v
+reverse proxy
+      | private HTTP
+      v
+hikyo server --- datastore
+      |
+      `--- encrypted backup archive
+```
+
+Only the server and local admin role unwrap the data-encryption key. The
+browser, network CLI, reverse proxy, datastore, backup exporter, and restore
+command never receive the operator root key.
+
+## One binary, four roles
+
+| Role | Commands | Boundary |
+| --- | --- | --- |
+| Server | `hikyo server` | Serves UI, API, health, and readiness. |
+| Migration | `hikyo migrate` | Applies datastore schema changes. |
+| Host operator | `hikyo admin`, `backup`, `restore` | Runs only beside the datastore. |
+| Network client | login, hierarchy, values, access, identities | Uses the versioned HTTP API. |
+
+Host-operator commands do not have network routes. Host access is the authority
+for bootstrap and recovery, so these commands must run on the server host.
+
+## HTTP surfaces
+
+- `/healthz` proves the process can answer.
+- `/readyz` checks whether the datastore is usable.
+- `/api/v1/*` is validated against the OpenAPI contract.
+- All other browser routes belong to the embedded single-page app.
+
+Health probes are unauthenticated and reveal no tenant data. API handlers use
+one error shape and keep unauthorized resources indistinguishable from missing
+resources.
+
+## Storage and encryption
+
+Hikyo supports SQLite and PostgreSQL. Sensitive values are envelope-encrypted
+before storage. The datastore carries wrapped key material, but not the root
+key needed to unwrap it.
+
+An encrypted backup contains the datastore and wrapped hierarchy. Reading its
+values requires both the backup identity and the separate Hikyo root key.
+
+## Startup sequence
+
+Production startup hardens the process, checks or applies migrations, loads the
+keyring, configures authentication, and only then opens the listener. Any failed
+boundary check prevents the server from serving.
+
+Next: [model resources in the hierarchy](/hikyo/docs/hierarchy/) or
+[prepare a production instance](/hikyo/docs/self-hosting/).
