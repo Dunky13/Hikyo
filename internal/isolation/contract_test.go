@@ -244,13 +244,25 @@ func TestTenantRoutesDeclareForbiddenOnlyForMFA(t *testing.T) {
 			t.Fatalf("%s: no operation at %s %s", id, op.Method, op.Path)
 		}
 		declared := operation.Responses.Status(http.StatusForbidden) != nil
-		wanted := authz.FormulaDemandsMFA(authz.Operation(op.AuthzOp))
+		// A tenant-class route may declare 403 for exactly the refusals the
+		// chokepoint raises AFTER the grant check, where the object's existence
+		// is no longer a secret from this caller because they hold the grant on
+		// it. There are two, and they are the same shape:
+		//
+		//   - the MFA-mandatory assurance floor (#54);
+		//   - the human-only artifact class (#68's `import`/`values import`,
+		//     joining the api-cli-surface ADR's human-only verb list).
+		//
+		// Every other refusal on a tenant route is the uniform 404, so a 403
+		// declared beside one is either unreachable or a leak.
+		wanted := authz.FormulaDemandsMFA(authz.Operation(op.AuthzOp)) ||
+			authz.HumanOnly(authz.Operation(op.AuthzOp))
 		switch {
 		case wanted && !declared:
-			t.Errorf("%s is tenant-class with an MFA-mandatory formula (%v) but declares no 403 — the assurance refusal it can return is undeclared",
+			t.Errorf("%s is tenant-class with a post-grant refusal (MFA-mandatory or human-only; formula %v) but declares no 403 — the refusal it can return is undeclared",
 				id, op.Formula)
 		case !wanted && declared:
-			t.Errorf("%s (formula %v) is tenant-class and not MFA-mandatory but declares a 403 — grant refusal there is the uniform 404, so the status is unreachable or a leak",
+			t.Errorf("%s (formula %v) is tenant-class with no post-grant refusal but declares a 403 — grant refusal there is the uniform 404, so the status is unreachable or a leak",
 				id, op.Formula)
 		}
 	}

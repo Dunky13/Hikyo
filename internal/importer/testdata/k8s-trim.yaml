@@ -1,0 +1,5 @@
+kind: Secret
+metadata:
+  name: trim
+data:
+  CERT: LS0tLUJFR0lOLS0tLQo=

@@ -1,0 +1,6 @@
+kind: Secret
+metadata:
+  name: coll
+data:
+  db-host: eA==
+  db.host: eQ==

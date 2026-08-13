@@ -1,0 +1,4 @@
+kind: Secret
+metadata:
+  name: hostile
+data: sk_live_51LEAKMEPLEASE_this_must_never_reach_stderr

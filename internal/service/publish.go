@@ -322,8 +322,8 @@ func recordPublish(ctx context.Context, r store.Repos, p authz.Proof, principal 
 // with no drafts applied.
 //
 // Every path that writes published cells outside the draft pipeline ends here
-// -- declare-into-environments, copy / bulk-apply, clone-at-creation, an
-// environment's own creation, and a semantic schema change's fan-out. That is
+// -- declare-into-environments, import, copy / bulk-apply, clone-at-creation,
+// an environment's own creation, and a semantic schema change's fan-out. That is
 // what makes "delivery reads only committed, valid snapshots" true of all of
 // them rather than of the publish verb alone, and it is why validation and
 // lineage have exactly one implementation.
@@ -597,8 +597,8 @@ func currentRevision(ctx context.Context, r store.Repos, p authz.Proof) (int64, 
 // state, validates it at the current schema revision, writes the published
 // cells, and allocates the immutable snapshot and revision that delivery reads.
 //
-// Every path that advances an environment goes through it -- a value publish, a
-// semantic schema publish's fan-out, and an environment's own creation -- so
+// Every path that advances an environment goes through it -- a value publish,
+// import, a semantic schema publish's fan-out, and an environment's own creation -- so
 // there is exactly one implementation of "what does this environment deliver,
 // and is that legal".
 func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,

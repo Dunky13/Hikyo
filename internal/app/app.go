@@ -28,7 +28,7 @@ import (
 // ClientVerbs are the fixed not-yet-implemented client-side subcommands from
 // the system-architecture component set. Implemented verbs move to cli.Verbs;
 // both lists are enumerated by the classification-totality invariant.
-var ClientVerbs = []string{"run", "render", "sync", "adopt", "definitions", "import"}
+var ClientVerbs = []string{"run", "render", "sync", "adopt", "definitions"}
 
 // Version is the build's version string, set from main's linker-stamped
 // value. It is what /api/v1/meta advertises, so a client that refuses an
