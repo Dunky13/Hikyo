@@ -480,5 +480,7 @@ remaining inside its issuer expiry and complete one final delivery.
 in-transaction clock before its explicit expiry check. The cross-engine
 `FederationTokenAgeCannotExpireMidFlight` fixture advances the shared clock in
 `OnValidated`, proving a token that crosses only `MaxTokenAge` receives the
-uniform unauthenticated refusal. The other PR #109 threads remain fixed,
-contractually rebutted, or tracked by #113 as recorded above.
+uniform unauthenticated refusal. Its audit event retains the caller-invariant
+`token-age` cause rather than collapsing it into the decoy-backed `unbound`
+bucket. The other PR #109 threads remain fixed, contractually rebutted, or
+tracked by #113 as recorded above.

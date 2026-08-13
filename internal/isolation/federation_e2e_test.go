@@ -1431,6 +1431,14 @@ func runFederationTokenAgeCannotExpireMidFlight(t *testing.T, db *store.DB) {
 	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token crossing the age cap during validation = %v, want the uniform refusal", err)
 	}
+	if n := queryInt(t, db,
+		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%token-age%'"); n != 1 {
+		t.Fatalf("mid-flight age-cap refusal audit count = %d, want 1 token-age event", n)
+	}
+	if n := queryInt(t, db,
+		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%unbound%'"); n != 0 {
+		t.Fatalf("mid-flight age-cap refusal was misclassified as unbound %d time(s)", n)
+	}
 }
 
 func TestFederationIssuerDeleteGuardSQLite(t *testing.T) {
