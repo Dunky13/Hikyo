@@ -126,7 +126,7 @@ func runSCIMCredentialRejected(t *testing.T, db *store.DB) {
 	if !isUnauth(err) {
 		t.Fatalf("a provisioning credential must not authenticate the membership surface, got %v", err)
 	}
-	orgs, _, _ := services(db)
+	orgs, _, _ := services(t, db)
 	if _, err := orgs.List(ctx, service.Bearer(token)); !isUnauth(err) {
 		t.Fatalf("a provisioning credential must not authenticate an instance operation, got %v", err)
 	}

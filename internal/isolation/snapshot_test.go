@@ -51,7 +51,7 @@ func runReadSnapshotStability(t *testing.T, db *store.DB) {
 	// The next transaction sees it: the snapshot is per-transaction, not a
 	// cache. Granting and revoking both take effect on the next operation,
 	// which is what "no authorization cache" means.
-	_, _, envs := services(db)
+	_, _, envs := services(t, db)
 	if _, err := envs.Get(t.Context(), service.LocalPrincipal(late), scope); err != nil {
 		t.Fatalf("the grant must take effect in the next transaction: %v", err)
 	}

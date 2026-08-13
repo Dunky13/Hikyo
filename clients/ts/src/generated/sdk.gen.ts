@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, ExportValuesData, ExportValuesErrors, ExportValuesResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetEnvironmentSignalsData, GetEnvironmentSignalsErrors, GetEnvironmentSignalsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetRevisionData, GetRevisionErrors, GetRevisionResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListRevisionsData, ListRevisionsErrors, ListRevisionsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PublishPendingChangesData, PublishPendingChangesErrors, PublishPendingChangesResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, RotateTokenKeyData, RotateTokenKeyErrors, RotateTokenKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WatchProjectEventsData, WatchProjectEventsErrors, WatchProjectEventsResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -1133,12 +1133,15 @@ export const listValues = <ThrowOnError extends boolean = false>(options: Option
 });
 
 /**
- * Clear a value to `absent`.
+ * Stage a clear to `absent`.
  *
- * With nothing to inherit from, this is the whole of "remove this value
- * now": there is no layer underneath for it to fall back to. A key
- * `required_in` this environment refuses to be cleared, naming key and
- * environment.
+ * Stages the `set` to `absent` transition; it does not publish. With
+ * nothing to inherit from, this is the whole of "remove this value now":
+ * there is no layer underneath for it to fall back to.
+ *
+ * A key `required_in` this environment may be staged for clearing and
+ * the publish that would commit it is what refuses, naming key and
+ * environment. Saving is free; publish is the authority.
  *
  */
 export const clearValue = <ThrowOnError extends boolean = false>(options: Options<ClearValueData, ThrowOnError>) => (options.client ?? client).delete<ClearValueResponses, ClearValueErrors, ThrowOnError>({
@@ -1157,17 +1160,25 @@ export const getValue = <ThrowOnError extends boolean = false>(options: Options<
 });
 
 /**
- * Set one value.
+ * Stage one value edit.
  *
- * The caller SUPPLIES the plaintext, so no reveal is involved on any
- * side: the formula is `edit` AND `publish` on the environment that is
- * about to deliver it. The value is validated against the key's
- * declaration before it commits, because in this slice what commits is
- * what the environment delivers.
+ * This STAGES; it does not publish. The edit lands in the caller's own
+ * working state as a pending change with an immutable version id, and the
+ * environment keeps delivering what it delivered until a publish names
+ * that id.
  *
- * A key that is `forbidden_in` this environment refuses the write, by
- * name. A key that is not declared refuses too - typing a name that does
- * not exist is a key CREATION, an explicit act elsewhere.
+ * The formula is `edit` ALONE: `edit` confers no delivery power and a
+ * draft is never a disclosure, so staging must not require `publish`.
+ * Edit-without-publish is the propose-and-review flow.
+ *
+ * SAVING IS FREE. The value is not validated here, and a key that is
+ * `forbidden_in` this environment may still be staged: a draft is the
+ * user's scratchpad, and blocking a save pushes work in progress into
+ * external notepads, which for secrets is exactly where it must not go.
+ * Every one of those refusals fires at publish instead, by name.
+ *
+ * A key that is not declared still refuses - typing a name that does not
+ * exist is a key CREATION, an explicit act elsewhere.
  *
  */
 export const setValue = <ThrowOnError extends boolean = false>(options: Options<SetValueData, ThrowOnError>) => (options.client ?? client).put<SetValueResponses, SetValueErrors, ThrowOnError>({
@@ -2651,5 +2662,186 @@ export const scimSearchUsers = <ThrowOnError extends boolean = false>(options: O
 export const scimSearchGroups = <ThrowOnError extends boolean = false>(options: Options<ScimSearchGroupsData, ThrowOnError>) => (options.client ?? client).post<unknown, ScimSearchGroupsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search',
+    ...options
+});
+
+/**
+ * Publish a selection of your own pending changes.
+ *
+ * SELECTIVE. The body names version ids, and only those - plus whatever
+ * key-group closure pulls in - are committed. Every other pending change,
+ * the caller's own unselected ones and every other principal's, is
+ * invisible to the computation, so the materialized snapshot always
+ * corresponds to a state the publisher previewed.
+ *
+ * A publish carries ONLY the caller's own pending changes. There is no
+ * cross-user hand-off of staged work: a key group whose members carry a
+ * pending change owned by another principal is refused, loud, naming the
+ * group and the key, never silently split.
+ *
+ * The whole operation is one serializable transaction holding the
+ * per-project lock. A version whose published cell has moved since it was
+ * staged is refused loud rather than rebased, and a `required_in` key
+ * left absent vetoes the publish naming key and environment.
+ *
+ * Publishing a version whose environment differs from the addressed one
+ * is permitted and each such environment is authorized for `publish`
+ * separately, immediately before commit.
+ *
+ */
+export const publishPendingChanges = <ThrowOnError extends boolean = false>(options: Options<PublishPendingChangesData, ThrowOnError>) => (options.client ?? client).post<PublishPendingChangesResponses, PublishPendingChangesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The matrix signals for one environment.
+ *
+ * The two "changed" signals the matrix renders, plus the environment's
+ * current revision. `pending_version_id` is the caller's OWN live draft
+ * for the cell - the id a selective publish names; `pending_by_others`
+ * is the quieter collision marker and carries no id, no owner and no
+ * operation, because another principal's draft is write-presence and
+ * nothing more.
+ *
+ * Both signals degrade to write-presence for `secret` keys: they report
+ * that someone WROTE here, never that the plaintext differs from the
+ * published one. A comparison status is itself an oracle.
+ *
+ * This is also the advisory stream's documented POLLING FALLBACK: the
+ * same facts, pulled under the caller's own authorization.
+ *
+ */
+export const getEnvironmentSignals = <ThrowOnError extends boolean = false>(options: Options<GetEnvironmentSignalsData, ThrowOnError>) => (options.client ?? client).get<GetEnvironmentSignalsResponses, GetEnvironmentSignalsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals',
+    ...options
+});
+
+/**
+ * One environment's revision history, newest first.
+ *
+ * LINEAGE ONLY: revision numbers, publishers, timestamps, the pinned
+ * schema revision, and which keys changed. It never contains a value in
+ * any form - not a plaintext, not a length, not a digest, not a
+ * changed-from marker. That is what lets lineage be retained forever
+ * while payloads are collected by retention policy.
+ *
+ */
+export const listRevisions = <ThrowOnError extends boolean = false>(options: Options<ListRevisionsData, ThrowOnError>) => (options.client ?? client).get<ListRevisionsResponses, ListRevisionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions',
+    ...options
+});
+
+/**
+ * One revision, with its change token.
+ *
+ * The change token is DERIVED here from the current root token key over
+ * the snapshot's delivery manifest; it is never stored. That is what
+ * makes `rotate-token-key` move every token while content, revision
+ * numbers and pinned input revisions stay exactly where they are.
+ *
+ * The token is non-secret metadata by construction - keyed, so
+ * unforgeable and un-invertible without the key, which is why it may flow
+ * into pod annotations and logs. The key set it accompanies carries names
+ * and classifications and no values.
+ *
+ */
+export const getRevision = <ThrowOnError extends boolean = false>(options: Options<GetRevisionData, ThrowOnError>) => (options.client ?? client).get<GetRevisionResponses, GetRevisionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}',
+    ...options
+});
+
+/**
+ * Export one environment's resolved snapshot.
+ *
+ * The one BULK-DISCLOSURE verb, and what "fetch resolved" actually is. It
+ * reads a committed snapshot, never live values.
+ *
+ * The formulas are stated separately because the capabilities imply
+ * nothing about each other: current material is `read` AND `reveal`;
+ * historical material - any revision that is not the latest - is `read`
+ * AND `reveal-history`. Without `reveal`, `config` values are returned in
+ * plaintext (classification IS the sensitivity boundary) and `secret`
+ * keys report write-presence with no value.
+ *
+ * It is a POST because disclosure is an ACT: one audit event is written
+ * per disclosed key, durably, before any plaintext leaves the server.
+ *
+ */
+export const exportValues = <ThrowOnError extends boolean = false>(options: Options<ExportValuesData, ThrowOnError>) => (options.client ?? client).post<ExportValuesResponses, ExportValuesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The advisory live-update stream (SSE).
+ *
+ * Server-sent events, metadata only. An event says that something
+ * changed - an environment advanced (`revision.published`), a principal
+ * staged a draft (`pending.staged`), a published cell moved
+ * (`cell.changed`) - and never what it changed to. It carries no value
+ * in any form and NO CHANGE TOKEN.
+ *
+ * `cell.changed` claims exactly what the publish knew: that cell
+ * advanced. A subscriber holding a draft on the named cell derives "my
+ * draft is stale" from its own draft plus this event; the server never
+ * asserts staleness it did not check.
+ *
+ * Every event is authorized against the environment it names, at emit
+ * time, so a grant revoked mid-session takes effect on the NEXT event
+ * rather than at the next reconnect. Events referencing objects the
+ * recipient may not see are dropped, and an event reduced to nothing is
+ * not sent.
+ *
+ * ADVISORY ONLY: correctness never depends on delivery. `Last-Event-ID`
+ * replays nothing; a reconnecting client refetches current state from the
+ * signals endpoint, which is the documented polling fallback. A client
+ * that cannot keep up is disconnected rather than buffered. Connection
+ * admission is bounded per principal, per organization, and instance-wide;
+ * a refusal is 429. Accepted streams begin with a jittered `retry:` hint.
+ *
+ */
+export const watchProjectEvents = <ThrowOnError extends boolean = false>(options: Options<WatchProjectEventsData, ThrowOnError>) => (options.client ?? client).sse.get<WatchProjectEventsResponses, WatchProjectEventsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/events',
+    ...options
+});
+
+/**
+ * Rotate the root change-token key.
+ *
+ * Mints a new root token key, retires the old one, and derives every
+ * subsequent change token under it.
+ *
+ * WHAT IT DOES NOT TOUCH: no snapshot's content, no revision number, and
+ * no pinned input revision moves. It cannot - a change token is never
+ * stored, it is derived at read from the live key over the snapshot's
+ * delivery manifest, so there is no cache to invalidate and nothing to
+ * resume after a crash.
+ *
+ * Every outstanding delivery cursor mismatches once and every consumer
+ * performs one full fetch. This is NOT a restart wave.
+ *
+ * It rides `rotate-dek`: the capability set is closed and names four
+ * rotation atoms for five rotation verbs, and the root token key is a
+ * tier-3 key alongside the DEKs.
+ *
+ */
+export const rotateTokenKey = <ThrowOnError extends boolean = false>(options?: Options<RotateTokenKeyData, ThrowOnError>) => (options?.client ?? client).post<RotateTokenKeyResponses, RotateTokenKeyErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/rotate-token-key',
     ...options
 });

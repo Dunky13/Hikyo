@@ -595,6 +595,8 @@ type Environments struct {
 	// its source side takes the same enumerated-key ceremony a cell reveal
 	// does. Nil refuses a clone that would open secrets, loudly.
 	Auth *Auth
+	// Advisory announces the new environment's revision 1, after commit.
+	Advisory *Advisory
 }
 
 // Environment methods address scope as a domain.Scope — the same shape
@@ -641,18 +643,20 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 	// adapter runs transactions of its own, and sqlite serves writes on a
 	// single connection, so resolving it inside would wait on the connection
 	// this transaction holds. A plain create needs none.
-	var sealer *crypto.ProjectSealer
-	if sourceEnvID != "" {
-		// After authorization, never before: resolving a sealer MINTS the
-		// project data key on first use, and an unauthorized caller must not
-		// leave a wrapped-key row behind (see service.sealerFor).
-		sealer, err = sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpEnvCreate, scope)
-		if err != nil {
-			return Environment{}, CloneResult{}, err
-		}
+	//
+	// After authorization, never before: resolving a sealer MINTS the project
+	// data key on first use, and an unauthorized caller must not leave a
+	// wrapped-key row behind (see service.sealerFor). Every create needs one
+	// now, clone or not: an environment is VALIDATED AND MATERIALIZED against
+	// the current schema revision before it becomes fetchable, and a
+	// materialization seals what it publishes.
+	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpEnvCreate, scope)
+	if err != nil {
+		return Environment{}, CloneResult{}, err
 	}
 	var created store.NewEnvironment
 	var clone CloneResult
+	var published PublishedEnvironment
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		clone = CloneResult{}
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
@@ -705,19 +709,31 @@ func (s *Environments) create(ctx context.Context, actor Actor, scope domain.Sco
 		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 			return err
 		}
-		if sourceEnvID == "" {
-			return nil
+		if sourceEnvID != "" {
+			// The row exists now, so the destination half of the copy formula
+			// can be evaluated against the environment being created — which
+			// is what the ADR requires it to be evaluated against.
+			clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID,
+				ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
+			if err != nil {
+				return err
+			}
 		}
-		// The row exists now, so the destination half of the copy formula can
-		// be evaluated against the environment being created — which is what
-		// the ADR requires it to be evaluated against.
-		clone, err = cloneInto(ctx, r, az, caller, sealer, scope, sourceEnvID, created.ID,
-			ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, sourceEnvID))
+		// MATERIALIZE REVISION 1 before the environment becomes fetchable
+		// (schema ADR § Presence): an environment is never deliverable in a
+		// state no schema check has seen, and delivery reads only committed
+		// snapshots. A `mode: all` required key with nothing to satisfy it
+		// therefore refuses the creation here rather than producing an
+		// environment born invalid.
+		newScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(created.ID)}
+		published, err = republish(ctx, r, az, caller, sealer, s.Keyring, newScope,
+			store.CanonTime(time.Now()), "environment-create")
 		return err
 	})
 	if err != nil {
 		return Environment{}, CloneResult{}, err
 	}
+	s.Advisory.published(scope, []PublishedEnvironment{published})
 	return Environment{
 		ID: created.ID, OrgID: string(scope.Org), ProjectID: string(scope.Project),
 		Name: created.Name, Note: created.Note,
@@ -934,6 +950,17 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 		// hand — makes an environment undeletable in proportion to how much it
 		// was used.
 		if err := r.Values().ClearEnvironment(ctx, p); err != nil {
+			return err
+		}
+		// The drafts and the published history go with it too, for the same
+		// composite-foreign-key reason. History is never rewritten, but an
+		// environment's lineage is not history once the environment is gone:
+		// there is nothing left for it to explain, and the row it hangs off no
+		// longer exists.
+		if err := r.Pending().DiscardEnvironment(ctx, p); err != nil {
+			return err
+		}
+		if err := r.Snapshots().DeleteEnvironment(ctx, p); err != nil {
 			return err
 		}
 		if err := r.Environments().Delete(ctx, p); err != nil {
