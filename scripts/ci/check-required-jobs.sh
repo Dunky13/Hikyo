@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+if [ "$#" -eq 1 ] && [ "$1" = "--supports-plan-v1" ]; then
+	exit 0
+fi
+
 if [ "$#" -ne 3 ]; then
 	printf 'usage: %s EVENT NEEDS_JSON PLAN_JSON\n' "$0" >&2
 	exit 2

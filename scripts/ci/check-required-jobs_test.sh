@@ -4,6 +4,11 @@ set -eu
 script_dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 checker="$script_dir/check-required-jobs.sh"
 
+if ! "$checker" --supports-plan-v1; then
+	printf 'required-jobs fixture failed: plan-v1 capability was not reported\n' >&2
+	exit 1
+fi
+
 expect_accept() {
 	label=$1
 	event=$2

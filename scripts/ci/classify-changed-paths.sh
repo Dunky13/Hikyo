@@ -56,6 +56,16 @@ else
 			release_snapshot=true
 			supply_chain_checks=true
 			;;
+		LICENSE)
+			docs=true
+			release_snapshot=true
+			;;
+		release/repository/main-ci-gate.json)
+			docs=true
+			lint=true
+			release_snapshot=true
+			supply_chain_checks=true
+			;;
 		scripts/ci/verify-docs.sh | scripts/ci/check-docs-live*.sh | scripts/ci/check-fallback-channel-test*.sh | scripts/ci/check-oss-policy*.sh)
 			docs=true
 			lint=true
@@ -66,7 +76,7 @@ else
 			release_snapshot=true
 			supply_chain_checks=true
 			;;
-		docs/* | README.md | CONTRIBUTING.md | GOVERNANCE.md | LICENSE | SECURITY.md | SUPPORT.md | TRADEMARK.md)
+		docs/* | README.md | CONTRIBUTING.md | GOVERNANCE.md | SECURITY.md | SUPPORT.md | TRADEMARK.md)
 			docs=true
 			;;
 		web/*)

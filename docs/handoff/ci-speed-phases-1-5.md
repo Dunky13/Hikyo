@@ -7,7 +7,11 @@ path, preventing obsolete pull-request runs from consuming runners, and
 skipping validation domains that a pull request cannot affect.
 
 - `changes` emits a tested JSON plan from the pull request's merge-base diff.
-  Unknown paths and changes to the classifier or CI workflow select every job.
+  Pull requests execute the classifier and aggregate checker from the base
+  revision, so head changes cannot redefine their own validation plan. Unknown
+  paths and changes to the classifier, checker, or CI workflow select every job.
+- While the classifier is first introduced, a base revision without it selects
+  every job and the trusted legacy aggregate checker requires every job to pass.
 - Dependency manifests and build/tool configuration select every job because
   their effects can cross validation-domain boundaries.
 - Pull requests run the complete suite inside each selected domain. They do not

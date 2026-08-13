@@ -96,6 +96,32 @@ if ! printf '%s\n' "$release_actual" | jq -e '
 	exit 1
 fi
 
+license_actual=$(printf '%s\n' 'LICENSE' | "$classifier" --files)
+if ! printf '%s\n' "$license_actual" | jq -e '
+	.docs == true and
+	.release_snapshot == true and
+	([.client, .generated, .headline_guarantee, .lint, .supply_chain_checks, .test, .web] |
+		all(. == false))
+' >/dev/null; then
+	printf 'changed-path classifier fixture failed: LICENSE plan was wrong\n' >&2
+	printf 'actual: %s\n' "$license_actual" >&2
+	exit 1
+fi
+
+main_gate_actual=$(printf '%s\n' 'release/repository/main-ci-gate.json' |
+	"$classifier" --files)
+if ! printf '%s\n' "$main_gate_actual" | jq -e '
+	.docs == true and
+	.lint == true and
+	.release_snapshot == true and
+	.supply_chain_checks == true and
+	([.client, .generated, .headline_guarantee, .test, .web] | all(. == false))
+' >/dev/null; then
+	printf 'changed-path classifier fixture failed: main CI gate plan was wrong\n' >&2
+	printf 'actual: %s\n' "$main_gate_actual" >&2
+	exit 1
+fi
+
 docs_workflow_actual=$(printf '%s\n' '.github/workflows/docs.yml' | "$classifier" --files)
 if ! printf '%s\n' "$docs_workflow_actual" | jq -e '
 	.docs == true and
@@ -183,7 +209,12 @@ if ! printf '%s\n' "$mixed_actual" | jq -e '
 	exit 1
 fi
 
-for fail_closed_input in '' 'future/product/file.new' '.github/workflows/ci.yml'; do
+for fail_closed_input in \
+	'' \
+	'future/product/file.new' \
+	'.github/workflows/ci.yml' \
+	'scripts/ci/classify-changed-paths.sh' \
+	'scripts/ci/check-required-jobs.sh'; do
 	fail_closed_actual=$(printf '%s\n' "$fail_closed_input" | "$classifier" --files)
 	if ! printf '%s\n' "$fail_closed_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
 		printf 'changed-path classifier fixture failed: %s did not fail closed\n' \
