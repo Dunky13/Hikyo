@@ -1402,6 +1402,37 @@ func TestFederationTokenCapsSQLite(t *testing.T) {
 	}
 }
 
+func TestFederationTokenAgeCannotExpireMidFlightSQLite(t *testing.T) {
+	runFederationTokenAgeCannotExpireMidFlight(t, seededDB(t, openSQLite))
+}
+
+func TestFederationTokenAgeCannotExpireMidFlightPostgres(t *testing.T) {
+	runFederationTokenAgeCannotExpireMidFlight(t, seededDB(t, openPostgres))
+}
+
+// runFederationTokenAgeCannotExpireMidFlight proves the authoritative,
+// in-transaction binding check revalidates Hikyo's own age cap. Signature-time
+// validation happens before OnValidated; advancing the clock there models a
+// slow delivery preflight without sleeping.
+func runFederationTokenAgeCannotExpireMidFlight(t *testing.T, db *store.DB) {
+	r := newFedRig(t, db)
+	shape := oidctest.KubernetesShape("prod", "age-racer", "uid-age-racer", "https://kubernetes.default.svc")
+	r.configureIssuer(t, domain.IssuerKubernetes, []string{shape.DefaultAudience})
+	r.bindShape(t, "wl-age-race", shape, hikyoAudience)
+
+	token, err := r.idp.MintShape(shape, hikyoAudience, r.clk.Now(), oidcfed.MaxTokenSpan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.fed.OnValidated = func() {
+		r.clk.advance(oidcfed.MaxTokenAge + time.Second)
+		r.fed.OnValidated = nil
+	}
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("token crossing the age cap during validation = %v, want the uniform refusal", err)
+	}
+}
+
 func TestFederationIssuerDeleteGuardSQLite(t *testing.T) {
 	runIssuerDeleteGuard(t, seededDB(t, openSQLite))
 }

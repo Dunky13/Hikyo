@@ -504,16 +504,14 @@ func checkTiming(c Claims, now time.Time) error {
 // to contain; the restore predicate last, because it is the only check that can
 // pass for a token that is in every other way correct.
 func CheckBinding(iss Issuer, b Binding, c Claims, now time.Time) error {
-	// EXPIRY IS RE-CHECKED HERE, against the caller's clock -- which the
-	// chokepoint reads inside the authorizing transaction. Signature-time
-	// validation (checkTiming, via go-oidc) proved the token was live when it
-	// was PRESENTED; the sealer preflight between presentation and this
-	// predicate can take real time, and a token whose `exp` passes during it
-	// must be refused by the authentication the delivery actually rides. The
-	// skew allowance is the same one checkTiming grants, so the two clocks
-	// disagree about nothing but the instant they were read.
-	if c.Expiry.IsZero() {
-		return fmt.Errorf("%w: token carries no exp", ErrTokenInvalid)
+	// ALL TIME-BASED PREDICATES ARE RE-CHECKED HERE, against the caller's clock
+	// -- which the chokepoint reads inside the authorizing transaction.
+	// Signature-time validation proved the token was live when it was PRESENTED;
+	// the sealer preflight between presentation and this predicate can take real
+	// time, and a token whose `exp`, `nbf`, or Hikyo-owned age cap passes during
+	// it must be refused by the authentication the delivery actually rides.
+	if err := checkTiming(c, now); err != nil {
+		return err
 	}
 	if now.After(c.Expiry.Add(MaxClockSkew)) {
 		return fmt.Errorf("%w: token expired during validation", ErrTokenInvalid)
