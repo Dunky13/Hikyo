@@ -1,0 +1,95 @@
+---
+title: Build from source
+description: Build and install Hikyo from a reviewed source commit with its embedded web UI.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/build-from-source.mdx
+---
+
+The source build is the current installation path. It produces one Hikyo
+binary containing the server, CLI, migrations, and optional browser UI.
+
+## Prerequisites
+
+Install these exact toolchain lines:
+
+| Tool | Required version | Used for |
+| --- | --- | --- |
+| Go | 1.26.2 or newer in the 1.26 line | Server and CLI |
+| Node.js | Version in `.nvmrc` | Embedded browser UI |
+| Corepack | Bundled with Node.js | Pinned pnpm launcher |
+| pnpm | 11.10.0 through Corepack | UI dependencies and build |
+
+Git is required for a source checkout. SQLite support is compiled into the
+binary; no local SQLite service is needed.
+
+## 1. Clone a reviewed revision
+
+```bash
+git clone https://github.com/Dunky13/hikyo.git
+cd hikyo
+git status --short --branch
+git rev-parse HEAD
+```
+
+Record the commit printed by `git rev-parse HEAD`. Before `1.0.0`, `main` may
+change interfaces and schema behavior without a compatibility promise.
+
+## 2. Build the embedded UI
+
+```bash
+corepack enable
+pnpm --dir clients/ts install --frozen-lockfile
+pnpm --dir web install --frozen-lockfile
+pnpm --dir web build
+```
+
+The generated TypeScript client is a local web dependency, so install both
+packages. Their frozen lockfiles prevent dependency resolution from drifting
+away from the reviewed checkout.
+
+## 3. Build Hikyo
+
+```bash
+mkdir -p bin
+go build -trimpath -tags ui -o ./bin/hikyo ./cmd/hikyo
+./bin/hikyo version
+```
+
+The `ui` tag embeds `web/dist` into the binary. Omitting it creates an API-only
+development binary that cannot serve the browser application.
+
+## 4. Install for your user
+
+```bash
+install -d "$HOME/.local/bin"
+install -m 0755 ./bin/hikyo "$HOME/.local/bin/hikyo"
+"$HOME/.local/bin/hikyo" version
+```
+
+Ensure `$HOME/.local/bin` is on `PATH` before using the shorter `hikyo` command.
+System-wide installation may instead copy the binary to `/usr/local/bin` with
+administrator approval.
+
+## Verify the checkout
+
+Run the repository tests before deploying a self-built binary:
+
+```bash
+go test ./...
+pnpm --dir web test
+```
+
+The complete CI pipeline also checks PostgreSQL conformance, the browser flow
+suite, release fixtures, generated code, documentation, and supply-chain rules.
+
+## Update a source build
+
+Do not overwrite a running production binary in place. First create an
+encrypted Hikyo export and preserve the root key through its separate recovery
+path.
+
+Then fetch a reviewed commit, repeat the build, stop the service, replace the
+binary, and start it. Follow the [upgrade checklist](/hikyo/docs/upgrades/) for
+schema and rollback handling.
+
+Next: [run a local evaluation](/hikyo/docs/getting-started/) or prepare the
+[self-hosting baseline](/hikyo/docs/self-hosting/).

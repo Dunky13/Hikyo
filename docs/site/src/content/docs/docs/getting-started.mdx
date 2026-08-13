@@ -8,6 +8,9 @@ This guide creates a local, loopback-only evaluation instance. Hikyo is still in
 `0.x`, so the supported installation path is currently a source build rather
 than a stable release artifact.
 
+At the end, you will have the Hikyo binary, an embedded browser UI, a local
+SQLite database, and one administrator account.
+
 ## Prerequisites
 
 - Go 1.26.2 or newer within the Go 1.26 line.
@@ -20,6 +23,7 @@ than a stable release artifact.
 git clone https://github.com/Dunky13/hikyo.git
 cd hikyo
 corepack enable
+pnpm --dir clients/ts install --frozen-lockfile
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 mkdir -p bin
@@ -84,6 +88,7 @@ or a pipe. Delete `hikyo-admin-authority` after the command succeeds, then open
 
 ## Next steps
 
-- Read [core concepts](/hikyo/docs/core-concepts/) before declaring keys and environments.
+- Complete [your first project](/hikyo/docs/first-project/) to create environments and a validated value.
+- Review [installation options](/hikyo/docs/installation/) before choosing a longer-lived setup.
+- Read [core concepts](/hikyo/docs/core-concepts/) before declaring production keys and environments.
 - Move to the [self-hosting baseline](/hikyo/docs/self-hosting/) before using real secret material.
-- Read the [security policy](/hikyo/security/) before reporting a vulnerability.

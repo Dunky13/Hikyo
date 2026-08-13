@@ -154,8 +154,12 @@ reject_text "$site_root/index.html" 'MIT licensed'
 
 require_text "$site_root/docs/index.html" 'Getting started'
 require_text "$site_root/docs/index.html" 'href="/hikyo/docs/getting-started/"'
+require_text "$site_root/docs/index.html" 'href="/hikyo/docs/installation/"'
 require_text "$site_root/docs/getting-started/index.html" 'Build Hikyo from source'
 require_text "$site_root/docs/getting-started/index.html" 'authority is single-use'
+require_text "$site_root/docs/installation/index.html" 'has no published stable release yet'
+require_text "$site_root/docs/build-from-source/index.html" 'frozen lockfiles prevent dependency resolution'
+require_text "$site_root/docs/first-project/index.html" 'Changing your own grants revokes your current session'
 require_text "$site_root/docs/core-concepts/index.html" 'Values do not inherit'
 require_text "$site_root/docs/self-hosting/index.html" 'Production startup is fail-closed'
 

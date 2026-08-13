@@ -10,12 +10,15 @@ search index is generated at build time.
 ## Routes
 
 `docs/site/src/content/docs/docs/meta.json` is the route manifest. It groups
-20 pages into Start, Understand, Use, Operate, and Reference sections.
+23 pages into Get started, Installation, Concepts, Guides, Identity providers,
+Operations, and Reference sections.
 
-- Start: overview and source-build getting started.
-- Understand: core concepts, architecture, hierarchy, values, and access.
-- Use: contexts, values, machine identities, account security, SAML, and SCIM.
-- Operate: self-hosting, configuration, backup/restore, upgrades, and troubleshooting.
+- Get started: overview, quick start, and first project.
+- Installation: installation choices and source build.
+- Concepts: core concepts, architecture, hierarchy, values, and access.
+- Guides: contexts, values, machine identities, and account security.
+- Identity providers: SAML and SCIM.
+- Operations: self-hosting, configuration, backup/restore, upgrades, and troubleshooting.
 - Reference: CLI command families and the HTTP API contract.
 
 Existing root policy routes and `/hikyo/release/signing/` remain stable.
@@ -38,5 +41,5 @@ Existing root policy routes and `/hikyo/release/signing/` remain stable.
 - Browser flows: docs navigation, static search, light-theme persistence.
 - Browser console: zero errors and zero warnings after the final search-route fix.
 - Mobile document width: 390px viewport and 390px scroll width.
-- Expanded manual: 20 internal docs routes resolve and all guide titles appear in search.
+- Expanded manual: 23 internal docs routes resolve and all guide titles appear in search.
 - Fumadocs integrity: deleting a page named by `meta.json` fails the OSS policy gate.

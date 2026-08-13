@@ -27,6 +27,7 @@ Until Hikyo publishes a stable release, build from a reviewed commit:
 
 ```bash
 corepack enable
+pnpm --dir clients/ts install --frozen-lockfile
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 go build -trimpath -tags ui -o ./hikyo ./cmd/hikyo

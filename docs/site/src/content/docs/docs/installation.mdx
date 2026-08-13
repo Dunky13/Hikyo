@@ -1,0 +1,65 @@
+---
+title: Installation
+description: Choose a safe Hikyo installation path for local evaluation or production preparation.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/installation.mdx
+---
+
+Hikyo is in `0.x` development and has no published stable release yet. Build
+from source for evaluation. Do not treat a development build as a supported
+production release.
+
+## Choose an installation path
+
+| Goal | Path | Result |
+| --- | --- | --- |
+| Try Hikyo locally | [Getting started](/hikyo/docs/getting-started/) | Loopback-only server, SQLite, embedded web UI |
+| Build a reusable binary | [Build from source](/hikyo/docs/build-from-source/) | One binary for your current platform |
+| Prepare a real deployment | [Self-hosting baseline](/hikyo/docs/self-hosting/) | Explicit storage, keys, TLS boundary, and backups |
+| Upgrade an existing instance | [Upgrades](/hikyo/docs/upgrades/) | Pre-migration export and verified rollout |
+
+<Callout type="info" title="Release installers are not published yet">
+  The repository contains the signed-release pipeline, installer template,
+  OCI image, and Helm chart. Those become installation options only after a
+  release is published. No copy-paste command here points at an artifact that
+  does not exist.
+</Callout>
+
+## Local evaluation
+
+Use the source build with `hikyo server --dev`. Development mode creates its
+SQLite database and root key in the working directory and listens only on
+`127.0.0.1:8080`.
+
+This path is intended for learning the product. It is not suitable for real
+secret material or network exposure.
+
+## Production preparation
+
+A production-like deployment needs decisions that an installer cannot make for
+you:
+
+1. Choose SQLite or PostgreSQL.
+2. Place the 32-byte root key outside the database backup.
+3. Terminate HTTPS at a trusted reverse proxy.
+4. Configure encrypted exports and run a restore drill.
+5. Record the exact source commit used to build the binary.
+
+Hikyo fails closed when these boundaries are missing. Continue with the
+[self-hosting baseline](/hikyo/docs/self-hosting/) and
+[server configuration](/hikyo/docs/configuration/).
+
+## Platform support
+
+Source builds follow Go's supported host platforms. The release pipeline is
+prepared for Linux and macOS on `x86_64` and `arm64`, but those downloads do not
+exist until the first release is published.
+
+The server is designed to run as one binary. The browser UI is embedded when
+the binary is built with the `ui` build tag.
+
+## What to read next
+
+- New evaluation: [Getting started](/hikyo/docs/getting-started/).
+- Existing checkout: [Build from source](/hikyo/docs/build-from-source/).
+- Deployment planning: [Self-hosting baseline](/hikyo/docs/self-hosting/).
+- Runtime settings: [Server configuration](/hikyo/docs/configuration/).
