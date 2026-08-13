@@ -229,7 +229,19 @@ type MyOrg struct {
 func (s *Orgs) ListMine(ctx context.Context, actor Actor) ([]MyOrg, error) {
 	var rows []authz.OrgIdentity
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		// resolveSelf, not resolve. This route calls NO OPERATION — that is the
+		// point of it, and the reason it needs no capability — so the
+		// artifact-eligibility chokepoint never sees it and cannot confine an
+		// instance-connection credential presented here. The admitting set is
+		// the confinement instead: the three SESSION artifacts and no machine.
+		//
+		// A workspace bearer IS admitted, deliberately. It is a session of this
+		// instance in every locked mechanical respect, it holds exactly the
+		// human's own grants, and the ADR's stated blast radius for it is "the
+		// compromised human's grants per remote" — which is precisely what this
+		// projection reports. A foreign installation's directory credential is
+		// not, and never was, entitled to it.
+		caller, err := actor.resolveSelf(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
 		}

@@ -2043,6 +2043,331 @@ export type ScimResource = {
 };
 
 /**
+ * What a connection credential authorizes, exhaustively. There is no field
+ * here that could carry a value, a key, an environment, a membership, a
+ * setting or an audit row, and adding one would widen every credential in
+ * circulation without any grant changing.
+ *
+ */
+export type DirectoryListing = {
+    /**
+     * This instance's opaque, server-generated identity, minted with the
+     * schema and preserved by backup/restore — a restored instance IS the
+     * instance. Returned ONLY here, never pre-authentication.
+     *
+     */
+    identity: string;
+    /**
+     * Display only. It never feeds a compatibility decision: a snapshot
+     * can race a downgrade or a restore, so the shell reads the pre-auth
+     * meta endpoint live for that.
+     *
+     */
+    version: string;
+    orgs: Array<DirectoryOrg>;
+    org_count: number;
+    project_count: number;
+};
+
+export type DirectoryOrg = {
+    name: string;
+    projects: Array<string>;
+};
+
+/**
+ * One connection entry and its last-known state. There is deliberately no
+ * credential field: the stored credential is write-only after storage and
+ * is not retrievable through any surface.
+ *
+ */
+export type Remote = {
+    id: Id;
+    name: EntityName;
+    /**
+     * The canonical https origin. Immutable for the life of the entry.
+     */
+    url: string;
+    /**
+     * base64(sha256(SubjectPublicKeyInfo)), confirmed by a human at add
+     * time and verified on every connection before any bytes are written.
+     * Immutable for the life of the entry.
+     *
+     */
+    spki_pin: string;
+    created_at: Timestamp;
+    created_by: string;
+    /**
+     * The most recent fetch's outcome. A closed enum because the
+     * operator's fix differs per outcome, and collapsing them into one
+     * "error" is what makes a directory card useless.
+     *
+     */
+    state: 'ok' | 'unreachable' | 'credential-rejected' | 'pin-mismatch' | 'redirect-refused' | 'identity-conflict' | 'self-connected';
+    last_attempt_at: Timestamp;
+    observed_at?: Timestamp;
+    /**
+     * The listing below is a SNAPSHOT, not current. Computed from the
+     * outcome rather than the age: a fetch that just failed makes even a
+     * one-second-old snapshot stale.
+     *
+     */
+    stale: boolean;
+    /**
+     * The snapshot's age, the number the card prints beside "unreachable".
+     */
+    stale_for_seconds?: number;
+    identity?: string;
+    version?: string;
+    org_count?: number;
+    project_count?: number;
+    orgs?: Array<DirectoryOrg>;
+};
+
+export type RemoteList = {
+    items: Array<Remote>;
+    count: number;
+};
+
+export type AddRemoteRequest = {
+    name: EntityName;
+    /**
+     * A canonical `https://` origin — no userinfo, no path, no query, no
+     * fragment, no plaintext HTTP. A value carrying one is REFUSED, never
+     * silently normalised.
+     *
+     */
+    url: string;
+    /**
+     * The fingerprint the human confirmed interactively.
+     */
+    spki_pin: string;
+    /**
+     * The connection credential minted on the serving side. Verified by
+     * one authenticated fetch before the entry is committed, then sealed
+     * under the instance keyring and never returned again.
+     *
+     */
+    credential: string;
+};
+
+export type RenameRemoteRequest = {
+    name: EntityName;
+};
+
+export type InstanceConnection = {
+    id: Id;
+    principal: string;
+    /**
+     * Names the intended peer for the audit trail. Descriptive, NOT
+     * enforced: this instance cannot verify who holds the token.
+     *
+     */
+    label: string;
+    kind: CredentialKind;
+    /**
+     * The leading, non-secret slice of the minted value, so two
+     * connections are distinguishable in a list without either being
+     * retrievable.
+     *
+     */
+    prefix_hint: string;
+    lifetime: CredentialLifetime;
+    expires_at?: Timestamp;
+    created_at: Timestamp;
+    created_by: string;
+    revoked_at?: Timestamp;
+    last_used_at?: Timestamp;
+    /**
+     * Whether it authenticates right now, under the current credential epoch.
+     */
+    live: boolean;
+};
+
+export type InstanceConnectionList = {
+    items: Array<InstanceConnection>;
+    count: number;
+};
+
+export type MintInstanceConnectionRequest = {
+    label: string;
+    /**
+     * Clamped to the instance ceiling, and the response says so. Omit for
+     * the default; naming both this and `indefinite` is a refusal, never a
+     * precedence rule.
+     *
+     */
+    lifetime_seconds?: number;
+    /**
+     * Requires the instance to allow indefinite credentials.
+     */
+    indefinite?: boolean;
+};
+
+export type MintedInstanceConnection = {
+    /**
+     * THE ONLY DISCLOSURE. Not retrievable afterwards through any surface.
+     *
+     */
+    value: string;
+    connection: InstanceConnection;
+    /**
+     * The instance ceiling shortened the requested lifetime.
+     */
+    clamped: boolean;
+};
+
+export type WorkspaceOrigin = {
+    /**
+     * An EXACT origin — scheme://host[:port]. No wildcards, no subdomains.
+     */
+    origin: string;
+    created_at: Timestamp;
+    created_by: string;
+};
+
+export type WorkspaceOriginList = {
+    items: Array<WorkspaceOrigin>;
+    count: number;
+};
+
+export type WorkspaceOriginRequest = {
+    origin: string;
+};
+
+export type WorkspaceOriginRemoved = {
+    origin: string;
+    /**
+     * Workspace sessions killed by the SAME transaction. This is what
+     * makes de-allowlisting a kill switch rather than a headers change.
+     *
+     */
+    sessions_revoked: number;
+};
+
+export type StartWorkspaceHandoffRequest = {
+    /**
+     * The requesting UI origin. Must be allowlisted, or the transaction refuses.
+     */
+    origin: string;
+    /**
+     * The exact pre-registered callback. Its authority IS the allowlist
+     * entry: a callback that does not live at the consented origin is not
+     * the consented code.
+     *
+     */
+    redirect_uri: string;
+    /**
+     * S256 challenge (RFC 7636). Plain is not accepted.
+     */
+    pkce_challenge: string;
+    purpose: 'establishment' | 'step-up';
+    session?: Id;
+    /**
+     * Step-up only, with `session`: the EXACT operation being elevated, so
+     * an elevated consent cannot be replayed against a different one.
+     *
+     */
+    operation?: string;
+    environment?: Id;
+    /**
+     * Step-up only, where the operation is key-scoped: the enumerated key
+     * set the consent covers.
+     *
+     */
+    key_set?: Array<string>;
+};
+
+export type WorkspaceHandoffStarted = {
+    handoff: Id;
+    /**
+     * Crosses the front channel. The artifact never does.
+     */
+    state: string;
+    expires_at: Timestamp;
+};
+
+export type ApproveWorkspaceHandoffRequest = {
+    state: string;
+};
+
+export type WorkspaceHandoffApproved = {
+    /**
+     * Single-use, atomically consumed at redemption.
+     */
+    code: string;
+    redirect_uri: string;
+};
+
+export type RedeemWorkspaceHandoffRequest = {
+    code: string;
+    pkce_verifier: string;
+    origin: string;
+};
+
+export type WorkspaceSession = {
+    /**
+     * Keep it in JS MEMORY ONLY — never a cookie, never localStorage or
+     * sessionStorage. In-memory storage narrows the at-rest window; it is
+     * not non-stealability, and this contract does not sell it as such.
+     *
+     */
+    value: string;
+    session: Id;
+    origin: string;
+    handoff: Id;
+    idle_expires_at: Timestamp;
+    absolute_expires_at: Timestamp;
+    /**
+     * True when this redemption ELEVATED the session the step-up
+     * transaction was bound to instead of establishing a new one. `session`
+     * is then that same session's id and `value` is its ROTATED bearer —
+     * not a second session. The rotation is deliberate: a bearer stolen
+     * before an elevation must not become an elevated bearer after it.
+     *
+     */
+    elevated?: boolean;
+    environment?: Id;
+    /**
+     * When the reauthentication window this elevation opened lapses.
+     * Present only on an elevation.
+     *
+     */
+    window_expires_at?: Timestamp;
+};
+
+/**
+ * One of the caller's own sessions. Metadata only; no verifier is ever returned.
+ */
+export type ActiveSession = {
+    id: Id;
+    /**
+     * A workspace session appears as its own artifact type — the ADR's
+     * requirement, and the reason it is a session row at all.
+     *
+     */
+    artifact: 'cli' | 'browser' | 'workspace';
+    auth_method: string;
+    created_at: Timestamp;
+    last_seen_at: Timestamp;
+    idle_expires_at: Timestamp;
+    absolute_expires_at: Timestamp;
+    source_ip?: string;
+    user_agent?: string;
+    /**
+     * Workspace sessions only: which foreign shell holds a session on this
+     * account. Removing that origin from the allowlist kills it atomically.
+     *
+     */
+    requesting_origin?: string;
+    handoff?: string;
+};
+
+export type SessionList = {
+    items: Array<ActiveSession>;
+    count: number;
+};
+
+/**
  * Organisation identifier.
  */
 export type OrgId = Id;
@@ -2207,6 +2532,25 @@ export type ScimSortOrder = string;
  *
  */
 export type ScimStartIndex = string;
+
+/**
+ * The entry's display name. A NAME, never a URL or host: an endpoint whose
+ * target is named by the request is a proxy whatever it is called, and the
+ * server looks the entry up so the stored, immutable URL is what is
+ * reached.
+ *
+ */
+export type RemoteName = EntityName;
+
+/**
+ * Connection credential identifier.
+ */
+export type ConnectionId = Id;
+
+/**
+ * Session identifier, always one of the caller's own.
+ */
+export type SessionId = Id;
 
 export type GetMetaData = {
     body?: never;
@@ -12212,3 +12556,1121 @@ export type ScimSearchGroupsErrors = {
 };
 
 export type ScimSearchGroupsError = ScimSearchGroupsErrors[keyof ScimSearchGroupsErrors];
+
+export type ServeDirectoryData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/directory';
+};
+
+export type ServeDirectoryErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ServeDirectoryError = ServeDirectoryErrors[keyof ServeDirectoryErrors];
+
+export type ServeDirectoryResponses = {
+    /**
+     * The served listing.
+     */
+    200: DirectoryListing;
+};
+
+export type ServeDirectoryResponse = ServeDirectoryResponses[keyof ServeDirectoryResponses];
+
+export type ListRemotesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/remotes';
+};
+
+export type ListRemotesErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListRemotesError = ListRemotesErrors[keyof ListRemotesErrors];
+
+export type ListRemotesResponses = {
+    /**
+     * Every configured entry with its last-known state.
+     */
+    200: RemoteList;
+};
+
+export type ListRemotesResponse = ListRemotesResponses[keyof ListRemotesResponses];
+
+export type AddRemoteData = {
+    body: AddRemoteRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/remotes';
+};
+
+export type AddRemoteErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type AddRemoteError = AddRemoteErrors[keyof AddRemoteErrors];
+
+export type AddRemoteResponses = {
+    /**
+     * The entry, with the listing its verifying fetch returned.
+     */
+    201: Remote;
+};
+
+export type AddRemoteResponse = AddRemoteResponses[keyof AddRemoteResponses];
+
+export type RemoveRemoteData = {
+    body?: never;
+    path: {
+        /**
+         * The entry's display name. A NAME, never a URL or host: an endpoint whose
+         * target is named by the request is a proxy whatever it is called, and the
+         * server looks the entry up so the stored, immutable URL is what is
+         * reached.
+         *
+         */
+        remote: EntityName;
+    };
+    query?: never;
+    url: '/api/v1/instance/remotes/{remote}';
+};
+
+export type RemoveRemoteErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RemoveRemoteError = RemoveRemoteErrors[keyof RemoveRemoteErrors];
+
+export type RemoveRemoteResponses = {
+    /**
+     * Removed. The serving-side credential is still live.
+     */
+    204: void;
+};
+
+export type RemoveRemoteResponse = RemoveRemoteResponses[keyof RemoveRemoteResponses];
+
+export type ShowRemoteData = {
+    body?: never;
+    path: {
+        /**
+         * The entry's display name. A NAME, never a URL or host: an endpoint whose
+         * target is named by the request is a proxy whatever it is called, and the
+         * server looks the entry up so the stored, immutable URL is what is
+         * reached.
+         *
+         */
+        remote: EntityName;
+    };
+    query?: never;
+    url: '/api/v1/instance/remotes/{remote}';
+};
+
+export type ShowRemoteErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowRemoteError = ShowRemoteErrors[keyof ShowRemoteErrors];
+
+export type ShowRemoteResponses = {
+    /**
+     * The entry with its last-known state.
+     */
+    200: Remote;
+};
+
+export type ShowRemoteResponse = ShowRemoteResponses[keyof ShowRemoteResponses];
+
+export type RenameRemoteData = {
+    body: RenameRemoteRequest;
+    path: {
+        /**
+         * The entry's display name. A NAME, never a URL or host: an endpoint whose
+         * target is named by the request is a proxy whatever it is called, and the
+         * server looks the entry up so the stored, immutable URL is what is
+         * reached.
+         *
+         */
+        remote: EntityName;
+    };
+    query?: never;
+    url: '/api/v1/instance/remotes/{remote}';
+};
+
+export type RenameRemoteErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RenameRemoteError = RenameRemoteErrors[keyof RenameRemoteErrors];
+
+export type RenameRemoteResponses = {
+    /**
+     * The entry as renamed.
+     */
+    200: Remote;
+};
+
+export type RenameRemoteResponse = RenameRemoteResponses[keyof RenameRemoteResponses];
+
+export type ListInstanceConnectionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/connections';
+};
+
+export type ListInstanceConnectionsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListInstanceConnectionsError = ListInstanceConnectionsErrors[keyof ListInstanceConnectionsErrors];
+
+export type ListInstanceConnectionsResponses = {
+    /**
+     * Every connection, live and revoked.
+     */
+    200: InstanceConnectionList;
+};
+
+export type ListInstanceConnectionsResponse = ListInstanceConnectionsResponses[keyof ListInstanceConnectionsResponses];
+
+export type MintInstanceConnectionData = {
+    body: MintInstanceConnectionRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/connections';
+};
+
+export type MintInstanceConnectionErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type MintInstanceConnectionError = MintInstanceConnectionErrors[keyof MintInstanceConnectionErrors];
+
+export type MintInstanceConnectionResponses = {
+    /**
+     * The connection, with its value disclosed once.
+     */
+    201: MintedInstanceConnection;
+};
+
+export type MintInstanceConnectionResponse = MintInstanceConnectionResponses[keyof MintInstanceConnectionResponses];
+
+export type RevokeInstanceConnectionData = {
+    body?: never;
+    path: {
+        /**
+         * Connection credential identifier.
+         */
+        connection: Id;
+    };
+    query?: never;
+    url: '/api/v1/instance/connections/{connection}';
+};
+
+export type RevokeInstanceConnectionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevokeInstanceConnectionError = RevokeInstanceConnectionErrors[keyof RevokeInstanceConnectionErrors];
+
+export type RevokeInstanceConnectionResponses = {
+    /**
+     * Revoked.
+     */
+    204: void;
+};
+
+export type RevokeInstanceConnectionResponse = RevokeInstanceConnectionResponses[keyof RevokeInstanceConnectionResponses];
+
+export type ShowInstanceConnectionData = {
+    body?: never;
+    path: {
+        /**
+         * Connection credential identifier.
+         */
+        connection: Id;
+    };
+    query?: never;
+    url: '/api/v1/instance/connections/{connection}';
+};
+
+export type ShowInstanceConnectionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowInstanceConnectionError = ShowInstanceConnectionErrors[keyof ShowInstanceConnectionErrors];
+
+export type ShowInstanceConnectionResponses = {
+    /**
+     * The connection.
+     */
+    200: InstanceConnection;
+};
+
+export type ShowInstanceConnectionResponse = ShowInstanceConnectionResponses[keyof ShowInstanceConnectionResponses];
+
+export type RemoveWorkspaceOriginData = {
+    body: WorkspaceOriginRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/workspace-origins';
+};
+
+export type RemoveWorkspaceOriginErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RemoveWorkspaceOriginError = RemoveWorkspaceOriginErrors[keyof RemoveWorkspaceOriginErrors];
+
+export type RemoveWorkspaceOriginResponses = {
+    /**
+     * Removed, with the number of sessions the same transaction killed.
+     */
+    200: WorkspaceOriginRemoved;
+};
+
+export type RemoveWorkspaceOriginResponse = RemoveWorkspaceOriginResponses[keyof RemoveWorkspaceOriginResponses];
+
+export type ListWorkspaceOriginsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/workspace-origins';
+};
+
+export type ListWorkspaceOriginsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListWorkspaceOriginsError = ListWorkspaceOriginsErrors[keyof ListWorkspaceOriginsErrors];
+
+export type ListWorkspaceOriginsResponses = {
+    /**
+     * The allowlist.
+     */
+    200: WorkspaceOriginList;
+};
+
+export type ListWorkspaceOriginsResponse = ListWorkspaceOriginsResponses[keyof ListWorkspaceOriginsResponses];
+
+export type AddWorkspaceOriginData = {
+    body: WorkspaceOriginRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/workspace-origins';
+};
+
+export type AddWorkspaceOriginErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type AddWorkspaceOriginError = AddWorkspaceOriginErrors[keyof AddWorkspaceOriginErrors];
+
+export type AddWorkspaceOriginResponses = {
+    /**
+     * Allowlisted.
+     */
+    201: WorkspaceOrigin;
+};
+
+export type AddWorkspaceOriginResponse = AddWorkspaceOriginResponses[keyof AddWorkspaceOriginResponses];
+
+export type StartWorkspaceHandoffData = {
+    body: StartWorkspaceHandoffRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/workspace/start';
+};
+
+export type StartWorkspaceHandoffErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type StartWorkspaceHandoffError = StartWorkspaceHandoffErrors[keyof StartWorkspaceHandoffErrors];
+
+export type StartWorkspaceHandoffResponses = {
+    /**
+     * The transaction's opaque state and its expiry.
+     */
+    201: WorkspaceHandoffStarted;
+};
+
+export type StartWorkspaceHandoffResponse = StartWorkspaceHandoffResponses[keyof StartWorkspaceHandoffResponses];
+
+export type ApproveWorkspaceHandoffData = {
+    body: ApproveWorkspaceHandoffRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/workspace/approve';
+};
+
+export type ApproveWorkspaceHandoffErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ApproveWorkspaceHandoffError = ApproveWorkspaceHandoffErrors[keyof ApproveWorkspaceHandoffErrors];
+
+export type ApproveWorkspaceHandoffResponses = {
+    /**
+     * The authorization code and the callback to deliver it to.
+     */
+    200: WorkspaceHandoffApproved;
+};
+
+export type ApproveWorkspaceHandoffResponse = ApproveWorkspaceHandoffResponses[keyof ApproveWorkspaceHandoffResponses];
+
+export type RedeemWorkspaceHandoffData = {
+    body: RedeemWorkspaceHandoffRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/workspace/redeem';
+};
+
+export type RedeemWorkspaceHandoffErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RedeemWorkspaceHandoffError = RedeemWorkspaceHandoffErrors[keyof RedeemWorkspaceHandoffErrors];
+
+export type RedeemWorkspaceHandoffResponses = {
+    /**
+     * The workspace session, disclosed once.
+     */
+    201: WorkspaceSession;
+};
+
+export type RedeemWorkspaceHandoffResponse = RedeemWorkspaceHandoffResponses[keyof RedeemWorkspaceHandoffResponses];
+
+export type ListMySessionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/me/sessions';
+};
+
+export type ListMySessionsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListMySessionsError = ListMySessionsErrors[keyof ListMySessionsErrors];
+
+export type ListMySessionsResponses = {
+    /**
+     * The caller's sessions.
+     */
+    200: SessionList;
+};
+
+export type ListMySessionsResponse = ListMySessionsResponses[keyof ListMySessionsResponses];
+
+export type RevokeMySessionData = {
+    body?: never;
+    path: {
+        /**
+         * Session identifier, always one of the caller's own.
+         */
+        session: Id;
+    };
+    query?: never;
+    url: '/api/v1/me/sessions/{session}';
+};
+
+export type RevokeMySessionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevokeMySessionError = RevokeMySessionErrors[keyof RevokeMySessionErrors];
+
+export type RevokeMySessionResponses = {
+    /**
+     * Revoked.
+     */
+    204: void;
+};
+
+export type RevokeMySessionResponse = RevokeMySessionResponses[keyof RevokeMySessionResponses];

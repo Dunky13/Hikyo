@@ -157,6 +157,21 @@ func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Tim
 	return az.AuthenticateCaller(ctx, a.bearer, now)
 }
 
+// resolveSelf is resolve for the SELF-SCOPED surface (the caller's own session
+// listing and revoke), which calls no operation and therefore never reaches the
+// artifact-eligibility chokepoint. It routes through AuthenticateSelfSurface,
+// whose admitting set refuses every machine artifact — instance-connection
+// credentials included — by construction rather than by a handler check.
+func (a Actor) resolveSelf(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (authz.Identity, error) {
+	if a.principal != "" {
+		return authz.Identity{Principal: a.principal}, nil
+	}
+	if a.bearer == "" {
+		return authz.Identity{}, domain.ErrUnauthenticated
+	}
+	return az.AuthenticateSelfSurface(ctx, a.bearer, now)
+}
+
 func newID(prefix string) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {

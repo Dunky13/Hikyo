@@ -139,6 +139,10 @@ type API struct {
 	// a single interface would let a handler reach the wrong one by autocomplete.
 	SCIM     SCIMAdminService
 	SCIMWire SCIMWireService
+	// Multi-instance (#71): the viewing side's directory and the serving
+	// side's connections, allowlist, handoff and session surface.
+	Remotes   RemoteService
+	Workspace WorkspaceService
 	// Admission bounds the unauthenticated discovery endpoint. The expensive
 	// pre-auth paths take their own slot inside the service, where the cost
 	// they bound actually lives; /meta is cheap and only needs a per-IP
@@ -537,6 +541,10 @@ func (a *API) wireContext(next http.Handler) http.Handler {
 			SourceIP:  a.sourceIP(r),
 			UserAgent: r.UserAgent(),
 			Origin:    audit.OriginAPI,
+			// The request's own Origin header, carried untouched. The workspace
+			// authentication leg compares it against the origin the bearer was
+			// issued to; nothing else reads it.
+			RequestOrigin: r.Header.Get("Origin"),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

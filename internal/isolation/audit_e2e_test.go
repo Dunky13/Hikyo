@@ -462,6 +462,11 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// binding, credential, user, group, mapping, attention and the lockout
 		// pair — before the trails are read.
 		runSCIMLifecycle(t, db)
+		// The multi-instance surface (#71): both tiers, against a real pinned
+		// TLS peer, so every remote.* type has a real emitter behind it too.
+		// Before the backup lifecycle, because that one advances the restore
+		// epoch and this one authenticates real artifacts against the current.
+		runRemoteLifecycle(t, db)
 		// The operator lifecycle (#76): every backup.* and restore.* type gets
 		// a real emitter. It runs LAST of the lifecycles because it advances
 		// the restore epoch and then reconciles the principals it made inert,

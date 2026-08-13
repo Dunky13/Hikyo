@@ -204,6 +204,10 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// references service_accounts, which references projects/principals.
 		"machine_credentials", "service_accounts",
 		"federation_issuers",
+		// Multi-instance (#71, migration 00019): snapshots reference remotes;
+		// instance_connections and workspace_handoffs reference principals.
+		"remote_snapshots", "remotes", "instance_connections",
+		"workspace_handoffs", "workspace_origins", "instance_identity",
 		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
 		// goes first of the pair.
 		"auth_instance_state",

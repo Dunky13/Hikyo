@@ -70,8 +70,20 @@ func grantRead(t *testing.T, db *store.DB, p domain.PrincipalID) {
 // reveal path will, and returns the refusal (or nil) unwrapped for errors.Is.
 func consumeWindow(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env string, keys []string, now time.Time) error {
 	t.Helper()
+	return consumeWindowFor(t, auth, db, sessionID, env, "", keys, now)
+}
+
+// consumeWindowFor is consumeWindow with the operation named, for the windows a
+// workspace step-up binds to one.
+func consumeWindowFor(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env, operation string, keys []string, now time.Time) error {
+	t.Helper()
 	return tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
-		return auth.ConsumeReauthWindow(ctx, az, sessionID, service.PurposeReveal, env, keys, now)
+		// PurposeReveal is the disclosure consumption these helpers model (#58);
+		// it is only consulted on the single-decision leg, where it is matched
+		// byte-exact against the ceremony's binding. The workspace step-up
+		// windows these helpers also drive are sliding, so the purpose is inert
+		// for them and the OPERATION is what their binding turns on.
+		return auth.ConsumeReauthWindow(ctx, az, sessionID, service.PurposeReveal, env, operation, keys, now)
 	})
 }
 

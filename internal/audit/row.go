@@ -117,6 +117,13 @@ type Context struct {
 	SourceIP  string
 	UserAgent string
 	Origin    Origin
+	// RequestOrigin is the HTTP `Origin` HEADER the request presented, not the
+	// audit Origin enum beside it — the two are different facts with the same
+	// English name. It is empty for every non-browser caller, and it exists so
+	// the workspace authentication leg can compare a bearer's BOUND origin
+	// against the origin actually presenting it: a `ws` bearer issued to
+	// origin A must not authenticate from allowlisted origin B.
+	RequestOrigin string
 }
 
 type ctxKey struct{}
@@ -125,6 +132,7 @@ type ctxKey struct{}
 func WithContext(ctx context.Context, c Context) context.Context {
 	c.SourceIP = SanitizeFreeText(c.SourceIP)
 	c.UserAgent = SanitizeFreeText(c.UserAgent)
+	c.RequestOrigin = SanitizeFreeText(c.RequestOrigin)
 	return context.WithValue(ctx, ctxKey{}, c)
 }
 

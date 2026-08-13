@@ -159,6 +159,28 @@ type GrantOrigin struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type InstanceConnection struct {
+	ID              string
+	PrincipalID     string
+	Label           string
+	Kind            string
+	Verifier        []byte
+	PrefixHint      string
+	Lifetime        string
+	ExpiresAt       pgtype.Timestamptz
+	CredentialEpoch int64
+	CreatedAt       pgtype.Timestamptz
+	CreatedBy       string
+	RevokedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
+}
+
+type InstanceIdentity struct {
+	ID        int32
+	Identity  string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Key struct {
 	ID              string
 	OrgID           string
@@ -326,6 +348,8 @@ type ReauthWindow struct {
 	CredentialEpoch int64
 	ConsumedAt      pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
+	BoundOperation  string
+	BoundKeySet     string
 }
 
 type RecoveryCode struct {
@@ -335,6 +359,28 @@ type RecoveryCode struct {
 	CredentialEpoch int64
 	RowVersion      int64
 	GeneratedAt     pgtype.Timestamptz
+}
+
+type Remote struct {
+	ID               string
+	Name             string
+	Url              string
+	SpkiPin          string
+	CredentialSealed []byte
+	CreatedAt        pgtype.Timestamptz
+	CreatedBy        string
+}
+
+type RemoteSnapshot struct {
+	RemoteID         string
+	LastAttemptAt    pgtype.Timestamptz
+	LastOutcome      string
+	ObservedAt       pgtype.Timestamptz
+	InstanceIdentity pgtype.Text
+	Version          pgtype.Text
+	OrgCount         pgtype.Int8
+	ProjectCount     pgtype.Int8
+	Listing          pgtype.Text
 }
 
 type SamlProvider struct {
@@ -517,6 +563,8 @@ type Session struct {
 	CsrfVerifier      []byte
 	ProviderID        pgtype.Text
 	SamlProviderID    pgtype.Text
+	RequestingOrigin  pgtype.Text
+	HandoffID         pgtype.Text
 }
 
 type Tier3Key struct {
@@ -601,4 +649,30 @@ type WebauthnCredential struct {
 	DisabledAt      pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	LastUsedAt      pgtype.Timestamptz
+}
+
+type WorkspaceHandoff struct {
+	ID            string
+	StateVerifier []byte
+	CodeVerifier  []byte
+	Origin        string
+	RedirectUri   string
+	PkceChallenge string
+	Purpose       string
+	SessionID     pgtype.Text
+	Operation     pgtype.Text
+	EnvID         pgtype.Text
+	KeySet        pgtype.Text
+	PrincipalID   pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
+	ConsumedAt    pgtype.Timestamptz
+	Factors       string
+	FactorClass   string
+}
+
+type WorkspaceOrigin struct {
+	Origin    string
+	CreatedAt pgtype.Timestamptz
+	CreatedBy string
 }

@@ -18,6 +18,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ActiveSessionArtifact.
+const (
+	ActiveSessionArtifactBrowser   ActiveSessionArtifact = "browser"
+	ActiveSessionArtifactCli       ActiveSessionArtifact = "cli"
+	ActiveSessionArtifactWorkspace ActiveSessionArtifact = "workspace"
+)
+
+// Valid indicates whether the value is a known member of the ActiveSessionArtifact enum.
+func (e ActiveSessionArtifact) Valid() bool {
+	switch e {
+	case ActiveSessionArtifactBrowser:
+		return true
+	case ActiveSessionArtifactCli:
+		return true
+	case ActiveSessionArtifactWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AffectedCredentialReason.
 const (
 	Clamped             AffectedCredentialReason = "clamped"
@@ -302,16 +323,16 @@ func (e KeyRuleType) Valid() bool {
 
 // Defines values for LocalLoginRequestArtifact.
 const (
-	Browser LocalLoginRequestArtifact = "browser"
-	Cli     LocalLoginRequestArtifact = "cli"
+	LocalLoginRequestArtifactBrowser LocalLoginRequestArtifact = "browser"
+	LocalLoginRequestArtifactCli     LocalLoginRequestArtifact = "cli"
 )
 
 // Valid indicates whether the value is a known member of the LocalLoginRequestArtifact enum.
 func (e LocalLoginRequestArtifact) Valid() bool {
 	switch e {
-	case Browser:
+	case LocalLoginRequestArtifactBrowser:
 		return true
-	case Cli:
+	case LocalLoginRequestArtifactCli:
 		return true
 	default:
 		return false
@@ -375,6 +396,39 @@ func (e ReauthPurpose) Valid() bool {
 	case Publish:
 		return true
 	case Reveal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RemoteState.
+const (
+	CredentialRejected RemoteState = "credential-rejected"
+	IdentityConflict   RemoteState = "identity-conflict"
+	Ok                 RemoteState = "ok"
+	PinMismatch        RemoteState = "pin-mismatch"
+	RedirectRefused    RemoteState = "redirect-refused"
+	SelfConnected      RemoteState = "self-connected"
+	Unreachable        RemoteState = "unreachable"
+)
+
+// Valid indicates whether the value is a known member of the RemoteState enum.
+func (e RemoteState) Valid() bool {
+	switch e {
+	case CredentialRejected:
+		return true
+	case IdentityConflict:
+		return true
+	case Ok:
+		return true
+	case PinMismatch:
+		return true
+	case RedirectRefused:
+		return true
+	case SelfConnected:
+		return true
+	case Unreachable:
 		return true
 	default:
 		return false
@@ -639,6 +693,90 @@ func (e ServiceAccountKind) Valid() bool {
 	}
 }
 
+// Defines values for StartWorkspaceHandoffRequestPurpose.
+const (
+	Establishment StartWorkspaceHandoffRequestPurpose = "establishment"
+	StepUp        StartWorkspaceHandoffRequestPurpose = "step-up"
+)
+
+// Valid indicates whether the value is a known member of the StartWorkspaceHandoffRequestPurpose enum.
+func (e StartWorkspaceHandoffRequestPurpose) Valid() bool {
+	switch e {
+	case Establishment:
+		return true
+	case StepUp:
+		return true
+	default:
+		return false
+	}
+}
+
+// ActiveSession One of the caller's own sessions. Metadata only; no verifier is ever returned.
+type ActiveSession struct {
+	// AbsoluteExpiresAt RFC 3339 UTC, microsecond precision.
+	AbsoluteExpiresAt Timestamp `json:"absolute_expires_at"`
+
+	// Artifact A workspace session appears as its own artifact type — the ADR's
+	// requirement, and the reason it is a session row at all.
+	Artifact   ActiveSessionArtifact `json:"artifact"`
+	AuthMethod string                `json:"auth_method"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+	Handoff   *string   `json:"handoff,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// IdleExpiresAt RFC 3339 UTC, microsecond precision.
+	IdleExpiresAt Timestamp `json:"idle_expires_at"`
+
+	// LastSeenAt RFC 3339 UTC, microsecond precision.
+	LastSeenAt Timestamp `json:"last_seen_at"`
+
+	// RequestingOrigin Workspace sessions only: which foreign shell holds a session on this
+	// account. Removing that origin from the allowlist kills it atomically.
+	RequestingOrigin *string `json:"requesting_origin,omitempty"`
+	SourceIp         *string `json:"source_ip,omitempty"`
+	UserAgent        *string `json:"user_agent,omitempty"`
+}
+
+// ActiveSessionArtifact A workspace session appears as its own artifact type — the ADR's
+// requirement, and the reason it is a session row at all.
+type ActiveSessionArtifact string
+
+// AddRemoteRequest defines model for AddRemoteRequest.
+type AddRemoteRequest struct {
+	// Credential The connection credential minted on the serving side. Verified by
+	// one authenticated fetch before the entry is committed, then sealed
+	// under the instance keyring and never returned again.
+	Credential string `json:"credential"`
+
+	// Name A display name for an organisation, project or environment. Identity is
+	// the immutable id, so this is a label and a rename never breaks a
+	// reference. The 128-byte bound is the one the organisation contract has
+	// carried since the first slice, adopted for every entity so there is one
+	// number rather than four; no ADR fixes a per-entity name length. The
+	// grammar itself (non-empty, no control characters, no surrounding
+	// whitespace) is enforced in the domain rather than restated as a pattern
+	// here — two grammars would be two things to keep in sync.
+	//
+	// **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+	// `maxLength` below counts Unicode code points, which is the only length
+	// JSON Schema can express, so a name of 100 emoji satisfies this schema
+	// and is still refused by the server with `bad_request`. Clients that want
+	// to pre-validate must measure the UTF-8 encoding, not the string length.
+	Name EntityName `json:"name"`
+
+	// SpkiPin The fingerprint the human confirmed interactively.
+	SpkiPin string `json:"spki_pin"`
+
+	// Url A canonical `https://` origin — no userinfo, no path, no query, no
+	// fragment, no plaintext HTTP. A value carrying one is REFUSED, never
+	// silently normalised.
+	Url string `json:"url"`
+}
+
 // AffectedCredential defines model for AffectedCredential.
 type AffectedCredential struct {
 	// ExpiresAt RFC 3339 UTC, microsecond precision.
@@ -662,6 +800,11 @@ type ApplyTemplateRequest struct {
 
 	// Template The closed v1 role template set.
 	Template RoleTemplate `json:"template"`
+}
+
+// ApproveWorkspaceHandoffRequest defines model for ApproveWorkspaceHandoffRequest.
+type ApproveWorkspaceHandoffRequest struct {
+	State string `json:"state"`
 }
 
 // Assurance How **this session** authenticated — not what the account owns.
@@ -1111,6 +1254,31 @@ type DeliveryResponse struct {
 	SchemaRevision int `json:"schema_revision"`
 }
 
+// DirectoryListing What a connection credential authorizes, exhaustively. There is no field
+// here that could carry a value, a key, an environment, a membership, a
+// setting or an audit row, and adding one would widen every credential in
+// circulation without any grant changing.
+type DirectoryListing struct {
+	// Identity This instance's opaque, server-generated identity, minted with the
+	// schema and preserved by backup/restore — a restored instance IS the
+	// instance. Returned ONLY here, never pre-authentication.
+	Identity     string         `json:"identity"`
+	OrgCount     int            `json:"org_count"`
+	Orgs         []DirectoryOrg `json:"orgs"`
+	ProjectCount int            `json:"project_count"`
+
+	// Version Display only. It never feeds a compatibility decision: a snapshot
+	// can race a downgrade or a restore, so the shell reads the pre-auth
+	// meta endpoint live for that.
+	Version string `json:"version"`
+}
+
+// DirectoryOrg defines model for DirectoryOrg.
+type DirectoryOrg struct {
+	Name     string   `json:"name"`
+	Projects []string `json:"projects"`
+}
+
 // EntityName A display name for an organisation, project or environment. Identity is
 // the immutable id, so this is a label and a rename never breaks a
 // reference. The 128-byte bound is the one the organisation contract has
@@ -1477,6 +1645,54 @@ type IdentityProviderKind string
 // IdentityUnlinkRequest defines model for IdentityUnlinkRequest.
 type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
+}
+
+// InstanceConnection defines model for InstanceConnection.
+type InstanceConnection struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt *Timestamp `json:"expires_at,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id ID `json:"id"`
+
+	// Kind How a credential authenticates its service account. The discriminator
+	// exists before a second kind does, so adding one is a new row type
+	// rather than a schema change.
+	Kind CredentialKind `json:"kind"`
+
+	// Label Names the intended peer for the audit trail. Descriptive, NOT
+	// enforced: this instance cannot verify who holds the token.
+	Label string `json:"label"`
+
+	// LastUsedAt RFC 3339 UTC, microsecond precision.
+	LastUsedAt *Timestamp `json:"last_used_at,omitempty"`
+
+	// Lifetime `indefinite` is a VALUE, not a large number: it is unreachable by
+	// raising the instance ceiling, and is admitted only under a separate,
+	// default-off instance opt-in.
+	Lifetime CredentialLifetime `json:"lifetime"`
+
+	// Live Whether it authenticates right now, under the current credential epoch.
+	Live bool `json:"live"`
+
+	// PrefixHint The leading, non-secret slice of the minted value, so two
+	// connections are distinguishable in a list without either being
+	// retrievable.
+	PrefixHint string `json:"prefix_hint"`
+	Principal  string `json:"principal"`
+
+	// RevokedAt RFC 3339 UTC, microsecond precision.
+	RevokedAt *Timestamp `json:"revoked_at,omitempty"`
+}
+
+// InstanceConnectionList defines model for InstanceConnectionList.
+type InstanceConnectionList struct {
+	Count int                  `json:"count"`
+	Items []InstanceConnection `json:"items"`
 }
 
 // IssuerType The federation issuer's platform. It is DECLARED rather than inferred
@@ -1864,6 +2080,18 @@ type MintCredentialResult struct {
 	Value string `json:"value"`
 }
 
+// MintInstanceConnectionRequest defines model for MintInstanceConnectionRequest.
+type MintInstanceConnectionRequest struct {
+	// Indefinite Requires the instance to allow indefinite credentials.
+	Indefinite *bool  `json:"indefinite,omitempty"`
+	Label      string `json:"label"`
+
+	// LifetimeSeconds Clamped to the instance ceiling, and the response says so. Omit for
+	// the default; naming both this and `indefinite` is a refusal, never a
+	// precedence rule.
+	LifetimeSeconds *int `json:"lifetime_seconds,omitempty"`
+}
+
 // MintScimCredentialRequest defines model for MintScimCredentialRequest.
 type MintScimCredentialRequest struct {
 	// Indefinite Requires the instance opt-in, which is default-off. Without it an
@@ -1875,6 +2103,16 @@ type MintScimCredentialRequest struct {
 	// `manage-members(org)` AND reauthentication, so a stolen elevated
 	// session cannot issue a durable bearer on its own.
 	Proof *string `json:"proof,omitempty"`
+}
+
+// MintedInstanceConnection defines model for MintedInstanceConnection.
+type MintedInstanceConnection struct {
+	// Clamped The instance ceiling shortened the requested lifetime.
+	Clamped    bool               `json:"clamped"`
+	Connection InstanceConnection `json:"connection"`
+
+	// Value THE ONLY DISCLOSURE. Not retrievable afterwards through any surface.
+	Value string `json:"value"`
 }
 
 // MyOrg An organisation as a navigation destination: what the caller needs to
@@ -2092,6 +2330,84 @@ type RecoveryProofRequest struct {
 	Proof string `json:"proof"`
 }
 
+// RedeemWorkspaceHandoffRequest defines model for RedeemWorkspaceHandoffRequest.
+type RedeemWorkspaceHandoffRequest struct {
+	Code         string `json:"code"`
+	Origin       string `json:"origin"`
+	PkceVerifier string `json:"pkce_verifier"`
+}
+
+// Remote One connection entry and its last-known state. There is deliberately no
+// credential field: the stored credential is write-only after storage and
+// is not retrievable through any surface.
+type Remote struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id       ID      `json:"id"`
+	Identity *string `json:"identity,omitempty"`
+
+	// LastAttemptAt RFC 3339 UTC, microsecond precision.
+	LastAttemptAt Timestamp `json:"last_attempt_at"`
+
+	// Name A display name for an organisation, project or environment. Identity is
+	// the immutable id, so this is a label and a rename never breaks a
+	// reference. The 128-byte bound is the one the organisation contract has
+	// carried since the first slice, adopted for every entity so there is one
+	// number rather than four; no ADR fixes a per-entity name length. The
+	// grammar itself (non-empty, no control characters, no surrounding
+	// whitespace) is enforced in the domain rather than restated as a pattern
+	// here — two grammars would be two things to keep in sync.
+	//
+	// **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+	// `maxLength` below counts Unicode code points, which is the only length
+	// JSON Schema can express, so a name of 100 emoji satisfies this schema
+	// and is still refused by the server with `bad_request`. Clients that want
+	// to pre-validate must measure the UTF-8 encoding, not the string length.
+	Name EntityName `json:"name"`
+
+	// ObservedAt RFC 3339 UTC, microsecond precision.
+	ObservedAt   *Timestamp      `json:"observed_at,omitempty"`
+	OrgCount     *int            `json:"org_count,omitempty"`
+	Orgs         *[]DirectoryOrg `json:"orgs,omitempty"`
+	ProjectCount *int            `json:"project_count,omitempty"`
+
+	// SpkiPin base64(sha256(SubjectPublicKeyInfo)), confirmed by a human at add
+	// time and verified on every connection before any bytes are written.
+	// Immutable for the life of the entry.
+	SpkiPin string `json:"spki_pin"`
+
+	// Stale The listing below is a SNAPSHOT, not current. Computed from the
+	// outcome rather than the age: a fetch that just failed makes even a
+	// one-second-old snapshot stale.
+	Stale bool `json:"stale"`
+
+	// StaleForSeconds The snapshot's age, the number the card prints beside "unreachable".
+	StaleForSeconds *int `json:"stale_for_seconds,omitempty"`
+
+	// State The most recent fetch's outcome. A closed enum because the
+	// operator's fix differs per outcome, and collapsing them into one
+	// "error" is what makes a directory card useless.
+	State RemoteState `json:"state"`
+
+	// Url The canonical https origin. Immutable for the life of the entry.
+	Url     string  `json:"url"`
+	Version *string `json:"version,omitempty"`
+}
+
+// RemoteState The most recent fetch's outcome. A closed enum because the
+// operator's fix differs per outcome, and collapsing them into one
+// "error" is what makes a directory card useless.
+type RemoteState string
+
+// RemoteList defines model for RemoteList.
+type RemoteList struct {
+	Count int      `json:"count"`
+	Items []Remote `json:"items"`
+}
+
 // RenameFolderRequest defines model for RenameFolderRequest.
 type RenameFolderRequest struct {
 	// Path A slash-separated namespace: no leading or trailing separator, no empty
@@ -2120,6 +2436,25 @@ type RenameKeyRequest struct {
 	// constraint, not a style preference. `maxLength` counts code points
 	// here and bytes in the service; the grammar is ASCII, so they agree.
 	Name KeyName `json:"name"`
+}
+
+// RenameRemoteRequest defines model for RenameRemoteRequest.
+type RenameRemoteRequest struct {
+	// Name A display name for an organisation, project or environment. Identity is
+	// the immutable id, so this is a label and a rename never breaks a
+	// reference. The 128-byte bound is the one the organisation contract has
+	// carried since the first slice, adopted for every entity so there is one
+	// number rather than four; no ADR fixes a per-entity name length. The
+	// grammar itself (non-empty, no control characters, no surrounding
+	// whitespace) is enforced in the domain rather than restated as a pattern
+	// here — two grammars would be two things to keep in sync.
+	//
+	// **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+	// `maxLength` below counts Unicode code points, which is the only length
+	// JSON Schema can express, so a name of 100 emoji satisfies this schema
+	// and is still refused by the server with `bad_request`. Clients that want
+	// to pre-validate must measure the UTF-8 encoding, not the string length.
+	Name EntityName `json:"name"`
 }
 
 // RenameRequest defines model for RenameRequest.
@@ -2690,6 +3025,12 @@ type Session struct {
 // actually used.
 type SessionArtifact = string
 
+// SessionList defines model for SessionList.
+type SessionList struct {
+	Count int             `json:"count"`
+	Items []ActiveSession `json:"items"`
+}
+
 // SetCredentialPolicyRequest defines model for SetCredentialPolicyRequest.
 type SetCredentialPolicyRequest struct {
 	AllowIndefinite bool `json:"allow_indefinite"`
@@ -2715,6 +3056,38 @@ type SetValueRequest struct {
 	// with associated data binding it to this row alone.
 	Value string `json:"value"`
 }
+
+// StartWorkspaceHandoffRequest defines model for StartWorkspaceHandoffRequest.
+type StartWorkspaceHandoffRequest struct {
+	// Environment A prefixed UUIDv7, e.g. `org_0198…`.
+	Environment *ID `json:"environment,omitempty"`
+
+	// KeySet Step-up only, where the operation is key-scoped: the enumerated key
+	// set the consent covers.
+	KeySet *[]string `json:"key_set,omitempty"`
+
+	// Operation Step-up only, with `session`: the EXACT operation being elevated, so
+	// an elevated consent cannot be replayed against a different one.
+	Operation *string `json:"operation,omitempty"`
+
+	// Origin The requesting UI origin. Must be allowlisted, or the transaction refuses.
+	Origin string `json:"origin"`
+
+	// PkceChallenge S256 challenge (RFC 7636). Plain is not accepted.
+	PkceChallenge string                              `json:"pkce_challenge"`
+	Purpose       StartWorkspaceHandoffRequestPurpose `json:"purpose"`
+
+	// RedirectUri The exact pre-registered callback. Its authority IS the allowlist
+	// entry: a callback that does not live at the consented origin is not
+	// the consented code.
+	RedirectUri string `json:"redirect_uri"`
+
+	// Session A prefixed UUIDv7, e.g. `org_0198…`.
+	Session *ID `json:"session,omitempty"`
+}
+
+// StartWorkspaceHandoffRequestPurpose defines model for StartWorkspaceHandoffRequest.Purpose.
+type StartWorkspaceHandoffRequestPurpose string
 
 // Timestamp RFC 3339 UTC, microsecond precision.
 type Timestamp = time.Time
@@ -2959,6 +3332,93 @@ type WhoAmI struct {
 	Session   Session   `json:"session"`
 }
 
+// WorkspaceHandoffApproved defines model for WorkspaceHandoffApproved.
+type WorkspaceHandoffApproved struct {
+	// Code Single-use, atomically consumed at redemption.
+	Code        string `json:"code"`
+	RedirectUri string `json:"redirect_uri"`
+}
+
+// WorkspaceHandoffStarted defines model for WorkspaceHandoffStarted.
+type WorkspaceHandoffStarted struct {
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+
+	// Handoff A prefixed UUIDv7, e.g. `org_0198…`.
+	Handoff ID `json:"handoff"`
+
+	// State Crosses the front channel. The artifact never does.
+	State string `json:"state"`
+}
+
+// WorkspaceOrigin defines model for WorkspaceOrigin.
+type WorkspaceOrigin struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+	CreatedBy string    `json:"created_by"`
+
+	// Origin An EXACT origin — scheme://host[:port]. No wildcards, no subdomains.
+	Origin string `json:"origin"`
+}
+
+// WorkspaceOriginList defines model for WorkspaceOriginList.
+type WorkspaceOriginList struct {
+	Count int               `json:"count"`
+	Items []WorkspaceOrigin `json:"items"`
+}
+
+// WorkspaceOriginRemoved defines model for WorkspaceOriginRemoved.
+type WorkspaceOriginRemoved struct {
+	Origin string `json:"origin"`
+
+	// SessionsRevoked Workspace sessions killed by the SAME transaction. This is what
+	// makes de-allowlisting a kill switch rather than a headers change.
+	SessionsRevoked int `json:"sessions_revoked"`
+}
+
+// WorkspaceOriginRequest defines model for WorkspaceOriginRequest.
+type WorkspaceOriginRequest struct {
+	Origin string `json:"origin"`
+}
+
+// WorkspaceSession defines model for WorkspaceSession.
+type WorkspaceSession struct {
+	// AbsoluteExpiresAt RFC 3339 UTC, microsecond precision.
+	AbsoluteExpiresAt Timestamp `json:"absolute_expires_at"`
+
+	// Elevated True when this redemption ELEVATED the session the step-up
+	// transaction was bound to instead of establishing a new one. `session`
+	// is then that same session's id and `value` is its ROTATED bearer —
+	// not a second session. The rotation is deliberate: a bearer stolen
+	// before an elevation must not become an elevated bearer after it.
+	Elevated *bool `json:"elevated,omitempty"`
+
+	// Environment A prefixed UUIDv7, e.g. `org_0198…`.
+	Environment *ID `json:"environment,omitempty"`
+
+	// Handoff A prefixed UUIDv7, e.g. `org_0198…`.
+	Handoff ID `json:"handoff"`
+
+	// IdleExpiresAt RFC 3339 UTC, microsecond precision.
+	IdleExpiresAt Timestamp `json:"idle_expires_at"`
+	Origin        string    `json:"origin"`
+
+	// Session A prefixed UUIDv7, e.g. `org_0198…`.
+	Session ID `json:"session"`
+
+	// Value Keep it in JS MEMORY ONLY — never a cookie, never localStorage or
+	// sessionStorage. In-memory storage narrows the at-rest window; it is
+	// not non-stealability, and this contract does not sell it as such.
+	Value string `json:"value"`
+
+	// WindowExpiresAt When the reauthentication window this elevation opened lapses.
+	// Present only on an elevation.
+	WindowExpiresAt *Timestamp `json:"window_expires_at,omitempty"`
+}
+
+// ConnectionID A prefixed UUIDv7, e.g. `org_0198…`.
+type ConnectionID = ID
+
 // CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type CredentialID = ID
 
@@ -3004,6 +3464,22 @@ type ProviderSlug = string
 // ProviderSlugPath defines model for ProviderSlugPath.
 type ProviderSlugPath = string
 
+// RemoteName A display name for an organisation, project or environment. Identity is
+// the immutable id, so this is a label and a rename never breaks a
+// reference. The 128-byte bound is the one the organisation contract has
+// carried since the first slice, adopted for every entity so there is one
+// number rather than four; no ADR fixes a per-entity name length. The
+// grammar itself (non-empty, no control characters, no surrounding
+// whitespace) is enforced in the domain rather than restated as a pattern
+// here — two grammars would be two things to keep in sync.
+//
+// **The bound is 128 UTF-8 BYTES, and the server is authoritative.**
+// `maxLength` below counts Unicode code points, which is the only length
+// JSON Schema can express, so a name of 100 emoji satisfies this schema
+// and is still refused by the server with `bad_request`. Clients that want
+// to pre-validate must measure the UTF-8 encoding, not the string length.
+type RemoteName = EntityName
+
 // ResetTargetPrincipal A prefixed UUIDv7, e.g. `org_0198…`.
 type ResetTargetPrincipal = ID
 
@@ -3030,6 +3506,9 @@ type ScimStartIndex = string
 
 // ServiceAccountID A prefixed UUIDv7, e.g. `org_0198…`.
 type ServiceAccountID = ID
+
+// SessionID A prefixed UUIDv7, e.g. `org_0198…`.
+type SessionID = ID
 
 // ValueKeyName The canonical key grammar: uppercase ASCII, digits and underscore, no
 // leading digit. It is the environment-variable-safe grammar every
@@ -3282,6 +3761,18 @@ type ReauthPasskeyStartJSONRequestBody = WebauthnReauthStartRequest
 // StepUpPasskeyFinishJSONRequestBody defines body for StepUpPasskeyFinish for application/json ContentType.
 type StepUpPasskeyFinishJSONRequestBody = WebauthnResponse
 
+// ApproveWorkspaceHandoffJSONRequestBody defines body for ApproveWorkspaceHandoff for application/json ContentType.
+type ApproveWorkspaceHandoffJSONRequestBody = ApproveWorkspaceHandoffRequest
+
+// RedeemWorkspaceHandoffJSONRequestBody defines body for RedeemWorkspaceHandoff for application/json ContentType.
+type RedeemWorkspaceHandoffJSONRequestBody = RedeemWorkspaceHandoffRequest
+
+// StartWorkspaceHandoffJSONRequestBody defines body for StartWorkspaceHandoff for application/json ContentType.
+type StartWorkspaceHandoffJSONRequestBody = StartWorkspaceHandoffRequest
+
+// MintInstanceConnectionJSONRequestBody defines body for MintInstanceConnection for application/json ContentType.
+type MintInstanceConnectionJSONRequestBody = MintInstanceConnectionRequest
+
 // SetCredentialPolicyJSONRequestBody defines body for SetCredentialPolicy for application/json ContentType.
 type SetCredentialPolicyJSONRequestBody = SetCredentialPolicyRequest
 
@@ -3300,6 +3791,12 @@ type ApplyInstanceTemplateJSONRequestBody = ApplyTemplateRequest
 // PutOidcProviderJSONRequestBody defines body for PutOidcProvider for application/json ContentType.
 type PutOidcProviderJSONRequestBody = OidcProviderInput
 
+// AddRemoteJSONRequestBody defines body for AddRemote for application/json ContentType.
+type AddRemoteJSONRequestBody = AddRemoteRequest
+
+// RenameRemoteJSONRequestBody defines body for RenameRemote for application/json ContentType.
+type RenameRemoteJSONRequestBody = RenameRemoteRequest
+
 // PatchSamlProviderJSONRequestBody defines body for PatchSamlProvider for application/json ContentType.
 type PatchSamlProviderJSONRequestBody = SamlProviderPatch
 
@@ -3308,6 +3805,12 @@ type PutSamlProviderJSONRequestBody = SamlProviderInput
 
 // RefreshSamlProviderMetadataJSONRequestBody defines body for RefreshSamlProviderMetadata for application/json ContentType.
 type RefreshSamlProviderMetadataJSONRequestBody = SamlMetadataRefreshRequest
+
+// RemoveWorkspaceOriginJSONRequestBody defines body for RemoveWorkspaceOrigin for application/json ContentType.
+type RemoveWorkspaceOriginJSONRequestBody = WorkspaceOriginRequest
+
+// AddWorkspaceOriginJSONRequestBody defines body for AddWorkspaceOrigin for application/json ContentType.
+type AddWorkspaceOriginJSONRequestBody = WorkspaceOriginRequest
 
 // CreateOrgJSONRequestBody defines body for CreateOrg for application/json ContentType.
 type CreateOrgJSONRequestBody = CreateOrgRequest
@@ -3548,12 +4051,36 @@ type ServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(w http.ResponseWriter, r *http.Request)
+	// ApproveWorkspaceHandoff Approve a handoff as the authenticated human, minting the code.
+	// (POST /api/v1/auth/workspace/approve)
+	ApproveWorkspaceHandoff(w http.ResponseWriter, r *http.Request)
+	// RedeemWorkspaceHandoff Exchange code + PKCE verifier for a workspace session.
+	// (POST /api/v1/auth/workspace/redeem)
+	RedeemWorkspaceHandoff(w http.ResponseWriter, r *http.Request)
+	// StartWorkspaceHandoff Open a workspace handoff transaction.
+	// (POST /api/v1/auth/workspace/start)
+	StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request)
+	// ListInstanceConnections The connection credentials this instance has minted.
+	// (GET /api/v1/instance/connections)
+	ListInstanceConnections(w http.ResponseWriter, r *http.Request)
+	// MintInstanceConnection Mint a connection principal and its one credential.
+	// (POST /api/v1/instance/connections)
+	MintInstanceConnection(w http.ResponseWriter, r *http.Request)
+	// RevokeInstanceConnection Revoke the credential and retire its principal with it.
+	// (DELETE /api/v1/instance/connections/{connection})
+	RevokeInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID)
+	// ShowInstanceConnection One connection's metadata.
+	// (GET /api/v1/instance/connections/{connection})
+	ShowInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID)
 	// GetCredentialPolicy Read the instance credential lifetime controls.
 	// (GET /api/v1/instance/credential-policy)
 	GetCredentialPolicy(w http.ResponseWriter, r *http.Request)
 	// SetCredentialPolicy Move the instance credential lifetime controls.
 	// (PUT /api/v1/instance/credential-policy)
 	SetCredentialPolicy(w http.ResponseWriter, r *http.Request)
+	// ServeDirectory This instance's directory listing, as served to a connected instance.
+	// (GET /api/v1/instance/directory)
+	ServeDirectory(w http.ResponseWriter, r *http.Request)
 	// ListFederationIssuers List the configured OIDC federation issuers.
 	// (GET /api/v1/instance/federation-issuers)
 	ListFederationIssuers(w http.ResponseWriter, r *http.Request)
@@ -3590,6 +4117,21 @@ type ServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(w http.ResponseWriter, r *http.Request, slug ProviderSlugPath)
+	// ListRemotes The directory of connected instances.
+	// (GET /api/v1/instance/remotes)
+	ListRemotes(w http.ResponseWriter, r *http.Request)
+	// AddRemote Add a connection entry, verified by one authenticated fetch.
+	// (POST /api/v1/instance/remotes)
+	AddRemote(w http.ResponseWriter, r *http.Request)
+	// RemoveRemote Destroy an entry, its stored credential and its snapshot.
+	// (DELETE /api/v1/instance/remotes/{remote})
+	RemoveRemote(w http.ResponseWriter, r *http.Request, remote RemoteName)
+	// ShowRemote One connection entry, full detail, fetched on view.
+	// (GET /api/v1/instance/remotes/{remote})
+	ShowRemote(w http.ResponseWriter, r *http.Request, remote RemoteName)
+	// RenameRemote Change an entry's display name.
+	// (PATCH /api/v1/instance/remotes/{remote})
+	RenameRemote(w http.ResponseWriter, r *http.Request, remote RemoteName)
 	// ListSamlProviders List configured SAML providers.
 	// (GET /api/v1/instance/saml-providers)
 	ListSamlProviders(w http.ResponseWriter, r *http.Request)
@@ -3620,9 +4162,24 @@ type ServerInterface interface {
 	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
 	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
 	CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.Request, fingerprint string)
+	// RemoveWorkspaceOrigin De-allowlist an origin and kill every session bound to it.
+	// (DELETE /api/v1/instance/workspace-origins)
+	RemoveWorkspaceOrigin(w http.ResponseWriter, r *http.Request)
+	// ListWorkspaceOrigins The origin allowlist — which UI origins may run the handoff.
+	// (GET /api/v1/instance/workspace-origins)
+	ListWorkspaceOrigins(w http.ResponseWriter, r *http.Request)
+	// AddWorkspaceOrigin Consent to one exact UI origin.
+	// (POST /api/v1/instance/workspace-origins)
+	AddWorkspaceOrigin(w http.ResponseWriter, r *http.Request)
 	// ListMyOrgs The organisations the caller's own grants name.
 	// (GET /api/v1/me/orgs)
 	ListMyOrgs(w http.ResponseWriter, r *http.Request)
+	// ListMySessions The caller's own active sessions, workspace sessions included.
+	// (GET /api/v1/me/sessions)
+	ListMySessions(w http.ResponseWriter, r *http.Request)
+	// RevokeMySession Revoke one of the caller's own sessions.
+	// (DELETE /api/v1/me/sessions/{session})
+	RevokeMySession(w http.ResponseWriter, r *http.Request, session SessionID)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(w http.ResponseWriter, r *http.Request)
@@ -4121,6 +4678,48 @@ func (_ Unimplemented) Whoami(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ApproveWorkspaceHandoff Approve a handoff as the authenticated human, minting the code.
+// (POST /api/v1/auth/workspace/approve)
+func (_ Unimplemented) ApproveWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RedeemWorkspaceHandoff Exchange code + PKCE verifier for a workspace session.
+// (POST /api/v1/auth/workspace/redeem)
+func (_ Unimplemented) RedeemWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartWorkspaceHandoff Open a workspace handoff transaction.
+// (POST /api/v1/auth/workspace/start)
+func (_ Unimplemented) StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListInstanceConnections The connection credentials this instance has minted.
+// (GET /api/v1/instance/connections)
+func (_ Unimplemented) ListInstanceConnections(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// MintInstanceConnection Mint a connection principal and its one credential.
+// (POST /api/v1/instance/connections)
+func (_ Unimplemented) MintInstanceConnection(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeInstanceConnection Revoke the credential and retire its principal with it.
+// (DELETE /api/v1/instance/connections/{connection})
+func (_ Unimplemented) RevokeInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowInstanceConnection One connection's metadata.
+// (GET /api/v1/instance/connections/{connection})
+func (_ Unimplemented) ShowInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetCredentialPolicy Read the instance credential lifetime controls.
 // (GET /api/v1/instance/credential-policy)
 func (_ Unimplemented) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
@@ -4130,6 +4729,12 @@ func (_ Unimplemented) GetCredentialPolicy(w http.ResponseWriter, r *http.Reques
 // SetCredentialPolicy Move the instance credential lifetime controls.
 // (PUT /api/v1/instance/credential-policy)
 func (_ Unimplemented) SetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ServeDirectory This instance's directory listing, as served to a connected instance.
+// (GET /api/v1/instance/directory)
+func (_ Unimplemented) ServeDirectory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4205,6 +4810,36 @@ func (_ Unimplemented) PutOidcProvider(w http.ResponseWriter, r *http.Request, s
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListRemotes The directory of connected instances.
+// (GET /api/v1/instance/remotes)
+func (_ Unimplemented) ListRemotes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddRemote Add a connection entry, verified by one authenticated fetch.
+// (POST /api/v1/instance/remotes)
+func (_ Unimplemented) AddRemote(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemoveRemote Destroy an entry, its stored credential and its snapshot.
+// (DELETE /api/v1/instance/remotes/{remote})
+func (_ Unimplemented) RemoveRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowRemote One connection entry, full detail, fetched on view.
+// (GET /api/v1/instance/remotes/{remote})
+func (_ Unimplemented) ShowRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RenameRemote Change an entry's display name.
+// (PATCH /api/v1/instance/remotes/{remote})
+func (_ Unimplemented) RenameRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListSamlProviders List configured SAML providers.
 // (GET /api/v1/instance/saml-providers)
 func (_ Unimplemented) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
@@ -4265,9 +4900,39 @@ func (_ Unimplemented) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RemoveWorkspaceOrigin De-allowlist an origin and kill every session bound to it.
+// (DELETE /api/v1/instance/workspace-origins)
+func (_ Unimplemented) RemoveWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWorkspaceOrigins The origin allowlist — which UI origins may run the handoff.
+// (GET /api/v1/instance/workspace-origins)
+func (_ Unimplemented) ListWorkspaceOrigins(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddWorkspaceOrigin Consent to one exact UI origin.
+// (POST /api/v1/instance/workspace-origins)
+func (_ Unimplemented) AddWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListMyOrgs The organisations the caller's own grants name.
 // (GET /api/v1/me/orgs)
 func (_ Unimplemented) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMySessions The caller's own active sessions, workspace sessions included.
+// (GET /api/v1/me/sessions)
+func (_ Unimplemented) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeMySession Revoke one of the caller's own sessions.
+// (DELETE /api/v1/me/sessions/{session})
+func (_ Unimplemented) RevokeMySession(w http.ResponseWriter, r *http.Request, session SessionID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5477,6 +6142,128 @@ func (siw *ServerInterfaceWrapper) Whoami(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// ApproveWorkspaceHandoff operation middleware
+func (siw *ServerInterfaceWrapper) ApproveWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveWorkspaceHandoff(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RedeemWorkspaceHandoff operation middleware
+func (siw *ServerInterfaceWrapper) RedeemWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RedeemWorkspaceHandoff(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartWorkspaceHandoff operation middleware
+func (siw *ServerInterfaceWrapper) StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartWorkspaceHandoff(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListInstanceConnections operation middleware
+func (siw *ServerInterfaceWrapper) ListInstanceConnections(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListInstanceConnections(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MintInstanceConnection operation middleware
+func (siw *ServerInterfaceWrapper) MintInstanceConnection(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MintInstanceConnection(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeInstanceConnection operation middleware
+func (siw *ServerInterfaceWrapper) RevokeInstanceConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection ConnectionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", chi.URLParam(r, "connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeInstanceConnection(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowInstanceConnection operation middleware
+func (siw *ServerInterfaceWrapper) ShowInstanceConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection" -------------
+	var connection ConnectionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection", chi.URLParam(r, "connection"), &connection, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowInstanceConnection(w, r, connection)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetCredentialPolicy operation middleware
 func (siw *ServerInterfaceWrapper) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
 
@@ -5496,6 +6283,20 @@ func (siw *ServerInterfaceWrapper) SetCredentialPolicy(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetCredentialPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ServeDirectory operation middleware
+func (siw *ServerInterfaceWrapper) ServeDirectory(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ServeDirectory(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5765,6 +6566,112 @@ func (siw *ServerInterfaceWrapper) PutOidcProvider(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListRemotes operation middleware
+func (siw *ServerInterfaceWrapper) ListRemotes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRemotes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddRemote operation middleware
+func (siw *ServerInterfaceWrapper) AddRemote(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddRemote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveRemote operation middleware
+func (siw *ServerInterfaceWrapper) RemoveRemote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "remote" -------------
+	var remote RemoteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "remote", chi.URLParam(r, "remote"), &remote, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "remote", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveRemote(w, r, remote)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowRemote operation middleware
+func (siw *ServerInterfaceWrapper) ShowRemote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "remote" -------------
+	var remote RemoteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "remote", chi.URLParam(r, "remote"), &remote, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "remote", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowRemote(w, r, remote)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameRemote operation middleware
+func (siw *ServerInterfaceWrapper) RenameRemote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "remote" -------------
+	var remote RemoteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "remote", chi.URLParam(r, "remote"), &remote, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "remote", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameRemote(w, r, remote)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSamlProviders operation middleware
 func (siw *ServerInterfaceWrapper) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
 
@@ -5989,11 +6896,93 @@ func (siw *ServerInterfaceWrapper) CompromiseRetireSamlSpKey(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveWorkspaceOrigin operation middleware
+func (siw *ServerInterfaceWrapper) RemoveWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveWorkspaceOrigin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWorkspaceOrigins operation middleware
+func (siw *ServerInterfaceWrapper) ListWorkspaceOrigins(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWorkspaceOrigins(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddWorkspaceOrigin operation middleware
+func (siw *ServerInterfaceWrapper) AddWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddWorkspaceOrigin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListMyOrgs operation middleware
 func (siw *ServerInterfaceWrapper) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyOrgs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMySessions operation middleware
+func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMySessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeMySession operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMySession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "session" -------------
+	var session SessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "session", chi.URLParam(r, "session"), &session, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "session", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMySession(w, r, session)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10749,6 +11738,60 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search", wrapper.ScimSearchGroups)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/directory", wrapper.ServeDirectory)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/remotes", wrapper.ListRemotes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/remotes", wrapper.AddRemote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/remotes/{remote}", wrapper.RemoveRemote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/remotes/{remote}", wrapper.ShowRemote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/instance/remotes/{remote}", wrapper.RenameRemote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/connections", wrapper.ListInstanceConnections)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/connections", wrapper.MintInstanceConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/connections/{connection}", wrapper.RevokeInstanceConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/connections/{connection}", wrapper.ShowInstanceConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/instance/workspace-origins", wrapper.RemoveWorkspaceOrigin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/workspace-origins", wrapper.ListWorkspaceOrigins)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/instance/workspace-origins", wrapper.AddWorkspaceOrigin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/workspace/start", wrapper.StartWorkspaceHandoff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/workspace/approve", wrapper.ApproveWorkspaceHandoff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/workspace/redeem", wrapper.RedeemWorkspaceHandoff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/me/sessions", wrapper.ListMySessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/me/sessions/{session}", wrapper.RevokeMySession)
+	})
 
 	return r
 }
@@ -13104,6 +14147,622 @@ func (response Whoami500JSONResponse) VisitWhoamiResponse(w http.ResponseWriter)
 	return err
 }
 
+type ApproveWorkspaceHandoffRequestObject struct {
+	Body *ApproveWorkspaceHandoffJSONRequestBody
+}
+
+type ApproveWorkspaceHandoffResponseObject interface {
+	VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error
+}
+
+type ApproveWorkspaceHandoff200JSONResponse WorkspaceHandoffApproved
+
+func (response ApproveWorkspaceHandoff200JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveWorkspaceHandoff400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApproveWorkspaceHandoff400JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveWorkspaceHandoff401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApproveWorkspaceHandoff401JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveWorkspaceHandoff403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApproveWorkspaceHandoff403JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveWorkspaceHandoff429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ApproveWorkspaceHandoff429JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveWorkspaceHandoff500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApproveWorkspaceHandoff500JSONResponse) VisitApproveWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemWorkspaceHandoffRequestObject struct {
+	Body *RedeemWorkspaceHandoffJSONRequestBody
+}
+
+type RedeemWorkspaceHandoffResponseObject interface {
+	VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error
+}
+
+type RedeemWorkspaceHandoff201JSONResponse WorkspaceSession
+
+func (response RedeemWorkspaceHandoff201JSONResponse) VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemWorkspaceHandoff400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RedeemWorkspaceHandoff400JSONResponse) VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemWorkspaceHandoff403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RedeemWorkspaceHandoff403JSONResponse) VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemWorkspaceHandoff429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RedeemWorkspaceHandoff429JSONResponse) VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemWorkspaceHandoff500JSONResponse struct{ InternalJSONResponse }
+
+func (response RedeemWorkspaceHandoff500JSONResponse) VisitRedeemWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkspaceHandoffRequestObject struct {
+	Body *StartWorkspaceHandoffJSONRequestBody
+}
+
+type StartWorkspaceHandoffResponseObject interface {
+	VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error
+}
+
+type StartWorkspaceHandoff201JSONResponse WorkspaceHandoffStarted
+
+func (response StartWorkspaceHandoff201JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkspaceHandoff400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartWorkspaceHandoff400JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkspaceHandoff403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response StartWorkspaceHandoff403JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkspaceHandoff429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response StartWorkspaceHandoff429JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkspaceHandoff500JSONResponse struct{ InternalJSONResponse }
+
+func (response StartWorkspaceHandoff500JSONResponse) VisitStartWorkspaceHandoffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceConnectionsRequestObject struct {
+}
+
+type ListInstanceConnectionsResponseObject interface {
+	VisitListInstanceConnectionsResponse(w http.ResponseWriter) error
+}
+
+type ListInstanceConnections200JSONResponse InstanceConnectionList
+
+func (response ListInstanceConnections200JSONResponse) VisitListInstanceConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceConnections401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListInstanceConnections401JSONResponse) VisitListInstanceConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceConnections403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListInstanceConnections403JSONResponse) VisitListInstanceConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceConnections429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListInstanceConnections429JSONResponse) VisitListInstanceConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListInstanceConnections500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListInstanceConnections500JSONResponse) VisitListInstanceConnectionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnectionRequestObject struct {
+	Body *MintInstanceConnectionJSONRequestBody
+}
+
+type MintInstanceConnectionResponseObject interface {
+	VisitMintInstanceConnectionResponse(w http.ResponseWriter) error
+}
+
+type MintInstanceConnection201JSONResponse MintedInstanceConnection
+
+func (response MintInstanceConnection201JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnection400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response MintInstanceConnection400JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response MintInstanceConnection401JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnection403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response MintInstanceConnection403JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnection429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response MintInstanceConnection429JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type MintInstanceConnection500JSONResponse struct{ InternalJSONResponse }
+
+func (response MintInstanceConnection500JSONResponse) VisitMintInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnectionRequestObject struct {
+	Connection ConnectionID `json:"connection"`
+}
+
+type RevokeInstanceConnectionResponseObject interface {
+	VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error
+}
+
+type RevokeInstanceConnection204Response struct {
+}
+
+func (response RevokeInstanceConnection204Response) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeInstanceConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeInstanceConnection401JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnection403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokeInstanceConnection403JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeInstanceConnection404JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnection409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RevokeInstanceConnection409JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnection429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeInstanceConnection429JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeInstanceConnection500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeInstanceConnection500JSONResponse) VisitRevokeInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnectionRequestObject struct {
+	Connection ConnectionID `json:"connection"`
+}
+
+type ShowInstanceConnectionResponseObject interface {
+	VisitShowInstanceConnectionResponse(w http.ResponseWriter) error
+}
+
+type ShowInstanceConnection200JSONResponse InstanceConnection
+
+func (response ShowInstanceConnection200JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnection401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowInstanceConnection401JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnection403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ShowInstanceConnection403JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnection404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowInstanceConnection404JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnection429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ShowInstanceConnection429JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowInstanceConnection500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowInstanceConnection500JSONResponse) VisitShowInstanceConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetCredentialPolicyRequestObject struct {
 }
 
@@ -13264,6 +14923,84 @@ func (response SetCredentialPolicy429JSONResponse) VisitSetCredentialPolicyRespo
 type SetCredentialPolicy500JSONResponse struct{ InternalJSONResponse }
 
 func (response SetCredentialPolicy500JSONResponse) VisitSetCredentialPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeDirectoryRequestObject struct {
+}
+
+type ServeDirectoryResponseObject interface {
+	VisitServeDirectoryResponse(w http.ResponseWriter) error
+}
+
+type ServeDirectory200JSONResponse DirectoryListing
+
+func (response ServeDirectory200JSONResponse) VisitServeDirectoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeDirectory401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ServeDirectory401JSONResponse) VisitServeDirectoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeDirectory403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ServeDirectory403JSONResponse) VisitServeDirectoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeDirectory429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ServeDirectory429JSONResponse) VisitServeDirectoryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ServeDirectory500JSONResponse struct{ InternalJSONResponse }
+
+func (response ServeDirectory500JSONResponse) VisitServeDirectoryResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -14386,6 +16123,493 @@ func (response PutOidcProvider500JSONResponse) VisitPutOidcProviderResponse(w ht
 	return err
 }
 
+type ListRemotesRequestObject struct {
+}
+
+type ListRemotesResponseObject interface {
+	VisitListRemotesResponse(w http.ResponseWriter) error
+}
+
+type ListRemotes200JSONResponse RemoteList
+
+func (response ListRemotes200JSONResponse) VisitListRemotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRemotes401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListRemotes401JSONResponse) VisitListRemotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRemotes403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListRemotes403JSONResponse) VisitListRemotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRemotes429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListRemotes429JSONResponse) VisitListRemotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRemotes500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListRemotes500JSONResponse) VisitListRemotesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemoteRequestObject struct {
+	Body *AddRemoteJSONRequestBody
+}
+
+type AddRemoteResponseObject interface {
+	VisitAddRemoteResponse(w http.ResponseWriter) error
+}
+
+type AddRemote201JSONResponse Remote
+
+func (response AddRemote201JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddRemote400JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddRemote401JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AddRemote403JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddRemote409JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response AddRemote429JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddRemote500JSONResponse struct{ InternalJSONResponse }
+
+func (response AddRemote500JSONResponse) VisitAddRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveRemoteRequestObject struct {
+	Remote RemoteName `json:"remote"`
+}
+
+type RemoveRemoteResponseObject interface {
+	VisitRemoveRemoteResponse(w http.ResponseWriter) error
+}
+
+type RemoveRemote204Response struct {
+}
+
+func (response RemoveRemote204Response) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RemoveRemote401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveRemote401JSONResponse) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveRemote403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RemoveRemote403JSONResponse) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveRemote404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveRemote404JSONResponse) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveRemote429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RemoveRemote429JSONResponse) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveRemote500JSONResponse struct{ InternalJSONResponse }
+
+func (response RemoveRemote500JSONResponse) VisitRemoveRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemoteRequestObject struct {
+	Remote RemoteName `json:"remote"`
+}
+
+type ShowRemoteResponseObject interface {
+	VisitShowRemoteResponse(w http.ResponseWriter) error
+}
+
+type ShowRemote200JSONResponse Remote
+
+func (response ShowRemote200JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemote401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowRemote401JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemote403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ShowRemote403JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemote404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowRemote404JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemote429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ShowRemote429JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowRemote500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowRemote500JSONResponse) VisitShowRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemoteRequestObject struct {
+	Remote RemoteName `json:"remote"`
+	Body   *RenameRemoteJSONRequestBody
+}
+
+type RenameRemoteResponseObject interface {
+	VisitRenameRemoteResponse(w http.ResponseWriter) error
+}
+
+type RenameRemote200JSONResponse Remote
+
+func (response RenameRemote200JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RenameRemote400JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RenameRemote401JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RenameRemote403JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RenameRemote404JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RenameRemote409JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RenameRemote429JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RenameRemote500JSONResponse struct{ InternalJSONResponse }
+
+func (response RenameRemote500JSONResponse) VisitRenameRemoteResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListSamlProvidersRequestObject struct {
 }
 
@@ -15388,6 +17612,298 @@ func (response CompromiseRetireSamlSpKey500JSONResponse) VisitCompromiseRetireSa
 	return err
 }
 
+type RemoveWorkspaceOriginRequestObject struct {
+	Body *RemoveWorkspaceOriginJSONRequestBody
+}
+
+type RemoveWorkspaceOriginResponseObject interface {
+	VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error
+}
+
+type RemoveWorkspaceOrigin200JSONResponse WorkspaceOriginRemoved
+
+func (response RemoveWorkspaceOrigin200JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RemoveWorkspaceOrigin400JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveWorkspaceOrigin401JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RemoveWorkspaceOrigin403JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveWorkspaceOrigin404JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RemoveWorkspaceOrigin429JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveWorkspaceOrigin500JSONResponse struct{ InternalJSONResponse }
+
+func (response RemoveWorkspaceOrigin500JSONResponse) VisitRemoveWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaceOriginsRequestObject struct {
+}
+
+type ListWorkspaceOriginsResponseObject interface {
+	VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error
+}
+
+type ListWorkspaceOrigins200JSONResponse WorkspaceOriginList
+
+func (response ListWorkspaceOrigins200JSONResponse) VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaceOrigins401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListWorkspaceOrigins401JSONResponse) VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaceOrigins403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListWorkspaceOrigins403JSONResponse) VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaceOrigins429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListWorkspaceOrigins429JSONResponse) VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkspaceOrigins500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListWorkspaceOrigins500JSONResponse) VisitListWorkspaceOriginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOriginRequestObject struct {
+	Body *AddWorkspaceOriginJSONRequestBody
+}
+
+type AddWorkspaceOriginResponseObject interface {
+	VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error
+}
+
+type AddWorkspaceOrigin201JSONResponse WorkspaceOrigin
+
+func (response AddWorkspaceOrigin201JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddWorkspaceOrigin400JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddWorkspaceOrigin401JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AddWorkspaceOrigin403JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddWorkspaceOrigin409JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response AddWorkspaceOrigin429JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddWorkspaceOrigin500JSONResponse struct{ InternalJSONResponse }
+
+func (response AddWorkspaceOrigin500JSONResponse) VisitAddWorkspaceOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListMyOrgsRequestObject struct {
 }
 
@@ -15441,6 +17957,143 @@ func (response ListMyOrgs429JSONResponse) VisitListMyOrgsResponse(w http.Respons
 type ListMyOrgs500JSONResponse struct{ InternalJSONResponse }
 
 func (response ListMyOrgs500JSONResponse) VisitListMyOrgsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessionsRequestObject struct {
+}
+
+type ListMySessionsResponseObject interface {
+	VisitListMySessionsResponse(w http.ResponseWriter) error
+}
+
+type ListMySessions200JSONResponse SessionList
+
+func (response ListMySessions200JSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessions401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListMySessions401JSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessions429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListMySessions429JSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMySessions500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListMySessions500JSONResponse) VisitListMySessionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMySessionRequestObject struct {
+	Session SessionID `json:"session"`
+}
+
+type RevokeMySessionResponseObject interface {
+	VisitRevokeMySessionResponse(w http.ResponseWriter) error
+}
+
+type RevokeMySession204Response struct {
+}
+
+func (response RevokeMySession204Response) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMySession401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeMySession401JSONResponse) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMySession404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeMySession404JSONResponse) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMySession429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RevokeMySession429JSONResponse) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMySession500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeMySession500JSONResponse) VisitRevokeMySessionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -25505,12 +28158,36 @@ type StrictServerInterface interface {
 	// Whoami Describe the presented session.
 	// (GET /api/v1/auth/whoami)
 	Whoami(ctx context.Context, request WhoamiRequestObject) (WhoamiResponseObject, error)
+	// ApproveWorkspaceHandoff Approve a handoff as the authenticated human, minting the code.
+	// (POST /api/v1/auth/workspace/approve)
+	ApproveWorkspaceHandoff(ctx context.Context, request ApproveWorkspaceHandoffRequestObject) (ApproveWorkspaceHandoffResponseObject, error)
+	// RedeemWorkspaceHandoff Exchange code + PKCE verifier for a workspace session.
+	// (POST /api/v1/auth/workspace/redeem)
+	RedeemWorkspaceHandoff(ctx context.Context, request RedeemWorkspaceHandoffRequestObject) (RedeemWorkspaceHandoffResponseObject, error)
+	// StartWorkspaceHandoff Open a workspace handoff transaction.
+	// (POST /api/v1/auth/workspace/start)
+	StartWorkspaceHandoff(ctx context.Context, request StartWorkspaceHandoffRequestObject) (StartWorkspaceHandoffResponseObject, error)
+	// ListInstanceConnections The connection credentials this instance has minted.
+	// (GET /api/v1/instance/connections)
+	ListInstanceConnections(ctx context.Context, request ListInstanceConnectionsRequestObject) (ListInstanceConnectionsResponseObject, error)
+	// MintInstanceConnection Mint a connection principal and its one credential.
+	// (POST /api/v1/instance/connections)
+	MintInstanceConnection(ctx context.Context, request MintInstanceConnectionRequestObject) (MintInstanceConnectionResponseObject, error)
+	// RevokeInstanceConnection Revoke the credential and retire its principal with it.
+	// (DELETE /api/v1/instance/connections/{connection})
+	RevokeInstanceConnection(ctx context.Context, request RevokeInstanceConnectionRequestObject) (RevokeInstanceConnectionResponseObject, error)
+	// ShowInstanceConnection One connection's metadata.
+	// (GET /api/v1/instance/connections/{connection})
+	ShowInstanceConnection(ctx context.Context, request ShowInstanceConnectionRequestObject) (ShowInstanceConnectionResponseObject, error)
 	// GetCredentialPolicy Read the instance credential lifetime controls.
 	// (GET /api/v1/instance/credential-policy)
 	GetCredentialPolicy(ctx context.Context, request GetCredentialPolicyRequestObject) (GetCredentialPolicyResponseObject, error)
 	// SetCredentialPolicy Move the instance credential lifetime controls.
 	// (PUT /api/v1/instance/credential-policy)
 	SetCredentialPolicy(ctx context.Context, request SetCredentialPolicyRequestObject) (SetCredentialPolicyResponseObject, error)
+	// ServeDirectory This instance's directory listing, as served to a connected instance.
+	// (GET /api/v1/instance/directory)
+	ServeDirectory(ctx context.Context, request ServeDirectoryRequestObject) (ServeDirectoryResponseObject, error)
 	// ListFederationIssuers List the configured OIDC federation issuers.
 	// (GET /api/v1/instance/federation-issuers)
 	ListFederationIssuers(ctx context.Context, request ListFederationIssuersRequestObject) (ListFederationIssuersResponseObject, error)
@@ -25547,6 +28224,21 @@ type StrictServerInterface interface {
 	// PutOidcProvider Create or reconfigure an OIDC provider.
 	// (PUT /api/v1/instance/oidc-providers/{slug})
 	PutOidcProvider(ctx context.Context, request PutOidcProviderRequestObject) (PutOidcProviderResponseObject, error)
+	// ListRemotes The directory of connected instances.
+	// (GET /api/v1/instance/remotes)
+	ListRemotes(ctx context.Context, request ListRemotesRequestObject) (ListRemotesResponseObject, error)
+	// AddRemote Add a connection entry, verified by one authenticated fetch.
+	// (POST /api/v1/instance/remotes)
+	AddRemote(ctx context.Context, request AddRemoteRequestObject) (AddRemoteResponseObject, error)
+	// RemoveRemote Destroy an entry, its stored credential and its snapshot.
+	// (DELETE /api/v1/instance/remotes/{remote})
+	RemoveRemote(ctx context.Context, request RemoveRemoteRequestObject) (RemoveRemoteResponseObject, error)
+	// ShowRemote One connection entry, full detail, fetched on view.
+	// (GET /api/v1/instance/remotes/{remote})
+	ShowRemote(ctx context.Context, request ShowRemoteRequestObject) (ShowRemoteResponseObject, error)
+	// RenameRemote Change an entry's display name.
+	// (PATCH /api/v1/instance/remotes/{remote})
+	RenameRemote(ctx context.Context, request RenameRemoteRequestObject) (RenameRemoteResponseObject, error)
 	// ListSamlProviders List configured SAML providers.
 	// (GET /api/v1/instance/saml-providers)
 	ListSamlProviders(ctx context.Context, request ListSamlProvidersRequestObject) (ListSamlProvidersResponseObject, error)
@@ -25577,9 +28269,24 @@ type StrictServerInterface interface {
 	// CompromiseRetireSamlSpKey Immediately erase and replace a compromised active SAML SP key.
 	// (POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire)
 	CompromiseRetireSamlSpKey(ctx context.Context, request CompromiseRetireSamlSpKeyRequestObject) (CompromiseRetireSamlSpKeyResponseObject, error)
+	// RemoveWorkspaceOrigin De-allowlist an origin and kill every session bound to it.
+	// (DELETE /api/v1/instance/workspace-origins)
+	RemoveWorkspaceOrigin(ctx context.Context, request RemoveWorkspaceOriginRequestObject) (RemoveWorkspaceOriginResponseObject, error)
+	// ListWorkspaceOrigins The origin allowlist — which UI origins may run the handoff.
+	// (GET /api/v1/instance/workspace-origins)
+	ListWorkspaceOrigins(ctx context.Context, request ListWorkspaceOriginsRequestObject) (ListWorkspaceOriginsResponseObject, error)
+	// AddWorkspaceOrigin Consent to one exact UI origin.
+	// (POST /api/v1/instance/workspace-origins)
+	AddWorkspaceOrigin(ctx context.Context, request AddWorkspaceOriginRequestObject) (AddWorkspaceOriginResponseObject, error)
 	// ListMyOrgs The organisations the caller's own grants name.
 	// (GET /api/v1/me/orgs)
 	ListMyOrgs(ctx context.Context, request ListMyOrgsRequestObject) (ListMyOrgsResponseObject, error)
+	// ListMySessions The caller's own active sessions, workspace sessions included.
+	// (GET /api/v1/me/sessions)
+	ListMySessions(ctx context.Context, request ListMySessionsRequestObject) (ListMySessionsResponseObject, error)
+	// RevokeMySession Revoke one of the caller's own sessions.
+	// (DELETE /api/v1/me/sessions/{session})
+	RevokeMySession(ctx context.Context, request RevokeMySessionRequestObject) (RevokeMySessionResponseObject, error)
 	// GetMeta Instance discovery, unauthenticated.
 	// (GET /api/v1/meta)
 	GetMeta(ctx context.Context, request GetMetaRequestObject) (GetMetaResponseObject, error)
@@ -26839,6 +29546,206 @@ func (sh *strictHandler) Whoami(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ApproveWorkspaceHandoff operation middleware
+func (sh *strictHandler) ApproveWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	var request ApproveWorkspaceHandoffRequestObject
+
+	var body ApproveWorkspaceHandoffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveWorkspaceHandoff(ctx, request.(ApproveWorkspaceHandoffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveWorkspaceHandoff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveWorkspaceHandoffResponseObject); ok {
+		if err := validResponse.VisitApproveWorkspaceHandoffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RedeemWorkspaceHandoff operation middleware
+func (sh *strictHandler) RedeemWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	var request RedeemWorkspaceHandoffRequestObject
+
+	var body RedeemWorkspaceHandoffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemWorkspaceHandoff(ctx, request.(RedeemWorkspaceHandoffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemWorkspaceHandoff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RedeemWorkspaceHandoffResponseObject); ok {
+		if err := validResponse.VisitRedeemWorkspaceHandoffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartWorkspaceHandoff operation middleware
+func (sh *strictHandler) StartWorkspaceHandoff(w http.ResponseWriter, r *http.Request) {
+	var request StartWorkspaceHandoffRequestObject
+
+	var body StartWorkspaceHandoffJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartWorkspaceHandoff(ctx, request.(StartWorkspaceHandoffRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartWorkspaceHandoff")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartWorkspaceHandoffResponseObject); ok {
+		if err := validResponse.VisitStartWorkspaceHandoffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListInstanceConnections operation middleware
+func (sh *strictHandler) ListInstanceConnections(w http.ResponseWriter, r *http.Request) {
+	var request ListInstanceConnectionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListInstanceConnections(ctx, request.(ListInstanceConnectionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListInstanceConnections")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListInstanceConnectionsResponseObject); ok {
+		if err := validResponse.VisitListInstanceConnectionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// MintInstanceConnection operation middleware
+func (sh *strictHandler) MintInstanceConnection(w http.ResponseWriter, r *http.Request) {
+	var request MintInstanceConnectionRequestObject
+
+	var body MintInstanceConnectionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.MintInstanceConnection(ctx, request.(MintInstanceConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "MintInstanceConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(MintInstanceConnectionResponseObject); ok {
+		if err := validResponse.VisitMintInstanceConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeInstanceConnection operation middleware
+func (sh *strictHandler) RevokeInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID) {
+	var request RevokeInstanceConnectionRequestObject
+
+	request.Connection = connection
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeInstanceConnection(ctx, request.(RevokeInstanceConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeInstanceConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeInstanceConnectionResponseObject); ok {
+		if err := validResponse.VisitRevokeInstanceConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowInstanceConnection operation middleware
+func (sh *strictHandler) ShowInstanceConnection(w http.ResponseWriter, r *http.Request, connection ConnectionID) {
+	var request ShowInstanceConnectionRequestObject
+
+	request.Connection = connection
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowInstanceConnection(ctx, request.(ShowInstanceConnectionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowInstanceConnection")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowInstanceConnectionResponseObject); ok {
+		if err := validResponse.VisitShowInstanceConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetCredentialPolicy operation middleware
 func (sh *strictHandler) GetCredentialPolicy(w http.ResponseWriter, r *http.Request) {
 	var request GetCredentialPolicyRequestObject
@@ -26887,6 +29794,30 @@ func (sh *strictHandler) SetCredentialPolicy(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetCredentialPolicyResponseObject); ok {
 		if err := validResponse.VisitSetCredentialPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ServeDirectory operation middleware
+func (sh *strictHandler) ServeDirectory(w http.ResponseWriter, r *http.Request) {
+	var request ServeDirectoryRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ServeDirectory(ctx, request.(ServeDirectoryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ServeDirectory")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ServeDirectoryResponseObject); ok {
+		if err := validResponse.VisitServeDirectoryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -27229,6 +30160,146 @@ func (sh *strictHandler) PutOidcProvider(w http.ResponseWriter, r *http.Request,
 	}
 }
 
+// ListRemotes operation middleware
+func (sh *strictHandler) ListRemotes(w http.ResponseWriter, r *http.Request) {
+	var request ListRemotesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRemotes(ctx, request.(ListRemotesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRemotes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRemotesResponseObject); ok {
+		if err := validResponse.VisitListRemotesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddRemote operation middleware
+func (sh *strictHandler) AddRemote(w http.ResponseWriter, r *http.Request) {
+	var request AddRemoteRequestObject
+
+	var body AddRemoteJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddRemote(ctx, request.(AddRemoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddRemote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddRemoteResponseObject); ok {
+		if err := validResponse.VisitAddRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveRemote operation middleware
+func (sh *strictHandler) RemoveRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	var request RemoveRemoteRequestObject
+
+	request.Remote = remote
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveRemote(ctx, request.(RemoveRemoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveRemote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveRemoteResponseObject); ok {
+		if err := validResponse.VisitRemoveRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowRemote operation middleware
+func (sh *strictHandler) ShowRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	var request ShowRemoteRequestObject
+
+	request.Remote = remote
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowRemote(ctx, request.(ShowRemoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowRemote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowRemoteResponseObject); ok {
+		if err := validResponse.VisitShowRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RenameRemote operation middleware
+func (sh *strictHandler) RenameRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	var request RenameRemoteRequestObject
+
+	request.Remote = remote
+
+	var body RenameRemoteJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RenameRemote(ctx, request.(RenameRemoteRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RenameRemote")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RenameRemoteResponseObject); ok {
+		if err := validResponse.VisitRenameRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListSamlProviders operation middleware
 func (sh *strictHandler) ListSamlProviders(w http.ResponseWriter, r *http.Request) {
 	var request ListSamlProvidersRequestObject
@@ -27504,6 +30575,92 @@ func (sh *strictHandler) CompromiseRetireSamlSpKey(w http.ResponseWriter, r *htt
 	}
 }
 
+// RemoveWorkspaceOrigin operation middleware
+func (sh *strictHandler) RemoveWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+	var request RemoveWorkspaceOriginRequestObject
+
+	var body RemoveWorkspaceOriginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveWorkspaceOrigin(ctx, request.(RemoveWorkspaceOriginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveWorkspaceOrigin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveWorkspaceOriginResponseObject); ok {
+		if err := validResponse.VisitRemoveWorkspaceOriginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWorkspaceOrigins operation middleware
+func (sh *strictHandler) ListWorkspaceOrigins(w http.ResponseWriter, r *http.Request) {
+	var request ListWorkspaceOriginsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWorkspaceOrigins(ctx, request.(ListWorkspaceOriginsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWorkspaceOrigins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWorkspaceOriginsResponseObject); ok {
+		if err := validResponse.VisitListWorkspaceOriginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddWorkspaceOrigin operation middleware
+func (sh *strictHandler) AddWorkspaceOrigin(w http.ResponseWriter, r *http.Request) {
+	var request AddWorkspaceOriginRequestObject
+
+	var body AddWorkspaceOriginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddWorkspaceOrigin(ctx, request.(AddWorkspaceOriginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddWorkspaceOrigin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddWorkspaceOriginResponseObject); ok {
+		if err := validResponse.VisitAddWorkspaceOriginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListMyOrgs operation middleware
 func (sh *strictHandler) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
 	var request ListMyOrgsRequestObject
@@ -27521,6 +30678,56 @@ func (sh *strictHandler) ListMyOrgs(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListMyOrgsResponseObject); ok {
 		if err := validResponse.VisitListMyOrgsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMySessions operation middleware
+func (sh *strictHandler) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	var request ListMySessionsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMySessions(ctx, request.(ListMySessionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMySessions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMySessionsResponseObject); ok {
+		if err := validResponse.VisitListMySessionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMySession operation middleware
+func (sh *strictHandler) RevokeMySession(w http.ResponseWriter, r *http.Request, session SessionID) {
+	var request RevokeMySessionRequestObject
+
+	request.Session = session
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMySession(ctx, request.(RevokeMySessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMySession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMySessionResponseObject); ok {
+		if err := validResponse.VisitRevokeMySessionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

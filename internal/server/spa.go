@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"regexp"
 	"strconv"
@@ -44,6 +46,104 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'; " +
 	"frame-ancestors 'none'"
 
+// connectSrcSelf is the token the remote origins extend (#71). It is spelled
+// once so the extension below cannot drift from the baseline above.
+const connectSrcSelf = "connect-src 'self'"
+
+// policyWithRemotes extends the baseline's `connect-src` with exactly the
+// origins of the configured remote entries.
+//
+// The workspace tier is the BROWSER talking to a remote directly, so the shell
+// must be permitted to reach those origins — and only those. It stays a CLOSED
+// LIST, never `*`: an origin that is not a configured remote is not reachable
+// from this instance's UI, which is the whole point of naming them.
+//
+// `frame-ancestors 'none'` is untouched and stays everywhere: the popup is a
+// top-level navigation and the workspace never iframes a remote.
+//
+// Each stored value is PARSED AND RECONSTRUCTED as a canonical https origin,
+// and anything that does not survive that round trip is dropped. Character
+// filtering is what this replaced, and it was the wrong shape: a filter has to
+// enumerate everything a CSP source expression can be, and it missed the most
+// important one — `https://*.example.test` contains no forbidden character and
+// broadens connect-src to every matching subdomain, in a directive whose whole
+// promise is "exact origins, never `*`". Reconstruction cannot miss a form,
+// because only `scheme://host[:port]` is ever emitted, and only when the parse
+// produced exactly that.
+func policyWithRemotes(origins []string) string {
+	extra := make([]string, 0, len(origins))
+	seen := map[string]bool{}
+	for _, o := range origins {
+		canonical, ok := cspOrigin(o)
+		if !ok || seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		extra = append(extra, canonical)
+	}
+	if len(extra) == 0 {
+		return contentSecurityPolicy
+	}
+	return strings.Replace(contentSecurityPolicy, connectSrcSelf,
+		connectSrcSelf+" "+strings.Join(extra, " "), 1)
+}
+
+// cspOrigin reconstructs one canonical https origin, or reports that the stored
+// value is not one.
+//
+// The host is checked character by character against the DNS/IPv6 alphabet
+// rather than trusted from url.Parse: a wildcard, a scheme-relative form, a
+// path, a query, userinfo and a CSP keyword all fail here, and a value that
+// parses but round-trips to something else fails the final comparison. `https`
+// only — the remote URL grammar refuses plaintext, so an http entry in this
+// list is a stored value that was never a remote.
+func cspOrigin(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil ||
+		u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", false
+	}
+	host, port := u.Hostname(), u.Port()
+	if host == "" {
+		return "", false
+	}
+	// https, or http on LOOPBACK and nothing else. The remote URL grammar
+	// refuses plaintext, so an http entry is never a remote a human added
+	// through the API — but the two-instance browser harness repoints an entry
+	// at a loopback http origin at the store layer, deliberately, because what
+	// the browser leg proves (popup origin, CORS, noopener, header-borne
+	// bearer, both kill switches) is origin-shaped rather than pin-shaped. A
+	// loopback origin cannot be intercepted, so admitting it here narrows
+	// nothing that matters, and it is the same asymmetry
+	// service.CanonicalOrigin already codifies for allowlist entries.
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && (host == "localhost" || host == "127.0.0.1" || host == "::1"):
+	default:
+		return "", false
+	}
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == ':': // ':' for a bracketed IPv6 literal
+		default:
+			return "", false
+		}
+	}
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return "", false
+		}
+	}
+	out := u.Scheme + "://" + u.Host
+	// The round trip: the emitted value must be exactly what the stored value
+	// meant, with nothing dropped in normalisation.
+	if trimmed := strings.TrimSuffix(raw, "/"); trimmed != out {
+		return "", false
+	}
+	return out, true
+}
+
 // reservedRoots are the surfaces that own their own vocabulary. Each covers
 // itself and everything beneath it. `/api` subsumes ContractPrefix, so the
 // version prefix needs no entry of its own.
@@ -66,14 +166,20 @@ func reservedFromFallback(p string) bool {
 // securityHeaders applies the baseline to every response, API answers
 // included: `nosniff` on a JSON error body is as load-bearing as it is on the
 // document, and a single writer means no surface can be forgotten.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Content-Security-Policy", contentSecurityPolicy)
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
-		next.ServeHTTP(w, r)
-	})
+func securityHeaders(remoteOrigins func(context.Context) []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			policy := contentSecurityPolicy
+			if remoteOrigins != nil {
+				policy = policyWithRemotes(remoteOrigins(r.Context()))
+			}
+			h.Set("Content-Security-Policy", policy)
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Referrer-Policy", "no-referrer")
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // wantsHTML reports whether the client asked for a document. A navigation says

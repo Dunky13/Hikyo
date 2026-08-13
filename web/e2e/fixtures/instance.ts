@@ -2,38 +2,87 @@ import { chromium, type Page } from '@playwright/test';
 import { z } from 'zod';
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash, X509Certificate } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+import { createServer as createHttpsServer, type Server } from 'node:https';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-import { seedTenant, totpCode, type Seeded } from './seed.ts';
+import { seedTenant, totpCode } from './seed.ts';
 
 /**
- * A real Hikyo instance for the flow suite.
+ * TWO real Hikyo instances for the flow suite.
  *
  * The flows run against the GO BINARY serving the embedded SPA, never against
  * a Vite dev server. That is not fussiness: the serving rules, the CSP, the
- * `__Host-` cookies and the CSRF contract are all part of what the flows are
- * there to prove, and a dev server implements none of them.
+ * `__Host-` cookies, the CORS echo and the CSRF contract are all part of what
+ * the flows are there to prove, and a dev server implements none of them.
  *
- * The instance is a `--dev` zero-config sqlite one in a fresh temp directory,
- * bootstrapped exactly the way an operator does it — `hikyo admin create` on
- * the host, then the credential established with the authority it minted. No
- * seeded password, no fixture user inserted behind the API's back.
+ * Both instances are `--dev` zero-config sqlite ones in fresh temp directories,
+ * bootstrapped exactly the way an operator does it — `hikyo admin create` on the
+ * host, then the credential established with the authority it minted. No seeded
+ * password, no fixture user inserted behind the API's back, and no assurance
+ * handed out that was not demonstrated: every instance-scope surface is
+ * MFA-mandatory, so a password-only session could not open the remotes page at
+ * all.
+ *
+ * ## Why two hosts and not two ports
+ *
+ * A(viewing) is `http://localhost:PORT_A` and B(serving) is
+ * `http://127.0.0.1:PORT_B`, and the differing HOSTNAME is load-bearing:
+ * cookies are not partitioned by port, so two instances on one hostname would
+ * share `__Host-hikyo` and B's login would silently destroy A's session. Two
+ * loopback names are two cookie jars, two origins, and a real cross-origin arc.
+ *
+ * WHICH name goes where is not free, and it is a WebAuthn constraint rather
+ * than a preference: the relying-party id must be a registrable domain and an
+ * IP literal is not one, so a passkey ceremony against a loopback ADDRESS is
+ * refused by the browser before the server sees it. A is where the shared
+ * passkey session lives and where the reveal flow's ceremonies run, so A takes
+ * `localhost`. B authenticates with a password and a real TOTP factor only, so
+ * the address literal is fine there.
+ *
+ * ## Why the browser leg is http (decision, #71)
+ *
+ * `service.CanonicalOrigin` accepts http so a loopback ORIGIN is representable
+ * as an allowlist entry, while `remotefetch.ValidateRemoteURL` refuses plaintext
+ * so a REMOTE URL never is. That asymmetry is deliberate in the product and the
+ * harness leans on it: what the browser leg proves — popup on the remote's
+ * origin, CORS, `noopener` + BroadcastChannel, header-borne bearer, the kill
+ * switch — is ORIGIN-shaped, not pin-shaped, so http loopback exercises it
+ * honestly and no certificate exception is needed anywhere. The pinned TLS half
+ * is proven where it belongs, in `internal/isolation/two_instance_test.go`,
+ * against two real routers over real TLS.
+ *
+ * The one seam that falls out of that decision is `repointRemoteAtB` below: an
+ * entry can only be CREATED over https (correctly), so it is created through the
+ * real API against a pinned TLS front that proxies B's own directory, and then
+ * repointed at B's loopback http origin for the browser leg. The credential is
+ * really sealed, the snapshot is really B's, and the card lands in the
+ * `unreachable — last known` state, which is itself one of the states the
+ * directory card owes a human.
  */
 
-// `localhost`, not `127.0.0.1`, and that is a WebAuthn constraint rather than
-// a preference: the relying-party id must be a registrable domain and an IP
-// literal is not one, so a passkey ceremony against a loopback ADDRESS is
-// refused by the browser before the server sees it. `--dev` derives the
-// external origin from the listen address, so the two move together.
 export const HOST = 'localhost';
 export const PORT = Number(process.env['HIKYO_E2E_PORT'] ?? 45789);
 export const BASE_URL = `http://${HOST}:${PORT}`;
 
-/** The bootstrap administrator every flow signs in as. */
+/** The serving instance: a different loopback NAME, hence a different origin. */
+export const HOST_B = '127.0.0.1';
+export const PORT_B = Number(process.env['HIKYO_E2E_PORT_B'] ?? 45790);
+export const BASE_URL_B = `http://${HOST_B}:${PORT_B}`;
+
+/** The TLS front that exists only so `remote add` can be performed for real. */
+const PORT_TLS = Number(process.env['HIKYO_E2E_PORT_TLS'] ?? 45791);
+
+/** The name the viewing instance knows the serving instance by. */
+export const REMOTE_NAME = 'peer-b';
+
+/** The bootstrap administrator every flow signs in as, on both instances. */
 export const ADMIN = {
   username: 'e2e-admin',
   displayName: 'End To End',
@@ -43,18 +92,15 @@ export const ADMIN = {
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 
 /**
- * STORAGE_STATE is a signed-in browser context, minted once for the whole run.
+ * STORAGE_STATE is a signed-in browser context for BOTH instances, minted once
+ * for the whole run.
  *
  * Signing in is the login flow's subject; every other flow starts from a
  * session, which is also how a real browser works — and it keeps the suite's
- * spend against the instance's pre-auth allowance proportional to what is
+ * spend against each instance's pre-auth allowance proportional to what is
  * actually being tested rather than to how many tests there are.
  */
 export const STORAGE_STATE = fileURLToPath(new URL('../.auth/state.json', import.meta.url));
-
-type Instance = { proc: ChildProcess; dir: string; binary: string };
-
-let running: Instance | null = null;
 
 /**
  * SEEDED is the fixture tenant the reveal flow addresses, written by global
@@ -70,11 +116,37 @@ export const SEEDED = fileURLToPath(new URL('../.auth/seed.json', import.meta.ur
  * account-security mutation: it advances the principal's session generation
  * and deletes every other session that principal holds — so a flow that
  * enrolled would silently invalidate the shared session every other flow in
- * the suite is using, and the suite has exactly one principal. Enrolling once,
- * here, and handing the credential to each test's virtual authenticator keeps
- * the ceremonies real without any flow mutating the account.
+ * the suite is using, and the suite has exactly one principal per instance.
+ * Enrolling once, here, and handing the credential to each test's virtual
+ * authenticator keeps the ceremonies real without any flow mutating the
+ * account.
  */
 export const PASSKEY = fileURLToPath(new URL('../.auth/passkey.json', import.meta.url));
+
+type Instance = {
+  proc: ChildProcess;
+  dir: string;
+  binary: string;
+  base: string;
+  host: string;
+  cookies: Cookie[];
+  /** Set before a deliberate kill so the death-report handler stays quiet. */
+  expectedExit?: boolean;
+};
+
+type Cookie = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires: number;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'Strict' | 'Lax';
+};
+
+let instances: Instance[] = [];
+let tlsFront: Server | null = null;
 
 function run(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }) {
   const result = spawnSync(command, args, {
@@ -97,35 +169,263 @@ function run(command: string, args: string[], options: { cwd: string; env?: Node
  * in a different temp directory. Health alone would say "ready" and every
  * later step would then address a stranger's state — which surfaces as an
  * unreadable root-key file or an authentication failure with no cause in this
- * run's code. The pid is what makes the check specific.
+ * run's code. The process's own exit is what makes the wait specific; the
+ * root-key file written into THIS instance's directory is what makes the
+ * answer specific.
  */
-async function waitForHealthz(deadlineMs = 30_000): Promise<void> {
-  if (running !== null && running.proc.exitCode !== null) {
-    throw new Error(`the instance exited immediately with ${String(running.proc.exitCode)}`);
-  }
+async function waitForHealthz(instance: Instance, deadlineMs = 30_000): Promise<void> {
   const until = Date.now() + deadlineMs;
   for (;;) {
+    if (instance.proc.exitCode !== null) {
+      throw new Error(`the instance exited immediately with ${String(instance.proc.exitCode)}`);
+    }
     try {
-      const resp = await fetch(`${BASE_URL}/healthz`);
+      const resp = await fetch(`${instance.base}/healthz`);
       if (resp.ok) {
-        return;
+        break;
       }
     } catch {
       // not listening yet
     }
     if (Date.now() > until) {
-      throw new Error(`the instance never became healthy at ${BASE_URL}`);
+      throw new Error(`the instance never became healthy at ${instance.base}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
+  if (!existsSync(join(instance.dir, 'hikyo-dev.rootkey'))) {
+    throw new Error(
+      `something else is already serving ${instance.base}: this run's instance wrote no root key. ` +
+        'Kill the stale `hikyo server` process and re-run.',
+    );
+  }
 }
 
-export async function startInstance(): Promise<void> {
-  const dist = join(repoRoot, 'internal', 'webui', 'dist', 'index.html');
-  if (!existsSync(dist)) {
+/** cookieHeader renders one instance's jar for a raw fetch. */
+function cookieHeader(instance: Instance): string {
+  return instance.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+}
+
+function csrfToken(instance: Instance): string {
+  return instance.cookies.find((c) => c.name === '__Host-hikyo-csrf')?.value ?? '';
+}
+
+/**
+ * api is an authenticated call as the instance's administrator, with the
+ * synchronizer token echoed exactly as the SPA echoes it. It is used for the
+ * setup a flow is not about — minting a connection credential, adding the
+ * entry — never for anything a flow claims to prove.
+ */
+async function api(
+  instance: Instance,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<unknown> {
+  const resp = await fetch(instance.base + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookieHeader(instance),
+      'X-Hikyo-CSRF': csrfToken(instance),
+    },
+    body: body === undefined ? null : JSON.stringify(body),
+  });
+  if (!resp.ok) {
     throw new Error(
-      'the SPA has not been built: run `pnpm --dir web build` before the flow suite ' +
-        '(the flows run against the embedded bundle, not a dev server)',
+      `${method} ${path} on ${instance.base} answered ${resp.status}: ${await resp.text()}`,
+    );
+  }
+  // Several account-security mutations REISSUE the session — the TOTP family
+  // rotates the verifier — so the jar is refreshed from every response that
+  // carries one. Holding the pre-call cookies made the very next request
+  // answer `unauthenticated`, which reads exactly like a wrong code and is not.
+  adoptCookies(instance, resp);
+  if (process.env['HIKYO_E2E_VERBOSE'] !== undefined) {
+    process.stderr.write(
+      `DEBUG ${method} ${path} set-cookie=${JSON.stringify(resp.headers.getSetCookie())}\n`,
+    );
+  }
+  return resp.status === 204 ? null : await resp.json();
+}
+
+/**
+ * adoptCookies MERGES whatever a response reissued into the jar, by name.
+ *
+ * By name and not wholesale: a reissue may set the session cookie alone, and a
+ * jar replaced with that one cookie loses the synchronizer token, which then
+ * fails the NEXT mutation with a refusal that looks nothing like its cause.
+ */
+function adoptCookies(instance: Instance, resp: Response): void {
+  const reissued = parseSetCookie(resp.headers.getSetCookie(), instance.host);
+  if (reissued.length === 0) {
+    return;
+  }
+  const jar = new Map(instance.cookies.map((c) => [c.name, c]));
+  for (const cookie of reissued) {
+    jar.set(cookie.name, cookie);
+  }
+  instance.cookies = [...jar.values()];
+}
+
+function parseSetCookie(raw: string[], host: string): Cookie[] {
+  return raw.map((line) => {
+    const [pair = ''] = line.split(';');
+    const [name = '', ...value] = pair.split('=');
+    return {
+      name,
+      value: value.join('='),
+      domain: host,
+      path: '/',
+      expires: -1,
+      httpOnly: /httponly/i.test(line),
+      secure: /secure/i.test(line),
+      sameSite: /samesite=strict/i.test(line) ? ('Strict' as const) : ('Lax' as const),
+    };
+  });
+}
+
+/** signIn mints a browser session the same way the SPA does. */
+async function signIn(instance: Instance): Promise<void> {
+  const resp = await fetch(`${instance.base}/api/v1/auth/local/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: ADMIN.username,
+      password: ADMIN.password,
+      artifact: 'browser',
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(`signing in at ${instance.base} answered ${resp.status}`);
+  }
+  const cookies = parseSetCookie(resp.headers.getSetCookie(), instance.host);
+  if (cookies.length !== 2) {
+    throw new Error(`the login set ${cookies.length} cookies, want the session and CSRF pair`);
+  }
+  instance.cookies = cookies;
+}
+
+/**
+ * enrolTotp gives the serving instance's administrator a real second factor.
+ *
+ * Only B needs this. A's administrator is enrolled by `seedTenant`, whose
+ * provisioning URI and spent-step bookkeeping travel to the workers in the
+ * SEEDED file — enrolling a second time here would rotate the secret out from
+ * under `nextTotpCode` and stale every flow that uses it.
+ *
+ * Every instance-scope capability is MFA-mandatory, so without this the setup
+ * would be testing the refusal rather than the surface.
+ */
+async function enrolTotp(instance: Instance): Promise<string> {
+  const started = await api(instance, 'POST', '/api/v1/auth/totp/enrol/start', {
+    password: ADMIN.password,
+  });
+  if (typeof started !== 'object' || started === null || !('otpauth_uri' in started)) {
+    throw new Error('TOTP enrolment did not disclose an otpauth URI');
+  }
+  const uri = started.otpauth_uri;
+  if (typeof uri !== 'string') {
+    throw new Error('the otpauth URI is not a string');
+  }
+  await presentTotp(instance, uri, '/api/v1/auth/totp/enrol/confirm');
+  return uri;
+}
+
+/**
+ * presentTotp posts a TOTP code, after waiting for a step the server has not
+ * already consumed.
+ *
+ * TRAP, recorded because it cost real time. A code is single-use PER STEP —
+ * `last_step < ?`, strictly — and the validation window is only +/-1 step wide,
+ * so two ceremonies inside the same 30 seconds have NO code that is both fresh
+ * and acceptable. Worse, the refusal is `unauthenticated`, which is
+ * indistinguishable from a wrong code and reads exactly like a clock skew that
+ * is not there: this server's `Date` header agrees with this process to the
+ * second, and the two implementations generate identical codes for identical
+ * instants (checked against `pquerna/otp` directly).
+ *
+ * So every presentation waits for the step counter to advance and then sends
+ * the code for NOW. That is deterministic — one request, no failed attempts to
+ * feed the per-account backoff — at the cost of up to 30 seconds per ceremony.
+ */
+async function presentTotp(instance: Instance, otpauth: string, path: string): Promise<void> {
+  const deadline = Date.now() + 3 * TOTP_PERIOD * 1000;
+  let last = '';
+  for (;;) {
+    for (const steps of [0, 1, 2]) {
+      const code = totpCode(otpauth, new Date(Date.now() + steps * TOTP_PERIOD * 1000));
+      const resp = await fetch(instance.base + path, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookieHeader(instance),
+          'X-Hikyo-CSRF': csrfToken(instance),
+        },
+        body: JSON.stringify({ code }),
+      });
+      if (resp.ok) {
+        adoptCookies(instance, resp);
+        return;
+      }
+      last = `${resp.status}: ${await resp.text()}`;
+      if (resp.status !== 401) {
+        throw new Error(`${path} at ${instance.base} answered ${last}`);
+      }
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`no TOTP code was accepted for ${path} at ${instance.base}; last ${last}`);
+    }
+    await waitForNextStep();
+  }
+}
+
+/** The server's TOTP step, in seconds. `seed.ts`'s generator assumes the same. */
+const TOTP_PERIOD = 30;
+
+/** waitForNextStep sleeps until the TOTP step counter has advanced. */
+async function waitForNextStep(): Promise<void> {
+  const step = () => Math.floor(Date.now() / 1000 / TOTP_PERIOD);
+  const from = step();
+  while (step() <= from) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
+/** portTaken reports whether anything accepts a connection on host:port. */
+function portTaken(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    const done = (taken: boolean) => {
+      socket.destroy();
+      resolve(taken);
+    };
+    socket.setTimeout(1000);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false));
+  });
+}
+
+/**
+ * startInstanceAt brings up one instance and establishes its bootstrap
+ * credential. It stops there: what each instance needs NEXT differs (A is
+ * seeded and takes a passkey, B enrols TOTP), and folding both into one
+ * function would mean a flag deciding half the body.
+ */
+async function startInstanceAt(host: string, port: number, base: string): Promise<Instance> {
+  // Fail loud on a squatter. A previous run killed mid-flight (a timeout, a
+  // ^C) leaves a server on this port with ANOTHER datastore behind it, and the
+  // health probe below cannot tell the difference — the bootstrap then writes
+  // to a database nobody is serving and the first authenticated call answers
+  // 401, which reads like a credential bug and is not.
+  //
+  // A raw TCP connect rather than a fetch: `fetch` to a closed port rejects
+  // with an opaque `TypeError: fetch failed` that is easy to swallow in the
+  // wrong place, and "is the port taken" is a question about the socket.
+  if (await portTaken(host, port)) {
+    throw new Error(
+      `something is already listening on ${host}:${port}. A previous flow run was killed ` +
+        `without teardown; stop it before running the suite again.`,
     );
   }
 
@@ -133,10 +433,11 @@ export async function startInstance(): Promise<void> {
   const binary = join(dir, 'hikyo');
   // `-tags ui` is what embeds the bundle. A binary built without it serves the
   // API and answers 404 for the document, which is the correct default and the
-  // wrong thing to test a UI against.
+  // wrong thing to test a UI against. Built once per instance directory because
+  // `admin` reads its datastore from the working directory it is run in.
   run('go', ['build', '-tags', 'ui', '-o', binary, './cmd/hikyo'], { cwd: repoRoot });
 
-  const proc = spawn(binary, ['server', '--dev', '--listen', `${HOST}:${PORT}`], {
+  const proc = spawn(binary, ['server', '--dev', '--listen', `${host}:${port}`], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
@@ -151,25 +452,41 @@ export async function startInstance(): Promise<void> {
       HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE: '500',
     },
   });
-  running = { proc, dir, binary };
+  const instance: Instance = { proc, dir, binary, base, host, cookies: [] };
+  instances.push(instance);
+  // The last 64 KiB of output is kept regardless of verbosity: when the server
+  // dies unexpectedly mid-suite, the diagnosis lives in this buffer and nowhere
+  // else — the suite has been killed by an undiagnosable ERR_CONNECTION_REFUSED
+  // before. stdout gets the same treatment so a full pipe can never block the
+  // server either.
+  const tail: Buffer[] = [];
+  let tailBytes = 0;
+  const keep = (chunk: Buffer): void => {
+    tail.push(chunk);
+    tailBytes += chunk.length;
+    while (tailBytes > 64 * 1024 && tail.length > 1) {
+      tailBytes -= tail[0]!.length;
+      tail.shift();
+    }
+  };
+  proc.stdout?.on('data', keep);
   proc.stderr?.on('data', (chunk: Buffer) => {
+    keep(chunk);
     if (process.env['HIKYO_E2E_VERBOSE'] !== undefined) {
       process.stderr.write(chunk);
     }
   });
-  proc.on('exit', (code) => {
-    if (running !== null && code !== 0 && code !== null) {
-      process.stderr.write(`hikyo exited with ${code}\n`);
+  proc.on('exit', (code, signal) => {
+    if (instance.expectedExit) {
+      return;
     }
+    process.stderr.write(
+      `\ninstance at ${base} exited unexpectedly (code=${String(code)} signal=${String(signal)}); ` +
+        `last output follows\n${Buffer.concat(tail).toString()}\n`,
+    );
   });
 
-  await waitForHealthz();
-  if (!existsSync(join(dir, 'hikyo-dev.rootkey'))) {
-    throw new Error(
-      `something else is already serving ${BASE_URL}: this run's instance wrote no root key. ` +
-        'Kill the stale `hikyo server` process and re-run.',
-    );
-  }
+  await waitForHealthz(instance);
 
   // `admin` reads its datastore and root key from the environment only, so the
   // dev root key the server just generated is handed to it explicitly.
@@ -178,49 +495,252 @@ export async function startInstance(): Promise<void> {
     binary,
     ['admin', 'create', '--username', ADMIN.username, '--display-name', ADMIN.displayName,
       '--output-file', authorityFile],
-    {
-      cwd: dir,
-      env: {
-        HIKYO_DB: 'sqlite:hikyo-dev.db',
-        HIKYO_ROOT_KEY: readFileSync(join(dir, 'hikyo-dev.rootkey'), 'utf8').trim(),
-      },
-    },
+    { cwd: dir, env: adminEnv(instance) },
   );
 
-  const establish = await fetch(`${BASE_URL}/api/v1/auth/credential/establish`, {
+  return instance;
+}
+
+/** adminEnv is what the `admin` verb needs to address this instance's store. */
+function adminEnv(instance: Instance): NodeJS.ProcessEnv {
+  return {
+    HIKYO_DB: 'sqlite:hikyo-dev.db',
+    HIKYO_ROOT_KEY: readFileSync(join(instance.dir, 'hikyo-dev.rootkey'), 'utf8').trim(),
+  };
+}
+
+async function establishCredential(instance: Instance): Promise<void> {
+  const establish = await fetch(`${instance.base}/api/v1/auth/credential/establish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      authority: readFileSync(authorityFile, 'utf8').trim(),
+      authority: readFileSync(join(instance.dir, 'authority'), 'utf8').trim(),
       password: ADMIN.password,
     }),
   });
   if (establish.status !== 204) {
     throw new Error(`establishing the bootstrap credential answered ${establish.status}`);
   }
+}
 
-  // The fixture tenant. Break-glass grants run through the binary on the host,
-  // which is the only path that issues a grant without a session — and the
-  // bootstrap administrator holds no disclosure capability by design, so
-  // something has to.
+/**
+ * seedDirectoryGrant gives the bootstrap administrator `instance-directory`
+ * before anyone signs in.
+ *
+ * A store-level seam, and it is here for a reason that is about the fixture
+ * rather than the product. `instance-directory` is deliberately NOT in the
+ * operator set — reading another installation's org and project names is its
+ * own grantable power — so an operator really does have to grant it. Doing that
+ * through the API is a three-ceremony detour: the grant surface is
+ * MFA-mandatory, and granting to oneself invalidates one's own sessions, so the
+ * fixture would have to enrol, step up, grant, sign in and step up again, at one
+ * 30-second TOTP step boundary per ceremony. The grant surface is #55's to prove
+ * and is proven there; what these flows are about starts after it.
+ *
+ * Written before the first sign-in on purpose: a grant that predates every
+ * session cannot invalidate one.
+ */
+function seedDirectoryGrant(dir: string): void {
+  const db = new DatabaseSync(join(dir, 'hikyo-dev.db'));
+  try {
+    const row = db.prepare(`SELECT id FROM principals WHERE kind = 'human' LIMIT 1`).get();
+    const principal = row === undefined ? undefined : Object(row)['id'];
+    if (typeof principal !== 'string') {
+      throw new Error('no bootstrap principal to grant instance-directory to');
+    }
+    const at = new Date().toISOString().replace('Z', '000Z');
+    db.prepare(
+      `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+       VALUES ('grn_e2e_directory', ?, 'instance-directory', NULL, NULL, NULL, ?)`,
+    ).run(principal, at);
+    // A grant row with no origin is the state the permission model forbids:
+    // the membership surface INNER JOINs origins, so a grant nobody can point
+    // at the reason for would simply not be seen.
+    db.prepare(
+      `INSERT INTO grant_origins (id, grant_id, kind, subject, created_at)
+       VALUES ('gor_e2e_directory', 'grn_e2e_directory', 'manual', ?, ?)`,
+    ).run(principal, at);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * startTLSFront brings up the pinned https peer `remote add` is performed
+ * against. It PROXIES B's own directory endpoint, so the snapshot the entry
+ * stores is B's real listing rather than a fabricated one.
+ *
+ * The certificate is generated here and its SPKI fingerprint is what the entry
+ * pins — the same construction the product uses, so the add ceremony is the
+ * real one including pin verification. The front is bound to the loopback
+ * ADDRESS regardless of which name A wears, because the certificate names it
+ * and because the pin, not the name, is what the product verifies.
+ */
+function startTLSFront(dir: string): string {
+  const key = join(dir, 'front.key');
+  const cert = join(dir, 'front.crt');
+  run('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', key, '-out', cert, '-days', '1',
+    '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1',
+  ], { cwd: dir });
+
+  const pem = readFileSync(cert, 'utf8');
+  const spki = new X509Certificate(pem).publicKey.export({ type: 'spki', format: 'der' });
+  const pin = createHash('sha256').update(spki).digest('base64');
+
+  tlsFront = createHttpsServer(
+    { key: readFileSync(key), cert: readFileSync(cert) },
+    (incoming, outgoing) => {
+      const proxied = httpRequest(
+        {
+          host: HOST_B,
+          port: PORT_B,
+          path: incoming.url ?? '/',
+          method: incoming.method ?? 'GET',
+          headers: { ...incoming.headers, host: `${HOST_B}:${PORT_B}` },
+        },
+        (answer) => {
+          outgoing.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.pipe(outgoing);
+        },
+      );
+      proxied.on('error', () => {
+        outgoing.writeHead(502).end();
+      });
+      incoming.pipe(proxied);
+    },
+  );
+  tlsFront.listen(PORT_TLS, TLS_FRONT_HOST);
+  return pin;
+}
+
+const TLS_FRONT_HOST = '127.0.0.1';
+
+/**
+ * repointRemoteAtB rewrites the entry's URL to B's loopback http origin.
+ *
+ * THE ONLY OTHER store-level seam in this harness, and it is here because the
+ * product is right and the harness is constrained: an entry may only be CREATED
+ * over https, which it was, through the real API, against a real pin. What the
+ * browser leg needs afterwards is B's real ORIGIN, and the workspace tier is
+ * origin-shaped rather than pin-shaped. The card then renders the
+ * `unreachable — last known` state honestly: the server genuinely cannot fetch
+ * a plaintext URL, and the snapshot it shows is genuinely the last one it got.
+ */
+function repointRemoteAtB(instance: Instance): void {
+  const db = new DatabaseSync(join(instance.dir, 'hikyo-dev.db'));
+  try {
+    db.prepare('UPDATE remotes SET url = ? WHERE name = ?').run(BASE_URL_B, REMOTE_NAME);
+  } finally {
+    db.close();
+  }
+}
+
+export async function startInstance(): Promise<void> {
+  const dist = join(repoRoot, 'internal', 'webui', 'dist', 'index.html');
+  if (!existsSync(dist)) {
+    throw new Error(
+      'the SPA has not been built: run `pnpm --dir web build` before the flow suite ' +
+        '(the flows run against the embedded bundle, not a dev server)',
+    );
+  }
+
+  // Concurrently, so the one unavoidable TOTP step-boundary wait is paid once
+  // rather than once per instance.
+  const [viewing, serving] = await Promise.all([
+    startInstanceAt(HOST, PORT, BASE_URL),
+    startInstanceAt(HOST_B, PORT_B, BASE_URL_B),
+  ]);
+
+  // Only the VIEWING instance needs `instance-directory`: it is the one that
+  // reads a foreign directory. The serving side's work — minting a connection
+  // credential, managing the origin allowlist — is `instance-config`, which the
+  // bootstrap operator already holds.
+  seedDirectoryGrant(viewing.dir);
+  await Promise.all([establishCredential(viewing), establishCredential(serving)]);
+
+  // The fixture tenant, on the VIEWING instance — the reveal flow's subject and
+  // the instance every non-#71 flow addresses. Break-glass grants run through
+  // the binary on the host, which is the only path that issues a grant without
+  // a session, and the bootstrap administrator holds no disclosure capability
+  // by design, so something has to. It also enrols the administrator's TOTP
+  // factor, which is why nothing here enrols a second one.
   const seeded = await seedTenant((args) => {
-    run(binary, ['admin', 'grant', ...args], {
-      cwd: dir,
-      env: {
-        HIKYO_DB: 'sqlite:hikyo-dev.db',
-        HIKYO_ROOT_KEY: readFileSync(join(dir, 'hikyo-dev.rootkey'), 'utf8').trim(),
-      },
+    run(viewing.binary, ['admin', 'grant', ...args], {
+      cwd: viewing.dir,
+      env: adminEnv(viewing),
     });
   });
   mkdirSync(fileURLToPath(new URL('../.auth', import.meta.url)), { recursive: true });
-  writeFileSync(SEEDED, JSON.stringify({ ...seeded, dbPath: join(dir, 'hikyo-dev.db') }));
+  writeFileSync(SEEDED, JSON.stringify({ ...seeded, dbPath: join(viewing.dir, 'hikyo-dev.db') }));
+
+  // B enrols its own factor: it has no seeded tenant and no passkey, and every
+  // #71 act below it performs is instance-scope and therefore MFA-mandatory.
+  await signIn(serving);
+  const servingOtpauth = await enrolTotp(serving);
+  // A fresh sign-in before the step-up: the enrolment's confirm REISSUES the
+  // session, and re-presenting the credential is both cheaper to reason about
+  // than tracking a rotation across two ceremonies and closer to what a human
+  // does — enrol, then sign in again and present the new factor.
+  await signIn(serving);
+  await presentTotp(serving, servingOtpauth, '/api/v1/auth/totp/step-up');
+
+  // A's raw setup session, stepped up with the factor `seedTenant` enrolled.
+  // `nextTotpCode` is what keeps the single-use-per-step bookkeeping honest
+  // across this process and the workers.
+  await signIn(viewing);
+  await stepUpWithSeededTotp(viewing);
+
+  // B mints the connection credential A will hold. Display-once: this response
+  // is the only time the value exists outside a verifier.
+  const minted = await api(serving, 'POST', '/api/v1/instance/connections', {
+    label: 'viewing instance',
+  });
+  if (typeof minted !== 'object' || minted === null || !('value' in minted)) {
+    throw new Error('minting a connection credential disclosed no value');
+  }
+  const credential = minted.value;
+  if (typeof credential !== 'string') {
+    throw new Error('the minted credential is not a string');
+  }
+
+  const pin = startTLSFront(viewing.dir);
+  await api(viewing, 'POST', '/api/v1/instance/remotes', {
+    name: REMOTE_NAME,
+    url: `https://${TLS_FRONT_HOST}:${PORT_TLS}`,
+    spki_pin: pin,
+    credential,
+  });
+  repointRemoteAtB(viewing);
 
   // The shared browser session is minted LAST, and that ordering is
   // load-bearing: seeding issues break-glass grants, a grant advances the
   // principal's session generation, and every session minted before it is dead
   // by design. A storage state written earlier would hand every flow a cookie
-  // the server has already disowned.
-  await mintStorageState();
+  // the server has already disowned. It also carries B's jar, which the raw
+  // setup above is the only thing that ever mints.
+  await mintStorageState(serving.cookies);
+}
+
+/**
+ * stepUpWithSeededTotp presents a code for a step nothing has spent, through
+ * the browser-cookie surface rather than seed.ts's bearer one.
+ */
+async function stepUpWithSeededTotp(instance: Instance): Promise<void> {
+  const resp = await fetch(`${instance.base}/api/v1/auth/totp/step-up`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookieHeader(instance),
+      'X-Hikyo-CSRF': csrfToken(instance),
+    },
+    body: JSON.stringify({ code: await nextTotpCode() }),
+  });
+  if (!resp.ok) {
+    throw new Error(`stepping up at ${instance.base} answered ${resp.status}`);
+  }
+  adoptCookies(instance, resp);
 }
 
 /**
@@ -272,7 +792,49 @@ export function readSeed(): Fixture {
   return zSeeded.parse(JSON.parse(readFileSync(SEEDED, 'utf8')));
 }
 
-async function mintStorageState(): Promise<void> {
+/**
+ * zStorageState is the Playwright storage state, parsed because this harness
+ * READS ITS OWN FILE BACK — `mintStorageState` has to preserve the serving
+ * instance's cookies across a re-mint, and a worker calling
+ * `refreshSharedSession` cannot reach the setup process's variables.
+ */
+const zStorageState = z.object({
+  cookies: z.array(
+    z.object({
+      name: z.string(),
+      value: z.string(),
+      domain: z.string(),
+      path: z.string(),
+      expires: z.number(),
+      httpOnly: z.boolean(),
+      secure: z.boolean(),
+      sameSite: z.enum(['Strict', 'Lax', 'None']),
+    }),
+  ),
+  origins: z.array(z.unknown()),
+});
+
+/**
+ * mintStorageState re-mints the VIEWING instance's browser session and leaves
+ * every other origin's cookies alone.
+ *
+ * `keepForeign` is only passed during initial setup, when the serving jar
+ * exists in memory. Every later call — `refreshSharedSession`, from a WORKER
+ * process where `instances` is empty — recovers it from the file instead. The
+ * file is the cross-process medium here for the same reason SEEDED and PASSKEY
+ * are: a re-mint that dropped B's session would kill the workspace flow
+ * halfway through the suite, from a cause several tests in the past.
+ */
+async function mintStorageState(keepForeign?: readonly Cookie[]): Promise<void> {
+  const foreign =
+    keepForeign ??
+    (existsSync(STORAGE_STATE)
+      ? zStorageState
+          .parse(JSON.parse(readFileSync(STORAGE_STATE, 'utf8')))
+          .cookies.filter((c) => c.domain !== HOST && c.domain !== `.${HOST}`)
+          .map((c) => ({ ...c, sameSite: c.sameSite === 'None' ? ('Lax' as const) : c.sameSite }))
+      : []);
+
   // A real browser, because the session this mints is a PASSKEY-BEARING one:
   // a WebAuthn ceremony needs `navigator.credentials`, which needs a browsing
   // context, and the virtual authenticator is bound to one.
@@ -316,7 +878,11 @@ async function mintStorageState(): Promise<void> {
     mkdirSync(fileURLToPath(new URL('../.auth', import.meta.url)), {
       recursive: true,
     });
-    await context.storageState({ path: STORAGE_STATE });
+    const state = await context.storageState();
+    writeFileSync(
+      STORAGE_STATE,
+      JSON.stringify({ ...state, cookies: [...state.cookies, ...foreign] }),
+    );
     writeFileSync(PASSKEY, JSON.stringify(credential));
   } finally {
     await browser.close();
@@ -575,24 +1141,25 @@ const zCount = z.object({ n: z.number() });
  * nextTotpCode returns a code for a step nothing has spent yet, and records
  * that it spent it.
  *
- * Every code is single-use per (account, step) — so the seeding session, the
- * desktop project and the mobile project cannot each pick "one step ahead of
- * now" and expect all three to be accepted. The newest spent step lives in the
- * same file the rest of the fixture does, for the same reason the passkey's
- * signature counter does: these are separate processes sharing one account.
+ * Every code is single-use per (account, step) — so the seeding session, this
+ * harness's own step-up, the desktop project and the mobile project cannot each
+ * pick "one step ahead of now" and expect all of them to be accepted. The
+ * newest spent step lives in the same file the rest of the fixture does, for
+ * the same reason the passkey's signature counter does: these are separate
+ * processes sharing one account.
  *
  * It never waits in practice: flows run well after setup, so the step after
  * the current one is already free.
  */
 export async function nextTotpCode(): Promise<string> {
   const seed = readSeed();
-  const step = () => Math.floor(Date.now() / 1000 / 30);
+  const step = () => Math.floor(Date.now() / 1000 / TOTP_PERIOD);
   const want = Math.max(step() + 1, seed.lastTotpStep + 1);
   while (step() < want - 1) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   writeFileSync(SEEDED, JSON.stringify({ ...seed, lastTotpStep: want }));
-  return totpCode(seed.otpauth, new Date(want * 30_000));
+  return totpCode(seed.otpauth, new Date(want * TOTP_PERIOD * 1000));
 }
 
 /**
@@ -601,18 +1168,24 @@ export async function nextTotpCode(): Promise<string> {
  * A flow that has to change the administrator's GRANTS advances their session
  * generation, which kills every session that principal holds — the suite's
  * shared storage state included. Re-minting is how such a flow leaves the
- * suite as it found it.
+ * suite as it found it, and it preserves the serving instance's jar by reading
+ * it back out of the file it is about to rewrite.
  */
 export async function refreshSharedSession(): Promise<void> {
   await mintStorageState();
 }
 
 export function stopInstance(): void {
-  if (running === null) {
-    return;
+  tlsFront?.close();
+  tlsFront = null;
+  for (const instance of instances) {
+    // SIGKILL, not SIGTERM: a server still inside boot may not have installed
+    // its signal handler yet, and a survivor holds the port for the NEXT run —
+    // where it answers /healthz from another datastore and turns every
+    // authenticated call into a 401 that looks like a credential bug.
+    instance.expectedExit = true;
+    instance.proc.kill('SIGKILL');
+    rmSync(instance.dir, { recursive: true, force: true });
   }
-  const { proc, dir } = running;
-  running = null;
-  proc.kill('SIGTERM');
-  rmSync(dir, { recursive: true, force: true });
+  instances = [];
 }

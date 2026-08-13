@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { AddRemoteData, AddRemoteErrors, AddRemoteResponses, AddWorkspaceOriginData, AddWorkspaceOriginErrors, AddWorkspaceOriginResponses, ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, ApproveWorkspaceHandoffData, ApproveWorkspaceHandoffErrors, ApproveWorkspaceHandoffResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceConnectionsData, ListInstanceConnectionsErrors, ListInstanceConnectionsResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListMySessionsData, ListMySessionsErrors, ListMySessionsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListRemotesData, ListRemotesErrors, ListRemotesResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, ListWorkspaceOriginsData, ListWorkspaceOriginsErrors, ListWorkspaceOriginsResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintInstanceConnectionData, MintInstanceConnectionErrors, MintInstanceConnectionResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RedeemWorkspaceHandoffData, RedeemWorkspaceHandoffErrors, RedeemWorkspaceHandoffResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveRemoteData, RemoveRemoteErrors, RemoveRemoteResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RemoveWorkspaceOriginData, RemoveWorkspaceOriginErrors, RemoveWorkspaceOriginResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, RenameRemoteData, RenameRemoteErrors, RenameRemoteResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceConnectionData, RevokeInstanceConnectionErrors, RevokeInstanceConnectionResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeMySessionData, RevokeMySessionErrors, RevokeMySessionResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, ServeDirectoryData, ServeDirectoryErrors, ServeDirectoryResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, ShowInstanceConnectionData, ShowInstanceConnectionErrors, ShowInstanceConnectionResponses, ShowRemoteData, ShowRemoteErrors, ShowRemoteResponses, StartWorkspaceHandoffData, StartWorkspaceHandoffErrors, StartWorkspaceHandoffResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -2651,5 +2651,361 @@ export const scimSearchUsers = <ThrowOnError extends boolean = false>(options: O
 export const scimSearchGroups = <ThrowOnError extends boolean = false>(options: Options<ScimSearchGroupsData, ThrowOnError>) => (options.client ?? client).post<unknown, ScimSearchGroupsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/scim/v2/{binding}/Groups/.search',
+    ...options
+});
+
+/**
+ * This instance's directory listing, as served to a connected instance.
+ *
+ * The ONE endpoint an instance-connection credential may reach. Artifact
+ * eligibility caps the credential to this operation alone
+ * (`internal/authz/eligibility.go`), so a future operation adopting the
+ * `instance-directory` formula does not widen any existing token.
+ *
+ * What it returns, exhaustively: this instance's opaque identity, its
+ * version, and the NAMES and counts of organisations and projects. No
+ * values, no keys, no environments, no membership, no settings, no audit —
+ * the response schema has no field that could carry one.
+ *
+ * The identity is returned ONLY here, never pre-authentication. That is
+ * what makes self-connection detectable at the fetch rather than guessable
+ * from outside.
+ *
+ * Human holders of `instance-directory` reach it too: it is the same
+ * listing, and hiding it from the humans the atom exists for would be
+ * arbitrary.
+ *
+ */
+export const serveDirectory = <ThrowOnError extends boolean = false>(options?: Options<ServeDirectoryData, ThrowOnError>) => (options?.client ?? client).get<ServeDirectoryResponses, ServeDirectoryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/directory',
+    ...options
+});
+
+/**
+ * The directory of connected instances.
+ *
+ * Fetched ON VIEW. There is no background poller: a fetch happens because
+ * a holder of `instance-directory` is looking, and at no other moment.
+ *
+ * An unreachable entry serves its last-known snapshot MARKED STALE with
+ * its age, never silently as current. A credential rejection is its own
+ * loud state, distinct from unreachability, because the operator's fix
+ * differs.
+ *
+ * When the instance-wide or per-viewer trigger budget is exhausted no
+ * round runs and every entry is served from its snapshot, marked stale —
+ * the bounds limit fetch triggers, not views.
+ *
+ */
+export const listRemotes = <ThrowOnError extends boolean = false>(options?: Options<ListRemotesData, ThrowOnError>) => (options?.client ?? client).get<ListRemotesResponses, ListRemotesErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/remotes',
+    ...options
+});
+
+/**
+ * Add a connection entry, verified by one authenticated fetch.
+ *
+ * URL AND PIN ARE IMMUTABLE once stored, so there is no edit verb
+ * anywhere: re-pointing a stored credential at a different host is the
+ * credential-redirect attack, and re-pointing is remove + add, which
+ * re-runs the full ceremony including the human fingerprint confirmation.
+ *
+ * The caller must already have displayed the SPKI fingerprint and taken
+ * the human's confirmation — that is interactive and belongs to the client.
+ * This endpoint performs the authenticated directory fetch, which returns
+ * the remote's instance identity: self-connection (409) and
+ * duplicate-identity (409) fire there, BEFORE the entry is committed. A
+ * fetch that does not succeed commits nothing (422).
+ *
+ * The credential is write-only after storage: sealed under the instance
+ * keyring, never re-displayable through any surface, and leaving the
+ * process only inside TLS to the pinned remote.
+ *
+ */
+export const addRemote = <ThrowOnError extends boolean = false>(options: Options<AddRemoteData, ThrowOnError>) => (options.client ?? client).post<AddRemoteResponses, AddRemoteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/remotes',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Destroy an entry, its stored credential and its snapshot.
+ *
+ * THIS IS NOT REVOCATION. The serving side's credential remains valid
+ * until it is revoked THERE, and every surface says so: destroying the
+ * local copy is not revocation and this API does not pretend otherwise.
+ *
+ */
+export const removeRemote = <ThrowOnError extends boolean = false>(options: Options<RemoveRemoteData, ThrowOnError>) => (options.client ?? client).delete<RemoveRemoteResponses, RemoveRemoteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/remotes/{remote}',
+    ...options
+});
+
+/**
+ * One connection entry, full detail, fetched on view.
+ */
+export const showRemote = <ThrowOnError extends boolean = false>(options: Options<ShowRemoteData, ThrowOnError>) => (options.client ?? client).get<ShowRemoteResponses, ShowRemoteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/remotes/{remote}',
+    ...options
+});
+
+/**
+ * Change an entry's display name.
+ *
+ * The display name is the ONE mutable field. There is no URL or pin edit
+ * here or anywhere; see `addRemote` for why.
+ *
+ * API and UI only, deliberately: the API/CLI ADR's closed verb list for
+ * this family is `remote add|list|show|remove`, and parity holds because
+ * this is public surface.
+ *
+ */
+export const renameRemote = <ThrowOnError extends boolean = false>(options: Options<RenameRemoteData, ThrowOnError>) => (options.client ?? client).patch<RenameRemoteResponses, RenameRemoteErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/remotes/{remote}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The connection credentials this instance has minted.
+ *
+ * Metadata only, never the value: a credential is display-once at mint
+ * and write-only after, and no statement anywhere reads a verifier back
+ * out for display.
+ *
+ */
+export const listInstanceConnections = <ThrowOnError extends boolean = false>(options?: Options<ListInstanceConnectionsData, ThrowOnError>) => (options?.client ?? client).get<ListInstanceConnectionsResponses, ListInstanceConnectionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/connections',
+    ...options
+});
+
+/**
+ * Mint a connection principal and its one credential.
+ *
+ * Principal and credential are ONE UNIT with a stable immutable id, and
+ * there is one credential per principal EVER — rotation is a new mint plus
+ * a revoke of the predecessor, never a second credential on this one.
+ *
+ * The value is returned EXACTLY ONCE, here. It is not retrievable
+ * afterwards through any surface.
+ *
+ * The label names the intended peer for the audit trail. It is
+ * descriptive and NOT enforced: this instance cannot verify who holds the
+ * token, and does not pretend to.
+ *
+ */
+export const mintInstanceConnection = <ThrowOnError extends boolean = false>(options: Options<MintInstanceConnectionData, ThrowOnError>) => (options.client ?? client).post<MintInstanceConnectionResponses, MintInstanceConnectionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/connections',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Revoke the credential and retire its principal with it.
+ *
+ * It bites at the NEXT presentation: the liveness predicate is read in the
+ * authenticating transaction, uncached, so there is no window in which a
+ * revoked connection still serves a listing.
+ *
+ * A double revoke is a 409, not a silent success — an act that did not
+ * happen must not put a second event on the trail.
+ *
+ */
+export const revokeInstanceConnection = <ThrowOnError extends boolean = false>(options: Options<RevokeInstanceConnectionData, ThrowOnError>) => (options.client ?? client).delete<RevokeInstanceConnectionResponses, RevokeInstanceConnectionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/connections/{connection}',
+    ...options
+});
+
+/**
+ * One connection's metadata.
+ */
+export const showInstanceConnection = <ThrowOnError extends boolean = false>(options: Options<ShowInstanceConnectionData, ThrowOnError>) => (options.client ?? client).get<ShowInstanceConnectionResponses, ShowInstanceConnectionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/connections/{connection}',
+    ...options
+});
+
+/**
+ * De-allowlist an origin and kill every session bound to it.
+ *
+ * THE KILL SWITCH. Removing the entry and revoking every workspace session
+ * bound to that origin happen in ONE transaction, so there is no window in
+ * which the origin is de-allowlisted and its sessions still authenticate.
+ * New handoffs refuse at the transaction, not merely at CORS.
+ *
+ * The origin travels in the REQUEST BODY and never as a path parameter,
+ * deliberately: a path parameter naming an origin is one review lapse away
+ * from a path parameter naming a target, which is the proxy shape this
+ * contract refuses by construction.
+ *
+ */
+export const removeWorkspaceOrigin = <ThrowOnError extends boolean = false>(options: Options<RemoveWorkspaceOriginData, ThrowOnError>) => (options.client ?? client).delete<RemoveWorkspaceOriginResponses, RemoveWorkspaceOriginErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/workspace-origins',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The origin allowlist — which UI origins may run the handoff.
+ *
+ * EXACT origins. No wildcards, no subdomain matching.
+ *
+ * It names UI ORIGINS, not instances, deliberately: what is trusted is
+ * precisely the code served at that origin, and that is what an admin must
+ * be able to point at when auditing why cross-origin access exists.
+ *
+ */
+export const listWorkspaceOrigins = <ThrowOnError extends boolean = false>(options?: Options<ListWorkspaceOriginsData, ThrowOnError>) => (options?.client ?? client).get<ListWorkspaceOriginsResponses, ListWorkspaceOriginsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/workspace-origins',
+    ...options
+});
+
+/**
+ * Consent to one exact UI origin.
+ */
+export const addWorkspaceOrigin = <ThrowOnError extends boolean = false>(options: Options<AddWorkspaceOriginData, ThrowOnError>) => (options.client ?? client).post<AddWorkspaceOriginResponses, AddWorkspaceOriginErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/workspace-origins',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Open a workspace handoff transaction.
+ *
+ * The browser edition of the RFC 8252 shape the CLI already uses: the
+ * front channel carries code and state ONLY, never the artifact.
+ *
+ * Pre-authentication and CORS-readable for an allowlisted origin. A
+ * non-allowlisted origin is refused HERE, at the transaction — CORS
+ * controls what a browser may read, never what a token may do.
+ *
+ * The viewing shell opens the returned authorization URL in a popup with
+ * `noopener`, so the return path is not `window.opener`: the popup's final
+ * redirect lands on a same-origin callback page of the viewing UI, which
+ * hands the result to the shell over a nonce-named `BroadcastChannel`.
+ *
+ */
+export const startWorkspaceHandoff = <ThrowOnError extends boolean = false>(options: Options<StartWorkspaceHandoffData, ThrowOnError>) => (options.client ?? client).post<StartWorkspaceHandoffResponses, StartWorkspaceHandoffErrors, ThrowOnError>({
+    url: '/api/v1/auth/workspace/start',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Approve a handoff as the authenticated human, minting the code.
+ *
+ * Runs INSIDE THE POPUP, on this instance's own origin, under this
+ * instance's own ceremonies — password + TOTP, passkey, OIDC, whatever
+ * this instance's human-auth configuration says. Authentication to a
+ * remote always happens on the remote's own origin; that is a design rule,
+ * not a platform limitation.
+ *
+ * It takes a HUMAN SESSION and refuses a workspace bearer by construction:
+ * a cross-origin credential living in another origin's JavaScript must not
+ * be able to authorize the issuance of another one.
+ *
+ */
+export const approveWorkspaceHandoff = <ThrowOnError extends boolean = false>(options: Options<ApproveWorkspaceHandoffData, ThrowOnError>) => (options.client ?? client).post<ApproveWorkspaceHandoffResponses, ApproveWorkspaceHandoffErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/auth/workspace/approve',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Exchange code + PKCE verifier for a workspace session.
+ *
+ * Single-use and atomically consumed: two concurrent redemptions of one
+ * code cannot both yield a session.
+ *
+ * The result is an opaque bearer whose server-side row here carries
+ * everything the locked session model requires, plus its two bound extras:
+ * the requesting origin and the issuing transaction. It differs from a
+ * browser session ONLY in transport — presented in an `Authorization`
+ * header, never a cookie — which is why CORS runs without credentials mode
+ * and this instance's CSRF posture is untouched.
+ *
+ * CLIENT-SIDE THE BEARER LIVES IN JS MEMORY ONLY: never a cookie, never
+ * localStorage or sessionStorage, gone on tab close.
+ *
+ */
+export const redeemWorkspaceHandoff = <ThrowOnError extends boolean = false>(options: Options<RedeemWorkspaceHandoffData, ThrowOnError>) => (options.client ?? client).post<RedeemWorkspaceHandoffResponses, RedeemWorkspaceHandoffErrors, ThrowOnError>({
+    url: '/api/v1/auth/workspace/redeem',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The caller's own active sessions, workspace sessions included.
+ *
+ * SELF-SCOPED: the caller's sessions and nothing else. It needs no
+ * capability for the reason `listMyOrgs` needs none — it is a projection
+ * of what the caller already holds — and requiring one would make incident
+ * response depend on an authority an attacker may have just removed.
+ *
+ * A WORKSPACE SESSION APPEARS HERE AS ITS OWN ARTIFACT TYPE, carrying the
+ * requesting origin. That is the ADR's requirement and the reason a
+ * workspace session is a session row at all.
+ *
+ * Metadata only. No verifier is returned here or anywhere.
+ *
+ */
+export const listMySessions = <ThrowOnError extends boolean = false>(options?: Options<ListMySessionsData, ThrowOnError>) => (options?.client ?? client).get<ListMySessionsResponses, ListMySessionsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/me/sessions',
+    ...options
+});
+
+/**
+ * Revoke one of the caller's own sessions.
+ *
+ * Kills it MID-FLIGHT: the next request re-resolves the row in its own
+ * transaction, so a revoked session stops working immediately rather than
+ * at some cache horizon.
+ *
+ * The principal conjunct lives in the SQL, so one caller is structurally
+ * unable to reach another's session by guessing an id — and an id that is
+ * not the caller's is a 404, not a 403.
+ *
+ */
+export const revokeMySession = <ThrowOnError extends boolean = false>(options: Options<RevokeMySessionData, ThrowOnError>) => (options.client ?? client).delete<RevokeMySessionResponses, RevokeMySessionErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/me/sessions/{session}',
     ...options
 });

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Dunky13/hikyo/api"
 	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 )
 
@@ -138,6 +139,50 @@ func TestContractSecuredOperationsTakeAnArtifact(t *testing.T) {
 	ops, err := api.Operations()
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The operations a machine credential may actually reach, pinned. The
+	// matrix is a closed promise, so an entry appearing here without code
+	// behind it would be a promise nothing keeps — and, since #71, an entry
+	// MISSING here for an operation the artifact-eligibility table admits
+	// would be the confinement going quietly wider than the contract says.
+	//
+	// DERIVED FROM THE LIVE ELIGIBILITY TABLE, not restated. A restated
+	// `{"serveDirectory": true}` agrees with a table that has silently lost the
+	// row it names — the declaration would go on being "expected" while nothing
+	// served it — and it agrees with a table that has silently gained a row,
+	// because the check only ever ran in one direction.
+	//
+	// So the expectation is computed: every operation the artifact-eligibility
+	// table admits for the instance-connection credential, mapped back to the
+	// contract operation ids that name it. The two directions are then both
+	// asserted below.
+	machineReachable := map[string]bool{}
+	for _, op := range authz.EligibleOperations(crypto.ArtifactInstanceConn) {
+		found := false
+		for id, spec := range ops {
+			if authz.Operation(spec.AuthzOp) == op {
+				machineReachable[id] = true
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the eligibility table admits %s for the instance-connection "+
+				"credential, but no contract operation names it — the confinement points "+
+				"at an operation the public surface does not describe", op)
+		}
+	}
+	if len(machineReachable) == 0 {
+		t.Fatal("no contract operation is machine-reachable — this check would be vacuously green")
+	}
+	// The reverse direction: an operation the table admits must DECLARE the
+	// eligibility in the contract. Dropping the declaration used to leave this
+	// test green.
+	for id := range machineReachable {
+		if !slices.Contains(ops[id].Artifacts, "machine-credential") {
+			t.Errorf("%s is reachable by the instance-connection credential per the "+
+				"eligibility table, but the contract does not declare machine-credential "+
+				"eligibility for it — the matrix and the enforcement disagree", id)
+		}
 	}
 	for id, op := range ops {
 		// Every verb declares its eligible artifact set as a closed matrix, and

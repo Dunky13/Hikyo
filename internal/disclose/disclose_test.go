@@ -213,3 +213,80 @@ func TestPreflightRefusesBeforeAnythingIsMinted(t *testing.T) {
 		t.Fatal("two destinations passed preflight")
 	}
 }
+
+// scriptedTTY is a terminal whose reads come from a script and whose writes go
+// somewhere else, which is what a real terminal is. fakeTTY cannot serve here:
+// it reads back its own prompt.
+type scriptedTTY struct {
+	in  *strings.Reader
+	out bytes.Buffer
+}
+
+func (s *scriptedTTY) Read(p []byte) (int, error)  { return s.in.Read(p) }
+func (s *scriptedTTY) Write(p []byte) (int, error) { return s.out.Write(p) }
+func (s *scriptedTTY) Close() error                { return nil }
+
+func scripted(answer string) (*scriptedTTY, Options) {
+	tty := &scriptedTTY{in: strings.NewReader(answer)}
+	return tty, Options{OpenTerminal: func() (io.WriteCloser, error) { return tty, nil }}
+}
+
+func TestConfirmReadsTheTerminal(t *testing.T) {
+	for _, c := range []struct {
+		answer string
+		want   bool
+	}{{"y\n", true}, {"yes\n", true}, {"\n", false}, {"n\n", false}, {"nope\n", false}} {
+		tty, o := scripted(c.answer)
+		got, err := Confirm("destroy it?", o)
+		if err != nil {
+			t.Fatalf("%q: %v", c.answer, err)
+		}
+		if got != c.want {
+			t.Errorf("Confirm(%q) = %v, want %v", c.answer, got, c.want)
+		}
+		if !strings.Contains(tty.out.String(), "destroy it?") {
+			t.Errorf("%q: the prompt did not reach the terminal", c.answer)
+		}
+	}
+}
+
+func TestConfirmNameRequiresTheExactName(t *testing.T) {
+	// The long name is the regression: the yes/no reader stops after nine
+	// bytes, so a name any longer than that could never be typed back.
+	const name = "production-eu-west-peer"
+	for _, c := range []struct {
+		answer string
+		want   bool
+	}{
+		{name + "\n", true},
+		{"  " + name + "  \n", true},
+		{"production-eu-west-pee\n", false},
+		{"PRODUCTION-EU-WEST-PEER\n", false},
+		{"y\n", false},
+		{"\n", false},
+	} {
+		tty, o := scripted(c.answer)
+		got, err := ConfirmName("removing it destroys the credential.", name, o)
+		if err != nil {
+			t.Fatalf("%q: %v", c.answer, err)
+		}
+		if got != c.want {
+			t.Errorf("ConfirmName(%q) = %v, want %v", c.answer, got, c.want)
+		}
+		if !strings.Contains(tty.out.String(), name) {
+			t.Errorf("%q: the prompt does not name what has to be typed", c.answer)
+		}
+	}
+}
+
+func TestConfirmNameRefusesWithoutATerminal(t *testing.T) {
+	ok, err := ConfirmName("remove it?", "peer-b", Options{
+		OpenTerminal: func() (io.WriteCloser, error) { return nil, errors.New("no controlling terminal") },
+	})
+	if !errors.Is(err, ErrNoDestination) {
+		t.Fatalf("err = %v, want ErrNoDestination", err)
+	}
+	if ok {
+		t.Fatal("a destructive act was confirmed with no terminal to confirm it at")
+	}
+}

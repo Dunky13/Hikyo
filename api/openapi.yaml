@@ -6300,6 +6300,684 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimResource"
 
+  # ---------------------------------------------------------------------------
+  # Multi-instance (#71, multi-instance ADR). Two tiers, both additive.
+  #
+  # There is deliberately NO endpoint here that relays a request to another
+  # instance. The directory tier reads foreign METADATA server-to-server under a
+  # pinned connection; the workspace tier is the BROWSER talking to the remote
+  # directly. A server-side proxy is the design the ADR rejected, and
+  # api/noproxy_test.go is what keeps it rejected.
+  # ---------------------------------------------------------------------------
+
+  /api/v1/instance/directory:
+    get:
+      operationId: serveDirectory
+      tags: [instance]
+      summary: This instance's directory listing, as served to a connected instance.
+      description: |
+        The ONE endpoint an instance-connection credential may reach. Artifact
+        eligibility caps the credential to this operation alone
+        (`internal/authz/eligibility.go`), so a future operation adopting the
+        `instance-directory` formula does not widen any existing token.
+
+        What it returns, exhaustively: this instance's opaque identity, its
+        version, and the NAMES and counts of organisations and projects. No
+        values, no keys, no environments, no membership, no settings, no audit —
+        the response schema has no field that could carry one.
+
+        The identity is returned ONLY here, never pre-authentication. That is
+        what makes self-connection detectable at the fetch rather than guessable
+        from outside.
+
+        Human holders of `instance-directory` reach it too: it is the same
+        listing, and hiding it from the humans the atom exists for would be
+        arbitrary.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.directory-serve
+      x-hikyo-formula: [instance-directory@instance]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The served listing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryListing"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/remotes:
+    get:
+      operationId: listRemotes
+      tags: [instance]
+      summary: The directory of connected instances.
+      description: |
+        Fetched ON VIEW. There is no background poller: a fetch happens because
+        a holder of `instance-directory` is looking, and at no other moment.
+
+        An unreachable entry serves its last-known snapshot MARKED STALE with
+        its age, never silently as current. A credential rejection is its own
+        loud state, distinct from unreachability, because the operator's fix
+        differs.
+
+        When the instance-wide or per-viewer trigger budget is exhausted no
+        round runs and every entry is served from its snapshot, marked stale —
+        the bounds limit fetch triggers, not views.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.list
+      x-hikyo-formula: [instance-directory@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: Every configured entry with its last-known state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoteList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: addRemote
+      tags: [instance]
+      summary: Add a connection entry, verified by one authenticated fetch.
+      description: |
+        URL AND PIN ARE IMMUTABLE once stored, so there is no edit verb
+        anywhere: re-pointing a stored credential at a different host is the
+        credential-redirect attack, and re-pointing is remove + add, which
+        re-runs the full ceremony including the human fingerprint confirmation.
+
+        The caller must already have displayed the SPKI fingerprint and taken
+        the human's confirmation — that is interactive and belongs to the client.
+        This endpoint performs the authenticated directory fetch, which returns
+        the remote's instance identity: self-connection (409) and
+        duplicate-identity (409) fire there, BEFORE the entry is committed. A
+        fetch that does not succeed commits nothing (422).
+
+        The credential is write-only after storage: sealed under the instance
+        keyring, never re-displayable through any surface, and leaving the
+        process only inside TLS to the pinned remote.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.add
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddRemoteRequest"
+      responses:
+        "201":
+          description: The entry, with the listing its verifying fetch returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Remote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/remotes/{remote}:
+    parameters:
+      - $ref: "#/components/parameters/RemoteName"
+    get:
+      operationId: showRemote
+      tags: [instance]
+      summary: One connection entry, full detail, fetched on view.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.show
+      x-hikyo-formula: [instance-directory@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The entry with its last-known state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Remote"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    patch:
+      operationId: renameRemote
+      tags: [instance]
+      summary: Change an entry's display name.
+      description: |
+        The display name is the ONE mutable field. There is no URL or pin edit
+        here or anywhere; see `addRemote` for why.
+
+        API and UI only, deliberately: the API/CLI ADR's closed verb list for
+        this family is `remote add|list|show|remove`, and parity holds because
+        this is public surface.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.rename
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameRemoteRequest"
+      responses:
+        "200":
+          description: The entry as renamed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Remote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: removeRemote
+      tags: [instance]
+      summary: Destroy an entry, its stored credential and its snapshot.
+      description: |
+        THIS IS NOT REVOCATION. The serving side's credential remains valid
+        until it is revoked THERE, and every surface says so: destroying the
+        local copy is not revocation and this API does not pretend otherwise.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote.remove
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Removed. The serving-side credential is still live.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/connections:
+    get:
+      operationId: listInstanceConnections
+      tags: [instance]
+      summary: The connection credentials this instance has minted.
+      description: |
+        Metadata only, never the value: a credential is display-once at mint
+        and write-only after, and no statement anywhere reads a verifier back
+        out for display.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote-credential.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: Every connection, live and revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceConnectionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: mintInstanceConnection
+      tags: [instance]
+      summary: Mint a connection principal and its one credential.
+      description: |
+        Principal and credential are ONE UNIT with a stable immutable id, and
+        there is one credential per principal EVER — rotation is a new mint plus
+        a revoke of the predecessor, never a second credential on this one.
+
+        The value is returned EXACTLY ONCE, here. It is not retrievable
+        afterwards through any surface.
+
+        The label names the intended peer for the audit trail. It is
+        descriptive and NOT enforced: this instance cannot verify who holds the
+        token, and does not pretend to.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote-credential.create
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MintInstanceConnectionRequest"
+      responses:
+        "201":
+          description: The connection, with its value disclosed once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MintedInstanceConnection"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/connections/{connection}:
+    parameters:
+      - $ref: "#/components/parameters/ConnectionID"
+    get:
+      operationId: showInstanceConnection
+      tags: [instance]
+      summary: One connection's metadata.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote-credential.show
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The connection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceConnection"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: revokeInstanceConnection
+      tags: [instance]
+      summary: Revoke the credential and retire its principal with it.
+      description: |
+        It bites at the NEXT presentation: the liveness predicate is read in the
+        authenticating transaction, uncached, so there is no window in which a
+        revoked connection still serves a listing.
+
+        A double revoke is a 409, not a silent success — an act that did not
+        happen must not put a second event on the trail.
+      x-hikyo-class: instance
+      x-hikyo-operation: remote-credential.revoke
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/workspace-origins:
+    get:
+      operationId: listWorkspaceOrigins
+      tags: [instance]
+      summary: The origin allowlist — which UI origins may run the handoff.
+      description: |
+        EXACT origins. No wildcards, no subdomain matching.
+
+        It names UI ORIGINS, not instances, deliberately: what is trusted is
+        precisely the code served at that origin, and that is what an admin must
+        be able to point at when auditing why cross-origin access exists.
+      x-hikyo-class: instance
+      x-hikyo-operation: workspace-origin.list
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The allowlist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOriginList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: addWorkspaceOrigin
+      tags: [instance]
+      summary: Consent to one exact UI origin.
+      x-hikyo-class: instance
+      x-hikyo-operation: workspace-origin.add
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceOriginRequest"
+      responses:
+        "201":
+          description: Allowlisted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOrigin"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: removeWorkspaceOrigin
+      tags: [instance]
+      summary: De-allowlist an origin and kill every session bound to it.
+      description: |
+        THE KILL SWITCH. Removing the entry and revoking every workspace session
+        bound to that origin happen in ONE transaction, so there is no window in
+        which the origin is de-allowlisted and its sessions still authenticate.
+        New handoffs refuse at the transaction, not merely at CORS.
+
+        The origin travels in the REQUEST BODY and never as a path parameter,
+        deliberately: a path parameter naming an origin is one review lapse away
+        from a path parameter naming a target, which is the proxy shape this
+        contract refuses by construction.
+      x-hikyo-class: instance
+      x-hikyo-operation: workspace-origin.remove
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceOriginRequest"
+      responses:
+        "200":
+          description: Removed, with the number of sessions the same transaction killed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOriginRemoved"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/workspace/start:
+    post:
+      operationId: startWorkspaceHandoff
+      tags: [auth]
+      summary: Open a workspace handoff transaction.
+      description: |
+        The browser edition of the RFC 8252 shape the CLI already uses: the
+        front channel carries code and state ONLY, never the artifact.
+
+        Pre-authentication and CORS-readable for an allowlisted origin. A
+        non-allowlisted origin is refused HERE, at the transaction — CORS
+        controls what a browser may read, never what a token may do.
+
+        The viewing shell opens the returned authorization URL in a popup with
+        `noopener`, so the return path is not `window.opener`: the popup's final
+        redirect lands on a same-origin callback page of the viewing UI, which
+        hands the result to the shell over a nonce-named `BroadcastChannel`.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartWorkspaceHandoffRequest"
+      responses:
+        "201":
+          description: The transaction's opaque state and its expiry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceHandoffStarted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/workspace/approve:
+    post:
+      operationId: approveWorkspaceHandoff
+      tags: [auth]
+      summary: Approve a handoff as the authenticated human, minting the code.
+      description: |
+        Runs INSIDE THE POPUP, on this instance's own origin, under this
+        instance's own ceremonies — password + TOTP, passkey, OIDC, whatever
+        this instance's human-auth configuration says. Authentication to a
+        remote always happens on the remote's own origin; that is a design rule,
+        not a platform limitation.
+
+        It takes a HUMAN SESSION and refuses a workspace bearer by construction:
+        a cross-origin credential living in another origin's JavaScript must not
+        be able to authorize the issuance of another one.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveWorkspaceHandoffRequest"
+      responses:
+        "200":
+          description: The authorization code and the callback to deliver it to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceHandoffApproved"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/workspace/redeem:
+    post:
+      operationId: redeemWorkspaceHandoff
+      tags: [auth]
+      summary: Exchange code + PKCE verifier for a workspace session.
+      description: |
+        Single-use and atomically consumed: two concurrent redemptions of one
+        code cannot both yield a session.
+
+        The result is an opaque bearer whose server-side row here carries
+        everything the locked session model requires, plus its two bound extras:
+        the requesting origin and the issuing transaction. It differs from a
+        browser session ONLY in transport — presented in an `Authorization`
+        header, never a cookie — which is why CORS runs without credentials mode
+        and this instance's CSRF posture is untouched.
+
+        CLIENT-SIDE THE BEARER LIVES IN JS MEMORY ONLY: never a cookie, never
+        localStorage or sessionStorage, gone on tab close.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemWorkspaceHandoffRequest"
+      responses:
+        "201":
+          description: The workspace session, disclosed once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/me/sessions:
+    get:
+      operationId: listMySessions
+      tags: [auth]
+      summary: The caller's own active sessions, workspace sessions included.
+      description: |
+        SELF-SCOPED: the caller's sessions and nothing else. It needs no
+        capability for the reason `listMyOrgs` needs none — it is a projection
+        of what the caller already holds — and requiring one would make incident
+        response depend on an authority an attacker may have just removed.
+
+        A WORKSPACE SESSION APPEARS HERE AS ITS OWN ARTIFACT TYPE, carrying the
+        requesting origin. That is the ADR's requirement and the reason a
+        workspace session is a session row at all.
+
+        Metadata only. No verifier is returned here or anywhere.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The caller's sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/me/sessions/{session}:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    delete:
+      operationId: revokeMySession
+      tags: [auth]
+      summary: Revoke one of the caller's own sessions.
+      description: |
+        Kills it MID-FLIGHT: the next request re-resolves the row in its own
+        transaction, so a revoked session stops working immediately rather than
+        at some cache horizon.
+
+        The principal conjunct lives in the SQL, so one caller is structurally
+        unable to reach another's session by guessing an id — and an id that is
+        not the caller's is a 404, not a 403.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+
 components:
   securitySchemes:
     hikyoSession:
@@ -6535,6 +7213,32 @@ components:
         layer after authentication.
       schema:
         type: string
+
+    RemoteName:
+      name: remote
+      in: path
+      required: true
+      description: |
+        The entry's display name. A NAME, never a URL or host: an endpoint whose
+        target is named by the request is a proxy whatever it is called, and the
+        server looks the entry up so the stored, immutable URL is what is
+        reached.
+      schema:
+        $ref: "#/components/schemas/EntityName"
+    ConnectionID:
+      name: connection
+      in: path
+      required: true
+      description: Connection credential identifier.
+      schema:
+        $ref: "#/components/schemas/ID"
+    SessionID:
+      name: session
+      in: path
+      required: true
+      description: Session identifier, always one of the caller's own.
+      schema:
+        $ref: "#/components/schemas/ID"
 
   responses:
     BadRequest:
@@ -9638,6 +10342,510 @@ components:
         What IS closed lives in the server: the subject source, the filter
         grammar, the PATCH matrix and the error mapping, each with its own
         named refusal.
+
+    DirectoryListing:
+      type: object
+      additionalProperties: false
+      required: [identity, version, orgs, org_count, project_count]
+      description: |
+        What a connection credential authorizes, exhaustively. There is no field
+        here that could carry a value, a key, an environment, a membership, a
+        setting or an audit row, and adding one would widen every credential in
+        circulation without any grant changing.
+      properties:
+        identity:
+          type: string
+          maxLength: 128
+          description: |
+            This instance's opaque, server-generated identity, minted with the
+            schema and preserved by backup/restore — a restored instance IS the
+            instance. Returned ONLY here, never pre-authentication.
+        version:
+          type: string
+          maxLength: 64
+          description: |
+            Display only. It never feeds a compatibility decision: a snapshot
+            can race a downgrade or a restore, so the shell reads the pre-auth
+            meta endpoint live for that.
+        orgs:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/DirectoryOrg"
+        org_count:
+          type: integer
+          minimum: 0
+        project_count:
+          type: integer
+          minimum: 0
+
+    DirectoryOrg:
+      type: object
+      additionalProperties: false
+      required: [name, projects]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        projects:
+          type: array
+          maxItems: 1000
+          items:
+            type: string
+            maxLength: 200
+
+    Remote:
+      type: object
+      additionalProperties: false
+      required:
+        [id, name, url, spki_pin, created_at, created_by, state, last_attempt_at, stale]
+      description: |
+        One connection entry and its last-known state. There is deliberately no
+        credential field: the stored credential is write-only after storage and
+        is not retrievable through any surface.
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/EntityName"
+        url:
+          type: string
+          maxLength: 512
+          description: The canonical https origin. Immutable for the life of the entry.
+        spki_pin:
+          type: string
+          maxLength: 64
+          description: |
+            base64(sha256(SubjectPublicKeyInfo)), confirmed by a human at add
+            time and verified on every connection before any bytes are written.
+            Immutable for the life of the entry.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          type: string
+          maxLength: 64
+        state:
+          type: string
+          enum:
+            [ok, unreachable, credential-rejected, pin-mismatch, redirect-refused,
+             identity-conflict, self-connected]
+          description: |
+            The most recent fetch's outcome. A closed enum because the
+            operator's fix differs per outcome, and collapsing them into one
+            "error" is what makes a directory card useless.
+        last_attempt_at:
+          $ref: "#/components/schemas/Timestamp"
+        observed_at:
+          $ref: "#/components/schemas/Timestamp"
+        stale:
+          type: boolean
+          description: |
+            The listing below is a SNAPSHOT, not current. Computed from the
+            outcome rather than the age: a fetch that just failed makes even a
+            one-second-old snapshot stale.
+        stale_for_seconds:
+          type: integer
+          minimum: 0
+          description: The snapshot's age, the number the card prints beside "unreachable".
+        identity:
+          type: string
+          maxLength: 128
+        version:
+          type: string
+          maxLength: 64
+        org_count:
+          type: integer
+          minimum: 0
+        project_count:
+          type: integer
+          minimum: 0
+        orgs:
+          type: array
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/DirectoryOrg"
+
+    RemoteList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Remote"
+        count:
+          type: integer
+          minimum: 0
+
+    AddRemoteRequest:
+      type: object
+      additionalProperties: false
+      required: [name, url, spki_pin, credential]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+        url:
+          type: string
+          maxLength: 512
+          description: |
+            A canonical `https://` origin — no userinfo, no path, no query, no
+            fragment, no plaintext HTTP. A value carrying one is REFUSED, never
+            silently normalised.
+        spki_pin:
+          type: string
+          maxLength: 64
+          description: The fingerprint the human confirmed interactively.
+        credential:
+          type: string
+          maxLength: 256
+          description: |
+            The connection credential minted on the serving side. Verified by
+            one authenticated fetch before the entry is committed, then sealed
+            under the instance keyring and never returned again.
+
+    RenameRemoteRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/EntityName"
+
+    InstanceConnection:
+      type: object
+      additionalProperties: false
+      required:
+        [id, principal, label, kind, prefix_hint, lifetime, created_at, created_by, live]
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        principal:
+          type: string
+          maxLength: 64
+        label:
+          type: string
+          maxLength: 200
+          description: |
+            Names the intended peer for the audit trail. Descriptive, NOT
+            enforced: this instance cannot verify who holds the token.
+        kind:
+          $ref: "#/components/schemas/CredentialKind"
+        prefix_hint:
+          type: string
+          maxLength: 32
+          description: |
+            The leading, non-secret slice of the minted value, so two
+            connections are distinguishable in a list without either being
+            retrievable.
+        lifetime:
+          $ref: "#/components/schemas/CredentialLifetime"
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          type: string
+          maxLength: 64
+        revoked_at:
+          $ref: "#/components/schemas/Timestamp"
+        last_used_at:
+          $ref: "#/components/schemas/Timestamp"
+        live:
+          type: boolean
+          description: Whether it authenticates right now, under the current credential epoch.
+
+    InstanceConnectionList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstanceConnection"
+        count:
+          type: integer
+          minimum: 0
+
+    MintInstanceConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 200
+        lifetime_seconds:
+          type: integer
+          minimum: 1
+          description: |
+            Clamped to the instance ceiling, and the response says so. Omit for
+            the default; naming both this and `indefinite` is a refusal, never a
+            precedence rule.
+        indefinite:
+          type: boolean
+          description: Requires the instance to allow indefinite credentials.
+
+    MintedInstanceConnection:
+      type: object
+      additionalProperties: false
+      required: [value, connection, clamped]
+      properties:
+        value:
+          type: string
+          maxLength: 256
+          description: |
+            THE ONLY DISCLOSURE. Not retrievable afterwards through any surface.
+        connection:
+          $ref: "#/components/schemas/InstanceConnection"
+        clamped:
+          type: boolean
+          description: The instance ceiling shortened the requested lifetime.
+
+    WorkspaceOrigin:
+      type: object
+      additionalProperties: false
+      required: [origin, created_at, created_by]
+      properties:
+        origin:
+          type: string
+          maxLength: 512
+          description: An EXACT origin — scheme://host[:port]. No wildcards, no subdomains.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        created_by:
+          type: string
+          maxLength: 64
+
+    WorkspaceOriginList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceOrigin"
+        count:
+          type: integer
+          minimum: 0
+
+    WorkspaceOriginRequest:
+      type: object
+      additionalProperties: false
+      required: [origin]
+      properties:
+        origin:
+          type: string
+          maxLength: 512
+
+    WorkspaceOriginRemoved:
+      type: object
+      additionalProperties: false
+      required: [origin, sessions_revoked]
+      properties:
+        origin:
+          type: string
+          maxLength: 512
+        sessions_revoked:
+          type: integer
+          minimum: 0
+          description: |
+            Workspace sessions killed by the SAME transaction. This is what
+            makes de-allowlisting a kill switch rather than a headers change.
+
+    StartWorkspaceHandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, redirect_uri, pkce_challenge, purpose]
+      properties:
+        origin:
+          type: string
+          maxLength: 512
+          description: The requesting UI origin. Must be allowlisted, or the transaction refuses.
+        redirect_uri:
+          type: string
+          maxLength: 512
+          description: |
+            The exact pre-registered callback. Its authority IS the allowlist
+            entry: a callback that does not live at the consented origin is not
+            the consented code.
+        pkce_challenge:
+          type: string
+          maxLength: 128
+          description: S256 challenge (RFC 7636). Plain is not accepted.
+        purpose:
+          type: string
+          enum: [establishment, step-up]
+        session:
+          $ref: "#/components/schemas/ID"
+        operation:
+          type: string
+          maxLength: 128
+          description: |
+            Step-up only, with `session`: the EXACT operation being elevated, so
+            an elevated consent cannot be replayed against a different one.
+        environment:
+          $ref: "#/components/schemas/ID"
+        key_set:
+          type: array
+          maxItems: 1000
+          items:
+            type: string
+            maxLength: 200
+          description: |
+            Step-up only, where the operation is key-scoped: the enumerated key
+            set the consent covers.
+
+    WorkspaceHandoffStarted:
+      type: object
+      additionalProperties: false
+      required: [handoff, state, expires_at]
+      properties:
+        handoff:
+          $ref: "#/components/schemas/ID"
+        state:
+          type: string
+          maxLength: 256
+          description: Crosses the front channel. The artifact never does.
+        expires_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    ApproveWorkspaceHandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          type: string
+          maxLength: 256
+
+    WorkspaceHandoffApproved:
+      type: object
+      additionalProperties: false
+      required: [code, redirect_uri]
+      properties:
+        code:
+          type: string
+          maxLength: 256
+          description: Single-use, atomically consumed at redemption.
+        redirect_uri:
+          type: string
+          maxLength: 512
+
+    RedeemWorkspaceHandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [code, pkce_verifier, origin]
+      properties:
+        code:
+          type: string
+          maxLength: 256
+        pkce_verifier:
+          type: string
+          maxLength: 256
+        origin:
+          type: string
+          maxLength: 512
+
+    WorkspaceSession:
+      type: object
+      additionalProperties: false
+      required: [value, session, origin, handoff, idle_expires_at, absolute_expires_at]
+      properties:
+        value:
+          type: string
+          maxLength: 256
+          description: |
+            Keep it in JS MEMORY ONLY — never a cookie, never localStorage or
+            sessionStorage. In-memory storage narrows the at-rest window; it is
+            not non-stealability, and this contract does not sell it as such.
+        session:
+          $ref: "#/components/schemas/ID"
+        origin:
+          type: string
+          maxLength: 512
+        handoff:
+          $ref: "#/components/schemas/ID"
+        idle_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        absolute_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        elevated:
+          type: boolean
+          description: |
+            True when this redemption ELEVATED the session the step-up
+            transaction was bound to instead of establishing a new one. `session`
+            is then that same session's id and `value` is its ROTATED bearer —
+            not a second session. The rotation is deliberate: a bearer stolen
+            before an elevation must not become an elevated bearer after it.
+        environment:
+          $ref: "#/components/schemas/ID"
+        window_expires_at:
+          allOf:
+            - $ref: "#/components/schemas/Timestamp"
+          description: |
+            When the reauthentication window this elevation opened lapses.
+            Present only on an elevation.
+
+    ActiveSession:
+      type: object
+      additionalProperties: false
+      required:
+        [id, artifact, auth_method, created_at, last_seen_at, idle_expires_at,
+         absolute_expires_at]
+      description: One of the caller's own sessions. Metadata only; no verifier is ever returned.
+      properties:
+        id:
+          $ref: "#/components/schemas/ID"
+        artifact:
+          type: string
+          enum: [cli, browser, workspace]
+          description: |
+            A workspace session appears as its own artifact type — the ADR's
+            requirement, and the reason it is a session row at all.
+        auth_method:
+          type: string
+          maxLength: 64
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        last_seen_at:
+          $ref: "#/components/schemas/Timestamp"
+        idle_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        absolute_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+        source_ip:
+          type: string
+          maxLength: 64
+        user_agent:
+          type: string
+          maxLength: 512
+        requesting_origin:
+          type: string
+          maxLength: 512
+          description: |
+            Workspace sessions only: which foreign shell holds a session on this
+            account. Removing that origin from the allowlist kills it atomically.
+        handoff:
+          type: string
+          maxLength: 64
+
+    SessionList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActiveSession"
+        count:
+          type: integer
+          minimum: 0
+
 
 security:
   - hikyoSession: []

@@ -63,23 +63,25 @@ func Run(ctx context.Context, io IO, args []string) int {
 // dispatches on it and Verbs (exit.go) is derived from its keys, so a verb
 // cannot exist here without main's dispatch gate admitting it.
 var verbHandlers = map[string]func(context.Context, IO, []string) error{
-	"login":            runLogin,
-	"logout":           runLogout,
-	"whoami":           runWhoami,
-	"account":          runAccount,
-	"context":          runContext,
-	"org":              runOrg,
-	"project":          runProject,
-	"env":              runEnv,
-	"folder":           runFolder,
-	"key":              runKey,
-	"values":           runValues,
-	"instance-config":  runInstanceConfig,
-	"doctor":           runDoctor,
-	"access":           runAccess,
-	"project-settings": runProjectSettings,
-	"sa":               runServiceAccount,
-	"scim":             runSCIM,
+	"login":             runLogin,
+	"logout":            runLogout,
+	"whoami":            runWhoami,
+	"account":           runAccount,
+	"context":           runContext,
+	"org":               runOrg,
+	"project":           runProject,
+	"env":               runEnv,
+	"folder":            runFolder,
+	"key":               runKey,
+	"values":            runValues,
+	"instance-config":   runInstanceConfig,
+	"doctor":            runDoctor,
+	"access":            runAccess,
+	"project-settings":  runProjectSettings,
+	"sa":                runServiceAccount,
+	"scim":              runSCIM,
+	"remote":            runRemote,
+	"remote-credential": runRemoteCredential,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -222,6 +224,19 @@ scim provisioning (org scope; the identity provider's own wire is not a CLI surf
   hikyo scim credential list|show|revoke <binding> [<credential-id>]
   hikyo scim user list <binding> [-o table|json]
   hikyo scim group list <binding> [-o table|json]
+multi-instance:
+  hikyo remote add <name> <url>                    interactive: confirm the key, paste the credential
+  hikyo remote list [-o table|json]
+  hikyo remote show <name> [-o table|json]
+  hikyo remote remove <name>                       interactive: type the name back to confirm
+  hikyo remote-credential create --label <peer> [--lifetime 720h | --indefinite]
+      [--output-file PATH | --dangerously-print]
+  hikyo remote-credential list|show|revoke [--id <connection-id>]
+
+  a remote's URL and pinned key are IMMUTABLE: re-pointing is remove + add,
+  which re-runs the fingerprint confirmation. 'remote remove' destroys the
+  local credential and is NOT revocation - revoke it on the serving instance.
+  the display name is the one mutable field, through the API and the UI.
 
 target resolution, per dimension, first hit wins:
   --instance/--org/--project/--env, then HIKYO_*, then ./.hikyo.json, then --context
