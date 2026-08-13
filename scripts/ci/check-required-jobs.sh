@@ -11,7 +11,7 @@ results=$2
 expected='["client","dco","docs","generated","headline-guarantee","lint","release-snapshot","supply-chain-checks","test","web"]'
 
 case "$event" in
-	pull_request)
+	pull_request | pull_request_target)
 		allowed='all(to_entries[]; .value.result == "success")'
 		;;
 	push)

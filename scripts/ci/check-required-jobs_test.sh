@@ -38,6 +38,7 @@ all_success='{
 }'
 
 expect_accept 'successful pull request' pull_request "$all_success"
+expect_accept 'successful base-controlled pull request' pull_request_target "$all_success"
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')"
 
