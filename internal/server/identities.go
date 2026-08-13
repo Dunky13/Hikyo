@@ -147,6 +147,13 @@ func wireServiceAccount(sa service.ServiceAccountView) apigen.ServiceAccount {
 
 // wireCredential renders metadata and nothing else. There is no branch here
 // that could add a value: the generated type has no member for one.
+//
+// The binding members ride along for an `oidc-federation` row, which is what
+// the schema has always said this row carries in place of a prefix hint: a
+// binding IS a credential row, listed through this route, and an operator who
+// cannot see the byte-exact `(issuer, subject)` pair cannot audit it. Every one
+// of them is the zero value for a bearer credential, so `optional` renders them
+// absent rather than empty.
 func wireCredential(c service.CredentialView) apigen.MachineCredential {
 	out := apigen.MachineCredential{
 		Id: c.ID, Kind: apigen.CredentialKind(c.Kind),
@@ -158,6 +165,13 @@ func wireCredential(c service.CredentialView) apigen.MachineCredential {
 	out.ExpiresAt = optionalTime(c.ExpiresAt)
 	out.RevokedAt = optionalTime(c.RevokedAt)
 	out.LastUsedAt = optionalTime(c.LastUsedAt)
+	out.Issuer = optional(c.Issuer)
+	out.Subject = optional(c.Subject)
+	out.Audience = optional(c.Audience)
+	out.ReactivatedAt = optionalTime(c.ReactivatedAt)
+	if pins := wireClaimPins(c.RequiredClaims); len(pins) > 0 {
+		out.RequiredClaims = &pins
+	}
 	return out
 }
 

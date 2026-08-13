@@ -12,7 +12,13 @@
  * login page is reached by not being signed in, never by choosing it).
  */
 
-export type SurfaceId = 'login' | 'overview' | 'projects' | 'settings' | 'values';
+export type SurfaceId =
+  | 'login'
+  | 'overview'
+  | 'projects'
+  | 'settings'
+  | 'values'
+  | 'machine-access';
 
 export type Surface = {
   readonly id: SurfaceId;
@@ -34,6 +40,17 @@ export const SURFACES: readonly Surface[] = [
     id: 'values',
     path: '/orgs/:org/projects/:project/environments/:environment/values',
     label: 'Values',
+    section: null,
+  },
+  // The machine-access surface (#67). `section: null` for the same reason
+  // `values` is: it addresses ONE project, and a static sidebar entry could not
+  // know which. It is reached from the project and by deep link. The
+  // project-scoped navigation the prototype draws around it is the shell's own
+  // ticket, not this one.
+  {
+    id: 'machine-access',
+    path: '/orgs/:org/projects/:project/machine-access',
+    label: 'Machine access',
     section: null,
   },
 ];

@@ -1449,3 +1449,139 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 	}
 	r.idp.SetOffline(false)
 }
+
+func TestFederationBindingIsListedWithItsIdentitySQLite(t *testing.T) {
+	runBindingListedWithIdentity(t, seededDB(t, openSQLite))
+}
+
+func TestFederationBindingIsListedWithItsIdentityPostgres(t *testing.T) {
+	runBindingListedWithIdentity(t, seededDB(t, openPostgres))
+}
+
+// runBindingListedWithIdentity pins what the credential LISTING carries for a
+// binding row.
+//
+// A binding is a credential row and is listed through the credential route
+// rather than a second pair of routes, which is what makes this the only place
+// an operator can read back the `(issuer, subject)` pair a binding matches. The
+// wire schema has always said so — an `oidc-federation` row "carries the binding
+// members instead" of a prefix hint — and the transport dropped every one of
+// them until #67, so a federation surface could show that a binding existed and
+// not which external identity it admitted.
+//
+// The issuer is asserted as the byte-exact STRING rather than the configuration
+// id: nothing folds case, resolves the URL or strips a trailing slash anywhere
+// on this path, and the id is not what the external authority presents.
+func runBindingListedWithIdentity(t *testing.T, db *store.DB) {
+	r := newFedRig(t, db)
+	const instance = "https://git.example.test"
+	shape := oidctest.ForgejoShape(instance, "acme/service", "refs/heads/main", "push")
+	r.configureIssuer(t, domain.IssuerForgejo, []string{shape.DefaultAudience})
+	sa, binding := r.bindShape(t, "listed-binding", shape, hikyoAudience)
+
+	// A bearer credential on the SAME account, so the discriminator is exercised
+	// in both directions by one listing.
+	if _, err := r.ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{}); err != nil {
+		t.Fatalf("mint bearer credential: %v", err)
+	}
+
+	rows, err := r.ident.ListCredentials(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID)
+	if err != nil {
+		t.Fatalf("list credentials: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("listed %d credentials, want the binding and the bearer", len(rows))
+	}
+
+	var listed, bearer *service.CredentialView
+	for i := range rows {
+		switch rows[i].Kind {
+		case domain.CredentialOIDCFederation:
+			listed = &rows[i]
+		case domain.CredentialHikyoToken:
+			bearer = &rows[i]
+		}
+	}
+	if listed == nil || bearer == nil {
+		t.Fatal("the listing did not carry one row of each kind")
+	}
+
+	if listed.ID != binding.CredentialID {
+		t.Fatalf("listed binding id %q, want %q", listed.ID, binding.CredentialID)
+	}
+	if listed.Issuer != r.idp.Issuer() {
+		t.Fatalf("listed issuer %q, want the byte-exact %q", listed.Issuer, r.idp.Issuer())
+	}
+	if listed.Subject != shape.Subject {
+		t.Fatalf("listed subject %q, want %q", listed.Subject, shape.Subject)
+	}
+	if listed.Audience != hikyoAudience {
+		t.Fatalf("listed audience %q, want %q", listed.Audience, hikyoAudience)
+	}
+	// The pins travel too, and the discriminated scalar is not folded on the way
+	// out: `event_name` is the whole CI rule, and an operator auditing a binding
+	// has to be able to see which event it admits.
+	pinned := map[string]bool{}
+	for _, pin := range listed.RequiredClaims {
+		pinned[pin.Claim] = true
+	}
+	if !pinned[oidcfed.EventNameClaim] {
+		t.Fatalf("listed pins %v, want the event_name pin among them", pinned)
+	}
+	if listed.PrefixHint != "" {
+		t.Fatalf("a binding has no minted value to hint at, got %q", listed.PrefixHint)
+	}
+
+	// And the other direction: a bearer row carries no binding members at all,
+	// so nothing on the read surface can read one into a credential that has none.
+	if bearer.Issuer != "" || bearer.Subject != "" || bearer.Audience != "" ||
+		len(bearer.RequiredClaims) != 0 || !bearer.ReactivatedAt.IsZero() {
+		t.Fatalf("a bearer credential carried binding members: %+v", *bearer)
+	}
+	if bearer.PrefixHint == "" {
+		t.Fatal("a bearer credential must carry its prefix hint")
+	}
+}
+
+// TestFederationIssuerGrammarRefusesNonIssuerURLs pins the issuer identifier
+// grammar at creation: an https URL with a host and NOTHING that is not part
+// of an identity namespace. The load-bearing case is userinfo — an issuer
+// stored as `https://user:secret@host` would be listed byte-exact by the
+// credential route to project-level `manage-identities` (#67), turning an
+// instance-config mistake into plaintext exposure on a project surface. The
+// refusal has to happen here, before a row exists, because byte-exact
+// matching forbids sanitising it later.
+func TestFederationIssuerGrammarRefusesNonIssuerURLs(t *testing.T) {
+	r := newFedRig(t, seededDB(t, openSQLite))
+	for _, tc := range []struct {
+		name   string
+		issuer string
+	}{
+		{"userinfo", "https://user:secret@issuer.example.test"},
+		{"userinfo without password", "https://user@issuer.example.test"},
+		{"query", "https://issuer.example.test/path?x=1"},
+		{"fragment", "https://issuer.example.test#frag"},
+		{"http", "http://issuer.example.test"},
+		{"no host", "https:///path"},
+		{"opaque", "https:issuer.example.test"},
+		{"empty", ""},
+	} {
+		if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
+			Issuer: tc.issuer, Type: domain.IssuerForgejo, Mode: domain.JWKSDiscovery,
+			RefusedAudiences: []string{"https://forgejo.example.test"},
+		}); !errors.Is(err, service.ErrIssuerValue) {
+			t.Errorf("%s: CreateIssuer(%q) = %v, want the issuer-grammar refusal", tc.name, tc.issuer, err)
+		}
+	}
+
+	// And the well-formed shapes stay admitted: a port and a path are both
+	// part of real issuer identifiers (kind clusters, tenant paths).
+	if _, err := r.fed.CreateIssuer(t.Context(), service.LocalPrincipal(root), service.IssuerRequest{
+		Issuer: "https://issuer.example.test:6443/tenant", Type: domain.IssuerForgejo,
+		Mode: domain.JWKSDiscovery, RefusedAudiences: []string{"https://forgejo.example.test"},
+	}); err != nil {
+		t.Fatalf("a host:port/path issuer must stay admitted, got %v", err)
+	}
+}

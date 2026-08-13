@@ -243,6 +243,14 @@ const zSeeded = z.object({
   principal: z.string(),
   otpauth: z.string(),
   lastTotpStep: z.number(),
+  machine: z.object({
+    workload: z.string(),
+    automation: z.string(),
+    mintable: z.string(),
+    issuer: z.string(),
+    subject: z.string(),
+    audience: z.string(),
+  }),
   /**
    * The instance's sqlite file. Playwright runs global setup and the workers
    * in SEPARATE PROCESSES, so a worker cannot reach the setup process's

@@ -134,6 +134,26 @@ type CredentialView struct {
 	// before any transport. It is computed, never stored: a stored flag would
 	// be stale the moment the clock moved past it.
 	ExpiringSoon bool
+	// The binding half, populated only for an `oidc-federation` row and the
+	// zero value for a bearer credential — the kind discriminates, so there is
+	// no second boolean saying which half of the view is meaningful.
+	//
+	// A binding IS a credential row (#62), listed and revoked through these
+	// routes, so its identity has to travel on the listing: an operator cannot
+	// audit a byte-exact `(issuer, subject)` pair they cannot see, and the
+	// contract has always said this row "carries the binding members instead"
+	// of a prefix hint. `Issuer` is the byte-exact string rather than the
+	// configuration's id, because the id is not what the external authority
+	// presents and not what an operator compares against a cluster.
+	Issuer         string
+	Subject        string
+	Audience       string
+	RequiredClaims []ClaimPin
+	// ReactivatedAt is the restore predicate's instant, zero unless this
+	// binding has been through a restore. It is a permanent refusal floor, not
+	// a quarantine window, and the surface that hides it hides the reason a
+	// workload stopped authenticating.
+	ReactivatedAt time.Time
 }
 
 // ExpiryWarningWindow is how far ahead a live finite credential is flagged
@@ -509,12 +529,37 @@ func (s *Identities) ListCredentials(ctx context.Context, actor Actor, scope dom
 		if err != nil {
 			return err
 		}
+		// Issuer strings are resolved once per DISTINCT configuration rather
+		// than once per row: a service account's bindings usually name the
+		// same issuer, and a lookup per row would make the listing's cost
+		// scale with the fleet rather than with the instance's configuration.
+		issuers := map[string]string{}
 		out = make([]CredentialView, 0, len(creds))
 		for _, c := range creds {
 			view := CredentialView{
 				ID: c.ID, Kind: c.Kind, PrefixHint: c.PrefixHint, Lifetime: c.Lifetime,
 				ExpiresAt: c.ExpiresAt, CreatedAt: c.CreatedAt, CreatedBy: c.CreatedBy,
 				RevokedAt: c.RevokedAt, LastUsedAt: c.LastUsedAt,
+			}
+			if c.Kind == domain.CredentialOIDCFederation {
+				issuer, ok := issuers[c.Binding.IssuerID]
+				if !ok {
+					configured, err := az.FederationIssuerByID(ctx, c.Binding.IssuerID)
+					if err != nil {
+						return err
+					}
+					issuer = configured.Issuer
+					issuers[c.Binding.IssuerID] = issuer
+				}
+				pins, err := DecodeClaimPins(c.Binding.RequiredClaimsJSON)
+				if err != nil {
+					return err
+				}
+				view.Issuer = issuer
+				view.Subject = c.Binding.Subject
+				view.Audience = c.Binding.Audience
+				view.RequiredClaims = pins
+				view.ReactivatedAt = c.Binding.ReactivatedAt
 			}
 			view.ExpiringSoon = expiringSoon(view, now)
 			out = append(out, view)

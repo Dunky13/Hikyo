@@ -110,6 +110,7 @@ describe('the execution half of closure', () => {
           'shell\tprojects\tlight',
           'shell\tsettings\tdark',
           'reveal\tvalues\tdark',
+          'machine-access\tmachine-access\tdark',
         ),
       ),
     ).toEqual([]);
@@ -117,7 +118,12 @@ describe('the execution half of closure', () => {
 
   it('fails a surface that was claimed but never asserted', () => {
     const problems = unexecutedClaims(
-      log('login\tlogin\tdark', 'shell\toverview\tdark', 'reveal\tvalues\tdark'),
+      log(
+        'login\tlogin\tdark',
+        'shell\toverview\tdark',
+        'reveal\tvalues\tdark',
+        'machine-access\tmachine-access\tdark',
+      ),
     );
     expect(problems).toHaveLength(2);
     expect(problems.join(' ')).toContain('claims surface "projects" but the pinned assertion set never ran');
@@ -125,7 +131,10 @@ describe('the execution half of closure', () => {
   });
 
   it('fails everything when nothing ran at all', () => {
-    expect(unexecutedClaims('')).toHaveLength(5);
+    // One line per (flow, surface) pair in the registry.
+    expect(unexecutedClaims('')).toHaveLength(
+      FLOWS.reduce((total, flow) => total + flow.surfaces.length, 0),
+    );
   });
 
   it('does not accept another flow\'s execution as this one\'s', () => {
