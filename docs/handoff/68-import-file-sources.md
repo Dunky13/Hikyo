@@ -396,6 +396,16 @@ transaction as the imported cells. A fully skipped run creates no revision.
 The original audit shape remains: `value.set` per key plus `value.imported` per
 run, with the shared revision event added by materialization.
 
+### PR #111 post-merge-hardening
+
+- Phase 1 refuses to author a values file larger than the 4 MiB cap phase 2
+  accepts; the refusal happens before any artifact is created.
+- Values files bind both project and environment, including imports without a
+  manifest. Mapping and manifest environment rows may not be empty.
+- Reviewed artifacts and Infisical exports reject exact and case-variant JSON
+  duplicate members before struct decoding, preventing last-value-wins
+  retargeting or provenance changes.
+
 ## Not built (and why)
 
 - **The wizard.** Out of scope, and **unticketed** — nothing tracks it today.

@@ -92,6 +92,59 @@ func TestReplayMappingUsesBoundedFileReader(t *testing.T) {
 	}
 }
 
+func TestWriteArtifactsRefusesValuesFilePhaseTwoCannotRead(t *testing.T) {
+	outDir := t.TempDir()
+	entries := make([]importer.ValuesEntry, 0, 65)
+	for i := 0; i < cap(entries); i++ {
+		entries = append(entries, importer.ValuesEntry{
+			Key: fmt.Sprintf("KEY_%d", i), Value: strings.Repeat("x", importer.MaxValueBytes),
+		})
+	}
+	plan := &importer.Plan{
+		HasValues: true,
+		Values: importer.ValuesFile{
+			FormatVersion: importer.FormatVersion, Project: "prj_1", Environment: "env_1", Entries: entries,
+		},
+	}
+	_, err := writeArtifacts(IO{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}, outDir, "env_1", plan)
+	var cliErr *Error
+	if !errors.As(err, &cliErr) || cliErr.Code != ExitRefused {
+		t.Fatalf("err = %v, want ExitRefused", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d-byte", importer.MaxFileBytes)) {
+		t.Fatalf("refusal does not name phase-2 file cap: %v", err)
+	}
+	for _, name := range []string{bundleFile, mappingFile, manifestFile, "values-env_1.json"} {
+		if _, statErr := os.Stat(filepath.Join(outDir, name)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("%s survived refused artifact run: %v", name, statErr)
+		}
+	}
+}
+
+func TestValuesImportBindsArtifactToProjectAndEnvironment(t *testing.T) {
+	values := importer.ValuesFile{Project: "prj_reviewed", Environment: "env_reviewed"}
+	for _, tc := range []struct {
+		name    string
+		project string
+		env     string
+		want    string
+	}{
+		{name: "project", project: "prj_other", env: "env_reviewed", want: "project"},
+		{name: "environment", project: "prj_reviewed", env: "env_other", want: "environment"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateImportArtifactTargets(values, tc.project, tc.env)
+			var cliErr *Error
+			if !errors.As(err, &cliErr) || cliErr.Code != ExitRefused {
+				t.Fatalf("err = %v, want ExitRefused", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("refusal does not name %s mismatch: %v", tc.want, err)
+			}
+		})
+	}
+}
+
 func TestMarkImportedReplacesSymlinkWithoutTouchingTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("atomic symlink replacement is a POSIX contract")

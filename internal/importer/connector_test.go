@@ -304,6 +304,15 @@ func TestInfisicalRefusesExportsWithoutProvenance(t *testing.T) {
 	}
 }
 
+func TestInfisicalRejectsDuplicateMembersBeforeProvenanceDecoding(t *testing.T) {
+	raw := []byte(`[{"key":"MY_OVERRIDE","value":"personal","type":"personal","TYPE":"shared","secretPath":"/db","_id":"sec_1"}]`)
+	_, err := Run(t.Context(), infisicalSource, Input{Path: "duplicate.json", Data: raw, EnvSlug: "dev"})
+	wantCode(t, err, CodeDuplicateKey)
+	if !strings.Contains(strings.ToLower(err.Error()), `"type"`) {
+		t.Fatalf("duplicate-member refusal does not name type: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The shared sanitized spawn path (M5 acceptance)
 // ---------------------------------------------------------------------------

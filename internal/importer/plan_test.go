@@ -599,6 +599,13 @@ func TestArtifactsRoundTripStrictly(t *testing.T) {
 	if _, err := ParseManifest(rawManifest); err != nil {
 		t.Fatalf("the manifest does not round-trip: %v", err)
 	}
+	plan.Manifest.Target.Environments[0] = ""
+	emptyTarget, err := Encode(plan.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseManifest(emptyTarget)
+	wantCode(t, err, CodeMalformed)
 
 	// A field this build does not know is a field a different build wrote.
 	polluted := strings.Replace(string(raw), `"source":`, `"unknown_choice": true,
@@ -637,6 +644,31 @@ func TestArtifactsRejectTrailingDocumentsAndDuplicateMembers(t *testing.T) {
 	if !strings.Contains(err.Error(), `"target"`) {
 		t.Fatalf("duplicate-member refusal does not name target: %v", err)
 	}
+
+	caseVariant := strings.Replace(string(raw), `"source_identity": {`, `"SOURCE_IDENTITY": {},
+  "source_identity": {`, 1)
+	_, err = ParseManifest([]byte(caseVariant))
+	wantCode(t, err, CodeDuplicateKey)
+	if !strings.Contains(strings.ToLower(err.Error()), `"source_identity"`) {
+		t.Fatalf("case-variant duplicate refusal does not name source_identity: %v", err)
+	}
+}
+
+func TestTemplateRequiresEveryTargetEnvironment(t *testing.T) {
+	plan, err := planFrom(t, "k8s-multi.yaml", state(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Template.Environments[0].Target = ""
+	raw, err := Encode(plan.Template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseTemplate(raw)
+	wantCode(t, err, CodeMalformed)
+	if !strings.Contains(err.Error(), "target environment") {
+		t.Fatalf("empty-target refusal does not name target environment: %v", err)
+	}
 }
 
 func TestValuesFileIsStrict(t *testing.T) {
@@ -654,6 +686,14 @@ func TestValuesFileIsStrict(t *testing.T) {
 	dup := `{"format_version":1,"project":"p","environment":"e","entries":[{"key":"A","value":"1"},{"key":"A","value":"2"}]}`
 	_, err = ParseValuesFile([]byte(dup))
 	wantCode(t, err, CodeDuplicateKey)
+
+	good.Project = ""
+	raw, err = Encode(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ParseValuesFile(raw)
+	wantCode(t, err, CodeMalformed)
 }
 
 func TestPlaintextWarningNamesEveryFileStillOnDisk(t *testing.T) {

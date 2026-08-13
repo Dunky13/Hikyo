@@ -109,6 +109,9 @@ func (infisicalConnector) Read(ctx context.Context, in Input, b *Budget) (Result
 	// this connector does not map, and a future Infisical release adding one
 	// must not break a migration. The pin is on the fields that MUST be there,
 	// checked by name below.
+	if err := rejectDuplicateMembers(trimmed, infisicalSource, in.Path); err != nil {
+		return Result{}, err
+	}
 	var entries []infisicalEntry
 	if err := json.Unmarshal(trimmed, &entries); err != nil {
 		// Dropped, not wrapped: encoding/json echoes the offending value.

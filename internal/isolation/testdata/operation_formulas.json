@@ -1066,16 +1066,6 @@
     ]
   },
   {
-    "operation": "value.import",
-    "class": "tenant",
-    "level": "environment",
-    "formula": [
-      "read@project",
-      "edit@environment",
-      "publish@environment"
-    ]
-  },
-  {
     "operation": "value.export",
     "class": "tenant",
     "level": "environment",
@@ -1099,6 +1089,16 @@
     "formula": [
       "read@environment",
       "reveal-history@environment"
+    ]
+  },
+  {
+    "operation": "value.import",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@project",
+      "edit@environment",
+      "publish@environment"
     ]
   },
   {

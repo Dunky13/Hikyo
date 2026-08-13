@@ -273,6 +273,19 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 	if plan.HasValues {
 		valuesPath = filepath.Join(outDir, "values-"+envID+".json")
 	}
+	var valuesBody []byte
+	if valuesPath != "" {
+		var err error
+		valuesBody, err = importer.Encode(plan.Values)
+		if err != nil {
+			return "", err
+		}
+		if len(valuesBody) > importer.MaxFileBytes {
+			return "", failf(ExitRefused,
+				"the values file would be %d bytes, exceeding the %d-byte per-file cap that `values import` accepts; split the import or reduce the selection",
+				len(valuesBody), importer.MaxFileBytes)
+		}
+	}
 
 	// The values file is preflighted BEFORE anything is written: a run that
 	// emits a bundle and then discovers it has nowhere to put the plaintext has
@@ -334,12 +347,7 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 	if valuesPath == "" {
 		return "", nil
 	}
-	body, err := importer.Encode(plan.Values)
-	if err != nil {
-		cleanup()
-		return "", err
-	}
-	if _, err := disclose.Emit("values for "+envID, strings.TrimRight(string(body), "\n"), deliver); err != nil {
+	if _, err := disclose.Emit("values for "+envID, strings.TrimRight(string(valuesBody), "\n"), deliver); err != nil {
 		cleanup()
 		return "", failf(ExitRefused, "writing the values file: %v", err)
 	}
@@ -431,6 +439,22 @@ func onTerminal(ios IO) bool {
 // `hikyo values import` — phase 2
 // ---------------------------------------------------------------------------
 
+// validateImportArtifactTargets binds the plaintext artifact to both target
+// dimensions phase 1 recorded, even when no manifest accompanies it.
+func validateImportArtifactTargets(values importer.ValuesFile, project, env string) error {
+	if values.Project != project {
+		return failf(ExitRefused,
+			"the values file was authored for project %s but this invocation targets %s",
+			importer.QuoteName(values.Project), importer.QuoteName(project))
+	}
+	if values.Environment != env {
+		return failf(ExitRefused,
+			"the values file was authored for environment %s but this invocation targets %s",
+			importer.QuoteName(values.Environment), importer.QuoteName(env))
+	}
+	return nil
+}
+
 // runValuesImport consumes one environment's values file. Strict, human-only,
 // per environment: an undeclared key rejects the run by name, and the closed
 // schema is not conceded on the import path — the largest imports are precisely
@@ -519,13 +543,15 @@ func runValuesImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	// The values file names the environment it was authored for. A mismatch is
-	// a hard refusal rather than a silent retarget: the occurrence tokens in the
-	// manifest beside it are scoped to that environment and to no other.
-	if values.Environment != env {
-		return failf(ExitRefused,
-			"the values file was authored for environment %s but this invocation targets %s",
-			values.Environment, env)
+	targetProject, err := resolved.Require(DimProject)
+	if err != nil {
+		return err
+	}
+	// The values file binds both target dimensions even without a manifest.
+	// Same environment ids and key names can exist in different projects; a
+	// one-dimensional check would silently retarget reviewed plaintext.
+	if err := validateImportArtifactTargets(values, targetProject, env); err != nil {
+		return err
 	}
 
 	var result apigen.ImportValuesResult

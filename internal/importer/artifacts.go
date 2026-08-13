@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 
 	"github.com/Dunky13/hikyo/internal/schema"
 )
@@ -286,6 +287,12 @@ func ParseTemplate(raw []byte) (Template, error) {
 		return Template{}, failure("import", CodeMalformed, "mapping.json",
 			"the template names no target environment")
 	}
+	for i, env := range t.Environments {
+		if env.Target == "" {
+			return Template{}, failure("import", CodeMalformed, "mapping.json",
+				"environment mapping %d names no target environment", i+1)
+		}
+	}
 	for _, c := range t.Classifications {
 		if c.Class != string(schema.Secret) && c.Class != string(schema.Config) {
 			return Template{}, failure("import", CodeMalformed, "mapping.json",
@@ -331,6 +338,12 @@ func ParseManifest(raw []byte) (Manifest, error) {
 		return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
 			"the manifest names no target environment; the precondition re-evaluates read(E) for every environment it names")
 	}
+	for i, env := range m.Target.Environments {
+		if env == "" {
+			return Manifest{}, failure("import", CodeMalformed, "run-manifest.json",
+				"target environment %d is empty", i+1)
+		}
+	}
 	return m, nil
 }
 
@@ -345,6 +358,10 @@ func ParseValuesFile(raw []byte) (ValuesFile, error) {
 	if v.FormatVersion != FormatVersion {
 		return ValuesFile{}, failure("import", CodeVersion, "values file",
 			"format version %d is not this build's %d: version mismatch", v.FormatVersion, FormatVersion)
+	}
+	if v.Project == "" {
+		return ValuesFile{}, failure("import", CodeMalformed, "values file",
+			"the values file names no project")
 	}
 	if v.Environment == "" {
 		return ValuesFile{}, failure("import", CodeMalformed, "values file",
@@ -365,7 +382,7 @@ func ParseValuesFile(raw []byte) (ValuesFile, error) {
 }
 
 func strictDecode(raw []byte, what string, into any) error {
-	if err := rejectDuplicateMembers(raw, what); err != nil {
+	if err := rejectDuplicateMembers(raw, "import", what); err != nil {
 		return err
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -388,21 +405,21 @@ func strictDecode(raw []byte, what string, into any) error {
 // rejectDuplicateMembers walks the raw JSON token stream before decoding into
 // a Go value. encoding/json otherwise accepts duplicate object members with
 // last-one-wins semantics, which is unsafe for reviewed artifacts.
-func rejectDuplicateMembers(raw []byte, what string) error {
+func rejectDuplicateMembers(raw []byte, source, what string) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	if err := walkJSONValue(dec, what); err != nil {
+	if err := walkJSONValue(dec, source, what); err != nil {
 		return err
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return failure("import", CodeMalformed, what, "trailing content after the document")
+		return failure(source, CodeMalformed, what, "trailing content after the document")
 	}
 	return nil
 }
 
-func walkJSONValue(dec *json.Decoder, what string) error {
+func walkJSONValue(dec *json.Decoder, source, what string) error {
 	tok, err := dec.Token()
 	if err != nil {
-		return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+		return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 	}
 	delim, ok := tok.(json.Delim)
 	if !ok {
@@ -414,39 +431,55 @@ func walkJSONValue(dec *json.Decoder, what string) error {
 		for dec.More() {
 			member, err := dec.Token()
 			if err != nil {
-				return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+				return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 			}
 			key, ok := member.(string)
 			if !ok {
-				return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+				return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 			}
-			if _, duplicate := seen[key]; duplicate {
-				return failure("import", CodeDuplicateKey, what,
+			folded := foldJSONMember(key)
+			if _, duplicate := seen[folded]; duplicate {
+				return failure(source, CodeDuplicateKey, what,
 					"object member %s appears more than once", quoteName(key))
 			}
-			seen[key] = struct{}{}
-			if err := walkJSONValue(dec, what); err != nil {
+			seen[folded] = struct{}{}
+			if err := walkJSONValue(dec, source, what); err != nil {
 				return err
 			}
 		}
 		end, err := dec.Token()
 		if err != nil || end != json.Delim('}') {
-			return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+			return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 		}
 	case '[':
 		for dec.More() {
-			if err := walkJSONValue(dec, what); err != nil {
+			if err := walkJSONValue(dec, source, what); err != nil {
 				return err
 			}
 		}
 		end, err := dec.Token()
 		if err != nil || end != json.Delim(']') {
-			return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+			return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 		}
 	default:
-		return failure("import", CodeMalformed, what, "it is not a well-formed artifact of this kind")
+		return failure(source, CodeMalformed, what, "it is not a well-formed artifact of this kind")
 	}
 	return nil
+}
+
+// foldJSONMember mirrors encoding/json's case-insensitive struct-field match.
+// Exact and case-variant spellings must occupy one logical member slot before
+// the later struct decode can apply last-value-wins semantics to them.
+func foldJSONMember(name string) string {
+	return strings.Map(func(r rune) rune {
+		for {
+			next := unicode.SimpleFold(r)
+			if next <= r {
+				return next
+			}
+			r = next
+		}
+	}, name)
 }
 
 func checkVersions(what string, format, contract int) error {
