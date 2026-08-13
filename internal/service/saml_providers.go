@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -901,18 +903,22 @@ func (s *SAMLProviders) metadataBytes(ctx context.Context, source string, docume
 
 func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byte, error) {
 	target, err := url.Parse(rawURL)
-	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil {
+	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil ||
+		target.Fragment != "" || metadataHostIsNonPublic(target.Hostname()) {
 		return nil, ErrSAMLMetadataFetch
 	}
 	client := s.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = publicMetadataHTTPClient()
 	}
 	copyClient := *client
 	priorRedirect := copyClient.CheckRedirect
 	copyClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if request.URL.Scheme != target.Scheme || request.URL.Host != target.Host {
 			return errors.New("service: SAML metadata redirect changed origin")
+		}
+		if metadataHostIsNonPublic(request.URL.Hostname()) {
+			return errors.New("service: SAML metadata redirect resolved to a non-public target")
 		}
 		if priorRedirect != nil {
 			return priorRedirect(request, via)
@@ -926,6 +932,10 @@ func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byt
 	if err != nil {
 		return nil, ErrSAMLMetadataFetch
 	}
+	// Production requests use publicMetadataHTTPClient, whose dialer resolves
+	// and pins a public IP for every connection. The explicit suppression records
+	// that CodeQL cannot model this transport-level SSRF boundary.
+	// codeql[go/request-forgery]
 	response, err := copyClient.Do(request)
 	if err != nil {
 		return nil, ErrSAMLMetadataFetch
@@ -940,6 +950,106 @@ func (s *SAMLProviders) fetchMetadata(ctx context.Context, rawURL string) ([]byt
 		return nil, ErrSAMLMetadataFetch
 	}
 	return payload, nil
+}
+
+// These are the IANA IPv4 special-purpose ranges that are not globally
+// reachable. Broad parent prefixes are deliberately conservative where IANA
+// has carved out a globally reachable anycast address inside a special block:
+// metadata retrieval needs ordinary public hosting, not protocol anycast.
+var nonPublicMetadataIPv4Prefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+}
+
+var (
+	publicMetadataIPv6Prefix      = netip.MustParsePrefix("2000::/3")
+	nonPublicMetadataIPv6Prefixes = []netip.Prefix{
+		// IANA special-purpose ranges inside 2000::/3 which are not ordinary
+		// globally reachable addresses.
+		netip.MustParsePrefix("2001::/23"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("2002::/16"),
+		netip.MustParsePrefix("3fff::/20"),
+	}
+)
+
+func metadataHostIsNonPublic(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	address, err := netip.ParseAddr(host)
+	return err == nil && metadataIPIsNonPublic(address)
+}
+
+func metadataIPIsNonPublic(address netip.Addr) bool {
+	address = address.Unmap()
+	if !address.IsValid() || !address.IsGlobalUnicast() || address.IsPrivate() ||
+		address.IsLoopback() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() {
+		return true
+	}
+	prefixes := nonPublicMetadataIPv4Prefixes
+	if address.Is6() {
+		if !publicMetadataIPv6Prefix.Contains(address) {
+			return true
+		}
+		prefixes = nonPublicMetadataIPv6Prefixes
+	}
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func publicMetadataHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// A proxy would perform DNS resolution outside the guarded dialer and could
+	// turn a public-looking hostname into a request to an internal service.
+	transport.Proxy = nil
+	transport.DialContext = dialPublicMetadata
+	transport.ResponseHeaderTimeout = 10 * time.Second
+	return &http.Client{Transport: transport, Timeout: 15 * time.Second}
+}
+
+func dialPublicMetadata(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil || len(addresses) == 0 {
+		return nil, errors.New("service: SAML metadata host did not resolve")
+	}
+	for _, resolved := range addresses {
+		if metadataIPIsNonPublic(resolved) {
+			return nil, errors.New("service: SAML metadata host resolved to a non-public address")
+		}
+	}
+
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, resolved := range addresses {
+		connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(resolved.String(), port))
+		if dialErr == nil {
+			return connection, nil
+		}
+		lastErr = dialErr
+	}
+	return nil, lastErr
 }
 
 type generatedSAMLSPKey struct {

@@ -43,6 +43,10 @@ type IdP struct {
 
 	mu    sync.Mutex
 	codes map[string]Code
+	// redirectURIs is the fixture's registered-client boundary. The authorize
+	// endpoint redirects only to an exact server-registered value, never to the
+	// request parameter itself.
+	redirectURIs map[string]string
 	// IssuerOverride, when set, is used as the `iss` claim and in the
 	// discovery document instead of the server URL. Byte-exact issuer
 	// fixtures use it (an issuer differing only in case from another).
@@ -131,7 +135,10 @@ func newIdP(useTLS bool) (*IdP, error) {
 	if err != nil {
 		return nil, fmt.Errorf("oidctest: generate key: %w", err)
 	}
-	p := &IdP{key: key, keyID: "test-key-1", codes: map[string]Code{}, PublishRetired: true}
+	p := &IdP{
+		key: key, keyID: "test-key-1", codes: map[string]Code{},
+		redirectURIs: map[string]string{}, PublishRetired: true,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", p.discovery)
 	mux.HandleFunc("/jwks", p.jwks)
@@ -177,6 +184,22 @@ func (p *IdP) MintCode(code string, c Code) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.codes[code] = c
+}
+
+// RegisterRedirectURI adds one exact callback URI to the fake provider's
+// server-side client registration. Keeping this explicit makes the fixture
+// exercise the same anti-open-redirect boundary as a real provider.
+func (p *IdP) RegisterRedirectURI(raw string) error {
+	target, err := url.Parse(raw)
+	if err != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" ||
+		target.User != nil || target.Fragment != "" {
+		return fmt.Errorf("oidctest: invalid redirect URI %q", raw)
+	}
+	canonical := target.String()
+	p.mu.Lock()
+	p.redirectURIs[canonical] = canonical
+	p.mu.Unlock()
+	return nil
 }
 
 func (p *IdP) discovery(w http.ResponseWriter, _ *http.Request) {
@@ -310,19 +333,26 @@ func (p *IdP) MintIDToken(claims map[string]any) (string, error) {
 // when present (fixtures drive it), else "user".
 func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	code := randomToken()
-	p.MintCode(code, Code{
-		ClientID:      q.Get("client_id"),
-		RedirectURI:   q.Get("redirect_uri"),
-		Nonce:         q.Get("nonce"),
-		CodeChallenge: q.Get("code_challenge"),
-		Claims:        map[string]any{"sub": firstNonEmpty(q.Get("sub"), "user")},
-	})
-	u, err := url.Parse(q.Get("redirect_uri"))
+	p.mu.Lock()
+	redirectURI, registered := p.redirectURIs[q.Get("redirect_uri")]
+	p.mu.Unlock()
+	if !registered {
+		http.Error(w, "bad redirect_uri", http.StatusBadRequest)
+		return
+	}
+	u, err := url.Parse(redirectURI)
 	if err != nil {
 		http.Error(w, "bad redirect_uri", http.StatusBadRequest)
 		return
 	}
+	code := randomToken()
+	p.MintCode(code, Code{
+		ClientID:      q.Get("client_id"),
+		RedirectURI:   redirectURI,
+		Nonce:         q.Get("nonce"),
+		CodeChallenge: q.Get("code_challenge"),
+		Claims:        map[string]any{"sub": firstNonEmpty(q.Get("sub"), "user")},
+	})
 	rq := u.Query()
 	rq.Set("code", code)
 	rq.Set("state", q.Get("state"))

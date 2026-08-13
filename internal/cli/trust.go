@@ -224,6 +224,10 @@ func FetchIdentity(origin string) (string, error) {
 		port = "443"
 	}
 	conn, err := tls.Dial("tcp", net.JoinHostPort(u.Hostname(), port), &tls.Config{
+		// This first-contact ceremony cannot verify an identity it has not yet
+		// shown the operator. It returns only the fingerprint; no credential or
+		// application request crosses this connection.
+		// codeql[go/disabled-certificate-check]
 		InsecureSkipVerify: true, //nolint:gosec // the ceremony displays the identity for a human to confirm; nothing is trusted here
 		ServerName:         u.Hostname(),
 		MinVersion:         tls.VersionTLS12,

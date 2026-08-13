@@ -276,3 +276,14 @@ func TestAdmissionOverrideUnsetLeavesTheDefault(t *testing.T) {
 		t.Fatalf("override = %d, want 0 (meaning: the locked default)", cfg.DevAdmissionPerIPPerMinute)
 	}
 }
+
+func TestAdmissionBudgetRefusesValuesThatCannotFitEverySupportedInt(t *testing.T) {
+	_, _, err := Load("server", []string{"--dev"},
+		env("HIKYO_ADMISSION_BUDGET_MIB", "4294967295"), nil)
+	if err == nil {
+		t.Fatal("an admission budget that overflows a 32-bit int was accepted")
+	}
+	if !strings.Contains(err.Error(), "HIKYO_ADMISSION_BUDGET_MIB") {
+		t.Fatalf("error should name HIKYO_ADMISSION_BUDGET_MIB, got: %v", err)
+	}
+}

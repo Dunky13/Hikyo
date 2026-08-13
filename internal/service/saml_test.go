@@ -7,8 +7,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
+	"io"
 	"math/big"
+	"net/http"
+	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +21,12 @@ import (
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/samlsp"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestAssessSAMLMetadataReturnsCompleteDiffAndOnlyRequiresNewTrust(t *testing.T) {
 	oldCertificate := testSAMLCertificate(t, "old")
@@ -197,6 +207,66 @@ func TestSAMLMetadataURLRequiresHTTPS(t *testing.T) {
 	} {
 		if _, err := providers.fetchMetadata(t.Context(), rawURL); !errors.Is(err, ErrSAMLMetadataFetch) {
 			t.Errorf("fetchMetadata(%q) error = %v, want ErrSAMLMetadataFetch", rawURL, err)
+		}
+	}
+}
+
+func TestSAMLMetadataURLRefusesPrivateNetworkTargets(t *testing.T) {
+	requests := 0
+	providers := &SAMLProviders{HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("<EntityDescriptor/>")),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	for _, rawURL := range []string{
+		"https://localhost/metadata",
+		"https://127.0.0.1/metadata",
+		"https://10.0.0.1/metadata",
+		"https://169.254.169.254/latest/meta-data",
+		"https://100.64.0.1/metadata",
+		"https://[::1]/metadata",
+		"https://[fd00::1]/metadata",
+	} {
+		if _, err := providers.fetchMetadata(t.Context(), rawURL); !errors.Is(err, ErrSAMLMetadataFetch) {
+			t.Errorf("fetchMetadata(%q) error = %v, want ErrSAMLMetadataFetch", rawURL, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("private metadata URLs made %d outbound requests, want 0", requests)
+	}
+}
+
+func TestSAMLMetadataIPClassifierAllowsOnlyPublicAddresses(t *testing.T) {
+	for _, test := range []struct {
+		address   string
+		nonPublic bool
+	}{
+		{"8.8.8.8", false},
+		{"2606:4700:4700::1111", false},
+		{"127.0.0.1", true},
+		{"10.0.0.1", true},
+		{"169.254.169.254", true},
+		{"100.64.0.1", true},
+		{"192.0.2.1", true},
+		{"198.51.100.1", true},
+		{"203.0.113.1", true},
+		{"::1", true},
+		{"fd00::1", true},
+		{"64:ff9b:1::1", true},
+		{"100::1", true},
+		{"2001:2::1", true},
+		{"2001:db8::1", true},
+		{"2002::1", true},
+		{"3fff::1", true},
+		{"5f00::1", true},
+	} {
+		address := netip.MustParseAddr(test.address)
+		if got := metadataIPIsNonPublic(address); got != test.nonPublic {
+			t.Errorf("metadataIPIsNonPublic(%s) = %v, want %v", address, got, test.nonPublic)
 		}
 	}
 }
