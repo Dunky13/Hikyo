@@ -44,4 +44,4 @@ Existing root policy routes and `/release/signing/` remain stable.
 - Expanded manual: 23 internal docs routes resolve and all guide titles appear in search.
 - Fumadocs integrity: deleting a page named by `meta.json` fails the OSS policy gate.
 - Custom-domain regression: generated HTML rejects stale `/hikyo/` asset and navigation URLs.
-- Post-deploy gate: landing and docs CSS/JavaScript must resolve from `hikyo.app` with expected content types.
+- Post-deploy gate: poll for up to 110 seconds until landing and docs CSS/JavaScript resolve from `hikyo.app` with expected content types.

@@ -68,5 +68,7 @@ jobs:
           node-version-file: .nvmrc
       - name: Verify custom-domain pages and assets
         env:
+          DOCS_ATTEMPTS: "12"
           DOCS_CACHE_BUST: ${{ github.sha }}
+          DOCS_RETRY_DELAY_SECONDS: "10"
         run: ./scripts/ci/check-docs-live.sh https://hikyo.app security@developwent.io

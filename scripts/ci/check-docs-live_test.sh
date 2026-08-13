@@ -17,7 +17,13 @@ for argument do
 done
 case "$url" in
 	https://hikyo.app/ | https://hikyo.app/\?*)
-		if [ "${FAKE_STALE_BASE:-0}" -eq 1 ]; then
+		stale_base=${FAKE_STALE_BASE:-0}
+		if [ "${FAKE_STALE_ONCE:-0}" -eq 1 ] && \
+			[ ! -f "${FAKE_STALE_MARKER:?}" ]; then
+			: >"$FAKE_STALE_MARKER"
+			stale_base=1
+		fi
+		if [ "$stale_base" -eq 1 ]; then
 			base=/hikyo
 		else
 			base=
@@ -139,5 +145,20 @@ if FAKE_BAD_ASSET_TYPE=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
 	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: HTML stylesheet response was accepted\n' >&2
+	exit 1
+fi
+
+if ! FAKE_STALE_ONCE=1 FAKE_STALE_MARKER="$fixture_dir/stale-once" \
+	DOCS_ATTEMPTS=2 DOCS_RETRY_DELAY_SECONDS=0 CURL_BIN="$fixture_dir/curl" \
+	"$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: transient stale deployment was not retried\n' >&2
+	exit 1
+fi
+
+if FAKE_STALE_BASE=1 DOCS_ATTEMPTS=2 DOCS_RETRY_DELAY_SECONDS=0 \
+	CURL_BIN="$fixture_dir/curl" "$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: persistent stale deployment was accepted\n' >&2
 	exit 1
 fi

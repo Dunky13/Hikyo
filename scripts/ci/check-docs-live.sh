@@ -12,6 +12,25 @@ CURL_BIN=${CURL_BIN:-curl}
 JQ_BIN=${JQ_BIN:-jq}
 NODE_BIN=${NODE_BIN:-node}
 docs_cache_bust=${DOCS_CACHE_BUST:-}
+docs_attempts=${DOCS_ATTEMPTS:-1}
+docs_retry_delay_seconds=${DOCS_RETRY_DELAY_SECONDS:-10}
+
+case "$docs_attempts" in
+	'' | *[!0-9]*)
+		printf 'live docs gate: DOCS_ATTEMPTS must be a positive integer\n' >&2
+		exit 2
+		;;
+esac
+[ "$docs_attempts" -ge 1 ] || {
+	printf 'live docs gate: DOCS_ATTEMPTS must be a positive integer\n' >&2
+	exit 2
+}
+case "$docs_retry_delay_seconds" in
+	'' | *[!0-9]*)
+		printf 'live docs gate: DOCS_RETRY_DELAY_SECONDS must be a non-negative integer\n' >&2
+		exit 2
+		;;
+esac
 
 case "$docs_origin" in
 	https://*) ;;
@@ -43,6 +62,27 @@ case "$fallback_domain" in
 		exit 2
 		;;
 esac
+
+if [ "$docs_attempts" -gt 1 ]; then
+	attempt=1
+	cache_bust_prefix=${docs_cache_bust:-deployment}
+	while [ "$attempt" -le "$docs_attempts" ]; do
+		if DOCS_ATTEMPTS=1 \
+			DOCS_CACHE_BUST="$cache_bust_prefix-$attempt" \
+			"$0" "$@"; then
+			exit 0
+		fi
+		if [ "$attempt" -eq "$docs_attempts" ]; then
+			printf 'live docs gate: deployment remained unavailable after %s attempts\n' \
+				"$docs_attempts" >&2
+			exit 1
+		fi
+		printf 'live docs gate: attempt %s/%s failed; retrying in %ss\n' \
+			"$attempt" "$docs_attempts" "$docs_retry_delay_seconds" >&2
+		sleep "$docs_retry_delay_seconds"
+		attempt=$((attempt + 1))
+	done
+fi
 
 fetch() {
 	"$CURL_BIN" --fail --location --silent --show-error \
