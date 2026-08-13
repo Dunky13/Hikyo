@@ -117,6 +117,7 @@ require_text "$repo_root/SUPPORT.md" 'Prereleases are never supported.'
 
 for path in \
 	.well-known/security.txt \
+	index.html \
 	security/index.html \
 	support/index.html \
 	governance/index.html \
@@ -125,6 +126,12 @@ for path in \
 	license/index.html; do
 	require_file "$site_root/$path"
 done
+
+require_text "$site_root/index.html" 'Every value is explicit'
+require_text "$site_root/index.html" 'Mozilla Public License 2.0'
+require_text "$site_root/index.html" 'href="/hikyo/docs/"'
+reject_text "$site_root/index.html" 'validated, inherited secrets'
+reject_text "$site_root/index.html" 'MIT licensed'
 
 cmp "$security_txt" "$site_root/.well-known/security.txt" >/dev/null || {
 	printf 'OSS policy gate: served security.txt differs from its canonical source\n' >&2
