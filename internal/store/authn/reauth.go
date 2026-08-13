@@ -30,6 +30,14 @@ type ReauthWindow struct {
 	HardExpiresAt   time.Time
 	CredentialEpoch int64
 	Consumed        bool
+	// BoundOperation and BoundKeySet are the EXACT consent a step-up window
+	// carries: the one operation and the one canonical (sorted, newline-joined)
+	// key set the human approved. Both empty means UNBOUND, which is what every
+	// pre-#71 opener writes and is the environment-wide window #54 designed. A
+	// bound window is refused for anything else, so an approval for `key.reveal`
+	// over DATABASE_URL cannot be spent on a different operation or key.
+	BoundOperation string
+	BoundKeySet    string
 }
 
 // ReauthWindowFor resolves the window over one environment for one session, or
@@ -58,6 +66,7 @@ func (r *Resolver) ReauthWindowFor(ctx context.Context, sessionID, environmentID
 			SingleDecision: row.SingleDecision == 1, AuthenticatedAt: authAt,
 			WindowExpiresAt: winExp, HardExpiresAt: hardExp,
 			CredentialEpoch: row.CredentialEpoch, Consumed: row.ConsumedAt.Valid,
+			BoundOperation: row.BoundOperation, BoundKeySet: row.BoundKeySet,
 		}, nil
 	}
 	row, err := r.pg.GetReauthWindow(ctx, pggen.GetReauthWindowParams{SessionID: sessionID, EnvironmentID: environmentID})
@@ -70,6 +79,7 @@ func (r *Resolver) ReauthWindowFor(ctx context.Context, sessionID, environmentID
 		SingleDecision: row.SingleDecision == 1, AuthenticatedAt: row.AuthenticatedAt.Time,
 		WindowExpiresAt: row.WindowExpiresAt.Time, HardExpiresAt: row.HardExpiresAt.Time,
 		CredentialEpoch: row.CredentialEpoch, Consumed: row.ConsumedAt.Valid,
+		BoundOperation: row.BoundOperation, BoundKeySet: row.BoundKeySet,
 	}, nil
 }
 

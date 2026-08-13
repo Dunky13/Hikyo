@@ -65,6 +65,24 @@ func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operat
 		return nil, errors.New("authz: empty principal")
 	}
 
+	// Artifact eligibility, BEFORE the formula and before any chain resolution
+	// (#71, the multi-instance ADR's double confinement). It sits here, at the
+	// single chokepoint every operation passes through, rather than on the
+	// routes that happen to exist today: a credential confined to one operation
+	// must stay confined when the next endpoint is written, and a check on the
+	// endpoint is a check the next endpoint's author has to remember.
+	//
+	// The refusal wears the class's own uniform: a confined credential
+	// addressing a tenant operation is answered exactly like an unauthorized
+	// one, so eligibility is not a side channel for which operations exist.
+	if !Eligible(caller, op) {
+		a.captureDenial(ctx, caller.Principal, op, spec, resolutionUnresolvable, domain.Scope{}, scope)
+		if spec.class == ClassTenant {
+			return nil, domain.ErrNotFound
+		}
+		return nil, domain.ErrUnauthorized
+	}
+
 	switch spec.class {
 	case ClassTenant:
 		return a.authorizeTenant(ctx, caller, op, spec, scope)

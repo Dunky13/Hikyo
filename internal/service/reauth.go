@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,8 +53,16 @@ var (
 // to an enumerated unit — authorizes exactly the unit its ceremony pinned and is
 // consumed by exactly one decision through the consumed_at NULL guard. A sliding
 // window slides window_expires_at forward per disclosure, never past the hard cap.
+//
+// `operation` names the operation this disclosure is being authorized for. A
+// window carrying an EXACT BINDING — today, one opened by a workspace step-up,
+// where the human consented to one named operation over one named key set —
+// authorizes that pair and refuses everything else. An UNBOUND window (every
+// #54 opener: TOTP, OIDC, WebAuthn) keeps the environment-wide semantics it was
+// designed with. The asymmetry is the point: a consent that named an operation
+// must not become a consent for whatever the holder asks next.
 func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
-	purpose ReauthPurpose, environmentID string, keyIDs []string, now time.Time) error {
+	purpose ReauthPurpose, environmentID, operation string, keyIDs []string, now time.Time) error {
 	w, err := az.ReauthWindowFor(ctx, sessionID, environmentID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return ErrNoReauthWindow
@@ -69,6 +78,15 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 	// epoch cannot authenticate or be reauthenticated against (ADR - Restore).
 	if w.CredentialEpoch != epoch || !now.Before(w.HardExpiresAt) || !now.Before(w.WindowExpiresAt) {
 		return ErrReauthWindowExpired
+	}
+	// The exact binding, consumed rather than merely stored. An unnamed
+	// operation ("" — every caller that has no operation-scoped consent to
+	// present) can never equal a bound one, so a bound window fails closed for
+	// it rather than being treated as unbound.
+	if w.BoundOperation != "" {
+		if operation != w.BoundOperation || w.BoundKeySet != CanonicalKeySet(keyIDs) {
+			return ErrReauthUnitMismatch
+		}
 	}
 	if w.SingleDecision {
 		// The unit is fixed before the ceremony and cannot grow after it, and it
@@ -146,6 +164,20 @@ func authorizeEnvironmentRead(ctx context.Context, az *authz.TxAuthorizer, calle
 		Env: domain.EnvID(chain.Env),
 	})
 	return err
+}
+
+// CanonicalKeySet is the one spelling of an enumerated key set: sorted and
+// newline-joined. Both the consent (written onto the window at approval) and
+// the disclosure (presented at consumption) go through it, so the comparison
+// is a SET comparison and not an ordering accident. An empty set canonicalizes
+// to "", which is what a consent naming no keys stores.
+func CanonicalKeySet(keyIDs []string) string {
+	if len(keyIDs) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), keyIDs...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, "\n")
 }
 
 // LowerEffectiveWindow performs, in one transaction, the five ADR items on an

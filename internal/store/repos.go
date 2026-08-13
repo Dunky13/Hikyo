@@ -56,6 +56,7 @@ func (s sqliteReadRepos) Projects() ProjectReader         { return s.r.Projects(
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
 func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
 func (s sqliteReadRepos) Audit() AuditReader              { return s.r.Audit() }
+func (s sqliteReadRepos) Remotes() RemoteReader           { return s.r.Remotes() }
 
 type pgReadRepos struct{ r pgRepos }
 
@@ -69,6 +70,7 @@ func (p pgReadRepos) Projects() ProjectReader         { return p.r.Projects() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
 func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
 func (p pgReadRepos) Audit() AuditReader              { return p.r.Audit() }
+func (p pgReadRepos) Remotes() RemoteReader           { return p.r.Remotes() }
 
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
 // microsecond precision (postgres timestamptz cannot hold more; sqlite text
@@ -353,6 +355,23 @@ func (r sqliteProjects) List(ctx context.Context, p authz.Proof) ([]Project, err
 			return nil, err
 		}
 		out = append(out, proj)
+	}
+	return out, nil
+}
+
+func (r sqliteProjects) ListAll(ctx context.Context, p authz.Proof) ([]ProjectName, error) {
+	// No chain: the proof is instance-scope and addresses no tenant, which is
+	// why the statement carries no conjunct and is annotated instance-scoped.
+	if _, err := authz.Verify(p, authz.StoreProjectsListAll, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListAllProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectName, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectName{OrgID: row.OrgID, Name: row.Name})
 	}
 	return out, nil
 }
@@ -882,6 +901,23 @@ func (r pgProjects) List(ctx context.Context, p authz.Proof) ([]Project, error) 
 			return nil, err
 		}
 		out = append(out, proj)
+	}
+	return out, nil
+}
+
+func (r pgProjects) ListAll(ctx context.Context, p authz.Proof) ([]ProjectName, error) {
+	// No chain: the proof is instance-scope and addresses no tenant, which is
+	// why the statement carries no conjunct and is annotated instance-scoped.
+	if _, err := authz.Verify(p, authz.StoreProjectsListAll, r.tok); err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListAllProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectName, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProjectName{OrgID: row.OrgID, Name: row.Name})
 	}
 	return out, nil
 }

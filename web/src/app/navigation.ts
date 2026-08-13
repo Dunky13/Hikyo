@@ -18,7 +18,10 @@ export type SurfaceId =
   | 'projects'
   | 'settings'
   | 'values'
-  | 'machine-access';
+  | 'machine-access'
+  | 'remotes'
+  | 'workspace-approve'
+  | 'workspace-callback';
 
 export type Surface = {
   readonly id: SurfaceId;
@@ -31,6 +34,7 @@ export const SURFACES: readonly Surface[] = [
   { id: 'login', path: '/login', label: 'Sign in', section: null },
   { id: 'overview', path: '/', label: 'Overview', section: 'Organisation' },
   { id: 'projects', path: '/projects', label: 'Projects', section: 'Organisation' },
+  { id: 'remotes', path: '/remotes', label: 'Remotes', section: 'Organisation' },
   { id: 'settings', path: '/settings', label: 'Settings', section: 'Account' },
   // The reveal / copy / write-only-edit surface (#58). `section: null` because
   // it is not a navigation destination: it addresses one environment of one
@@ -53,6 +57,18 @@ export const SURFACES: readonly Surface[] = [
     label: 'Machine access',
     section: null,
   },
+  // The two ceremony pages. Neither is a navigation destination and neither
+  // wears the chrome: they are the two ends of the workspace handoff's front
+  // channel, and both are reached by a redirect, never by choosing them.
+  //
+  // `workspace-approve` is served by the SERVING instance and is where the
+  // popup lands — the human authenticates there with that instance's own
+  // ceremonies, on that instance's own origin, which is the whole architecture
+  // in one route. `workspace-callback` is served by the VIEWING instance and
+  // is the same-origin return path that exists because the popup is opened
+  // with `noopener` and therefore has no `window.opener` to talk back through.
+  { id: 'workspace-approve', path: '/workspace/approve', label: 'Authorize workspace', section: null },
+  { id: 'workspace-callback', path: '/workspace/callback', label: 'Returning', section: null },
 ];
 
 export type Section = {
@@ -68,6 +84,30 @@ export const SECTIONS: readonly Section[] = Object.entries(
     return acc;
   }, {}),
 ).map(([title, items]) => ({ title, items }));
+
+/**
+ * CHROMELESS is every surface that renders WITHOUT the application chrome AND
+ * without a session — the login page and the two workspace ceremony pages.
+ *
+ * DECLARED, not derived from `section === null`, and the counterexample is
+ * `values`: it is not a navigation destination either (it addresses one
+ * environment of one project, so it is reached from the matrix, never from a
+ * static sidebar entry), yet it is a signed-in surface that wears the chrome
+ * like any other. Deriving this set from `section` would have made the reveal
+ * surface publicly routable the moment both tickets met — the two properties
+ * look alike and are not the same property.
+ *
+ * A popup 520px wide showing an org rail would be chrome around a consent
+ * decision, which is why the ceremony pages are here; and the approve page in
+ * particular must render for a caller with NO session at all, or a first
+ * establishment would be bounced to `/login` and lose the `state` the whole
+ * transaction is addressed by.
+ */
+const CHROMELESS_IDS: readonly SurfaceId[] = ['login', 'workspace-approve', 'workspace-callback'];
+
+export const CHROMELESS: readonly Surface[] = SURFACES.filter((s) =>
+  CHROMELESS_IDS.includes(s.id),
+);
 
 export function surfaceById(id: SurfaceId): Surface {
   const found = SURFACES.find((s) => s.id === id);

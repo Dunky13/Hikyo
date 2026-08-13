@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 
 	"golang.org/x/term"
@@ -29,9 +30,45 @@ func readTerminalPassword(prompt string) (string, error) {
 	if _, err := fmt.Fprint(tty, prompt); err != nil {
 		return "", err
 	}
+	// INTERRUPT-SAFE ECHO RESTORE. term.ReadPassword turns echo off and turns
+	// it back on when it returns — and a Ctrl-C while it is blocked kills the
+	// process before it returns, leaving the terminal with echo disabled. The
+	// user's shell then reads their next keystrokes invisibly, and the next
+	// secret they type is invisible too, which is the failure mode that matters:
+	// they cannot see that it is not being masked, so they type it anyway.
+	//
+	// The state is captured before the read and restored from a signal handler,
+	// so the terminal is usable whichever way the read ends.
+	state, stateErr := term.GetState(int(tty.Fd()))
+	if stateErr == nil {
+		interrupted := make(chan os.Signal, 1)
+		signal.Notify(interrupted, os.Interrupt)
+		done := make(chan struct{})
+		defer func() {
+			signal.Stop(interrupted)
+			close(done)
+		}()
+		go func() {
+			select {
+			case <-interrupted:
+				_ = term.Restore(int(tty.Fd()), state)
+				fmt.Fprintln(tty)
+				// The command still dies of the interrupt — 130 is the shell's
+				// own spelling of "killed by SIGINT". Restoring and exiting is
+				// portable where re-raising the signal is not, and this handler
+				// exists to leave the terminal usable, not to make the command
+				// uninterruptible.
+				os.Exit(130)
+			case <-done:
+			}
+		}()
+	}
 	raw, err := term.ReadPassword(int(tty.Fd()))
 	fmt.Fprintln(tty)
 	if err != nil {
+		if stateErr == nil {
+			_ = term.Restore(int(tty.Fd()), state)
+		}
 		return "", failf(ExitRefused, "reading the password: %v", err)
 	}
 	// TrimRight only: leading and internal whitespace are legitimate password

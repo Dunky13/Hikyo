@@ -635,6 +635,15 @@ var migrationSeededTables = map[string]bool{
 	"auth_instance_state": true,
 	"key_generations":     true,
 	"credential_policy":   true,
+	// The instance's own opaque identity (#71) is minted BY THE MIGRATION,
+	// deliberately: the only correct moment for it to exist is the moment the
+	// schema does, and a boot mint site would have grown the system-proof
+	// operation set that invariant 11 closes. So a freshly migrated target
+	// carries exactly one of these rows, and it is a seed like the others.
+	// The truncate replacing it with the archive's is right rather than
+	// merely tolerable: a restore reconstitutes THAT instance, and a remote
+	// that pinned the old identity must keep resolving to it.
+	"instance_identity": true,
 	// The version table is populated by the RunUpTo that created this schema
 	// moments ago; its rows are the migration run's own bookkeeping, not
 	// instance state, and the truncate replaces them with the archive's.

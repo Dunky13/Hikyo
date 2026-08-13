@@ -279,3 +279,191 @@ func coveredBy(grants []domain.Grant, cap domain.Capability, at domain.Scope) bo
 func (a *TxAuthorizer) GrantsOf(ctx context.Context, p domain.PrincipalID) ([]domain.Grant, error) {
 	return a.r.Grants(ctx, p)
 }
+
+// authenticateInstanceConnection resolves a presented directory credential
+// (#71). It is the machine leg's sibling and keeps the same discipline, with
+// one fewer read: the connection row holds the principal AND the credential,
+// because the ADR mints them as one unit, so there is no second lookup to
+// make. What matters for the oracle is that EVERY presentation of this
+// artifact does the same two reads, the same decode and the same compare —
+// uniformity is within the leg, not across legs, and a caller cannot choose
+// which leg runs without already knowing the artifact type they typed.
+func (a *TxAuthorizer) authenticateInstanceConnection(ctx context.Context, presented string, now time.Time) (Identity, error) {
+	conn, connErr := a.r.InstanceConnectionByVerifier(ctx, crypto.ArtifactVerifier(presented))
+	if connErr != nil && !errors.Is(connErr, domain.ErrNotFound) {
+		return Identity{}, connErr
+	}
+
+	epoch, err := a.r.CredentialEpoch(ctx)
+	if err != nil {
+		return Identity{}, err
+	}
+
+	if connErr != nil || !conn.Live(now, epoch) {
+		return Identity{}, domain.ErrUnauthenticated
+	}
+
+	return Identity{
+		Principal: conn.PrincipalID,
+		// NOT string(conn.Kind). The credential kind is "hikyo-token" and says
+		// nothing about what this artifact may reach; the ARTIFACT TYPE is what
+		// the eligibility table is keyed on, and setting the kind here — the
+		// shape the machine leg above uses — would make the double confinement
+		// silently inert while every test of the table itself still passed.
+		Artifact:     string(crypto.ArtifactInstanceConn),
+		Class:        domain.ClassInstanceConn,
+		CredentialID: conn.ID,
+		CreatedAt:    conn.CreatedAt,
+		LastSeenAt:   conn.LastUsedAt,
+	}, nil
+}
+
+// The instance-connection tables' in-transaction face (#71). Same shape as the
+// machine surface above: authorization happens at the chokepoint first — every
+// caller mints a proof through Authorize before reaching here — but the rows
+// are `class=authn`, so the reads and writes ride the resolution surface.
+
+func (a *TxAuthorizer) MintInstanceConnection(ctx context.Context, n authn.NewInstanceConnection) error {
+	return a.r.MintInstanceConnection(ctx, n)
+}
+
+func (a *TxAuthorizer) RevokeInstanceConnection(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.RevokeInstanceConnection(ctx, id, at)
+}
+
+func (a *TxAuthorizer) TouchInstanceConnection(ctx context.Context, id string, at time.Time) error {
+	return a.r.TouchInstanceConnection(ctx, id, at)
+}
+
+func (a *TxAuthorizer) InstanceConnections(ctx context.Context) ([]authn.InstanceConnection, error) {
+	return a.r.InstanceConnections(ctx)
+}
+
+func (a *TxAuthorizer) InstanceConnectionByID(ctx context.Context, id string) (authn.InstanceConnection, error) {
+	return a.r.InstanceConnectionByID(ctx, id)
+}
+
+// InstanceIdentity is this instance's own opaque id — the value a directory
+// listing carries and the one self-connection refusal compares against.
+func (a *TxAuthorizer) InstanceIdentity(ctx context.Context) (string, error) {
+	return a.r.InstanceIdentity(ctx)
+}
+
+// The workspace tier's carrier types, re-exported so the service layer never
+// names internal/store/authn — the import-boundary test enforces that the
+// resolution surface is reachable only through this package.
+type (
+	WorkspaceOrigin       = authn.WorkspaceOrigin
+	WorkspaceHandoff      = authn.WorkspaceHandoff
+	NewWorkspaceHandoff   = authn.NewWorkspaceHandoff
+	SessionSummary        = authn.SessionSummary
+	HandoffPurpose        = authn.HandoffPurpose
+	NewInstanceConnection = authn.NewInstanceConnection
+	InstanceConnection    = authn.InstanceConnection
+)
+
+const (
+	HandoffEstablishment = authn.HandoffEstablishment
+	HandoffStepUp        = authn.HandoffStepUp
+)
+
+// The workspace tier's in-transaction face (#71). Every one of these rides the
+// resolution surface for the reason stated above the connection block: the
+// origin allowlist is consulted PRE-authentication (at handoff issuance and by
+// CORS), the handoff transaction resolves a caller exactly as a session
+// verifier does, and the session statements are session statements. The
+// mutating ones are still authorized at the chokepoint first, except the two
+// that cannot be — StartHandoff and RedeemHandoff, where no principal exists
+// yet, which is what a handoff transaction is for.
+
+func (a *TxAuthorizer) WorkspaceOrigins(ctx context.Context) ([]authn.WorkspaceOrigin, error) {
+	return a.r.WorkspaceOrigins(ctx)
+}
+
+func (a *TxAuthorizer) WorkspaceOriginAllowed(ctx context.Context, origin string) (bool, error) {
+	return a.r.WorkspaceOriginAllowed(ctx, origin)
+}
+
+func (a *TxAuthorizer) AllowWorkspaceOrigin(ctx context.Context, o authn.WorkspaceOrigin) error {
+	return a.r.AllowWorkspaceOrigin(ctx, o)
+}
+
+// RemoveWorkspaceOrigin and RevokeWorkspaceSessionsForOrigin are ONE ACT in two
+// statements and must be called in one transaction. That pairing is the ADR's
+// atomic kill switch; splitting it leaves a window in which an origin is
+// de-allowlisted and its sessions still authenticate.
+func (a *TxAuthorizer) RemoveWorkspaceOrigin(ctx context.Context, origin string) (bool, error) {
+	return a.r.RemoveWorkspaceOrigin(ctx, origin)
+}
+
+func (a *TxAuthorizer) RevokeWorkspaceSessionsForOrigin(ctx context.Context, origin string) (int64, error) {
+	return a.r.RevokeWorkspaceSessionsForOrigin(ctx, origin)
+}
+
+func (a *TxAuthorizer) CreateWorkspaceHandoff(ctx context.Context, h authn.NewWorkspaceHandoff) error {
+	return a.r.CreateWorkspaceHandoff(ctx, h)
+}
+
+func (a *TxAuthorizer) WorkspaceHandoffByState(ctx context.Context, verifier []byte) (authn.WorkspaceHandoff, error) {
+	return a.r.WorkspaceHandoffByState(ctx, verifier)
+}
+
+func (a *TxAuthorizer) WorkspaceHandoffByCode(ctx context.Context, verifier []byte) (authn.WorkspaceHandoff, error) {
+	return a.r.WorkspaceHandoffByCode(ctx, verifier)
+}
+
+func (a *TxAuthorizer) ApproveWorkspaceHandoff(ctx context.Context, id string, codeVerifier []byte, p domain.PrincipalID, factors, factorClass string) (bool, error) {
+	return a.r.ApproveWorkspaceHandoff(ctx, id, codeVerifier, p, factors, factorClass)
+}
+
+// LockWorkspaceOrigin and LockInstanceIdentityRow are the two row locks the
+// serving side's read-then-write decisions serialize on under postgres' READ
+// COMMITTED semantics.
+func (a *TxAuthorizer) LockWorkspaceOrigin(ctx context.Context, origin string) (bool, error) {
+	return a.r.LockWorkspaceOrigin(ctx, origin)
+}
+
+func (a *TxAuthorizer) LockInstanceIdentityRow(ctx context.Context) error {
+	return a.r.LockInstanceIdentityRow(ctx)
+}
+
+func (a *TxAuthorizer) ConsumeWorkspaceHandoff(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.ConsumeWorkspaceHandoff(ctx, id, at)
+}
+
+func (a *TxAuthorizer) SweepExpiredWorkspaceHandoffs(ctx context.Context, before time.Time) (int64, error) {
+	return a.r.SweepExpiredWorkspaceHandoffs(ctx, before)
+}
+
+// SessionsForPrincipal and RevokeSessionForPrincipal are the self-scoped
+// active-session surface (#71 criterion 5). The principal conjunct is in the
+// SQL, so one caller structurally cannot reach another's row.
+func (a *TxAuthorizer) SessionsForPrincipal(ctx context.Context, p domain.PrincipalID) ([]authn.SessionSummary, error) {
+	return a.r.SessionsForPrincipal(ctx, p)
+}
+
+func (a *TxAuthorizer) RevokeSessionForPrincipal(ctx context.Context, id string, p domain.PrincipalID) (bool, error) {
+	return a.r.RevokeSessionForPrincipal(ctx, id, p)
+}
+
+// InstanceConnectionByPrincipal answers "which connection is this caller",
+// which is what the directory serve needs to stamp last-used and to name the
+// actor in its audit event.
+func (a *TxAuthorizer) InstanceConnectionByPrincipal(ctx context.Context, p domain.PrincipalID) (authn.InstanceConnection, error) {
+	conns, err := a.r.InstanceConnections(ctx)
+	if err != nil {
+		return authn.InstanceConnection{}, err
+	}
+	for _, c := range conns {
+		if c.PrincipalID == p {
+			return c, nil
+		}
+	}
+	return authn.InstanceConnection{}, domain.ErrNotFound
+}
+
+// RemoteOrigins is the CSP `connect-src` input. See the resolver's doc comment
+// for why this one read of a class=instance table is proof-free.
+func (a *TxAuthorizer) RemoteOrigins(ctx context.Context) ([]string, error) {
+	return a.r.RemoteOrigins(ctx)
+}

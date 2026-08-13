@@ -151,6 +151,21 @@ type ProjectReader interface {
 	Get(ctx context.Context, p authz.Proof) (Project, error)
 	// List returns every project in the org the proof addresses.
 	List(ctx context.Context, p authz.Proof) ([]Project, error)
+	// ListAll returns (org id, name) for every project on the instance,
+	// under an instance-scope proof addressing no tenant. It exists for the
+	// multi-instance directory (#71), whose served listing is org/project
+	// names and counts across org boundaries by design. It is deliberately
+	// NOT List in a loop: N tenant proofs for one operation would misreport
+	// the operation in the boundary check.
+	ListAll(ctx context.Context, p authz.Proof) ([]ProjectName, error)
+}
+
+// ProjectName is the directory listing's project row: the two fields the
+// served listing may carry, and nothing more. A full Project would hand the
+// caller an id and a creation time the directory has no licence to publish.
+type ProjectName struct {
+	OrgID string
+	Name  string
 }
 
 // ProjectRepo is the full projects aggregate.
@@ -232,6 +247,109 @@ type FolderRepo interface {
 	Delete(ctx context.Context, p authz.Proof, id string) error
 }
 
+// Remote is one connection entry: this instance's named pointer at another
+// one (#71, multi-instance ADR § The connection entry).
+//
+// There is deliberately NO credential field. URL and pin are immutable and the
+// sealed credential is write-only after storage, so the ordinary read cannot
+// hand it out by accident — reaching it is the separate, greppable
+// SealedCredential call, and that call exists so the fetch path can PRESENT the
+// value, never so a surface can display it.
+type Remote struct {
+	ID   string
+	Name string
+	URL  string
+	// SPKIPin is base64(sha256(SubjectPublicKeyInfo)), verified on every
+	// connection before any request is written.
+	SPKIPin   string
+	CreatedAt time.Time
+	CreatedBy domain.PrincipalID
+}
+
+// NewRemote is one entry insert. It is the only carrier that names the sealed
+// credential, and it names it once.
+type NewRemote struct {
+	ID               string
+	Name             string
+	URL              string
+	SPKIPin          string
+	CredentialSealed []byte
+	CreatedAt        time.Time
+	CreatedBy        domain.PrincipalID
+}
+
+// RemoteSnapshot is one entry's last-known directory listing.
+//
+// TWO CLOCKS, deliberately separate. LastAttemptAt/LastOutcome record the most
+// recent FETCH; ObservedAt and the listing fields record the most recent
+// SUCCESS. That split is the whole freshness model: an unreachable remote
+// serves its last-known listing marked stale with its age, never silently as
+// current, and a credential rejection is a distinct loud state because the
+// operator's fix differs.
+//
+// LastOutcome is a plain string here rather than remotefetch.Outcome: the
+// store must not depend on the outbound client, and the column's own CHECK is
+// what makes the enum total. A value outside it fails loud at the write.
+type RemoteSnapshot struct {
+	RemoteID      string
+	LastAttemptAt time.Time
+	LastOutcome   string
+	// ObservedAt is the zero time until the first successful fetch. The
+	// listing fields are meaningful IFF it is non-zero — the table's CHECK
+	// makes the pairing total, so a zero-count "listing" cannot be stored.
+	ObservedAt       time.Time
+	InstanceIdentity string
+	Version          string
+	OrgCount         int64
+	ProjectCount     int64
+	// Listing is the org/project names as fetched, stored as JSON. It is
+	// foreign structure at rest and holds nothing value-bearing: the
+	// credential that produced it may read nothing else.
+	Listing json.RawMessage
+}
+
+// RemoteReader is the read side of the remotes aggregate (viewing side).
+// Every method takes an instance-scope proof: remotes address no tenant.
+type RemoteReader interface {
+	List(ctx context.Context, p authz.Proof) ([]Remote, error)
+	Get(ctx context.Context, p authz.Proof, id string) (Remote, error)
+	// GetByName is the CLI's addressing mode — `remote show <name>`,
+	// `remote remove <name>` — and the uniqueness the schema already enforces
+	// is what makes it single-valued.
+	GetByName(ctx context.Context, p authz.Proof, name string) (Remote, error)
+	// Count is the RemoteCount cap's input, read inside the same transaction
+	// as the insert it bounds.
+	Count(ctx context.Context, p authz.Proof) (int64, error)
+	Snapshots(ctx context.Context, p authz.Proof) ([]RemoteSnapshot, error)
+	Snapshot(ctx context.Context, p authz.Proof, remoteID string) (RemoteSnapshot, error)
+	// SealedCredential is the ONLY reader of the stored credential. It is a
+	// distinct method rather than a field on Remote so that reaching the
+	// credential is a greppable act, and it carries its own StoreOp so an
+	// operation licensed to LIST remotes is not thereby licensed to present
+	// one. It is on the READ side because the on-view fetch reads it in a read
+	// transaction — a network fan-out must not hold the write connection.
+	SealedCredential(ctx context.Context, p authz.Proof, id string) ([]byte, error)
+}
+
+// RemoteRepo is the full remotes aggregate.
+type RemoteRepo interface {
+	RemoteReader
+	Create(ctx context.Context, p authz.Proof, r NewRemote) error
+	// Rename touches the display name, the ADR's one mutable field. There is
+	// no Repoint: re-pointing a stored credential at a different host is the
+	// credential-redirect attack, so it is remove + add, which re-runs the
+	// full ceremony including the human fingerprint confirmation.
+	Rename(ctx context.Context, p authz.Proof, id, name string) error
+	Delete(ctx context.Context, p authz.Proof, id string) error
+	// WriteSnapshot records a SUCCESSFUL fetch, listing and all.
+	WriteSnapshot(ctx context.Context, p authz.Proof, s RemoteSnapshot) error
+	// RecordFetchFailure records the attempt and its outcome and PRESERVES the
+	// last known listing — that preservation is what makes "unreachable 2h,
+	// last known state shown" possible, and it is why failure is its own
+	// method rather than WriteSnapshot with empty fields.
+	RecordFetchFailure(ctx context.Context, p authz.Proof, remoteID string, at time.Time, outcome string) error
+}
+
 // Repos bundles the full repositories bound to one write transaction.
 //
 // Keys() is the KEYRING (#43, wrapped crypto material); Catalogue() is the KEY
@@ -255,6 +373,8 @@ type Repos interface {
 	// administration reads run beside their own lifecycle events — so a
 	// read-only twin would be a surface with no caller.
 	SCIM() SCIMRepo
+	// Remotes is the multi-instance directory's viewing side (#71).
+	Remotes() RemoteRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
@@ -271,6 +391,7 @@ type ReadRepos interface {
 	Environments() EnvironmentReader
 	Folders() FolderReader
 	Audit() AuditReader
+	Remotes() RemoteReader
 }
 
 // ErrNotFound is the canonical cross-engine "no such row" — aliased from

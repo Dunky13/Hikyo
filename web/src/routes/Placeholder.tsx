@@ -33,15 +33,6 @@ export function Projects() {
   );
 }
 
-export function Settings() {
-  return (
-    <Placeholder title="Settings">
-      Account and security: sessions by artifact type, passkeys, TOTP, recovery
-      codes and linked identities.
-    </Placeholder>
-  );
-}
-
 export function NotFound() {
   return (
     <Placeholder title="Not found">

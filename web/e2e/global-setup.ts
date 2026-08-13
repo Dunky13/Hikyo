@@ -1,4 +1,4 @@
-import { startInstance } from './fixtures/instance.ts';
+import { startInstance, stopInstance } from './fixtures/instance.ts';
 import { liveClosureViolations, resetRunLog } from './registry.ts';
 
 /**
@@ -13,5 +13,13 @@ export default async function globalSetup(): Promise<void> {
   }
   // A previous run's log must not vouch for this one.
   resetRunLog();
-  await startInstance();
+  try {
+    await startInstance();
+  } catch (err) {
+    // A setup failure means Playwright never runs globalTeardown; without this
+    // the just-spawned servers outlive the runner and poison the next run's
+    // port preflight.
+    stopInstance();
+    throw err;
+  }
 }

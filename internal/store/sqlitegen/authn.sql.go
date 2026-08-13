@@ -268,6 +268,46 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteSessionForPrincipal = `-- name: DeleteSessionForPrincipal :execrows
+DELETE FROM sessions WHERE id = ? AND principal_id = ?
+`
+
+type DeleteSessionForPrincipalParams struct {
+	ID          string
+	PrincipalID string
+}
+
+// Self-scoped revocation: the principal conjunct is what makes one caller
+// unable to revoke another's session by guessing an id, and it is why the
+// statement reports rows affected rather than succeeding silently.
+// hikyo:authn-resolution
+func (q *Queries) DeleteSessionForPrincipal(ctx context.Context, arg DeleteSessionForPrincipalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSessionForPrincipal, arg.ID, arg.PrincipalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteSessionsForOrigin = `-- name: DeleteSessionsForOrigin :execrows
+DELETE FROM sessions WHERE requesting_origin = ?
+`
+
+// The origin kill switch (#71). Removing an origin from the allowlist
+// atomically revokes every workspace session bound to it -- ONE statement over
+// one indexed column, in the same transaction as the allowlist delete, which
+// is what makes de-allowlisting a real kill switch rather than a headers
+// change. Only workspace rows carry a requesting_origin, so no cli or browser
+// session can be caught by it.
+// hikyo:authn-resolution
+func (q *Queries) DeleteSessionsForOrigin(ctx context.Context, requestingOrigin sql.NullString) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSessionsForOrigin, requestingOrigin)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSessionsForPrincipal = `-- name: DeleteSessionsForPrincipal :exec
 DELETE FROM sessions WHERE principal_id = ?
 `
@@ -846,7 +886,7 @@ func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcPr
 const getReauthWindow = `-- name: GetReauthWindow :one
 SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
        authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-       consumed_at, created_at
+       consumed_at, created_at, bound_operation, bound_key_set
 FROM reauth_windows WHERE session_id = ? AND environment_id = ?
 `
 
@@ -878,6 +918,8 @@ func (q *Queries) GetReauthWindow(ctx context.Context, arg GetReauthWindowParams
 		&i.CredentialEpoch,
 		&i.ConsumedAt,
 		&i.CreatedAt,
+		&i.BoundOperation,
+		&i.BoundKeySet,
 	)
 	return i, err
 }
@@ -927,7 +969,8 @@ func (q *Queries) GetRestoreState(ctx context.Context) (GetRestoreStateRow, erro
 const getSessionByID = `-- name: GetSessionByID :one
 SELECT id, principal_id, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier,
+       requesting_origin
 FROM sessions WHERE id = ?
 `
 
@@ -946,6 +989,7 @@ type GetSessionByIDRow struct {
 	IdleExpiresAt     string
 	AbsoluteExpiresAt string
 	CsrfVerifier      []byte
+	RequestingOrigin  sql.NullString
 }
 
 // hikyo:authn-resolution
@@ -967,6 +1011,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByID
 		&i.IdleExpiresAt,
 		&i.AbsoluteExpiresAt,
 		&i.CsrfVerifier,
+		&i.RequestingOrigin,
 	)
 	return i, err
 }
@@ -974,7 +1019,8 @@ func (q *Queries) GetSessionByID(ctx context.Context, id string) (GetSessionByID
 const getSessionByVerifier = `-- name: GetSessionByVerifier :one
 SELECT id, principal_id, verifier, artifact, session_generation, credential_epoch,
        auth_method, factors, authenticated_at, ceremony_id, created_at,
-       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier
+       last_seen_at, idle_expires_at, absolute_expires_at, csrf_verifier,
+       requesting_origin
 FROM sessions WHERE verifier = ?
 `
 
@@ -994,6 +1040,7 @@ type GetSessionByVerifierRow struct {
 	IdleExpiresAt     string
 	AbsoluteExpiresAt string
 	CsrfVerifier      []byte
+	RequestingOrigin  sql.NullString
 }
 
 // hikyo:authn-resolution
@@ -1016,6 +1063,7 @@ func (q *Queries) GetSessionByVerifier(ctx context.Context, verifier []byte) (Ge
 		&i.IdleExpiresAt,
 		&i.AbsoluteExpiresAt,
 		&i.CsrfVerifier,
+		&i.RequestingOrigin,
 	)
 	return i, err
 }
@@ -1251,8 +1299,8 @@ const insertReauthWindow = `-- name: InsertReauthWindow :exec
 INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-     consumed_at, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+     consumed_at, created_at, bound_operation, bound_key_set)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 ON CONFLICT (session_id, environment_id) DO UPDATE SET
     id = excluded.id,
     ceremony_id = excluded.ceremony_id,
@@ -1263,7 +1311,9 @@ ON CONFLICT (session_id, environment_id) DO UPDATE SET
     hard_expires_at = excluded.hard_expires_at,
     credential_epoch = excluded.credential_epoch,
     consumed_at = NULL,
-    created_at = excluded.created_at
+    created_at = excluded.created_at,
+    bound_operation = excluded.bound_operation,
+    bound_key_set = excluded.bound_key_set
 `
 
 type InsertReauthWindowParams struct {
@@ -1278,6 +1328,8 @@ type InsertReauthWindowParams struct {
 	HardExpiresAt   string
 	CredentialEpoch int64
 	CreatedAt       string
+	BoundOperation  string
+	BoundKeySet     string
 }
 
 // A FRESH CEREMONY SUPERSEDES THE PAIR'S PREVIOUS WINDOW (#58).
@@ -1289,6 +1341,8 @@ type InsertReauthWindowParams struct {
 // reveal guard's own headline case: a protected environment is capped at 0, so
 // its disclosures are "a passkey ceremony per disclosure" (ceremony, disclose,
 // ceremony again) and the second ceremony hit the first window's spent row.
+// The same fault bit every opener, including a workspace step-up (#71)
+// repeated on one environment, so the fix is shared by all of them.
 //
 // It is ONE atomic statement rather than a delete followed by an insert,
 // because two tabs finishing ceremonies at the same time are a real shape: on
@@ -1298,7 +1352,8 @@ type InsertReauthWindowParams struct {
 // loser update instead of fail.
 //
 // consumed_at resets to NULL because the row now describes the NEW ceremony,
-// which nothing has spent.
+// which nothing has spent. bound_operation and bound_key_set (#71) carry a
+// workspace step-up's exact-consent binding; the human openers write NULLs.
 // hikyo:authn-resolution
 func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindowParams) error {
 	_, err := q.db.ExecContext(ctx, insertReauthWindow,
@@ -1313,6 +1368,8 @@ func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindow
 		arg.HardExpiresAt,
 		arg.CredentialEpoch,
 		arg.CreatedAt,
+		arg.BoundOperation,
+		arg.BoundKeySet,
 	)
 	return err
 }
@@ -1348,8 +1405,8 @@ INSERT INTO sessions
     (id, principal_id, verifier, artifact, session_generation, credential_epoch,
      auth_method, factors, authenticated_at, ceremony_id, created_at,
      last_seen_at, idle_expires_at, absolute_expires_at, source_ip, user_agent,
-     provider_id, csrf_verifier)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     provider_id, csrf_verifier, requesting_origin, handoff_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -1371,8 +1428,15 @@ type InsertSessionParams struct {
 	UserAgent         string
 	ProviderID        sql.NullString
 	CsrfVerifier      []byte
+	RequestingOrigin  sql.NullString
+	HandoffID         sql.NullString
 }
 
+// One insert for every session artifact, including the workspace session
+// (#71). requesting_origin and handoff_id are NULL for cli and browser rows
+// and NOT NULL for a workspace row; the table CHECK ties them to the artifact,
+// so a second insert statement for the workspace case would buy nothing but a
+// second place for the pairing to drift.
 // hikyo:authn-resolution
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
 	_, err := q.db.ExecContext(ctx, insertSession,
@@ -1394,6 +1458,8 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.UserAgent,
 		arg.ProviderID,
 		arg.CsrfVerifier,
+		arg.RequestingOrigin,
+		arg.HandoffID,
 	)
 	return err
 }
@@ -1562,6 +1628,71 @@ func (q *Queries) ListGrantsForResetTarget(ctx context.Context, principalID stri
 	return items, nil
 }
 
+const listSessionsForPrincipal = `-- name: ListSessionsForPrincipal :many
+SELECT id, artifact, auth_method, factors, authenticated_at, created_at,
+       last_seen_at, idle_expires_at, absolute_expires_at, source_ip,
+       user_agent, requesting_origin, handoff_id
+FROM sessions WHERE principal_id = ? ORDER BY created_at, id
+`
+
+type ListSessionsForPrincipalRow struct {
+	ID                string
+	Artifact          string
+	AuthMethod        string
+	Factors           string
+	AuthenticatedAt   string
+	CreatedAt         string
+	LastSeenAt        string
+	IdleExpiresAt     string
+	AbsoluteExpiresAt string
+	SourceIp          string
+	UserAgent         string
+	RequestingOrigin  sql.NullString
+	HandoffID         sql.NullString
+}
+
+// The active-session listing (#71 criterion 5). A workspace session appears
+// here as its own artifact type, beside the cli and browser rows, which is the
+// ADR's requirement and the reason it is a `sessions` row at all. Metadata
+// only: no verifier is selected, here or anywhere.
+// hikyo:authn-resolution
+func (q *Queries) ListSessionsForPrincipal(ctx context.Context, principalID string) ([]ListSessionsForPrincipalRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSessionsForPrincipal, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSessionsForPrincipalRow
+	for rows.Next() {
+		var i ListSessionsForPrincipalRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Artifact,
+			&i.AuthMethod,
+			&i.Factors,
+			&i.AuthenticatedAt,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.IdleExpiresAt,
+			&i.AbsoluteExpiresAt,
+			&i.SourceIp,
+			&i.UserAgent,
+			&i.RequestingOrigin,
+			&i.HandoffID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnreconciledPrincipals = `-- name: ListUnreconciledPrincipals :many
 SELECT principals.id, principals.kind FROM principals
 WHERE principals.reconciled_epoch < (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1)
@@ -1635,6 +1766,7 @@ SELECT MAX(e) AS max_epoch FROM (
     UNION ALL SELECT restore_epoch FROM auth_instance_state WHERE id = 1
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM credential_authorities
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM external_identities
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM instance_connections
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM machine_credentials
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM oidc_transactions
     UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM password_credentials
