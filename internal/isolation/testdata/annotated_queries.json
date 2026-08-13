@@ -7,6 +7,12 @@
   },
   {
     "engine": "postgres",
+    "name": "AdvanceRestoreEpoch",
+    "annotation": "authn-resolution",
+    "hash": "caa001a214c59e1bbe046d47874a801939c6b798e155b1f67418b70d768a87c3"
+  },
+  {
+    "engine": "postgres",
     "name": "AdvanceTOTPStep",
     "annotation": "authn-resolution",
     "hash": "c5353f7cb1ff1eb6c1cef4049ec65630c5b8aa9022193730a552eb8e690dc7bd"
@@ -403,6 +409,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetRestoreState",
+    "annotation": "authn-resolution",
+    "hash": "38fa160386db473e50a02cf294955622482e31b74576ffe56c904897b809832a"
+  },
+  {
+    "engine": "postgres",
     "name": "GetSAMLProviderBySlug",
     "annotation": "authn-resolution",
     "hash": "c8ab42a4a029f2d425b3769ae74e7ba96cb0e4d62237e36cde35f4755a8cc439"
@@ -531,7 +543,7 @@
     "engine": "postgres",
     "name": "InsertMachinePrincipal",
     "annotation": "authn-resolution",
-    "hash": "4f78efc4cd95d756051a4cf903691eb4184d1bc7ceffef08772007d03116b798"
+    "hash": "1b3500201caf060d6465f3bfbfa0bd7d452752dce134095fbd8263485300ecf1"
   },
   {
     "engine": "postgres",
@@ -549,7 +561,7 @@
     "engine": "postgres",
     "name": "InsertPrincipal",
     "annotation": "authn-resolution",
-    "hash": "3ca1f7b2720bc723487c9222622bd0056112c329a4d1b977799a575536dc0d6f"
+    "hash": "938169e254c82b536f15ff301bcf7317ed29f4e2f442c36a68630386f7b018c7"
   },
   {
     "engine": "postgres",
@@ -651,7 +663,7 @@
     "engine": "postgres",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
-    "hash": "4237055886adb603b2de32c4789fb214266455a1e76f701028279e2def76ce0a"
+    "hash": "799fa2cf773075cb50e4e622475f1bce25c33cac599c6fd4779639e9b16460ba"
   },
   {
     "engine": "postgres",
@@ -733,6 +745,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListUnreconciledPrincipals",
+    "annotation": "authn-resolution",
+    "hash": "ac1034e50c04345beedfce9353697b6a860aa5ea28698588ea50a86fd208ddaa"
+  },
+  {
+    "engine": "postgres",
     "name": "ListWebAuthnCredentialsForAccount",
     "annotation": "authn-resolution",
     "hash": "0393cf6c111cddb0a59e89add48421f43180ba7b8d235586ee435502c8177b34"
@@ -769,15 +787,33 @@
   },
   {
     "engine": "postgres",
+    "name": "MarkAllPrincipalsUnreconciled",
+    "annotation": "authn-resolution",
+    "hash": "583d54cf8e92d8fdd22f4c8ff53eb66b629abad58c021483c9428356f348697a"
+  },
+  {
+    "engine": "postgres",
     "name": "MarkSAMLSPKeyRetiringCAS",
     "annotation": "authn-resolution",
     "hash": "fcfa1609192d4062059f8e375a8ca832255856a52bbd936c72026e36a194bb4d"
   },
   {
     "engine": "postgres",
+    "name": "MaxKnownCredentialEpoch",
+    "annotation": "authn-resolution",
+    "hash": "bcc965f2855da3601f60cdfd2208dc7559ecb6935a789ee3f1a1cb65168021af"
+  },
+  {
+    "engine": "postgres",
     "name": "RebindSAMLExternalIdentityProvider",
     "annotation": "authn-resolution",
     "hash": "5e7e022bd30f720586e24fc548d35032553ac795430e1caab2335a93b3cfb635"
+  },
+  {
+    "engine": "postgres",
+    "name": "ReconcilePrincipal",
+    "annotation": "authn-resolution",
+    "hash": "ef38161256d15ae1edbe86469e611bdade74d77f20bd74f196fd1fd6370de983"
   },
   {
     "engine": "postgres",
@@ -880,6 +916,12 @@
     "name": "AdvancePrincipalGeneration",
     "annotation": "authn-resolution",
     "hash": "08d4e8c14474157f924c8206e0729295dc3aa792c0f6441e8554cc30364fe4ce"
+  },
+  {
+    "engine": "sqlite",
+    "name": "AdvanceRestoreEpoch",
+    "annotation": "authn-resolution",
+    "hash": "536126127d2e76324dbe41ea8a8b8a57f0d2d915cc23ce30bfee37b78ebea525"
   },
   {
     "engine": "sqlite",
@@ -1279,6 +1321,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetRestoreState",
+    "annotation": "authn-resolution",
+    "hash": "38fa160386db473e50a02cf294955622482e31b74576ffe56c904897b809832a"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetSAMLProviderBySlug",
     "annotation": "authn-resolution",
     "hash": "bb80f0a1bdc320ddbc66f3a11e1241379b4add95f4508fde1d0147f3369a628c"
@@ -1407,7 +1455,7 @@
     "engine": "sqlite",
     "name": "InsertMachinePrincipal",
     "annotation": "authn-resolution",
-    "hash": "17393c7341af645f52c9e62fe02f3f7da5a434da856b69af9e3955f67ef12cab"
+    "hash": "6ca2fc07d21206201d58fce9c53c588023acdb5cce86bf56363ef895de862220"
   },
   {
     "engine": "sqlite",
@@ -1425,7 +1473,7 @@
     "engine": "sqlite",
     "name": "InsertPrincipal",
     "annotation": "authn-resolution",
-    "hash": "0ed06ada8cac89c2a005d4072b72c9c77c5040285e91d3d4aa79dde571d51c0d"
+    "hash": "07904cd00d918b78b6c6d0edfae6ab9c52be040c985e3f42fc1ab75787284e75"
   },
   {
     "engine": "sqlite",
@@ -1527,7 +1575,7 @@
     "engine": "sqlite",
     "name": "ListGrantsForPrincipal",
     "annotation": "authn-resolution",
-    "hash": "96adce8c4dfa09ee31ff6db10bc0ecd1dd41a792b4095693e84447b2fbffaa98"
+    "hash": "e3d624061226e306391bfac4b06bf21a123d2fa82af691d3dabadaf57824f7d8"
   },
   {
     "engine": "sqlite",
@@ -1609,6 +1657,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListUnreconciledPrincipals",
+    "annotation": "authn-resolution",
+    "hash": "ac1034e50c04345beedfce9353697b6a860aa5ea28698588ea50a86fd208ddaa"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListWebAuthnCredentialsForAccount",
     "annotation": "authn-resolution",
     "hash": "a61a59f9064c68633753d2abde2e3be0c92e8dceed8d942103954590e1448858"
@@ -1645,15 +1699,33 @@
   },
   {
     "engine": "sqlite",
+    "name": "MarkAllPrincipalsUnreconciled",
+    "annotation": "authn-resolution",
+    "hash": "583d54cf8e92d8fdd22f4c8ff53eb66b629abad58c021483c9428356f348697a"
+  },
+  {
+    "engine": "sqlite",
     "name": "MarkSAMLSPKeyRetiringCAS",
     "annotation": "authn-resolution",
     "hash": "13fd254838e1a82f2d75dd438b0c2f979f4c233c7e3e09191d7129aec5bb3d89"
   },
   {
     "engine": "sqlite",
+    "name": "MaxKnownCredentialEpoch",
+    "annotation": "authn-resolution",
+    "hash": "f383c912996548ac51227f8498725e4fb230a527819836d5b5efacfbacc9ce62"
+  },
+  {
+    "engine": "sqlite",
     "name": "RebindSAMLExternalIdentityProvider",
     "annotation": "authn-resolution",
     "hash": "5e7e022bd30f720586e24fc548d35032553ac795430e1caab2335a93b3cfb635"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ReconcilePrincipal",
+    "annotation": "authn-resolution",
+    "hash": "66ba2d7daadf156ad869f16ead2c023b833f5605b1680a7bd13005f13677f30e"
   },
   {
     "engine": "sqlite",

@@ -29,6 +29,7 @@ all_success='{
 	"dco":{"result":"success"},
 	"docs":{"result":"success"},
 	"generated":{"result":"success"},
+	"headline-guarantee":{"result":"success"},
 	"lint":{"result":"success"},
 	"release-snapshot":{"result":"success"},
 	"supply-chain-checks":{"result":"success"},

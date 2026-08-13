@@ -364,8 +364,8 @@ func (q *Queries) InsertMachineCredential(ctx context.Context, arg InsertMachine
 }
 
 const insertMachinePrincipal = `-- name: InsertMachinePrincipal :exec
-INSERT INTO principals (id, kind, class, session_generation, created_at)
-VALUES (?, 'machine', ?, 1, ?)
+INSERT INTO principals (id, kind, class, session_generation, created_at, reconciled_epoch)
+VALUES (?, 'machine', ?, 1, ?, (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1))
 `
 
 type InsertMachinePrincipalParams struct {
@@ -374,6 +374,8 @@ type InsertMachinePrincipalParams struct {
 	CreatedAt string
 }
 
+// Born reconciled to the current restore epoch, for the reason
+// InsertPrincipal states (#76).
 // hikyo:authn-resolution
 func (q *Queries) InsertMachinePrincipal(ctx context.Context, arg InsertMachinePrincipalParams) error {
 	_, err := q.db.ExecContext(ctx, insertMachinePrincipal, arg.ID, arg.Class, arg.CreatedAt)

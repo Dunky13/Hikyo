@@ -95,7 +95,9 @@ var forbidden = []struct{ importer, imports, why string }{
 // unrestricted — hashing verifiers is not envelope encryption.
 var cryptoPrimitiveImporters = map[string]bool{
 	module + "/internal/crypto": true,
-	// internal/crypto/backup joins when the backup ticket lands.
+	// internal/crypto/backup imports no primitive of its own: the age
+	// container is the whole of its cryptography (#76), so it stays off this
+	// list and appears only on the age allowlist below.
 }
 
 var cryptoPrimitivePrefixes = []string{
@@ -107,7 +109,7 @@ var cryptoPrimitivePrefixes = []string{
 }
 
 var ageImporters = map[string]bool{
-	module + "/internal/crypto/backup": true, // sole age importer, future ticket
+	module + "/internal/crypto/backup": true, // sole age importer (#76)
 }
 
 type pkg struct {
@@ -223,6 +225,13 @@ func TestForbiddenEdges(t *testing.T) {
 				continue
 			}
 			for _, imp := range allImports(p) {
+				// An external test package (`package foo_test`) importing the
+				// package under test is not a dependency edge — it is the
+				// same package seen from outside, and counting it would make
+				// every leaf package unable to have a black-box test.
+				if imp == p.ImportPath {
+					continue
+				}
 				if strings.HasPrefix(imp, rule.imports) {
 					t.Errorf("%s imports %s: %s", p.ImportPath, imp, rule.why)
 				}

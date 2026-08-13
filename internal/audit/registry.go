@@ -208,6 +208,34 @@ const (
 	// recovery.break_glass_grant records a grant issued under local host
 	// authority — the one authorization path not evaluated against a grant.
 	EventBreakGlassGrant EventType = "recovery.break_glass_grant"
+
+	// backup.* / restore.* — the operator lifecycle (#76, encryption ADR
+	// § Propagations "export and restore are auditable events"; ops spec § 11).
+	// All four are instance-trail, local host authority, and all four are
+	// SECURITY retention: a backup is a copy of every ciphertext in the
+	// instance, and the record of one being taken, skipped, or replayed into a
+	// new instance is exactly the evidence an incident starts from.
+	//
+	// backup.exported records an artifact coming into existence and WHERE it
+	// went, because a backup nobody can find is a backup that does not exist.
+	// It deliberately records the recipient MODE and count, never a recipient
+	// value: the public recipients are not secret, but naming them in every
+	// event would put the operator's escrow topology in the trail.
+	EventBackupExported EventType = "backup.exported"
+	// backup.export_skipped is the loud half of the ops spec's "automatic
+	// pre-migration export when public recipients are configured, LOUD SKIP
+	// otherwise". A skip that only warned to a log would be invisible the
+	// morning after a migration went wrong.
+	EventBackupExportSkipped EventType = "backup.export_skipped"
+	// restore.completed records an instance being reconstructed from an
+	// archive: the credential epoch it advanced to, and therefore the moment
+	// every pre-restore artifact in the restored state became inert.
+	EventRestoreCompleted EventType = "restore.completed"
+	// restore.principal_reconciled records ONE principal's re-activation. One
+	// event per principal is the point — the ADR's per-principal assertion has
+	// to leave a per-principal record, and a single "reconciliation completed"
+	// event would be exactly the bulk accept the surface refuses to offer.
+	EventRestorePrincipalReconciled EventType = "restore.principal_reconciled"
 	// settings.key_* — the key catalogue's lifecycle (#49). The catalogue IS
 	// the project's schema, so these are schema events; they are named
 	// `settings.*` like the rest of the definitions surface because an
@@ -1069,6 +1097,72 @@ var registry = map[EventType]TypeSpec{
 			"grant_created":    {Kind: KindBool, Required: true},
 		},
 	},
+	// Backup and restore (#76). Instance trail only: every one of these runs
+	// under local host authority, which has no session and no tenant actor.
+	EventBackupExported: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		// Success only: an export that failed produced no artifact to record,
+		// and the failure surfaces as a refusal on the operator's terminal or
+		// as the migration's own loud error. Declaring an outcome nothing can
+		// emit is the same smell as declaring a type nothing emits.
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true},
+		Trails:   map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// Why the export ran: `manual` or `pre-migration`.
+			"trigger": {Kind: KindString, Required: true},
+			// The recipient MODE, never a recipient value.
+			"recipient_mode":  {Kind: KindString, Required: true},
+			"recipient_count": {Kind: KindInt, Required: true},
+			"engine":          {Kind: KindString, Required: true},
+			"schema_version":  {Kind: KindInt, Required: true},
+			"artifact_bytes":  {Kind: KindInt, Required: true},
+			// The path the artifact was published to. It is operator
+			// infrastructure, not tenant data, and an export nobody can
+			// locate afterwards is not a backup.
+			"destination": {Kind: KindFreeText, Required: true},
+		},
+	},
+	EventBackupExportSkipped: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"trigger": {Kind: KindString, Required: true},
+			"reason":  {Kind: KindString, Required: true},
+		},
+	},
+	EventRestoreCompleted: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"engine":         {Kind: KindString, Required: true},
+			"schema_version": {Kind: KindInt, Required: true},
+			// The epoch every pre-restore artifact is now behind, and the
+			// count of principals the operator must reconcile before their
+			// grants authorize anything again.
+			"credential_epoch":   {Kind: KindInt, Required: true},
+			"restore_epoch":      {Kind: KindInt, Required: true},
+			"pending_principals": {Kind: KindInt, Required: true},
+			"authority":          {Kind: KindString, Required: true}, // local-host
+		},
+	},
+	EventRestorePrincipalReconciled: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"target_principal":   {Kind: KindString, Required: true},
+			"restore_epoch":      {Kind: KindInt, Required: true},
+			"pending_principals": {Kind: KindInt, Required: true},
+			"authority":          {Kind: KindString, Required: true}, // local-host
+		},
+	},
+
 	EventGrantMembershipRead: {
 		SchemaVersion: 1,
 		Retention:     RetentionAccess,

@@ -21,10 +21,18 @@ SELECT org_id, id FROM projects WHERE org_id = ? AND id = ?;
 SELECT org_id, project_id, id FROM environments
 WHERE org_id = ? AND project_id = ? AND id = ?;
 
+-- The grant lookup authorize() makes, carrying the restore-reconciliation
+-- gate (#76): after a restore, a principal's grants do not authorize until an
+-- operator reconciles that principal up to the restore epoch. The gate is a
+-- conjunct of the SAME query rather than a second read, so no caller can
+-- forget it and the pinned query count is unchanged. Never restored means
+-- restore_epoch = 0, which every principal's default already satisfies.
 -- hikyo:authn-resolution
 -- name: ListGrantsForPrincipal :many
-SELECT capability, org_id, project_id, env_id FROM grants
-WHERE principal_id = ?;
+SELECT g.capability, g.org_id, g.project_id, g.env_id FROM grants AS g
+JOIN principals AS p ON p.id = g.principal_id
+WHERE g.principal_id = ?
+  AND p.reconciled_epoch >= (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1);
 
 -- The denial writer's actor-class lookup (#45, audit-model ADR amendment
 -- part 4): the flush transaction resolves the denied principal's kind for
@@ -95,10 +103,14 @@ FROM credential_authorities WHERE verifier = ?;
 
 -- Enumerated writers.
 
+-- A principal is born reconciled to the CURRENT restore epoch (#76): it
+-- postdates the restore, so there is nothing about it to reconcile, and a
+-- literal default of zero would make every principal created after a restore
+-- inert until somebody reconciled a principal that never existed before it.
 -- hikyo:authn-resolution
 -- name: InsertPrincipal :exec
-INSERT INTO principals (id, kind, created_at, session_generation)
-VALUES (?, ?, ?, 1);
+INSERT INTO principals (id, kind, created_at, session_generation, reconciled_epoch)
+VALUES (?, ?, ?, 1, (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1));
 
 -- hikyo:authn-resolution
 -- name: InsertAccount :exec
@@ -474,3 +486,76 @@ SELECT org_id, project_id, id FROM environments WHERE id = ?;
 -- the id equality is that chain as a top-level conjunct.
 -- name: GetOrgIdentity :one
 SELECT id, name FROM orgs WHERE id = ?;
+
+-- Restore reconciliation (#76, ops spec section  11). All four run under local host
+-- authority: after a restore every session is dead and every grant inert, so
+-- there is no principal who could authorize a network call to undo that.
+
+-- hikyo:authn-resolution
+-- name: GetRestoreState :one
+SELECT credential_epoch, restore_epoch, reactivated_at FROM auth_instance_state WHERE id = 1;
+
+-- The largest credential epoch appearing ANYWHERE in the datastore - the
+-- instance row and every epoch-stamped artifact table. Restore derives its
+-- new epoch as this value + 1 rather than trusting the archive's own
+-- counter: an archive is attacker-forgeable by anyone holding the PUBLIC
+-- recipient, and a forged archive that understates the instance epoch while
+-- stamping its planted credentials one higher would otherwise come back to
+-- life on the bump (K2: restored verifiers never trusted - including their
+-- epoch stamps).
+-- hikyo:authn-resolution
+-- name: MaxKnownCredentialEpoch :one
+SELECT MAX(e) AS max_epoch FROM (
+    SELECT credential_epoch AS e FROM auth_instance_state WHERE id = 1
+    UNION ALL SELECT restore_epoch FROM auth_instance_state WHERE id = 1
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM credential_authorities
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM external_identities
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM machine_credentials
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM oidc_transactions
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM password_credentials
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM reauth_windows
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM recovery_codes
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM saml_transactions
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM sessions
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_challenges
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM totp_credentials
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM webauthn_ceremonies
+    UNION ALL SELECT COALESCE(MAX(credential_epoch), 0) FROM webauthn_credentials
+);
+
+-- Sets the credential epoch and marks the epoch reached BY RESTORING. The
+-- caller supplies the value (MaxKnownCredentialEpoch + 1) so the new epoch is
+-- strictly greater than every epoch stamp the archive carried.
+-- hikyo:authn-resolution
+-- name: AdvanceRestoreEpoch :exec
+UPDATE auth_instance_state
+SET credential_epoch = ?,
+    restore_epoch = ?,
+    reactivated_at = ?,
+    updated_at = ?
+WHERE id = 1;
+
+-- Restore strips every reconciliation stamp: reconciled_epoch is archive data
+-- like everything else, and a forged archive could stamp its principals
+-- "already reconciled" against any future restore epoch. Zero is always below
+-- the post-restore restore_epoch, so every restored principal starts inert.
+-- hikyo:authn-resolution
+-- name: MarkAllPrincipalsUnreconciled :exec
+UPDATE principals SET reconciled_epoch = 0;
+
+-- One principal, named explicitly. There is deliberately no statement here
+-- that reconciles a set: per-principal reconciliation is an informed
+-- assertion about one identity, and a bulk form would make it a keystroke.
+-- hikyo:authn-resolution
+-- name: ReconcilePrincipal :execrows
+UPDATE principals
+SET reconciled_epoch = (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1)
+WHERE principals.id = ?;
+
+-- Reading the outstanding set is not accepting it: the operator has to know
+-- who is waiting in order to reconcile them one at a time.
+-- hikyo:authn-resolution
+-- name: ListUnreconciledPrincipals :many
+SELECT principals.id, principals.kind FROM principals
+WHERE principals.reconciled_epoch < (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1)
+ORDER BY principals.id;

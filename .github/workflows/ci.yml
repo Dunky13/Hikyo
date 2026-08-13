@@ -424,6 +424,65 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ steps.go-module-cache.outputs.cache-primary-key }}
 
+  # The headline guarantee, as its own named context (#76, mvp-boundary K3):
+  # a stolen database and a stolen backup, without the root key, yield no
+  # values and no replayable credentials. It runs the backup drill on both
+  # engines, which is where the planted-plaintext scan of the dump AND of the
+  # age artifact lives, together with the replay of every credential artifact
+  # an attacker can lift out of the dump.
+  #
+  # It is a separate job rather than a step inside `test` so the guarantee has
+  # a context of its own: a green `test` that skipped these because someone
+  # narrowed a -run pattern would still look green, and this is the one row
+  # the project's positioning rests on.
+  headline-guarantee:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+        env:
+          POSTGRES_USER: hikyo
+          POSTGRES_PASSWORD: hikyo
+          POSTGRES_DB: hikyo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hikyo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore test Go cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-test-${{ runner.os }}-
+      - name: Container round-trip, stanza exclusivity and truncation refusal
+        run: go test -count=1 ./internal/crypto/backup/
+      - name: Planted-plaintext scan of dump and backup, and credential replay refusal
+        env:
+          HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
+        run: >-
+          go test -count=1 -v ./internal/isolation/
+          -run 'TestBackupRestoreDrill|TestNoBulkAcceptInTheAPISurface'
+      - name: Automatic pre-migration export, with recipients and without
+        run: go test -count=1 ./internal/app/ -run TestPreMigrationExport
+
   # The permanent required context. Every validation job is named here so a
   # future job split cannot accidentally weaken branch protection.
   ci-required:
@@ -433,6 +492,7 @@ jobs:
       - dco
       - docs
       - generated
+      - headline-guarantee
       - lint
       - release-snapshot
       - supply-chain-checks

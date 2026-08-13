@@ -71,6 +71,8 @@ type AuthInstanceState struct {
 	ID              int32
 	CredentialEpoch int64
 	UpdatedAt       pgtype.Timestamptz
+	RestoreEpoch    int64
+	ReactivatedAt   pgtype.Timestamptz
 }
 
 type CredentialAuthority struct {
@@ -271,6 +273,7 @@ type Principal struct {
 	CreatedAt         pgtype.Timestamptz
 	SessionGeneration int64
 	Class             pgtype.Text
+	ReconciledEpoch   int64
 }
 
 type Project struct {
