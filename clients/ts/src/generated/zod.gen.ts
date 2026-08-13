@@ -80,6 +80,17 @@ export const zTotpCodeRequest = z.object({
     code: z.string().min(6).max(10)
 });
 
+/**
+ * A disclosure reauthentication by TOTP. `environment_id` is what the
+ * window is opened OVER — the reveal guard is per environment, so a
+ * window on staging authorizes nothing in production.
+ *
+ */
+export const zTotpReauthRequest = z.object({
+    environment_id: zId,
+    code: z.string().min(6).max(10)
+});
+
 export const zTotpProofRequest = z.object({
     password: z.string().min(1).max(1024)
 });
@@ -1081,7 +1092,22 @@ export const zWebauthnEnrolStartRequest = z.object({
     code: z.optional(z.string().max(16))
 });
 
+/**
+ * The decision a disclosure ceremony authorizes. It is part of the SIGNED
+ * binding, not a label: without it an assertion given to `reveal` would be
+ * spendable on `publish` over the same environment and keys — the same
+ * unit, a different decision, and the human agreed to only one of them.
+ *
+ */
+export const zReauthPurpose = z.enum([
+    'reveal',
+    'copy',
+    'publish',
+    'mint'
+]);
+
 export const zWebauthnReauthStartRequest = z.object({
+    operation: zReauthPurpose,
     environment_id: z.string().max(64),
     key_ids: z.array(z.string().max(256))
 });
@@ -1097,11 +1123,27 @@ export const zWebauthnCredentialProofRequest = z.object({
     code: z.optional(z.string().max(16))
 });
 
-export const zWebauthnReauthResult = z.object({
+export const zReauthResult = z.object({
     session_id: zId,
     environment_id: z.string(),
     single_decision: z.boolean(),
     window_expires: zTimestamp
+});
+
+/**
+ * The reveal guard's state for one environment and the acting session.
+ * Nothing here is material: it is project settings plus the caller's own
+ * window.
+ *
+ */
+export const zRevealWindow = z.object({
+    effective_window_seconds: z.int().gte(0),
+    protected: z.boolean(),
+    totp_offered: z.boolean(),
+    live: z.boolean(),
+    single_decision: z.boolean(),
+    can_reveal: z.boolean(),
+    expires_at: z.optional(zTimestamp)
 });
 
 export const zPasskey = z.object({
@@ -1287,6 +1329,17 @@ export const zStepUpTotpData = z.object({
  * Session elevated. The rotated token replaces the old one.
  */
 export const zStepUpTotpResponse = zLoginResult;
+
+export const zReauthTotpData = z.object({
+    body: zTotpReauthRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The window this reauthentication opened.
+ */
+export const zReauthTotpResponse = zReauthResult;
 
 export const zRemoveTotpData = z.object({
     body: zTotpProofRequest,
@@ -2177,6 +2230,21 @@ export const zDiffValuesData = z.object({
  */
 export const zDiffValuesResponse = zValueDiff;
 
+export const zGetRevealWindowData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The guard's state.
+ */
+export const zGetRevealWindowResponse = zRevealWindow;
+
 export const zRevealValuesData = z.object({
     body: z.optional(z.never()),
     path: z.object({
@@ -2448,7 +2516,7 @@ export const zReauthPasskeyFinishData = z.object({
 /**
  * The window this reauthentication opened.
  */
-export const zReauthPasskeyFinishResponse = zWebauthnReauthResult;
+export const zReauthPasskeyFinishResponse = zReauthResult;
 
 export const zListPasskeysData = z.object({
     body: z.optional(z.never()),

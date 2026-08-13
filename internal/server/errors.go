@@ -111,8 +111,21 @@ func writeError(w http.ResponseWriter, code apigen.ErrorCode, detail string) {
 //   - ErrConflict and ErrLimitExceeded are decided AFTER authorization
 //     succeeded, so they disclose nothing a caller could not already read.
 //   - ErrInvalid is decided before or independently of tenant resolution.
+//   - The reveal-ceremony refusals (#58) are `forbidden`. They are decided
+//     AFTER authorize() has already succeeded, so they disclose nothing beyond
+//     the caller's own capability — which they can read off their own grants —
+//     and they must not be 500s: a missing ceremony is a routine, actionable
+//     state, not a fault. They are deliberately NOT distinguishable from one
+//     another on the wire: whether a window was absent, lapsed, spent or bound
+//     to different keys, the client's correct move is the same (re-run the
+//     ceremony the guard's own state route describes), and the enum is closed.
 func classify(err error) apigen.ErrorCode {
 	switch {
+	case errors.Is(err, service.ErrNoReauthWindow),
+		errors.Is(err, service.ErrReauthWindowExpired),
+		errors.Is(err, service.ErrReauthUnitMismatch),
+		errors.Is(err, service.ErrReauthWindowSpent):
+		return apigen.ErrorCodeForbidden
 	case errors.Is(err, domain.ErrUnauthenticated):
 		return apigen.ErrorCodeUnauthenticated
 	case errors.Is(err, domain.ErrNotFound):

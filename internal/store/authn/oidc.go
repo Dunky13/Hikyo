@@ -611,7 +611,21 @@ type NewReauthWindow struct {
 	CreatedAt       time.Time
 }
 
-// CreateReauthWindow opens a reauthentication window over one environment.
+// CreateReauthWindow opens a reauthentication window over one environment,
+// superseding whatever window that (session, environment) pair already had.
+//
+// The supersede is the whole point rather than tidiness. The table's UNIQUE
+// (session_id, environment_id) means one window per pair, which is right; a
+// bare INSERT turned it into one window EVER per pair, which is wrong, because
+// the reveal guard's headline case is a protected environment capped at 0
+// where every disclosure takes its own ceremony. Ceremony, disclose, ceremony
+// again is the intended flow, and the second ceremony collided with the first
+// window's spent row.
+//
+// It is ONE statement, not a delete then an insert: two tabs finishing
+// ceremonies concurrently would otherwise both miss the other's not-yet-visible
+// row and the loser's insert would hit the unique constraint, failing a
+// legitimate supersede. The upsert makes the loser update.
 func (r *Resolver) CreateReauthWindow(ctx context.Context, w NewReauthWindow) error {
 	if r.sq != nil {
 		return r.sq.InsertReauthWindow(ctx, sqlitegen.InsertReauthWindowParams{

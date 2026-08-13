@@ -235,7 +235,8 @@ func (a *API) ReauthPasskeyStart(ctx context.Context, req apigen.ReauthPasskeySt
 	if req.Body == nil {
 		return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 	}
-	raw, err := a.Auth.ReauthPasskeyStart(ctx, bearer(ctx), req.Body.EnvironmentId, req.Body.KeyIds)
+	raw, err := a.Auth.ReauthPasskeyStart(ctx, bearer(ctx),
+		service.ReauthPurpose(req.Body.Operation), req.Body.EnvironmentId, req.Body.KeyIds)
 	if err != nil {
 		if webauthnPrecondition(err) {
 			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
@@ -261,7 +262,7 @@ func (a *API) ReauthPasskeyStart(ctx context.Context, req apigen.ReauthPasskeySt
 // reauthPasskeyResponse carries the window body and, for a session that arrived
 // on the cookie, the rotated token back onto that same cookie.
 type reauthPasskeyResponse struct {
-	body    apigen.WebauthnReauthResult
+	body    apigen.ReauthResult
 	cookies []*http.Cookie
 }
 
@@ -289,7 +290,7 @@ func (a *API) ReauthPasskeyFinish(ctx context.Context, req apigen.ReauthPasskeyF
 			return apigen.ReauthPasskeyFinish500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 		}
 	}
-	resp := reauthPasskeyResponse{body: apigen.WebauthnReauthResult{
+	resp := reauthPasskeyResponse{body: apigen.ReauthResult{
 		SessionId:      result.SessionID,
 		EnvironmentId:  result.EnvironmentID,
 		SingleDecision: result.SingleDecision,

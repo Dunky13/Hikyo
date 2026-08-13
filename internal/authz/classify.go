@@ -106,14 +106,18 @@ var wireRegistry = map[string]Class{
 	// authz operation — the mutations resolve and rotate the acting session,
 	// which is resolution rather than authorization, so their audit obligation
 	// is discharged directly through wireEvents.
-	"http:POST /api/v1/auth/webauthn/enrol/start":        ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/enrol/finish":       ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/login/start":        ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/login/finish":       ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/step-up/start":      ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/step-up/finish":     ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/reauth/start":       ClassUnauthenticated,
-	"http:POST /api/v1/auth/webauthn/reauth/finish":      ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/enrol/start":    ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/enrol/finish":   ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/start":    ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/login/finish":   ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/start":  ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/step-up/finish": ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/start":   ClassUnauthenticated,
+	"http:POST /api/v1/auth/webauthn/reauth/finish":  ClassUnauthenticated,
+	// The TOTP half of the disclosure ceremony (#58). Unauthenticated-class
+	// for the same reason as every other reauth leg: it authenticates a factor
+	// rather than acting on a tenant object, and its refusals are uniform.
+	"http:POST /api/v1/auth/reauth/totp":                 ClassUnauthenticated,
 	"http:GET /api/v1/auth/webauthn/credentials":         ClassUnauthenticated,
 	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": ClassUnauthenticated,
 	"http:GET /api/v1/instance/oidc-providers":           ClassInstance,
@@ -218,6 +222,7 @@ var wireRegistry = map[string]Class{
 	// The flat value model (#50). Tenant-class throughout: a value the caller
 	// may not reach answers exactly like one that is not there.
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window":        ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal":       ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         ClassTenant,
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         ClassTenant,
@@ -448,6 +453,10 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthReauthenticated,
 		audit.EventAuthPasskeyCloned,
 	},
+	"http:POST /api/v1/auth/reauth/totp": {
+		audit.EventAuthReauthenticated,
+		audit.EventAuthThrottleCrossed,
+	},
 	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": {
 		audit.EventAuthPasskeyRemoved,
 		audit.EventAuthSessionCreated,
@@ -558,6 +567,7 @@ var wireRoutes = map[string][]Operation{
 	//     material moving (see the registry);
 	//   - clone is an environment create that then runs the copy legs.
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values":               {OpValueList},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window":        {OpRevealWindowRead},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal":       {OpValueReveal},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueRead},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":         {OpValueSet},

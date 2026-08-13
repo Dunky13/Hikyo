@@ -175,11 +175,15 @@ func (s stubAuth) StepUpPasskeyFinish(context.Context, string, []byte) (service.
 	return service.LoginResult{}, domain.ErrUnauthenticated
 }
 
-func (s stubAuth) ReauthPasskeyStart(context.Context, string, string, []string) ([]byte, error) {
+func (s stubAuth) ReauthPasskeyStart(context.Context, string, service.ReauthPurpose, string, []string) ([]byte, error) {
 	return nil, domain.ErrUnauthenticated
 }
 
 func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.ReauthResult, error) {
+	return service.ReauthResult{}, domain.ErrUnauthenticated
+}
+
+func (s stubAuth) ReauthTOTP(context.Context, string, string, string) (service.ReauthResult, error) {
 	return service.ReauthResult{}, domain.ErrUnauthenticated
 }
 

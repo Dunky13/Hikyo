@@ -616,6 +616,14 @@
     ]
   },
   {
+    "operation": "reveal.window_read",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
     "operation": "saml-provider.delete",
     "class": "instance",
     "level": "instance",

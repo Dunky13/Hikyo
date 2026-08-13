@@ -374,6 +374,58 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/reauth/totp:
+    post:
+      operationId: reauthTotp
+      tags: [auth]
+      summary: Open a disclosure reauthentication window with a TOTP code.
+      description: |
+        The possession-factor half of the reveal ceremony (#58,
+        permission-model ADR § The reveal guard). It is DISCLOSURE
+        reauthentication, not account step-up: it opens a sliding window over
+        one environment and changes nothing about the account.
+
+        The environment is RESOLVED AND AUTHORIZED under `read(E)` before its
+        reauthentication policy is looked at. An environment the caller cannot
+        reach answers exactly as a nonexistent one does — the uniform `401` this
+        route gives every other refusal — so the policy-shaped `409` below is
+        never an oracle for which environment ids exist or which are protected.
+
+        TOTP cannot bind its challenge to an enumerated unit, so it cannot
+        honour a per-disclosure gate. Where the environment's effective window
+        is `0` — which every protected environment is capped at — this route
+        REFUSES with `409`, naming the passkey ceremony as the remedy, and
+        `/auth/webauthn/reauth/*` is the only path that opens a window there.
+
+        The reauth rotates the acting session; a browser session's rotated
+        token is delivered on the `__Host-hikyo` cookie.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpReauthRequest"
+      responses:
+        "200":
+          description: The window this reauthentication opened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReauthResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/auth/totp:
     delete:
       operationId: removeTotp
@@ -2682,6 +2734,50 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: getRevealWindow
+      tags: [values]
+      summary: The reveal guard's state for this environment and session.
+      description: |
+        The window gates the PROMPT, never the authorization check
+        (permission-model ADR § The reveal guard), so a client has to know
+        whether the next disclosure will prompt and which factor that prompt
+        may offer. This route answers exactly that and discloses no material,
+        which is why its formula is `read` alone: the effective window and the
+        protected flag are project settings, and the live window is the
+        caller's own session state.
+
+        `totp_offered` is false exactly where the effective window is `0`.
+
+        Human sessions only: a machine identity never reauthenticates, has no
+        window to report, and reaches secret material through its own fetch
+        path rather than this one.
+      x-hikyo-class: tenant
+      x-hikyo-operation: reveal.window_read
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The guard's state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevealWindow"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -3456,7 +3552,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WebauthnReauthResult"
+                $ref: "#/components/schemas/ReauthResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -4668,6 +4764,23 @@ components:
       additionalProperties: false
       required: [code]
       properties:
+        code:
+          type: string
+          description: A TOTP code from the enrolled authenticator.
+          minLength: 6
+          maxLength: 10
+
+    TotpReauthRequest:
+      type: object
+      additionalProperties: false
+      required: [environment_id, code]
+      description: |
+        A disclosure reauthentication by TOTP. `environment_id` is what the
+        window is opened OVER — the reveal guard is per environment, so a
+        window on staging authorizes nothing in production.
+      properties:
+        environment_id:
+          $ref: "#/components/schemas/ID"
         code:
           type: string
           description: A TOTP code from the enrolled authenticator.
@@ -6613,8 +6726,10 @@ components:
     WebauthnReauthStartRequest:
       type: object
       additionalProperties: false
-      required: [environment_id, key_ids]
+      required: [operation, environment_id, key_ids]
       properties:
+        operation:
+          $ref: "#/components/schemas/ReauthPurpose"
         environment_id:
           type: string
           maxLength: 64
@@ -6624,6 +6739,19 @@ components:
           items:
             type: string
             maxLength: 256
+
+    ReauthPurpose:
+      type: string
+      description: |
+        The decision a disclosure ceremony authorizes. It is part of the SIGNED
+        binding, not a label: without it an assertion given to `reveal` would be
+        spendable on `publish` over the same environment and keys — the same
+        unit, a different decision, and the human agreed to only one of them.
+      enum:
+        - reveal
+        - copy
+        - publish
+        - mint
 
     WebauthnCredentialProofRequest:
       type: object
@@ -6640,7 +6768,7 @@ components:
           type: string
           maxLength: 16
 
-    WebauthnReauthResult:
+    ReauthResult:
       type: object
       additionalProperties: false
       required: [session_id, environment_id, single_decision, window_expires]
@@ -6653,6 +6781,64 @@ components:
           type: boolean
           description: True where the effective window is zero — the window authorizes exactly one decision.
         window_expires:
+          $ref: "#/components/schemas/Timestamp"
+
+    RevealWindow:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          effective_window_seconds,
+          protected,
+          totp_offered,
+          live,
+          single_decision,
+          can_reveal,
+        ]
+      description: |
+        The reveal guard's state for one environment and the acting session.
+        Nothing here is material: it is project settings plus the caller's own
+        window.
+      properties:
+        effective_window_seconds:
+          type: integer
+          minimum: 0
+          description: |
+            The environment's resolved reauthentication window. `0` means
+            every disclosure takes its own ceremony — the state a protected
+            environment is capped at.
+        protected:
+          type: boolean
+          description: |
+            The protected-environment flag. Reported beside the window rather
+            than folded into it, because "this environment is protected" and
+            "the window is set to 0" are different sentences to a human even
+            when they produce the same gate.
+        totp_offered:
+          type: boolean
+          description: |
+            Whether a TOTP code may open a window here. False exactly where
+            the effective window is `0`: TOTP cannot bind a challenge to the
+            enumerated unit, so a passkey ceremony is the only path there.
+        live:
+          type: boolean
+          description: Whether a window is open for this session right now.
+        single_decision:
+          type: boolean
+          description: |
+            True when the live window authorizes exactly the keys its ceremony
+            enumerated and is spent by one decision — never presented as a
+            standing window with a countdown.
+        can_reveal:
+          type: boolean
+          description: |
+            Whether this principal satisfies `read(E) AND reveal(E)` here. It is
+            an AFFORDANCE, never a decision — the chokepoint judges every
+            disclosure regardless — and it is what makes the write-only editing
+            path first-class: `edit` without `reveal` is a supported state, so
+            the editor offers a blind-replacement field with honest microcopy
+            rather than guessing from whether a cell happens to be on screen.
+        expires_at:
           $ref: "#/components/schemas/Timestamp"
 
     PasskeyList:

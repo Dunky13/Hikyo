@@ -5,6 +5,7 @@ import { useSession } from '../api/session.ts';
 import { Login } from '../routes/Login.tsx';
 import { NotFound, Overview, Projects, Settings } from '../routes/Placeholder.tsx';
 import { Shell } from '../routes/Shell.tsx';
+import { Values } from '../routes/Values.tsx';
 import { SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
 
 /**
@@ -22,6 +23,7 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   overview: <Overview />,
   projects: <Projects />,
   settings: <Settings />,
+  values: <Values />,
 };
 
 const signedInSurfaces: readonly Surface[] = SURFACES.filter((s) => s.id !== 'login');

@@ -70,6 +70,12 @@ const (
 type Values struct {
 	DB      *store.DB
 	Keyring *crypto.Keyring
+	// Auth supplies the reveal guard (#58): every route in the formula table
+	// that carries a `reveal` conjunct consumes this session's reauthentication
+	// window over the environment it discloses in, for exactly the keys it
+	// discloses. Nil is a wiring fault and refuses every disclosure loudly
+	// (ErrNoCeremonySeam) rather than disclosing without a ceremony.
+	Auth *Auth
 }
 
 // ValueCell is one `(key, environment)` cell as reported to a reader.
@@ -595,7 +601,8 @@ func (s *Values) read(ctx context.Context, actor Actor, scope domain.Scope, keyN
 			if err != nil {
 				return err
 			}
-			out, err = readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, true)
+			out, err = readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, true,
+				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env)))
 			if err != nil {
 				return err
 			}
@@ -611,7 +618,7 @@ func (s *Values) read(ctx context.Context, actor Actor, scope domain.Scope, keyN
 			if err != nil {
 				return err
 			}
-			out, err = readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, false)
+			out, err = readCells(ctx, r.Catalogue(), r.Values(), p, sealer, keyName, false, nil)
 			return err
 		})
 	}
@@ -622,8 +629,21 @@ func (s *Values) read(ctx context.Context, actor Actor, scope domain.Scope, keyN
 }
 
 // readCells assembles the resolved view for one environment.
+// gate is the reveal ceremony's insertion point (#58). It is called with the
+// enumerated unit — the `secret` keys that are `set`, and therefore exactly the
+// keys this act will decrypt and emit a disclosure event for — BEFORE the first
+// ciphertext is opened. Nil on a non-revealing read, where there is no unit and
+// nothing to gate.
+//
+// It takes the key ids rather than being folded into the decrypt loop because
+// the ceremony is ONE decision over the whole unit: a per-key gate inside the
+// loop would let a bulk reveal open half its keys and then refuse, which is
+// neither the prototype's "one decision over exactly the keys below" nor a
+// trail anyone can read.
+type discloseGate func(keyIDs []string) error
+
 func readCells(ctx context.Context, cat store.CatalogueReader, vals store.ValueReader, p authz.Proof,
-	sealer *crypto.ProjectSealer, keyName string, reveal bool) ([]ValueCell, error) {
+	sealer *crypto.ProjectSealer, keyName string, reveal bool, gate discloseGate) ([]ValueCell, error) {
 	keys, err := cat.List(ctx, p)
 	if err != nil {
 		return nil, err
@@ -655,6 +675,23 @@ func readCells(ctx context.Context, cat store.CatalogueReader, vals store.ValueR
 			return nil, err
 		default:
 			entries[row.KeyID] = row
+		}
+	}
+	// The ceremony runs here: after the catalogue and the rows are resolved (so
+	// the unit is known exactly) and before any cell is opened (so a refusal
+	// discloses nothing and writes no disclosure event).
+	if reveal && gate != nil {
+		unit := make([]string, 0, len(keys))
+		for _, key := range keys {
+			if key.Classification != string(schema.Secret) {
+				continue
+			}
+			if _, ok := entries[key.ID]; ok {
+				unit = append(unit, key.ID)
+			}
+		}
+		if err := gate(unit); err != nil {
+			return nil, err
 		}
 	}
 	out := make([]ValueCell, 0, len(keys))
@@ -753,7 +790,12 @@ func (s *Values) Diff(ctx context.Context, actor Actor, scope domain.Scope, left
 			if err != nil {
 				return nil, err
 			}
-			cells, err := readCells(ctx, cat, vals, p, sealer, "", reveal)
+			// One ceremony PER SIDE, over that side's own unit. A diff
+			// discloses in two environments, and the reveal guard is
+			// per-environment: a window open on staging authorizes nothing in
+			// production, which is the whole point of capping production at 0.
+			cells, err := readCells(ctx, cat, vals, p, sealer, "", reveal,
+				ceremonyGate(ctx, s.Auth, az, caller, PurposeReveal, envID))
 			if err != nil {
 				return nil, err
 			}
@@ -884,8 +926,9 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 			return err
 		}
 		// Classify the named keys under the source read — nothing is opened here.
-		// This decides which destination legs the copy will need.
-		hasConfig, hasSecret, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
+		// This decides which destination legs the copy will need, and supplies
+		// the units the two ceremonies enumerate.
+		hasConfig, secretKeyIDs, allKeyIDs, err := classifyCopyKeys(ctx, r, az, caller, sourceScope, req.KeyNames)
 		if err != nil {
 			return err
 		}
@@ -900,19 +943,25 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		for _, destID := range req.DestinationEnvironmentIDs {
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			if err := authorizeDestination(ctx, r, az, caller, destScope,
-				req.ConfirmProtected, hasConfig, hasSecret); err != nil {
+				req.ConfirmProtected, hasConfig, len(secretKeyIDs) > 0, allKeyIDs,
+				ceremonyGate(ctx, s.Auth, az, caller, PurposePublish, destID)); err != nil {
 				return err
 			}
 		}
+		// The SOURCE ceremony. A copy carries `reveal(source E)` in the locked
+		// formula, so it takes the same enumerated-key ceremony a cell reveal
+		// does — including copy-without-display, which discloses to a
+		// destination rather than to a screen and is a disclosure either way.
 		material, _, err := readSourceMaterial(ctx, r, az, caller, sealer, scope,
-			req.SourceEnvironmentID, req.KeyNames, false, copyOpCopy)
+			req.SourceEnvironmentID, req.KeyNames, false, copyOpCopy,
+			ceremonyGate(ctx, s.Auth, az, caller, PurposeCopy, req.SourceEnvironmentID))
 		if err != nil {
 			return err
 		}
 		for _, destID := range req.DestinationEnvironmentIDs {
 			destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destID)}
 			copied, err := applyMaterial(ctx, r, az, caller, sealer, destScope,
-				req.SourceEnvironmentID, material, operation, req.ConfirmProtected)
+				req.SourceEnvironmentID, material, operation)
 			out.Copied = append(out.Copied, copied...)
 			if err != nil {
 				return err
@@ -932,23 +981,29 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 // is decrypted. An absent named key is a refusal here just as it is in
 // readSourceMaterial, so the two agree on what a copy names.
 func classifyCopyKeys(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sourceScope domain.Scope, keyNames []string) (hasConfig, hasSecret bool, err error) {
+	sourceScope domain.Scope, keyNames []string) (hasConfig bool, secretKeyIDs, allKeyIDs []string, err error) {
 	readProof, err := az.Authorize(ctx, caller, authz.OpValueList, sourceScope)
 	if err != nil {
-		return false, false, err
+		return false, nil, nil, err
 	}
 	for _, name := range keyNames {
 		key, err := findKey(ctx, r.Catalogue(), readProof, name)
 		if err != nil {
-			return false, false, err
+			return false, nil, nil, err
 		}
+		// allKeyIDs is what the DESTINATION ceremony enumerates: every key the
+		// decision carries, `config` included. The human is agreeing to deliver
+		// this batch into a protected environment, and a modal that listed only
+		// the secret half would be asking them to approve something narrower
+		// than what happens.
+		allKeyIDs = append(allKeyIDs, key.ID)
 		if key.Classification == string(schema.Secret) {
-			hasSecret = true
+			secretKeyIDs = append(secretKeyIDs, key.ID)
 		} else {
 			hasConfig = true
 		}
 	}
-	return hasConfig, hasSecret, nil
+	return hasConfig, secretKeyIDs, allKeyIDs, nil
 }
 
 // authorizeDestination clears one copy destination up front: the destination
@@ -959,7 +1014,8 @@ func classifyCopyKeys(ctx context.Context, r store.Repos, az *authz.TxAuthorizer
 // only where its classification is present, preserving the non-empty-batch rule
 // the copy formula split depends on.
 func authorizeDestination(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	destScope domain.Scope, confirmProtected, hasConfig, hasSecret bool) error {
+	destScope domain.Scope, confirmProtected, hasConfig, hasSecret bool, allKeyIDs []string,
+	protectedGate discloseGate) error {
 	var legs []authz.Operation
 	if hasConfig {
 		legs = append(legs, authz.OpValueCopyDestinationConfig)
@@ -967,13 +1023,40 @@ func authorizeDestination(ctx context.Context, r store.Repos, az *authz.TxAuthor
 	if hasSecret {
 		legs = append(legs, authz.OpValueCopyDestination)
 	}
-	for _, op := range legs {
-		if err := withDestination(ctx, r, az, caller, op, destScope, confirmProtected,
-			func(authz.Proof) error { return nil }); err != nil {
+	var protected bool
+	for i, op := range legs {
+		if err := withDestination(ctx, r, az, caller, op, destScope, func(_ authz.Proof, isProtected bool) error {
+			if i == 0 {
+				protected = isProtected
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
-	return nil
+	if !protected {
+		return nil
+	}
+	// THE PROTECTED-DESTINATION DECISION, made exactly once per destination and
+	// over EVERY key the copy carries — `config` included.
+	//
+	// A machine gets the ADR's explicit plan field: "an explicit field in the
+	// immutable plan… never an interactive prompt". A HUMAN gets the ceremony,
+	// and the boolean is not an alternative for them — a caller-supplied `true`
+	// is the one thing that must never satisfy protection, or the UI can delete
+	// the guard by sending a constant. That was the hole: the ceremony hung on
+	// the secret leg, so a config-only copy into a protected environment went
+	// through on the flag alone.
+	if skipsCeremony(caller) {
+		if !confirmProtected {
+			return ProtectedDestinationRefusal(destScope.Env)
+		}
+		return nil
+	}
+	if protectedGate == nil {
+		return ProtectedDestinationRefusal(destScope.Env)
+	}
+	return protectedGate(allKeyIDs)
 }
 
 // sourceValue is one piece of source material, carried in memory between the
@@ -1120,9 +1203,23 @@ func planSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthoriz
 // rollback past this point is a real fault, never an abort erasing a disclosure
 // it should have stood behind. `config` opens no event — reading it discloses
 // nothing beyond the `read` the caller already holds.
+// The ceremony runs between the plan and the open, on EVERY caller of this
+// pair: `gate` is handed the planned `secret` unit, and a refusal lands before
+// the first ciphertext is touched — so a copy or clone whose source ceremony is
+// missing opens nothing and writes no disclosure event, which is the same
+// ordering the destination preflight already establishes.
 func openSourceMaterial(ctx context.Context, r store.Repos, sealer *crypto.ProjectSealer,
-	principal domain.PrincipalID, plan sourcePlan, surface string) (materialSet, error) {
+	principal domain.PrincipalID, plan sourcePlan, surface string, gate discloseGate) (materialSet, error) {
 	var out materialSet
+	if gate != nil && len(plan.secret) > 0 {
+		unit := make([]string, 0, len(plan.secret))
+		for _, c := range plan.secret {
+			unit = append(unit, c.key.ID)
+		}
+		if err := gate(unit); err != nil {
+			return out, err
+		}
+	}
 	for _, c := range plan.config {
 		plain, err := openCell(sealer, c.entry)
 		if err != nil {
@@ -1153,12 +1250,12 @@ func openSourceMaterial(ctx context.Context, r store.Repos, sealer *crypto.Proje
 // roll back.
 func readSourceMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
 	sealer *crypto.ProjectSealer, scope domain.Scope, sourceEnvID string, keyNames []string,
-	tolerateGateFailure bool, surface string) (materialSet, []string, error) {
+	tolerateGateFailure bool, surface string, gate discloseGate) (materialSet, []string, error) {
 	plan, err := planSourceMaterial(ctx, r, az, caller, scope, sourceEnvID, keyNames, tolerateGateFailure)
 	if err != nil {
 		return materialSet{}, nil, err
 	}
-	material, err := openSourceMaterial(ctx, r, sealer, caller.Principal, plan, surface)
+	material, err := openSourceMaterial(ctx, r, sealer, caller.Principal, plan, surface, gate)
 	if err != nil {
 		return materialSet{}, nil, err
 	}
@@ -1185,8 +1282,14 @@ func auditSourceDisclosures(ctx context.Context, trail store.AuditRepo, p authz.
 // returns a proof has to return SOMETHING on the error path, and the only
 // value available is a nil Proof — the one forgeable value the proof guard
 // refuses outright. Handing the proof to a callback never constructs one.
+// It reports the destination's PROTECTED flag to the callback rather than
+// deciding on it: the decision is one per destination and belongs where the
+// whole batch is known (authorizeDestination), not once per classification
+// leg. The project row is locked for the rest of the transaction here, so the
+// flag this reports cannot move underneath a later step — which is why the
+// write path re-checks nothing.
 func withDestination(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	op authz.Operation, destScope domain.Scope, confirmProtected bool, fn func(authz.Proof) error) error {
+	op authz.Operation, destScope domain.Scope, fn func(authz.Proof, bool) error) error {
 	p, err := az.Authorize(ctx, caller, op, destScope)
 	if err != nil {
 		return err
@@ -1198,10 +1301,7 @@ func withDestination(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
 	if err != nil {
 		return err
 	}
-	if settings.Protected && !confirmProtected {
-		return ProtectedDestinationRefusal(destScope.Env)
-	}
-	return fn(p)
+	return fn(p, settings.Protected)
 }
 
 // applyMaterial writes one destination's share, one leg per classification and
@@ -1210,7 +1310,7 @@ func withDestination(ctx context.Context, r store.Repos, az *authz.TxAuthorizer,
 // the split exists to avoid comes straight back.
 func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
 	sealer *crypto.ProjectSealer, destScope domain.Scope, sourceEnvID string,
-	material materialSet, operation string, confirmProtected bool) ([]CopiedValue, error) {
+	material materialSet, operation string) ([]CopiedValue, error) {
 	var out []CopiedValue
 	legs := []struct {
 		op       authz.Operation
@@ -1223,7 +1323,10 @@ func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c
 		if len(leg.material) == 0 {
 			continue
 		}
-		err := withDestination(ctx, r, az, caller, leg.op, destScope, confirmProtected, func(p authz.Proof) error {
+		// The protected decision was made and CONSUMED in the preflight, under
+		// the project lock this call re-takes; a protected window authorises
+		// exactly one decision, so re-deciding here would be a double-spend.
+		err := withDestination(ctx, r, az, caller, leg.op, destScope, func(p authz.Proof, _ bool) error {
 			copied, err := writeMaterial(ctx, r, p, sealer, caller, destScope, sourceEnvID, leg.material, operation)
 			out = append(out, copied...)
 			return err
@@ -1302,7 +1405,8 @@ func writeMaterial(ctx context.Context, r store.Repos, p authz.Proof, sealer *cr
 //  4. The planned material is opened and its source disclosures written, then
 //     each destination leg copies its share.
 func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, caller authz.Identity,
-	sealer *crypto.ProjectSealer, scope domain.Scope, sourceEnvID, destEnvID string) (CloneResult, error) {
+	sealer *crypto.ProjectSealer, scope domain.Scope, sourceEnvID, destEnvID string,
+	gate discloseGate) (CloneResult, error) {
 	var out CloneResult
 	sourceScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(sourceEnvID)}
 	destScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(destEnvID)}
@@ -1380,7 +1484,7 @@ func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	// Preflight passed — NOW open the planned material and write the source-side
 	// disclosure events. Any failure past here is a genuine fault where rollback
 	// is correct, not an abort erasing a disclosure it had already written.
-	material, err := openSourceMaterial(ctx, r, sealer, caller.Principal, plan, copyOpClone)
+	material, err := openSourceMaterial(ctx, r, sealer, caller.Principal, plan, copyOpClone, gate)
 	if err != nil {
 		return out, err
 	}
@@ -1389,7 +1493,7 @@ func cloneInto(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	}
 	// A brand-new environment cannot be protected — the flag is set after
 	// creation — so the ceremony has nothing to confirm here.
-	copied, err := applyMaterial(ctx, r, az, caller, sealer, destScope, sourceEnvID, material, copyOpClone, true)
+	copied, err := applyMaterial(ctx, r, az, caller, sealer, destScope, sourceEnvID, material, copyOpClone)
 	if err != nil {
 		return CloneResult{}, err
 	}

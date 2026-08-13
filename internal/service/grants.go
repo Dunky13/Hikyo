@@ -465,7 +465,7 @@ func (s *Auth) RequireDisclosureAuthority(
 		}
 	}
 	for _, env := range union(current, historical) {
-		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, string(env), nil, now)
+		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, PurposeMint, string(env), nil, now)
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired),

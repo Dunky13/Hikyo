@@ -204,11 +204,17 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// The keyring reaches the value surface (#50): clone-at-creation and
 		// every value write re-seal under the project data key, in the
 		// transaction that writes the row.
-		Environments: &service.Environments{DB: db, Keyring: kr},
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc},
 		Folders:      &service.Folders{DB: db},
 		Keys:         &service.Keys{DB: db},
-		Values:       &service.Values{DB: db, Keyring: kr},
-		KeyGroups:    &service.KeyGroups{DB: db},
+		// The reveal ceremony (#58): the value surface's disclosure routes
+		// consume the SAME reauthentication window machinery the passkey and
+		// TOTP reauth endpoints open, so both sides take the one Auth. A
+		// Values without it refuses every disclosure rather than disclosing
+		// without a ceremony.
+		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc},
+		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
+		KeyGroups: &service.KeyGroups{DB: db},
 		// One Auth across the grant surface, the settings knob and the machine
 		// identity surface: the reauthentication conjunct a machine widening
 		// carries is the SAME window machinery human disclosure consumes, so

@@ -236,3 +236,63 @@ func covers(g, target domain.Scope) bool {
 // Authorize. A token alone authorizes nothing — minting the proof is what
 // is privileged, and SystemAuthority checks the site registry.
 func (a *TxAuthorizer) Token() *TxToken { return a.tok }
+
+// CallerHolds answers a UI-affordance question about THE CALLER: would this
+// identity satisfy `op` at this scope, right now?
+//
+// It is deliberately NOT an authorization decision and it mints no denial
+// event. Authorize() is still the only thing that produces a proof and the
+// only thing that lets an operation proceed; this reads the same grant table
+// through the same predicate so the two cannot disagree, and it exists because
+// a surface has to know what to OFFER before anyone acts.
+//
+// Concretely (#58): the write-only editing path is a first-class one — `edit`
+// without `reveal` is a valid, supported state the permission model refuses to
+// reject — so the value editor has to say "replace without seeing the current
+// value" to a principal who cannot reveal, and "leave empty to keep unchanged"
+// to one who can. Deriving that from whether a cell happens to be revealed on
+// screen would make the affordance a function of what the human last clicked
+// rather than of what they may do.
+//
+// It takes a resolved Identity rather than a bare principal id, and answers
+// only about that identity — an exported probe that accepted any principal
+// would be an unaudited "what can THEY do?" oracle waiting for its first
+// caller. It applies the same session policy the chokepoint does beyond the
+// grant check (the MFA-mandatory floor), so a password-only session is not
+// told it may reveal while real authorization refuses it.
+//
+// It discloses only the caller's OWN capability on a scope they already
+// resolved, which is exactly what the reveal ceremony's own refusals already
+// tell them, and which they can read off their own grants.
+func (a *TxAuthorizer) CallerHolds(ctx context.Context, caller Identity,
+	op Operation, scope domain.Scope) (bool, error) {
+	spec, ok := operations[op]
+	if !ok {
+		return false, fmt.Errorf("authz: operation %q is not in the operation registry", op)
+	}
+	if caller.Principal == "" {
+		return false, errors.New("authz: empty principal")
+	}
+	chain, err := a.r.ResolveChain(ctx, scope)
+	if err != nil {
+		// Unresolvable is "no", not an error to surface: the caller has
+		// already been authorized for the scope it is asking about, so a
+		// resolution miss here is a race with a deletion and the honest answer
+		// to "may they reveal" is no.
+		if errors.Is(err, domain.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	grants, err := a.r.Grants(ctx, caller.Principal)
+	if err != nil {
+		return false, err
+	}
+	if !evaluate(spec.formula, chain, grants) {
+		return false, nil
+	}
+	// The same assurance floor Authorize() applies after the grant check. A
+	// surface that offered `reveal` to a password-only session would be
+	// offering something the chokepoint is about to refuse.
+	return !a.assuranceInadequate(caller, op), nil
+}

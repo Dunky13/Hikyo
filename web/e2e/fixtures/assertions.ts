@@ -525,7 +525,14 @@ export async function interactiveElements(page: Page): Promise<Locator[]> {
     '[contenteditable]:not([contenteditable="false"])',
     '[tabindex]:not([tabindex="-1"])',
   ].join(', ');
-  const all = page.locator(selector);
+  // A MODAL DIALOG makes the rest of the document inert, and an inert element
+  // is not an interactive one: focusing it is impossible by design, so
+  // asserting a focus ring on it would fail for a reason that is the platform
+  // working. When one is open, "every interactive element the page offers" is
+  // exactly the set inside it.
+  const modal = page.locator('dialog[open]');
+  const scope = (await modal.count()) > 0 ? modal.first() : page;
+  const all = scope.locator(selector);
   const out: Locator[] = [];
   for (let i = 0; i < (await all.count()); i++) {
     const one = all.nth(i);
