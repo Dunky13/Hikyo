@@ -1,0 +1,6 @@
+kind: Secret
+metadata:
+  name: trim
+data:
+  CERT_A: LS0tCg==
+  CERT_B: LS0tCg==

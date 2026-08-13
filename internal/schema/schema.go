@@ -64,6 +64,23 @@ const (
 	TypeJSON    Type = "json"
 )
 
+// TypeExpression is the compact textual form used by the key catalogue's
+// table output and by import presence reads. A declaration with one primitive
+// is that primitive; a union preserves its canonical alternative order.
+func TypeExpression(types []Type) string {
+	if len(types) == 0 {
+		return ""
+	}
+	if len(types) == 1 {
+		return string(types[0])
+	}
+	parts := make([]string, 0, len(types))
+	for _, typ := range types {
+		parts = append(parts, string(typ))
+	}
+	return "any_of(" + strings.Join(parts, "|") + ")"
+}
+
 // Bounds. Declaration and validation are attacker-triggerable work (threat
 // model § Availability), so every one of them is a named constant with a loud
 // named refusal rather than a number buried in a comparison. The concrete

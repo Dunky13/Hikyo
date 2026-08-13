@@ -699,6 +699,36 @@ func (e ServiceAccountKind) Valid() bool {
 	}
 }
 
+// Defines values for ValueOccurrenceCandidateIntendedType.
+const (
+	ValueOccurrenceCandidateIntendedTypeBoolean ValueOccurrenceCandidateIntendedType = "boolean"
+	ValueOccurrenceCandidateIntendedTypeEnum    ValueOccurrenceCandidateIntendedType = "enum"
+	ValueOccurrenceCandidateIntendedTypeInteger ValueOccurrenceCandidateIntendedType = "integer"
+	ValueOccurrenceCandidateIntendedTypeJson    ValueOccurrenceCandidateIntendedType = "json"
+	ValueOccurrenceCandidateIntendedTypeString  ValueOccurrenceCandidateIntendedType = "string"
+	ValueOccurrenceCandidateIntendedTypeUrl     ValueOccurrenceCandidateIntendedType = "url"
+)
+
+// Valid indicates whether the value is a known member of the ValueOccurrenceCandidateIntendedType enum.
+func (e ValueOccurrenceCandidateIntendedType) Valid() bool {
+	switch e {
+	case ValueOccurrenceCandidateIntendedTypeBoolean:
+		return true
+	case ValueOccurrenceCandidateIntendedTypeEnum:
+		return true
+	case ValueOccurrenceCandidateIntendedTypeInteger:
+		return true
+	case ValueOccurrenceCandidateIntendedTypeJson:
+		return true
+	case ValueOccurrenceCandidateIntendedTypeString:
+		return true
+	case ValueOccurrenceCandidateIntendedTypeUrl:
+		return true
+	default:
+		return false
+	}
+}
+
 // AffectedCredential defines model for AffectedCredential.
 type AffectedCredential struct {
 	// ExpiresAt RFC 3339 UTC, microsecond precision.
@@ -1647,6 +1677,64 @@ type IdentityProviderKind string
 // IdentityUnlinkRequest defines model for IdentityUnlinkRequest.
 type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
+}
+
+// ImportPrecondition The run manifest's expected-state half - the one declared additive
+// input `values import` gained. Verified inside the import's own
+// authorized transaction, after `read@project AND read@environment` is
+// re-evaluated for every environment named here.
+type ImportPrecondition struct {
+	DefinitionsRevision int64 `json:"definitions_revision"`
+	EnvironmentIds      []ID  `json:"environment_ids"`
+	Occurrences         []struct {
+		// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+		EnvironmentId ID `json:"environment_id"`
+
+		// Key The canonical key grammar: uppercase ASCII, digits and underscore, no
+		// leading digit. It is the environment-variable-safe grammar every
+		// delivery surface assumes - an execve environment block, a Kubernetes
+		// Secret data key, an adapter effective name - so it is a delivery
+		// constraint, not a style preference. `maxLength` counts code points
+		// here and bytes in the service; the grammar is ASCII, so they agree.
+		Key   KeyName `json:"key"`
+		Token string  `json:"token"`
+	} `json:"occurrences"`
+}
+
+// ImportValuesRequest defines model for ImportValuesRequest.
+type ImportValuesRequest struct {
+	// Entries The values file's entries. A key named twice is refused: it is one
+	// logical cell requested twice.
+	Entries []struct {
+		// Key The canonical key grammar: uppercase ASCII, digits and underscore, no
+		// leading digit. It is the environment-variable-safe grammar every
+		// delivery surface assumes - an execve environment block, a Kubernetes
+		// Secret data key, an adapter effective name - so it is a delivery
+		// constraint, not a style preference. `maxLength` counts code points
+		// here and bytes in the service; the grammar is ASCII, so they agree.
+		Key   KeyName `json:"key"`
+		Value string  `json:"value"`
+	} `json:"entries"`
+
+	// Overwrite The enumerated `set`-bucket consent. Skip-by-default otherwise.
+	// Naming a key this import does not carry is refused: a typo in a
+	// consent list is the one place a silent no-op is dangerous.
+	Overwrite *[]KeyName `json:"overwrite,omitempty"`
+
+	// Precondition The run manifest's expected-state half - the one declared additive
+	// input `values import` gained. Verified inside the import's own
+	// authorized transaction, after `read@project AND read@environment` is
+	// re-evaluated for every environment named here.
+	Precondition *ImportPrecondition `json:"precondition,omitempty"`
+}
+
+// ImportValuesResult defines model for ImportValuesResult.
+type ImportValuesResult struct {
+	Imported []KeyName `json:"imported"`
+
+	// Skipped Keys already `set` in the target environment that no enumerated
+	// overwrite named. Listed by name, never silently dropped.
+	Skipped []KeyName `json:"skipped"`
 }
 
 // IssuerType The federation issuer's platform. It is DECLARED rather than inferred
@@ -3220,6 +3308,88 @@ type ValueList struct {
 	Items []ValueCell `json:"items"`
 }
 
+// ValueOccurrence defines model for ValueOccurrence.
+type ValueOccurrence struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification *KeyClassification `json:"classification,omitempty"`
+
+	// Declared Whether the project declares this key at all. False for a candidate
+	// the run proposes that does not exist yet.
+	Declared bool `json:"declared"`
+
+	// DeclaredType The key catalogue's canonical textual type expression: a primitive,
+	// or `any_of(branch|branch)`. An importer uses the full expression to
+	// check its effective primitive against every permitted branch.
+	DeclaredType *string `json:"declared_type,omitempty"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId *ID `json:"key_id,omitempty"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+
+	// Set The whole presence model: `set` or `absent`. There is no third
+	// state.
+	Set bool `json:"set"`
+
+	// Token The server-minted OPAQUE occurrence token for this
+	// (key, environment). Copy it into the run manifest; never parse it.
+	// It is keyed and scoped, so it is meaningful only within the
+	// environment that produced it, and a fabricated one is exactly as
+	// informative as a stale one.
+	Token string `json:"token"`
+}
+
+// ValueOccurrenceCandidate defines model for ValueOccurrenceCandidate.
+type ValueOccurrenceCandidate struct {
+	// IntendedClassification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	IntendedClassification KeyClassification                    `json:"intended_classification"`
+	IntendedType           ValueOccurrenceCandidateIntendedType `json:"intended_type"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name KeyName `json:"name"`
+}
+
+// ValueOccurrenceCandidateIntendedType defines model for ValueOccurrenceCandidate.IntendedType.
+type ValueOccurrenceCandidateIntendedType string
+
+// ValueOccurrenceList defines model for ValueOccurrenceList.
+type ValueOccurrenceList struct {
+	// DefinitionsRevision The project's key-catalogue revision as phase 1 observed it. The
+	// run manifest pins it, and phase 2 refuses a run whose declarations
+	// moved.
+	DefinitionsRevision int64 `json:"definitions_revision"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID                `json:"environment_id"`
+	Items         []ValueOccurrence `json:"items"`
+}
+
+// ValueOccurrencesRequest defines model for ValueOccurrencesRequest.
+type ValueOccurrencesRequest struct {
+	// Candidates The candidate declarations this run intends to propose. Names the
+	// project already declares are answered from the catalogue; names it
+	// does not are answered as `declared: false` with a token binding the
+	// undeclared-and-absent state to the intended classification and type.
+	Candidates []ValueOccurrenceCandidate `json:"candidates"`
+}
+
 // WebauthnCredentialProofRequest The account-security proof for removing a credential — the pre-existing
 // password or a TOTP code, never the credential being removed (B7). Both
 // optional; the service selects and enforces the required proof.
@@ -3664,6 +3834,12 @@ type SetEnvironmentSettingsJSONRequestBody = EnvironmentSettings
 // ExportValuesJSONRequestBody defines body for ExportValues for application/json ContentType.
 type ExportValuesJSONRequestBody = ExportValuesRequest
 
+// ImportValuesJSONRequestBody defines body for ImportValues for application/json ContentType.
+type ImportValuesJSONRequestBody = ImportValuesRequest
+
+// ListValueOccurrencesJSONRequestBody defines body for ListValueOccurrences for application/json ContentType.
+type ListValueOccurrencesJSONRequestBody = ValueOccurrencesRequest
+
 // SetValueJSONRequestBody defines body for SetValue for application/json ContentType.
 type SetValueJSONRequestBody = SetValueRequest
 
@@ -4047,6 +4223,12 @@ type ServerInterface interface {
 	// ExportValues Export one environment's resolved snapshot.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
 	ExportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ImportValues Import phase 2 - a strict, human-only batch value write.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import)
+	ImportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ListValueOccurrences Import phase 1 - declared keys, presence, and occurrence tokens.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences)
+	ListValueOccurrences(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// RevealValues The environment's values, with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal)
 	RevealValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
@@ -4821,6 +5003,18 @@ func (_ Unimplemented) ListValues(w http.ResponseWriter, r *http.Request, org Or
 // ExportValues Export one environment's resolved snapshot.
 // (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
 func (_ Unimplemented) ExportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ImportValues Import phase 2 - a strict, human-only batch value write.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import)
+func (_ Unimplemented) ImportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListValueOccurrences Import phase 1 - declared keys, presence, and occurrence tokens.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences)
+func (_ Unimplemented) ListValueOccurrences(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7695,6 +7889,94 @@ func (siw *ServerInterfaceWrapper) ExportValues(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExportValues(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportValues operation middleware
+func (siw *ServerInterfaceWrapper) ImportValues(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportValues(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListValueOccurrences operation middleware
+func (siw *ServerInterfaceWrapper) ListValueOccurrences(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListValueOccurrences(w, r, org, project, environment)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11150,6 +11432,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/reveal-window", wrapper.GetRevealWindow)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences", wrapper.ListValueOccurrences)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import", wrapper.ImportValues)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal", wrapper.RevealValues)
@@ -19530,6 +19818,240 @@ func (response ExportValues500JSONResponse) VisitExportValuesResponse(w http.Res
 	return err
 }
 
+type ImportValuesRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *ImportValuesJSONRequestBody
+}
+
+type ImportValuesResponseObject interface {
+	VisitImportValuesResponse(w http.ResponseWriter) error
+}
+
+type ImportValues200JSONResponse ImportValuesResult
+
+func (response ImportValues200JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ImportValues400JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ImportValues401JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ImportValues403JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ImportValues404JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ImportValues409JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ImportValues429JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportValues500JSONResponse struct{ InternalJSONResponse }
+
+func (response ImportValues500JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrencesRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *ListValueOccurrencesJSONRequestBody
+}
+
+type ListValueOccurrencesResponseObject interface {
+	VisitListValueOccurrencesResponse(w http.ResponseWriter) error
+}
+
+type ListValueOccurrences200JSONResponse ValueOccurrenceList
+
+func (response ListValueOccurrences200JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListValueOccurrences400JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListValueOccurrences401JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListValueOccurrences403JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListValueOccurrences404JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListValueOccurrences429JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListValueOccurrences500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListValueOccurrences500JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RevealValuesRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -27023,6 +27545,12 @@ type StrictServerInterface interface {
 	// ExportValues Export one environment's resolved snapshot.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export)
 	ExportValues(ctx context.Context, request ExportValuesRequestObject) (ExportValuesResponseObject, error)
+	// ImportValues Import phase 2 - a strict, human-only batch value write.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/import)
+	ImportValues(ctx context.Context, request ImportValuesRequestObject) (ImportValuesResponseObject, error)
+	// ListValueOccurrences Import phase 1 - declared keys, presence, and occurrence tokens.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/occurrences)
+	ListValueOccurrences(ctx context.Context, request ListValueOccurrencesRequestObject) (ListValueOccurrencesResponseObject, error)
 	// RevealValues The environment's values, with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/reveal)
 	RevealValues(ctx context.Context, request RevealValuesRequestObject) (RevealValuesResponseObject, error)
@@ -29953,6 +30481,76 @@ func (sh *strictHandler) ExportValues(w http.ResponseWriter, r *http.Request, or
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ExportValuesResponseObject); ok {
 		if err := validResponse.VisitExportValuesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ImportValues operation middleware
+func (sh *strictHandler) ImportValues(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ImportValuesRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body ImportValuesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ImportValues(ctx, request.(ImportValuesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ImportValues")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ImportValuesResponseObject); ok {
+		if err := validResponse.VisitImportValuesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListValueOccurrences operation middleware
+func (sh *strictHandler) ListValueOccurrences(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ListValueOccurrencesRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body ListValueOccurrencesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListValueOccurrences(ctx, request.(ListValueOccurrencesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListValueOccurrences")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListValueOccurrencesResponseObject); ok {
+		if err := validResponse.VisitListValueOccurrencesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

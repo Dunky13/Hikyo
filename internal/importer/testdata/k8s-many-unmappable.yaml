@@ -1,0 +1,7 @@
+kind: Secret
+metadata:
+  name: bad
+data:
+  "has space": eA==
+  "a=b": eA==
+  "café": eA==

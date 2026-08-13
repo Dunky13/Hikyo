@@ -21,8 +21,7 @@ const remarkPlugins = [
 const rehypePlugins = [rehypeCode];
 
 export default defineConfig({
-  site: 'https://dunky13.github.io',
-  base: '/hikyo',
+  site: 'https://hikyo.app',
   trailingSlash: 'always',
   markdown: {
     processor: unified({

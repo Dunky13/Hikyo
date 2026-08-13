@@ -168,6 +168,28 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"extra positional on key delete", []string{"key", "delete", "key_x", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"stray positional on key group list", []string{"key", "group", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"key list with no session", []string{"key", "list", "--instance", "unknown-ref", "--org", "org_x", "--project", "prj_x"}, cli.ExitRefused},
+		// The import path (#68). Its usage boundary is pinned like every other
+		// verb family's, and the first case is the one the ADR states outright:
+		// `import` with no source arguments and no terminal is a HARD ERROR,
+		// never a hung prompt. testIO injects no OpenTerminal, so these run in
+		// exactly that state.
+		{"import without a source or a mapping", []string{"import"}, cli.ExitUsage},
+		{"import with both a source and a mapping", []string{"import", "--from", "k8s", "--mapping", "m.json"}, cli.ExitUsage},
+		{"import without an export file", []string{"import", "--from", "k8s", "--project", "prj_x", "--environment", "env_x"}, cli.ExitUsage},
+		{"import with an unserved source", []string{"import", "--from", "vault", "--file", "x.yaml"}, cli.ExitUsage},
+		{"import without an explicit project", []string{"import", "--from", "k8s", "--environment", "env_x", "--file", "x.yaml"}, cli.ExitRefused},
+		{"import without an explicit environment", []string{"import", "--from", "k8s", "--project", "prj_x", "--file", "x.yaml"}, cli.ExitRefused},
+		{"import with a missing export file", []string{"import", "--from", "k8s", "--project", "prj_x", "--environment", "env_x", "--file", "nope.yaml"}, cli.ExitUsage},
+		{"stray positional on import", []string{"import", "--from", "k8s", "--file", "x.yaml", "stray"}, cli.ExitUsage},
+		{"values import without a file", []string{"values", "import", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"values import with a missing file", []string{"values", "import", "--file", "nope.json", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"stray positional on values import", []string{"values", "import", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
+		// A replay takes its target from the artifact it replays; a flag that
+		// would override it is refused rather than silently ignored, which is
+		// what keeps the template a record rather than a suggestion.
+		{"replay with an overriding project", []string{"import", "--mapping", "m.json", "--file", "x.yaml", "--project", "prj_x"}, cli.ExitUsage},
+		{"replay with an overriding environment", []string{"import", "--mapping", "m.json", "--file", "x.yaml", "--environment", "env_x"}, cli.ExitUsage},
+		{"values import with an unknown output format", []string{"values", "import", "--file", "v.json", "-o", "yaml", "--instance", "unknown-ref"}, cli.ExitUsage},
 	}
 	var report strings.Builder
 	for _, tc := range cases {
@@ -510,6 +532,41 @@ func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
 			}},
 			Count: 1,
 		}},
+		// The import path (#68). Two shapes worth freezing: phase 1's
+		// occurrence list, whose `token` is opaque to every client and whose
+		// `set` is the whole two-state presence model; and phase 2's result,
+		// where `skipped` is a LIST OF NAMES rather than a count — a skipped key
+		// the operator expected to land is a fact they must be told by name.
+		{"value-occurrences-json.json", apigen.ValueOccurrenceList{
+			EnvironmentId:       "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f33",
+			DefinitionsRevision: 7,
+			Items: []apigen.ValueOccurrence{
+				{
+					KeyId: strptr("key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f55"), Name: "DATABASE_URL",
+					Declared: true, Classification: classptr("secret"),
+					DeclaredType: strptr("string"), Set: true,
+					Token: "v1:sBn6Q0m2Yy1a9m0nGm9nX0cD4rQ7pS2tU5vW8xY1zA0",
+				},
+				{
+					KeyId: strptr("key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f57"), Name: "FEATURE_FLAG",
+					Declared: true, Classification: classptr("config"),
+					DeclaredType: strptr("boolean"), Set: false,
+					Token: "v1:Tq3Lm7Nn2Pp9Rr4Ss6Uu8Vv0Ww1Xx3Yy5Zz7Aa9Bb2",
+				},
+				// A candidate the project does not declare yet: `declared` is
+				// false, there is no key id and no classification to report, and
+				// the token names exactly that state. It is the row an import
+				// creates, and it is server-minted like every other.
+				{
+					Name: "NEW_FROM_IMPORT", Declared: false, Set: false,
+					Token: "v1:Cc4Dd6Ee8Ff0Gg2Hh4Ii6Jj8Kk0Ll2Mm4Nn6Oo8Pp0",
+				},
+			},
+		}},
+		{"value-import-json.json", apigen.ImportValuesResult{
+			Imported: []string{"DATABASE_URL", "FEATURE_FLAG"},
+			Skipped:  []string{"API_KEY"},
+		}},
 	} {
 		var out bytes.Buffer
 		if err := cli.Render(&out, cli.FormatJSON, cli.Table{JSON: tc.payload}); err != nil {
@@ -520,4 +577,6 @@ func TestHierarchyJSONShapesAreFrozen(t *testing.T) {
 }
 
 func strptr(s string) *string { return &s }
-func boolptr(b bool) *bool    { return &b }
+
+func classptr(c apigen.KeyClassification) *apigen.KeyClassification { return &c }
+func boolptr(b bool) *bool                                          { return &b }

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-db
+  namespace: prod
+  resourceVersion: "8821"
+type: Opaque
+data:
+  DB_PASSWORD: czNjcjN0
+  db-host: ZGIuaW50ZXJuYWw=
+  DB_PORT: NTQzMg==
+stringData:
+  DB_PASSWORD: overlaid-wins
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-api
+  namespace: prod
+  resourceVersion: "8822"
+data:
+  API_KEY: c2tfbGl2ZV9hYmM=
+---

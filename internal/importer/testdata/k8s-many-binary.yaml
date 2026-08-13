@@ -1,0 +1,6 @@
+kind: Secret
+metadata:
+  name: bin
+data:
+  BLOB_A: AAECAw==
+  BLOB_B: AAECAw==

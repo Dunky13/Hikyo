@@ -1,0 +1,5 @@
+[
+  {"key":"DB_URL","workspace":"ws_1","value":"postgres://x","type":"shared","_id":"sec_1","secretPath":"/db","tags":[],"comment":"","Etag":"","skipMultilineEncoding":false},
+  {"key":"api-key","workspace":"ws_1","value":"sk_live_x","type":"shared","_id":"sec_2","secretPath":"/db","tags":[],"comment":"","Etag":"","skipMultilineEncoding":false},
+  {"key":"MY_OVERRIDE","workspace":"ws_1","value":"personal","type":"personal","_id":"sec_3","secretPath":"/db","tags":[],"comment":"","Etag":"","skipMultilineEncoding":false}
+]

@@ -57,9 +57,23 @@ values:                                            --env selects the environment
   hikyo values declare <KEY> --envs <env,env> (--stdin | --value-file PATH)
   hikyo values diff --left <env> --right <env> [--reveal] [--output-file PATH | --dangerously-print]
   hikyo values copy --from <env> --to <env,env> --keys <KEY,KEY> [--confirm-protected]
+  hikyo values import --file <values-file> [--manifest <run-manifest.json>]
+      [--overwrite KEY,KEY]                       strict: undeclared keys are refused
   hikyo values pending                              your drafts, and the ids to publish
   hikyo values publish --versions <id,id>           selective; closes over key groups
   hikyo values export [--revision N] [--reveal] [--output-file PATH | --dangerously-print]
+
+import:                                            authors artifacts, then stops
+  hikyo import --from <k8s|sops|infisical> --project <p> --environment <e>
+      --file <path> [--env <slug>] [--out-dir <dir>]
+  hikyo import --mapping <mapping.json> --file <path> [--out-dir <dir>]
+
+  phase 1 emits a definitions bundle, a per-environment values file, mapping.json
+  and run-manifest.json. Review the bundle, apply it, then run
+  hikyo values import --manifest run-manifest.json, which refuses any key whose
+  state moved since you reviewed it. --env names the SOURCE slice inside an
+  export; --environment names the target. Nothing is renamed invisibly and
+  nothing already set is overwritten without naming it.
 
 revisions:                                         --env selects the environment
   hikyo revision list                               lineage only, never values
