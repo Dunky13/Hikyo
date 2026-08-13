@@ -983,3 +983,121 @@ select {
     height: var(--touch);
   }
 }
+
+
+/* --- Multi-instance (#71): remote directory cards, origin allowlist, and the
+   active-session list. Same vocabulary as the rest of the shell: hairline
+   containers, no shadows, states carried by text with the badge as decoration. */
+
+.remotes,
+.origins,
+.sessions,
+.remote__orgs {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.remote {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.remote__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote__name {
+  margin: 0;
+  font-size: 16px;
+}
+
+.remote__url {
+  margin: 4px 0 8px;
+  color: var(--tx-dim);
+  overflow-wrap: anywhere;
+}
+
+.remote__state,
+.remote__stale {
+  margin: 0 0 8px;
+  color: var(--tx-dim);
+}
+
+.remote__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.remote__facts dt {
+  color: var(--tx-dim);
+}
+
+.remote__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.remote__orgs li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+
+.remote__projects {
+  color: var(--tx-dim);
+}
+
+.remote__actions,
+.origin,
+.session__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.origin,
+.session {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.origin {
+  justify-content: space-between;
+}
+
+.session__id,
+.session__detail {
+  overflow-wrap: anywhere;
+}
+
+.session__detail {
+  margin: 8px 0;
+  color: var(--tx-dim);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  max-width: 520px;
+}
+
+.form--inline {
+  max-width: none;
+}

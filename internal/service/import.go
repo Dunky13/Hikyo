@@ -306,6 +306,14 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		if e.Key == "" {
 			return ImportResult{}, fmt.Errorf("%w: an import entry names a key", domain.ErrInvalid)
 		}
+		// Bound supplied plaintext before declaration parsing, validation, or
+		// sealing. The schema engine enforces the same byte budget later, but
+		// import must not accept an oversized request merely because this entry
+		// would have been skipped or rejected for another reason first.
+		if len(e.Value) > schema.MaxValueBytes {
+			return ImportResult{}, fmt.Errorf("%w: value for %q exceeds the %d-byte validation budget",
+				domain.ErrInvalid, e.Key, schema.MaxValueBytes)
+		}
 		names = append(names, e.Key)
 	}
 	if dup, ok := firstDuplicate(names); ok {

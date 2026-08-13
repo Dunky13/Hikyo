@@ -233,8 +233,32 @@ var wireRegistry = map[string]Class{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                 ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}": ClassTenant,
-	"http:GET /api/v1/instance/credential-policy":                                                                  ClassInstance,
-	"http:PUT /api/v1/instance/credential-policy":                                                                  ClassInstance,
+	// Multi-instance (#71). The instance surfaces are instance-class; the
+	// handoff family joins the auth-protocol exception class and is
+	// unauthenticated-class for its probe contract, exactly as the OIDC and
+	// SAML transports are. The self-scoped session surface is
+	// unauthenticated-class for the reason /api/v1/me/orgs is: enumeration
+	// uniformity, not tenancy.
+	"http:GET /api/v1/instance/directory":                   ClassInstance,
+	"http:GET /api/v1/instance/remotes":                     ClassInstance,
+	"http:POST /api/v1/instance/remotes":                    ClassInstance,
+	"http:GET /api/v1/instance/remotes/{remote}":            ClassInstance,
+	"http:PATCH /api/v1/instance/remotes/{remote}":          ClassInstance,
+	"http:DELETE /api/v1/instance/remotes/{remote}":         ClassInstance,
+	"http:GET /api/v1/instance/connections":                 ClassInstance,
+	"http:POST /api/v1/instance/connections":                ClassInstance,
+	"http:GET /api/v1/instance/connections/{connection}":    ClassInstance,
+	"http:DELETE /api/v1/instance/connections/{connection}": ClassInstance,
+	"http:GET /api/v1/instance/workspace-origins":           ClassInstance,
+	"http:POST /api/v1/instance/workspace-origins":          ClassInstance,
+	"http:DELETE /api/v1/instance/workspace-origins":        ClassInstance,
+	"http:POST /api/v1/auth/workspace/start":                ClassUnauthenticated,
+	"http:POST /api/v1/auth/workspace/approve":              ClassUnauthenticated,
+	"http:POST /api/v1/auth/workspace/redeem":               ClassUnauthenticated,
+	"http:GET /api/v1/me/sessions":                          ClassUnauthenticated,
+	"http:DELETE /api/v1/me/sessions/{session}":             ClassUnauthenticated,
+	"http:GET /api/v1/instance/credential-policy":           ClassInstance,
+	"http:PUT /api/v1/instance/credential-policy":           ClassInstance,
 
 	// OIDC federation (#62). Issuer configuration is instance-class under
 	// `instance-config` — the same siting as OIDC and SAML provider
@@ -365,10 +389,16 @@ var wireRegistry = map[string]Class{
 	// a verb whose class understated its reach would let an instance-scoped
 	// call ride in under a tenant probe contract. `project`, `env` and `folder`
 	// reach tenant routes exclusively.
-	"cli:org":     ClassInstance,
-	"cli:project": ClassTenant,
-	"cli:env":     ClassTenant,
-	"cli:folder":  ClassTenant,
+	// Multi-instance (#71). Both families are instance-scoped: the viewing
+	// side's remotes are instance configuration read under instance-directory,
+	// and the serving side's connection credentials are custody under
+	// instance-config.
+	"cli:remote":            ClassInstance,
+	"cli:remote-credential": ClassInstance,
+	"cli:org":               ClassInstance,
+	"cli:project":           ClassTenant,
+	"cli:env":               ClassTenant,
+	"cli:folder":            ClassTenant,
 	// `key` reaches the catalogue and the group routes, all tenant-class.
 	"cli:key": ClassTenant,
 	// `values` reaches only the tenant-scoped value routes.
@@ -474,6 +504,27 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthLogin,
 		audit.EventAuthSessionCreated,
 		audit.EventAuthThrottleCrossed,
+	},
+	// Multi-instance handoff (#71). These three carry the workspace tier's
+	// pre-authentication audit obligation, which no operation can carry for
+	// them: start and redeem authenticate nobody, and a handoff FAILURE
+	// predates any session at every stage.
+	"http:POST /api/v1/auth/workspace/start":   {audit.EventRemoteHandoffFailed},
+	"http:POST /api/v1/auth/workspace/approve": {audit.EventRemoteHandoffFailed},
+	// Redeem carries two shapes, because a redemption is two acts: an
+	// establishment ISSUES a workspace session, while a step-up ELEVATES the one
+	// it was bound to and mints nothing — the trail records that as the ordinary
+	// reauthentication it is, on the session that was elevated.
+	"http:POST /api/v1/auth/workspace/redeem": {
+		audit.EventRemoteWorkspaceSessionIssued,
+		audit.EventAuthReauthenticated,
+		audit.EventRemoteHandoffFailed,
+	},
+	// The self-scoped revoke. A workspace session's death is a #71 event; an
+	// ordinary session's is a logout, already the trail's own vocabulary.
+	"http:DELETE /api/v1/me/sessions/{session}": {
+		audit.EventAuthLogout,
+		audit.EventRemoteWorkspaceSessionRevoked,
 	},
 	"http:POST /api/v1/auth/logout": {audit.EventAuthLogout},
 	"http:POST /api/v1/auth/credential/establish": {
@@ -695,8 +746,26 @@ var wireRoutes = map[string][]Operation{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                 {OpCredentialList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                {OpCredentialMint},
 	"http:DELETE /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials/{credential}": {OpCredentialRevoke},
-	"http:GET /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyRead},
-	"http:PUT /api/v1/instance/credential-policy":                                                                  {OpCredentialPolicyUpdate},
+	// Multi-instance (#71). The handoff routes reach no authz operation: they
+	// are pre-authentication by construction, and their audit obligation is
+	// discharged through wireEvents like every other identity-protocol
+	// endpoint. The session routes reach none for the same reason
+	// /api/v1/me/orgs reaches none: they are self-scoped projections.
+	"http:GET /api/v1/instance/directory":                   {OpRemoteDirectoryServe},
+	"http:GET /api/v1/instance/remotes":                     {OpRemoteList},
+	"http:POST /api/v1/instance/remotes":                    {OpRemoteAdd},
+	"http:GET /api/v1/instance/remotes/{remote}":            {OpRemoteShow},
+	"http:PATCH /api/v1/instance/remotes/{remote}":          {OpRemoteRename},
+	"http:DELETE /api/v1/instance/remotes/{remote}":         {OpRemoteRemove},
+	"http:GET /api/v1/instance/connections":                 {OpRemoteCredentialList},
+	"http:POST /api/v1/instance/connections":                {OpRemoteCredentialCreate},
+	"http:GET /api/v1/instance/connections/{connection}":    {OpRemoteCredentialShow},
+	"http:DELETE /api/v1/instance/connections/{connection}": {OpRemoteCredentialRevoke},
+	"http:GET /api/v1/instance/workspace-origins":           {OpWorkspaceOriginList},
+	"http:POST /api/v1/instance/workspace-origins":          {OpWorkspaceOriginAdd},
+	"http:DELETE /api/v1/instance/workspace-origins":        {OpWorkspaceOriginRemove},
+	"http:GET /api/v1/instance/credential-policy":           {OpCredentialPolicyRead},
+	"http:PUT /api/v1/instance/credential-policy":           {OpCredentialPolicyUpdate},
 
 	// OIDC federation (#62). One route, one operation.
 	"http:GET /api/v1/instance/federation-issuers":                                               {OpFederationIssuerList},

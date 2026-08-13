@@ -97,7 +97,13 @@ func requireCeremony(ctx context.Context, auth *Auth, az *authz.TxAuthorizer, ca
 	// that lock is an instant that can be arbitrarily old by the time it is
 	// used, and a window that expired while the transaction waited would still
 	// be spent against it.
-	return auth.ConsumeReauthWindow(ctx, az, caller.SessionID, purpose, envID, unit, auth.now())
+	// #58's closed purpose set maps to the authz operation the shell names in
+	// the matching workspace step-up consent. A bound window can therefore be
+	// spent by this real disclosure seam, while ConsumeReauthWindow still
+	// accepts every #54 UNBOUND window because it checks the name only when the
+	// stored window itself carries a binding.
+	return auth.ConsumeReauthWindow(ctx, az, caller.SessionID, purpose, envID,
+		string(operationForReauthPurpose(purpose)), unit, auth.now())
 }
 
 // ceremonyGate is the callback the value paths hand to readCells and
@@ -262,8 +268,8 @@ func (s *Reveal) Window(ctx context.Context, actor Actor, scope domain.Scope) (R
 // gave to "reveal · production" is spendable on "publish into · production"
 // over the same keys, which is a different decision they were never shown.
 //
-// Three members, because three acts reach the guard: reading plaintext, taking
-// it out of an environment, and putting it into one.
+// Four members: reading plaintext, taking it out of an environment, putting it
+// into one, and minting or widening a machine path to it.
 type ReauthPurpose string
 
 const (
@@ -289,4 +295,21 @@ func (p ReauthPurpose) Valid() bool {
 		return true
 	}
 	return false
+}
+
+// operationForReauthPurpose is the workspace consent vocabulary for #58's
+// closed purpose set. Keep one explicit switch arm per member: there is no
+// unnamed fallback that could make a new purpose silently unspendable.
+func operationForReauthPurpose(p ReauthPurpose) authz.Operation {
+	switch p {
+	case PurposeReveal:
+		return authz.OpValueReveal
+	case PurposeCopy:
+		return authz.OpValueCopySource
+	case PurposePublish:
+		return authz.OpValueCopyDestination
+	case PurposeMint:
+		return authz.OpCredentialMint
+	}
+	panic("service: unhandled reauthentication purpose")
 }

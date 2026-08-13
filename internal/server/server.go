@@ -38,9 +38,52 @@ type ReadyChecker interface {
 // rules in spa.go decide, and only for an HTML navigation to a non-reserved
 // path. A nil `ui` is an API-only binary, which is what a plain `go build`
 // produces.
+// remoteOriginSource adapts the directory service to the CSP writer. It
+// swallows the read error deliberately and answers the BASELINE: a database
+// hiccup must tighten the policy, never loosen it, and a document served with
+// `connect-src 'self'` is a workspace that cannot connect — visible and safe —
+// where a document served with no CSP at all would be neither.
+func remoteOriginSource(a *API) func(context.Context) []string {
+	if a == nil || a.Remotes == nil {
+		return nil
+	}
+	return func(ctx context.Context) []string {
+		origins, err := a.Remotes.RemoteOrigins(ctx)
+		if err != nil {
+			return nil
+		}
+		return origins
+	}
+}
+
 func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 	r := chi.NewRouter()
-	r.Use(securityHeaders)
+	// The CSP's `connect-src` is extended with the configured remotes' origins
+	// (#71) — a closed list, read per response so an added or removed remote
+	// takes effect without a restart. Nil when no directory surface is wired,
+	// which keeps the baseline exactly as it was.
+	r.Use(securityHeaders(remoteOriginSource(a)))
+	// Cross-origin readability for allowlisted workspace origins (#71), at the
+	// TOP of the chain rather than inside the API group, and that placement is
+	// load-bearing rather than tidy.
+	//
+	// A CORS PREFLIGHT MUST BE ANSWERED WHETHER OR NOT IT MATCHES A ROUTE. The
+	// contract declares no OPTIONS operations — correctly, it describes the API
+	// and not the browser's transport protocol — so an `OPTIONS
+	// /api/v1/auth/workspace/start` matches nothing and, from inside a route
+	// group, never reaches that group's middleware at all: it falls through to
+	// the router's not-found handler, which knows nothing about CORS and
+	// answers with no headers. The browser reports that as a missing
+	// `Access-Control-Allow-Origin`, which reads like an allowlist problem and
+	// is not — and it made every cross-origin POST of the workspace tier
+	// unreachable while the GETs worked.
+	//
+	// Router-level middleware runs on every request, matched or not. It is also
+	// OUTSIDE the artifact middleware, which is what a preflight needs: a
+	// preflight carries no credential by definition, so it must be answered
+	// before anything tries to resolve one. Requests without an `Origin` header
+	// pass through untouched, so nothing else on the router changes.
+	r.Use(workspaceCORS(workspaceOriginCheck(a)))
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

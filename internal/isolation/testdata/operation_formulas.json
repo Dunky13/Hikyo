@@ -696,6 +696,86 @@
     ]
   },
   {
+    "operation": "remote-credential.create",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote-credential.list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote-credential.revoke",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote-credential.show",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote.add",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote.directory-serve",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-directory@instance"
+    ]
+  },
+  {
+    "operation": "remote.list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-directory@instance"
+    ]
+  },
+  {
+    "operation": "remote.remove",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote.rename",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "remote.show",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-directory@instance"
+    ]
+  },
+  {
     "operation": "reveal.window_read",
     "class": "tenant",
     "level": "environment",
@@ -1149,6 +1229,30 @@
     "level": "environment",
     "formula": [
       "edit@environment"
+    ]
+  },
+  {
+    "operation": "workspace-origin.add",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "workspace-origin.list",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "workspace-origin.remove",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
     ]
   }
 ]

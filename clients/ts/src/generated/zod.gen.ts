@@ -796,7 +796,7 @@ export const zImportPrecondition = z.object({
 export const zImportValuesRequest = z.object({
     entries: z.array(z.object({
         key: zKeyName,
-        value: z.string()
+        value: z.string().max(65536)
     })).min(1).max(5000),
     overwrite: z.optional(z.array(zKeyName)),
     precondition: z.optional(zImportPrecondition)
@@ -1671,6 +1671,197 @@ export const zScimMintResult = z.object({
  */
 export const zScimResource = z.record(z.string(), z.unknown());
 
+export const zDirectoryOrg = z.object({
+    name: z.string().max(200),
+    projects: z.array(z.string().max(200)).max(1000)
+});
+
+/**
+ * What a connection credential authorizes, exhaustively. There is no field
+ * here that could carry a value, a key, an environment, a membership, a
+ * setting or an audit row, and adding one would widen every credential in
+ * circulation without any grant changing.
+ *
+ */
+export const zDirectoryListing = z.object({
+    identity: z.string().max(128),
+    version: z.string().max(64),
+    orgs: z.array(zDirectoryOrg).max(1000),
+    org_count: z.int().gte(0),
+    project_count: z.int().gte(0)
+});
+
+/**
+ * One connection entry and its last-known state. There is deliberately no
+ * credential field: the stored credential is write-only after storage and
+ * is not retrievable through any surface.
+ *
+ */
+export const zRemote = z.object({
+    id: zId,
+    name: zEntityName,
+    url: z.string().max(512),
+    spki_pin: z.string().max(64),
+    created_at: zTimestamp,
+    created_by: z.string().max(64),
+    state: z.enum([
+        'ok',
+        'unreachable',
+        'credential-rejected',
+        'pin-mismatch',
+        'redirect-refused',
+        'identity-conflict',
+        'self-connected'
+    ]),
+    last_attempt_at: zTimestamp,
+    observed_at: z.optional(zTimestamp),
+    stale: z.boolean(),
+    stale_for_seconds: z.optional(z.int().gte(0)),
+    identity: z.optional(z.string().max(128)),
+    version: z.optional(z.string().max(64)),
+    org_count: z.optional(z.int().gte(0)),
+    project_count: z.optional(z.int().gte(0)),
+    orgs: z.optional(z.array(zDirectoryOrg).max(1000))
+});
+
+export const zRemoteList = z.object({
+    items: z.array(zRemote),
+    count: z.int().gte(0)
+});
+
+export const zAddRemoteRequest = z.object({
+    name: zEntityName,
+    url: z.string().max(512),
+    spki_pin: z.string().max(64),
+    credential: z.string().max(256)
+});
+
+export const zRenameRemoteRequest = z.object({
+    name: zEntityName
+});
+
+export const zInstanceConnection = z.object({
+    id: zId,
+    principal: z.string().max(64),
+    label: z.string().max(200),
+    kind: zCredentialKind,
+    prefix_hint: z.string().max(32),
+    lifetime: zCredentialLifetime,
+    expires_at: z.optional(zTimestamp),
+    created_at: zTimestamp,
+    created_by: z.string().max(64),
+    revoked_at: z.optional(zTimestamp),
+    last_used_at: z.optional(zTimestamp),
+    live: z.boolean()
+});
+
+export const zInstanceConnectionList = z.object({
+    items: z.array(zInstanceConnection),
+    count: z.int().gte(0)
+});
+
+export const zMintInstanceConnectionRequest = z.object({
+    label: z.string().min(1).max(200),
+    lifetime_seconds: z.optional(z.int().gte(1)),
+    indefinite: z.optional(z.boolean())
+});
+
+export const zMintedInstanceConnection = z.object({
+    value: z.string().max(256),
+    connection: zInstanceConnection,
+    clamped: z.boolean()
+});
+
+export const zWorkspaceOrigin = z.object({
+    origin: z.string().max(512),
+    created_at: zTimestamp,
+    created_by: z.string().max(64)
+});
+
+export const zWorkspaceOriginList = z.object({
+    items: z.array(zWorkspaceOrigin),
+    count: z.int().gte(0)
+});
+
+export const zWorkspaceOriginRequest = z.object({
+    origin: z.string().max(512)
+});
+
+export const zWorkspaceOriginRemoved = z.object({
+    origin: z.string().max(512),
+    sessions_revoked: z.int().gte(0)
+});
+
+export const zStartWorkspaceHandoffRequest = z.object({
+    origin: z.string().max(512),
+    redirect_uri: z.string().max(512),
+    pkce_challenge: z.string().length(43).regex(/^[A-Za-z0-9_-]{43}$/),
+    purpose: z.enum(['establishment', 'step-up']),
+    session: z.optional(zId),
+    operation: z.optional(z.string().max(128)),
+    environment: z.optional(zId),
+    key_set: z.optional(z.array(z.string().max(200)).max(1000))
+});
+
+export const zWorkspaceHandoffStarted = z.object({
+    handoff: zId,
+    state: z.string().max(256),
+    expires_at: zTimestamp
+});
+
+export const zApproveWorkspaceHandoffRequest = z.object({
+    state: z.string().max(256)
+});
+
+export const zWorkspaceHandoffApproved = z.object({
+    code: z.string().max(256),
+    redirect_uri: z.string().max(512)
+});
+
+export const zRedeemWorkspaceHandoffRequest = z.object({
+    code: z.string().max(256),
+    pkce_verifier: z.string().min(43).max(128).regex(/^[A-Za-z0-9_-]{43,128}$/),
+    origin: z.string().max(512)
+});
+
+export const zWorkspaceSession = z.object({
+    value: z.string().max(256),
+    session: zId,
+    origin: z.string().max(512),
+    handoff: zId,
+    idle_expires_at: zTimestamp,
+    absolute_expires_at: zTimestamp,
+    elevated: z.optional(z.boolean()),
+    environment: z.optional(zId),
+    window_expires_at: z.optional(zTimestamp)
+});
+
+/**
+ * One of the caller's own sessions. Metadata only; no verifier is ever returned.
+ */
+export const zActiveSession = z.object({
+    id: zId,
+    artifact: z.enum([
+        'cli',
+        'browser',
+        'workspace'
+    ]),
+    auth_method: z.string().max(64),
+    created_at: zTimestamp,
+    last_seen_at: zTimestamp,
+    idle_expires_at: zTimestamp,
+    absolute_expires_at: zTimestamp,
+    source_ip: z.optional(z.string().max(64)),
+    user_agent: z.optional(z.string().max(512)),
+    requesting_origin: z.optional(z.string().max(512)),
+    handoff: z.optional(z.string().max(64))
+});
+
+export const zSessionList = z.object({
+    items: z.array(zActiveSession),
+    count: z.int().gte(0)
+});
+
 /**
  * Organisation identifier.
  */
@@ -1836,6 +2027,25 @@ export const zScimSortOrder = z.string();
  *
  */
 export const zScimStartIndex = z.string();
+
+/**
+ * The entry's display name. A NAME, never a URL or host: an endpoint whose
+ * target is named by the request is a proxy whatever it is called, and the
+ * server looks the entry up so the stored, immutable URL is what is
+ * reached.
+ *
+ */
+export const zRemoteName = zEntityName;
+
+/**
+ * Connection credential identifier.
+ */
+export const zConnectionId = zId;
+
+/**
+ * Session identifier, always one of the caller's own.
+ */
+export const zSessionId = zId;
 
 export const zGetMetaData = z.object({
     body: z.optional(z.never()),
@@ -3999,6 +4209,216 @@ export const zScimSearchGroupsData = z.object({
     }),
     query: z.optional(z.never())
 });
+
+export const zServeDirectoryData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The served listing.
+ */
+export const zServeDirectoryResponse = zDirectoryListing;
+
+export const zListRemotesData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Every configured entry with its last-known state.
+ */
+export const zListRemotesResponse = zRemoteList;
+
+export const zAddRemoteData = z.object({
+    body: zAddRemoteRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The entry, with the listing its verifying fetch returned.
+ */
+export const zAddRemoteResponse = zRemote;
+
+export const zRemoveRemoteData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        remote: zEntityName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Removed. The serving-side credential is still live.
+ */
+export const zRemoveRemoteResponse = z.void();
+
+export const zShowRemoteData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        remote: zEntityName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The entry with its last-known state.
+ */
+export const zShowRemoteResponse = zRemote;
+
+export const zRenameRemoteData = z.object({
+    body: zRenameRemoteRequest,
+    path: z.object({
+        remote: zEntityName
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The entry as renamed.
+ */
+export const zRenameRemoteResponse = zRemote;
+
+export const zListInstanceConnectionsData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Every connection, live and revoked.
+ */
+export const zListInstanceConnectionsResponse = zInstanceConnectionList;
+
+export const zMintInstanceConnectionData = z.object({
+    body: zMintInstanceConnectionRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The connection, with its value disclosed once.
+ */
+export const zMintInstanceConnectionResponse = zMintedInstanceConnection;
+
+export const zRevokeInstanceConnectionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        connection: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeInstanceConnectionResponse = z.void();
+
+export const zShowInstanceConnectionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        connection: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The connection.
+ */
+export const zShowInstanceConnectionResponse = zInstanceConnection;
+
+export const zRemoveWorkspaceOriginData = z.object({
+    body: zWorkspaceOriginRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Removed, with the number of sessions the same transaction killed.
+ */
+export const zRemoveWorkspaceOriginResponse = zWorkspaceOriginRemoved;
+
+export const zListWorkspaceOriginsData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The allowlist.
+ */
+export const zListWorkspaceOriginsResponse = zWorkspaceOriginList;
+
+export const zAddWorkspaceOriginData = z.object({
+    body: zWorkspaceOriginRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Allowlisted.
+ */
+export const zAddWorkspaceOriginResponse = zWorkspaceOrigin;
+
+export const zStartWorkspaceHandoffData = z.object({
+    body: zStartWorkspaceHandoffRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The transaction's opaque state and its expiry.
+ */
+export const zStartWorkspaceHandoffResponse = zWorkspaceHandoffStarted;
+
+export const zApproveWorkspaceHandoffData = z.object({
+    body: zApproveWorkspaceHandoffRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The authorization code and the callback to deliver it to.
+ */
+export const zApproveWorkspaceHandoffResponse = zWorkspaceHandoffApproved;
+
+export const zRedeemWorkspaceHandoffData = z.object({
+    body: zRedeemWorkspaceHandoffRequest,
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The workspace session, disclosed once.
+ */
+export const zRedeemWorkspaceHandoffResponse = zWorkspaceSession;
+
+export const zListMySessionsData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * The caller's sessions.
+ */
+export const zListMySessionsResponse = zSessionList;
+
+export const zRevokeMySessionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        session: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Revoked.
+ */
+export const zRevokeMySessionResponse = z.void();
 
 export const zPublishPendingChangesData = z.object({
     body: zPublishRequest,

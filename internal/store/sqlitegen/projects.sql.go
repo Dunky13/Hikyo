@@ -74,6 +74,46 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 	return i, err
 }
 
+const listAllProjects = `-- name: ListAllProjects :many
+SELECT org_id, name FROM projects ORDER BY org_id, name
+`
+
+type ListAllProjectsRow struct {
+	OrgID string
+	Name  string
+}
+
+// ListAllProjects is the multi-instance directory's cross-org enumeration
+// (#71): the served listing is org/project names and counts across the whole
+// instance, so it addresses no tenant and carries no chain conjunct. It is
+// annotated instance-scoped for exactly the reason ListOrgs is - the read is
+// cross-tenant by definition, not by omission. Only (org_id, name) is
+// selected: the directory needs names and counts, and a row shape carrying
+// created_at would be foreign structure nobody asked for.
+// hikyo:instance-scoped
+func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllProjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllProjectsRow
+	for rows.Next() {
+		var i ListAllProjectsRow
+		if err := rows.Scan(&i.OrgID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjects = `-- name: ListProjects :many
 SELECT id, org_id, name, created_at FROM projects
 WHERE org_id = ? ORDER BY name

@@ -239,7 +239,7 @@ func (r sqliteSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, e
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshotFromSQLite(row)
+	return revisionSnapshotFromSQLite(row)
 }
 
 func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
@@ -263,7 +263,7 @@ func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshotFromSQLite(row)
+	return revisionSnapshotFromSQLite(row)
 }
 
 func (r sqliteSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error) {
@@ -285,7 +285,7 @@ func (r sqliteSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, e
 	}
 	out := make([]Snapshot, 0, len(rows))
 	for _, row := range rows {
-		snap, err := snapshotFromSQLite(row)
+		snap, err := revisionSnapshotFromSQLite(row)
 		if err != nil {
 			return nil, err
 		}
@@ -452,7 +452,7 @@ func (r sqliteSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) e
 	return constraint(err)
 }
 
-func snapshotFromSQLite(row sqlitegen.Snapshot) (Snapshot, error) {
+func revisionSnapshotFromSQLite(row sqlitegen.Snapshot) (Snapshot, error) {
 	published, err := parseTime("snapshot", row.ID, row.PublishedAt)
 	if err != nil {
 		return Snapshot{}, err
@@ -640,7 +640,7 @@ func (r pgSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, error
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshotFromPG(row), nil
+	return revisionSnapshotFromPG(row), nil
 }
 
 func (r pgSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
@@ -664,7 +664,7 @@ func (r pgSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshotFromPG(row), nil
+	return revisionSnapshotFromPG(row), nil
 }
 
 func (r pgSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error) {
@@ -686,7 +686,7 @@ func (r pgSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error
 	}
 	out := make([]Snapshot, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, snapshotFromPG(row))
+		out = append(out, revisionSnapshotFromPG(row))
 	}
 	return out, nil
 }
@@ -848,7 +848,7 @@ func (r pgSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error
 	return constraint(err)
 }
 
-func snapshotFromPG(row pggen.Snapshot) Snapshot {
+func revisionSnapshotFromPG(row pggen.Snapshot) Snapshot {
 	return Snapshot{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, Revision: row.Revision,

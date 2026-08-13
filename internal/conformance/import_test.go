@@ -130,8 +130,17 @@ func scenarioImportStrict(t *testing.T, db *store.DB) {
 	mustKey(t, keys, actor, scope, "DB_URL", string(schema.Config), schema.DefaultPresenceRules())
 	mustKey(t, keys, actor, scope, "API_KEY", string(schema.Config), schema.DefaultPresenceRules())
 
-	// Closed schema: not conceded on the import path.
+	// Import carries the same per-value budget as every other plaintext write,
+	// enforced in the service before schema validation or sealing.
 	_, err := values.Import(t.Context(), actor, prod, service.ImportRequest{
+		Entries: []service.ImportEntry{{Key: "DB_URL", Value: strings.Repeat("x", schema.MaxValueBytes+1)}},
+	})
+	if err == nil || !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "65536-byte") {
+		t.Fatalf("an oversized import value was not refused at the service boundary: %v", err)
+	}
+
+	// Closed schema: not conceded on the import path.
+	_, err = values.Import(t.Context(), actor, prod, service.ImportRequest{
 		Entries: []service.ImportEntry{{Key: "DB_URL", Value: "x"}, {Key: "DATBASE_URL", Value: "y"}},
 	})
 	if err == nil || !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "DATBASE_URL") {

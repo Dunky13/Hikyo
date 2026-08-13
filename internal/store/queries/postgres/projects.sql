@@ -14,6 +14,17 @@ WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 SELECT id, org_id, name, created_at FROM projects
 WHERE org_id = sqlc.arg(chain_org_id) ORDER BY name;
 
+-- ListAllProjects is the multi-instance directory's cross-org enumeration
+-- (#71): the served listing is org/project names and counts across the whole
+-- instance, so it addresses no tenant and carries no chain conjunct. It is
+-- annotated instance-scoped for exactly the reason ListOrgs is - the read is
+-- cross-tenant by definition, not by omission. Only (org_id, name) is
+-- selected: the directory needs names and counts, and a row shape carrying
+-- created_at would be foreign structure nobody asked for.
+-- hikyo:instance-scoped
+-- name: ListAllProjects :many
+SELECT org_id, name FROM projects ORDER BY org_id, name;
+
 -- name: RenameProject :execrows
 UPDATE projects SET name = sqlc.arg(name)
 WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
