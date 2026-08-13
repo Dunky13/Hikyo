@@ -1,0 +1,331 @@
+---
+import '../styles/landing.css';
+
+const base = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
+const repository = 'https://github.com/Dunky13/hikyo';
+const links = {
+  contributing: `${base}contributing/`,
+  docs: `${base}docs/`,
+  governance: `${base}governance/`,
+  license: `${base}license/`,
+  security: `${base}security/`,
+  support: `${base}support/`,
+};
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta
+      name="description"
+      content="Hikyo is a fully open-source, self-hosted control plane for validated secrets and configuration across environments."
+    />
+    <meta name="theme-color" content="#1b2225" />
+    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <link rel="canonical" href="https://dunky13.github.io/hikyo/" />
+    <title>Hikyo — fully open secrets and configuration</title>
+    <script is:inline>
+      (() => {
+        const stored = localStorage.getItem('starlight-theme');
+        document.documentElement.dataset.theme = stored === 'light' ? 'light' : 'dark';
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="wrap nav" aria-label="Primary navigation">
+        <a class="brand" href={base} aria-label="Hikyo home">
+          <span class="brand-glyph" aria-hidden="true">h</span>
+          <span>hikyo</span>
+        </a>
+        <div class="nav-links">
+          <a href="#matrix">Product</a>
+          <a href="#self-host">Self-hosting</a>
+          <a href="#why">Why Hikyo</a>
+          <a href={links.docs}>Docs</a>
+        </div>
+        <div class="nav-actions">
+          <button class="theme-toggle" type="button" aria-label="Switch to light theme">
+            <span class="theme-icon" aria-hidden="true">◐</span>
+            <span class="theme-label">Light</span>
+          </button>
+          <a class="button button-primary header-cta" href={repository}>View on GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="wrap">
+          <p class="eyebrow"><span class="live" aria-hidden="true"></span> 0.x · one Go binary · self-hosted</p>
+          <h1>See every value.<br /><span>Trust every decision.</span></h1>
+          <p class="lede">
+            Hikyo is a self-hosted control plane for validated secrets and configuration across environments.
+            Every value is explicit, every disclosure is deliberate, and production features stay open.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href={repository}>Follow development <span aria-hidden="true">↗</span></a>
+            <a class="button button-line" href={links.docs}>Read the docs</a>
+          </div>
+          <p class="subtrust">
+            <strong>Mozilla Public License 2.0.</strong> No account required. No enterprise-only directory.
+          </p>
+
+          <div class="surface" id="matrix">
+            <div class="surface-bar">
+              <div class="crumb"><span class="avatar">AC</span> <strong>acme</strong><span>/</span> payments-api</div>
+              <div class="environment-chips" aria-label="Visible environments">
+                <span>development</span><span>staging</span><span>production</span>
+              </div>
+            </div>
+            <div class="matrix-scroll">
+              <table class="matrix">
+                <caption class="sr-only">Explicit configuration values for three environments</caption>
+                <thead>
+                  <tr><th>Key</th><th>development</th><th>staging</th><th>production</th></tr>
+                </thead>
+                <tbody>
+                  <tr class="group"><th colspan="4">database <span>3</span></th></tr>
+                  <tr>
+                    <th>DATABASE_URL</th>
+                    <td><span class="state masked">● set · secret</span></td>
+                    <td><span class="state masked">● set · secret</span></td>
+                    <td><span class="state masked">● set · secret</span></td>
+                  </tr>
+                  <tr>
+                    <th>DATABASE_POOL_MAX</th>
+                    <td><span class="state set">✓ 10</span></td>
+                    <td><span class="state set">✓ 20</span></td>
+                    <td><span class="state set">✓ 40</span></td>
+                  </tr>
+                  <tr>
+                    <th>DATABASE_SSLMODE</th>
+                    <td><span class="state set">✓ disable</span></td>
+                    <td><span class="state set">✓ verify-full</span></td>
+                    <td><span class="state set">✓ verify-full</span></td>
+                  </tr>
+                  <tr class="group"><th colspan="4">observability <span>2</span></th></tr>
+                  <tr>
+                    <th>LOG_LEVEL</th>
+                    <td><span class="state set">✓ debug</span></td>
+                    <td><span class="state set">✓ info</span></td>
+                    <td><span class="state set">✓ info</span></td>
+                  </tr>
+                  <tr>
+                    <th>SENTRY_DSN</th>
+                    <td><span class="state absent">○ absent</span></td>
+                    <td><span class="state masked">● set · secret</span></td>
+                    <td><span class="state missing">! required · absent</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="surface-foot" aria-label="Value state legend">
+              <span><i class="dot set-dot"></i> set here</span>
+              <span><i class="dot absent-dot"></i> absent</span>
+              <span><i class="dot masked-dot"></i> secret set</span>
+              <span><i class="dot missing-dot"></i> required, absent</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="stack">
+        <div class="wrap stack-inner">
+          <p>Built for infrastructure you own</p>
+          <div><span>Go</span><span>SQLite</span><span>PostgreSQL</span><span>Helm</span><span>OpenAPI</span></div>
+        </div>
+      </div>
+
+      <section class="block" aria-labelledby="product-heading">
+        <div class="wrap">
+          <p class="kicker">// explicit state, deliberate access</p>
+          <h2 id="product-heading">A dense surface that stays honest.</h2>
+          <p class="section-lede">
+            Fifty keys across four environments should stay scannable. Hikyo makes absence visible and keeps
+            secret material behind a separate disclosure path.
+          </p>
+
+          <article class="feature-row">
+            <div class="feature-copy">
+              <h3>Every environment answers for itself.</h3>
+              <p>
+                Values never fall through a hidden inheritance chain. Each cell is explicitly set or absent, so
+                production cannot quietly borrow a development default.
+              </p>
+              <p class="feature-note"><span>▸</span> Flat values: no inheritance, no hidden fallback.</p>
+            </div>
+            <div class="artifact frame">
+              <div class="frame-head"><i></i><i></i><i></i><span>DATABASE_POOL_MAX · coverage</span></div>
+              <div class="frame-body coverage">
+                <div><span>development</span><code>10</code><b>set ✓</b></div>
+                <div><span>staging</span><code>20</code><b>set ✓</b></div>
+                <div class="active"><span>production</span><code>40</code><b>set ✓</b></div>
+                <p>3 environments · 3 explicit values · 0 fallbacks</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="feature-row flip">
+            <div class="feature-copy">
+              <h3>Revealing a secret is a ceremony.</h3>
+              <p>
+                Secrets stay masked until you deliberately re-authenticate. Reveal windows remask automatically,
+                and clipboard copies become individual audited disclosures.
+              </p>
+              <p class="feature-note"><span>▸</span> Write-only replacement never needs the current plaintext.</p>
+            </div>
+            <div class="artifact frame">
+              <div class="frame-head"><i></i><i></i><i></i><span>STRIPE_SECRET_KEY · production</span></div>
+              <div class="frame-body reveal">
+                <div class="gate"><span>⌾</span> Re-authentication required <small>protected environment</small></div>
+                <div class="secret-stage"><span>before</span><code>••••••••••••••••</code></div>
+                <div class="secret-stage"><span>after</span><code class="shown">sk_live_51Kp…9aQ</code><b>remask 0:18</b></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="feature-row">
+            <div class="feature-copy">
+              <h3>Invalid changes stop at write time.</h3>
+              <p>
+                Key declarations distinguish config from secrets and attach validation rules. Invalid values are
+                refused, and a value required in an environment cannot be cleared there.
+              </p>
+              <p class="feature-note"><span>▸</span> The server validates the value and presence rule together.</p>
+            </div>
+            <div class="artifact frame">
+              <div class="frame-head"><i></i><i></i><i></i><span>SENTRY_DSN · production · clear</span></div>
+              <div class="frame-body checks">
+                <div><b class="ok">✓</b><span>current value is set</span><code>secret</code></div>
+                <div><b class="bad">!</b><span>clear requested in <strong>production</strong></span><code>change</code></div>
+                <div><b class="ok">✓</b><span>presence rule is required</span><code>required_in</code></div>
+                <div><b class="bad">×</b><span>clear refused; value unchanged</span><code>fail-closed</code></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="feature-row flip">
+            <div class="feature-copy">
+              <h3>Machine access has an honest boundary.</h3>
+              <p>
+                Today, workload fetch returns the authorized key catalogue, classification, and declared presence.
+                It does not return plaintext values. Every request still reaches the same authorization chokepoint.
+              </p>
+              <p class="feature-note"><span>▸</span> Unauthorized resources remain indistinguishable from nonexistent ones.</p>
+            </div>
+            <div class="artifact frame terminal">
+              <div class="frame-head"><i></i><i></i><i></i><span>catalogue fetch · production</span></div>
+              <pre><span># workload presents its own identity</span>
+<b>authorize</b> payments-api / production
+  <em>✓</em> identity verified
+  <em>✓</em> grant constrained to project + environment
+  <em>✓</em> 18 key declarations returned
+  <span>→ required 4 · optional 13 · forbidden 1</span>
+  <strong>!</strong> no plaintext on this surface</pre>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="self-host" id="self-host" aria-labelledby="self-host-heading">
+        <div class="wrap self-host-grid">
+          <div>
+            <p class="kicker">// runs where you do</p>
+            <h2 id="self-host-heading">Own the keys. Own the data.</h2>
+            <p class="section-lede">
+              Self-hosting is the product, not a paid tier. Run one binary with its embedded web UI, choose SQLite
+              or PostgreSQL, and hold the root key outside the datastore it protects.
+            </p>
+            <div class="section-actions">
+              <a class="button button-primary" href={repository}>Inspect the source</a>
+              <a class="button button-line" href={links.security}>Read the security policy</a>
+            </div>
+          </div>
+          <dl class="specs">
+            <div><dt>runtime</dt><dd><strong>One Go binary</strong> with an embedded web interface.</dd></div>
+            <div><dt>storage</dt><dd><strong>SQLite or PostgreSQL</strong>, selected explicitly.</dd></div>
+            <div><dt>encryption</dt><dd>Envelope encryption with <strong>operator-held root key material</strong>.</dd></div>
+            <div><dt>deploy</dt><dd>A first-party <strong>Helm chart</strong> for Kubernetes and K3s.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="block" id="why" aria-labelledby="why-heading">
+        <div class="wrap why">
+          <p class="kicker">// why hikyo exists</p>
+          <h2 id="why-heading">Operational capability should not be an enterprise upsell.</h2>
+          <div class="why-body">
+            <p>
+              Secrets products often make audit, SSO, SCIM, or recovery the reason to upgrade. Hikyo keeps the
+              production path in the same open repository under the Mozilla Public License 2.0.
+            </p>
+            <p>
+              The environment matrix is the core idea: <strong>explicit state you can inspect</strong>, disclosure
+              you must intend, and refusals that name the safe next action.
+            </p>
+            <p>No badge wall. No hidden operational tier. Infrastructure you can reason about.</p>
+          </div>
+          <p class="signature">Built in the open · MPL-2.0 · no <code>/ee</code></p>
+        </div>
+      </section>
+
+      <section class="final-cta" aria-labelledby="final-heading">
+        <div class="wrap">
+          <h2 id="final-heading">Config you can reason about.</h2>
+          <p>Hikyo is under active 0.x development. Read the code, inspect the decisions, and follow the road to 1.0.</p>
+          <div class="section-actions">
+            <a class="button button-primary" href={repository}>View on GitHub <span aria-hidden="true">↗</span></a>
+            <a class="button button-line" href={links.docs}>Read project docs</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href={base}><span class="brand-glyph" aria-hidden="true">h</span><span>hikyo</span></a>
+          <p>Fully open-source secrets and configuration across environments.</p>
+        </div>
+        <div>
+          <h3>Project</h3>
+          <a href={links.docs}>Documentation</a><a href={links.governance}>Governance</a><a href={links.license}>License</a>
+        </div>
+        <div>
+          <h3>Operate</h3>
+          <a href={links.security}>Security</a><a href={links.support}>Support</a><a href={`${base}release/signing/`}>Release trust</a>
+        </div>
+        <div>
+          <h3>Contribute</h3>
+          <a href={repository}>GitHub</a><a href={links.contributing}>Contributing</a><a href={`${repository}/issues`}>Issues</a>
+        </div>
+      </div>
+      <div class="wrap footer-bar">
+        <span>© 2026 Hikyo contributors</span><span>MPL-2.0 · self-hosted</span>
+      </div>
+    </footer>
+
+    <script>
+      const button = document.querySelector<HTMLButtonElement>('.theme-toggle');
+      const label = button?.querySelector<HTMLElement>('.theme-label');
+
+      const renderTheme = (theme: 'dark' | 'light') => {
+        document.documentElement.dataset.theme = theme;
+        if (label) label.textContent = theme === 'dark' ? 'Light' : 'Dark';
+        button?.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`);
+      };
+
+      renderTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+      button?.addEventListener('click', () => {
+        const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('starlight-theme', theme);
+        renderTheme(theme);
+      });
+    </script>
+  </body>
+</html>

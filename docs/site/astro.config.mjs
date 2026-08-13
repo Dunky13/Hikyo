@@ -23,7 +23,7 @@ export default defineConfig({
         { icon: 'github', label: 'GitHub', href: 'https://github.com/Dunky13/hikyo' },
       ],
       sidebar: [
-        { label: 'Overview', slug: 'index' },
+        { label: 'Overview', slug: 'docs' },
         {
           label: 'Project policy',
           items: [
