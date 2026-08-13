@@ -1424,12 +1424,17 @@ func runFederationTokenAgeCannotExpireMidFlight(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	validated := false
 	r.fed.OnValidated = func() {
+		validated = true
 		r.clk.advance(oidcfed.MaxTokenAge + time.Second)
 		r.fed.OnValidated = nil
 	}
 	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token crossing the age cap during validation = %v, want the uniform refusal", err)
+	}
+	if !validated {
+		t.Fatal("OnValidated was not called; mid-flight timing was not tested")
 	}
 	if n := queryInt(t, db,
 		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%token-age%'"); n != 1 {
