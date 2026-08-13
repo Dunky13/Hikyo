@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Dunky13/hikyo/api"
 	"github.com/Dunky13/hikyo/api/apigen"
 	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/scimproto"
 	"github.com/Dunky13/hikyo/internal/service"
 )
 
@@ -64,8 +68,33 @@ type FolderService interface {
 // generated decoder cannot read is a shape failure, decided before any tenant
 // resolution — the one class permitted to name the offending member, and here
 // there is nothing finer to name than the body itself.
-func (a *API) writeRequestError(w http.ResponseWriter, _ *http.Request, _ error) {
+func (a *API) writeRequestError(w http.ResponseWriter, r *http.Request, _ error) {
+	// The generated handler could not bind the request — for the SCIM wire that
+	// means a body that is not a JSON object at all. That refusal must still be
+	// ranked BEHIND authentication: an identity provider presenting no
+	// credential, or the wrong one, gets the uniform 401 and learns nothing
+	// about the shape of what it sent. Only an authenticated caller is told the
+	// body was malformed, and then in the RFC 7644 shape rather than Wenv's.
+	if operation, ok := api.OperationIDFor(r); ok && api.IsSCIMWireOperation(operation) {
+		a.writeSCIMRequestError(w, r,
+			scimproto.ErrInvalidSyntax("The request body is not a valid SCIM resource."))
+		return
+	}
 	writeError(w, apigen.ErrorCodeBadRequest, "body")
+}
+
+// writeSCIMRequestError renders a pre-handler refusal on a SCIM wire route,
+// RANKED BEHIND AUTHENTICATION: an identity provider presenting no credential
+// learns nothing about the body it sent.
+func (a *API) writeSCIMRequestError(w http.ResponseWriter, r *http.Request, refusal *scimproto.Error) {
+	org, binding := chi.URLParam(r, "org"), chi.URLParam(r, "binding")
+	err := a.afterAuth(r.Context(), org, binding, refusal)
+	e := scimError(err)
+	w.Header().Set("Content-Type", scimproto.MediaType)
+	w.WriteHeader(e.Status)
+	if encodeErr := json.NewEncoder(w).Encode(e.Body()); encodeErr != nil {
+		a.fault(r.Context(), "render a SCIM request error", encodeErr)
+	}
 }
 
 // writeHandlerError renders a refusal a handler returned as an error. The cause

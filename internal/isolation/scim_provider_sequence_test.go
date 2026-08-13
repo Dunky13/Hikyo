@@ -54,6 +54,13 @@ const wireOrg = domain.OrgID("org_0198f000-0000-7000-8000-00000000000a")
 // binding's credential) and a raw-request function carrying this binding's own.
 func scimWireServer(t *testing.T, db *store.DB, slug string) (string, string, scimCall) {
 	t.Helper()
+	return scimWireServerWithSubject(t, db, slug, domain.SubjectSourceExternalID)
+}
+
+// scimWireServerWithSubject is the same, with the binding's declared subject
+// source chosen — which is also what declares its schema extension (§5.1).
+func scimWireServerWithSubject(t *testing.T, db *store.DB, slug, subjectSource string) (string, string, scimCall) {
+	t.Helper()
 	// ONE Auth, built BEFORE anything else touches the datastore: each call
 	// mints a fresh root key and lazily creates the key hierarchy, so a second
 	// one cannot open the keyring this datastore already holds.
@@ -71,7 +78,7 @@ func scimWireServer(t *testing.T, db *store.DB, slug string) (string, string, sc
 	binding, err := svc.CreateBinding(t.Context(), service.LocalPrincipal(orgAdmin), wireOrg,
 		service.SCIMBindingInput{
 			ProviderKind: domain.ProviderOIDC, ProviderSlug: slug,
-			SubjectSource: domain.SubjectSourceExternalID,
+			SubjectSource: subjectSource,
 		})
 	if err != nil {
 		t.Fatalf("binding create: %v", err)
@@ -109,11 +116,29 @@ func scimWireServer(t *testing.T, db *store.DB, slug string) (string, string, sc
 // connector builds one rather than through a generated client.
 func scimRawRequest(t *testing.T, method, url, token string, body any) (int, map[string]any) {
 	t.Helper()
+	status, _, decoded := scimRawResponse(t, method, url, token, body)
+	return status, decoded
+}
+
+// scimRawResponse is the same, returning the response BYTES as they came off
+// the socket. Comparing re-marshalled maps compares this test's encoder, not
+// the server's: key order, whitespace, number formatting and duplicate members
+// all vanish in the round trip, and those are exactly what "indistinguishable"
+// has to cover.
+func scimRawResponse(t *testing.T, method, url, token string, body any) (int, []byte, map[string]any) {
+	t.Helper()
 	var reader io.Reader
 	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
+		// Raw bytes pass through VERBATIM: the malformed-body fixtures need to
+		// send bodies that are not valid JSON at all, which json.Marshal
+		// cannot express.
+		raw, verbatim := body.([]byte)
+		if !verbatim {
+			var err error
+			raw, err = json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		reader = bytes.NewReader(raw)
 	}
@@ -135,7 +160,7 @@ func scimRawRequest(t *testing.T, method, url, token string, body any) (int, map
 	if len(bytes.TrimSpace(raw)) > 0 {
 		_ = json.Unmarshal(raw, &out)
 	}
-	return res.StatusCode, out
+	return res.StatusCode, raw, out
 }
 
 // scimStep is one request in a captured sequence.
@@ -666,6 +691,35 @@ func runSCIMWireAuthBeforeValidation(t *testing.T, db *store.DB) {
 		{"an unsupported filter", "/Users?filter=" + url.QueryEscape(`userName sw "a"`)},
 		{"an over-long sort parameter", "/Users?sortBy=" + strings.Repeat("s", 4096)},
 	}
+	// A body that is not a SCIM resource at all. It is refused BY THE
+	// TRANSPORT, before any handler binds it — which is exactly why it has to
+	// be ranked behind authentication too: contract validation and the
+	// generated binder both run before a credential is resolved.
+	for _, body := range []any{
+		[]byte(`{"userName":`),   // truncated JSON
+		[]byte(`[1,2,3]`),        // valid JSON, not an object
+		[]byte(`"a string"`),     // valid JSON, not an object
+		[]byte(`{"a":1}{"b":2}`), // trailing content
+	} {
+		status, out := scimRawRequest(t, http.MethodPost, base+"/Users", "hik_1_scim_notatoken", body)
+		if status != http.StatusUnauthorized {
+			t.Errorf("malformed body, unauthenticated: %d, want 401 — a malformed body must not be "+
+				"answered before authentication\n  body: %v", status, out)
+		}
+		// With a REAL credential the same body gets the RFC 7644 refusal, in
+		// the SCIM error shape rather than Hikyo's.
+		status, out = call(http.MethodPost, "/Users", body)
+		if status != http.StatusBadRequest {
+			t.Errorf("malformed body, authenticated: %d, want 400: %v", status, out)
+		}
+		if schemas, _ := out["schemas"].([]any); len(schemas) != 1 || schemas[0] != scimproto.SchemaError {
+			t.Errorf("malformed body, authenticated: not an RFC 7644 error body: %v", out)
+		}
+		if out["scimType"] != scimproto.TypeInvalidSyntax {
+			t.Errorf("malformed body, authenticated: scimType = %v, want %q", out["scimType"], scimproto.TypeInvalidSyntax)
+		}
+	}
+
 	for _, m := range malformed {
 		// No credential at all: the answer must be 401 in every case, never a
 		// contract 400 describing what is wrong with the request.
@@ -1206,6 +1260,138 @@ func writeJSONShape(b *strings.Builder, v any) {
 }
 
 // ---------------------------------------------------------------------------
+// SC1.a: discovery is the CLOSED truth, per binding
+// ---------------------------------------------------------------------------
+
+// TestSCIMDeclaredExtensionsAreTheClosedTruth is §8's "the content is the
+// closed truth of what this server implements", made true rather than claimed.
+//
+// §5.1 admits `externalId` or "a declared enterprise/custom extension path" as
+// a subject source, and DECLARATION is what closes the set: a binding that
+// names a custom URN declares it, discovery describes it, ingest accepts it —
+// and a binding that declared nothing of the sort refuses that same URN by
+// name. Before this, any URN was a valid subject source, discovery advertised
+// only the enterprise extension, and the renderer echoed whatever arrived.
+func TestSCIMDeclaredExtensionsAreTheClosedTruthSQLite(t *testing.T) {
+	runSCIMDeclaredExtensions(t, seededDB(t, openSQLite))
+}
+func TestSCIMDeclaredExtensionsAreTheClosedTruthPostgres(t *testing.T) {
+	runSCIMDeclaredExtensions(t, seededDB(t, openPostgres))
+}
+
+func runSCIMDeclaredExtensions(t *testing.T, db *store.DB) {
+	const acme = "urn:example:params:scim:schemas:extension:acme:2.0:User"
+	const undeclared = "urn:example:params:scim:schemas:extension:other:2.0:User"
+	_, mount, call := scimWireServerWithSubject(t, db, "okta", acme+":employeeId")
+
+	// The declared extension is DESCRIBED, with the attribute the binding named.
+	status, schemas := call(http.MethodGet, "/Schemas", nil)
+	if status != http.StatusOK {
+		t.Fatalf("/Schemas = %d %v", status, schemas)
+	}
+	var described map[string]any
+	for _, r := range schemas["Resources"].([]any) {
+		if m, _ := r.(map[string]any); m["id"] == acme {
+			described = m
+		}
+	}
+	if described == nil {
+		t.Fatalf("the binding's declared extension must be described: %v", schemas)
+	}
+	attrs, _ := described["attributes"].([]any)
+	if len(attrs) != 1 || attrs[0].(map[string]any)["name"] != "employeeId" {
+		t.Fatalf("the description must carry exactly the declared attribute: %v", attrs)
+	}
+	// …and ADVERTISED on the User resource type.
+	status, types := call(http.MethodGet, "/ResourceTypes", nil)
+	if status != http.StatusOK {
+		t.Fatalf("/ResourceTypes = %d %v", status, types)
+	}
+	var advertised bool
+	for _, r := range types["Resources"].([]any) {
+		m, _ := r.(map[string]any)
+		for _, e := range m["schemaExtensions"].([]any) {
+			if e.(map[string]any)["schema"] == acme {
+				advertised = true
+			}
+		}
+	}
+	if !advertised {
+		t.Fatalf("the binding's declared extension must be advertised: %v", types)
+	}
+
+	// A resource carrying the DECLARED extension is accepted, and its rendered
+	// `schemas` names it — the array and the documents come from one list.
+	status, created := call(http.MethodPost, "/Users", map[string]any{
+		"schemas":  []string{scimproto.SchemaUser, acme},
+		"userName": "declared@example.test",
+		acme:       map[string]any{"employeeId": "e-1"},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("a declared extension must be accepted: %d %v", status, created)
+	}
+	got, _ := created["schemas"].([]any)
+	var names []string
+	for _, v := range got {
+		names = append(names, v.(string))
+	}
+	sort.Strings(names)
+	if len(names) != 2 || names[0] != acme || names[1] != scimproto.SchemaUser {
+		t.Fatalf("the rendered schemas must be the core one plus the declared extension, got %v", names)
+	}
+
+	// An UNDECLARED extension is refused BY NAME, not stored and echoed.
+	status, body := call(http.MethodPost, "/Users", map[string]any{
+		"schemas":  []string{scimproto.SchemaUser},
+		"userName": "undeclared@example.test",
+		// The DECLARED extension is present too, so the request gets past
+		// subject derivation and the refusal is unambiguously about the other
+		// one.
+		acme:       map[string]any{"employeeId": "e-9"},
+		undeclared: map[string]any{"anything": "x"},
+	})
+	if status != http.StatusBadRequest || body["scimType"] != scimproto.TypeInvalidValue {
+		t.Fatalf("an undeclared extension must be refused with invalidValue: %d %v", status, body)
+	}
+	if detail, _ := body["detail"].(string); !strings.Contains(detail, undeclared) {
+		t.Fatalf("the refusal must name the schema it refused: %v", body["detail"])
+	}
+	// The refusal is about DECLARATION, not about the URN being exotic: on a
+	// SECOND binding in the same org, declaring only `externalId`, the very
+	// same extension is refused — and its own /Schemas does not describe it.
+	svc := scimSvc(db)
+	seedSCIMProvider(t, db, "entra", "https://entra.example.test", true)
+	plain, err := svc.CreateBinding(t.Context(), service.LocalPrincipal(orgAdmin), wireOrg,
+		service.SCIMBindingInput{
+			ProviderKind: domain.ProviderOIDC, ProviderSlug: "entra",
+			SubjectSource: domain.SubjectSourceExternalID,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainMint, err := svc.MintCredential(t.Context(), service.LocalPrincipal(orgAdmin), wireOrg, plain.ID, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainBase := mount + plain.ID
+	if status, body := scimRawRequest(t, http.MethodPost, plainBase+"/Users", plainMint.Token, map[string]any{
+		"schemas": []string{scimproto.SchemaUser}, "userName": "plain@example.test",
+		"externalId": "plain", acme: map[string]any{"employeeId": "e-2"},
+	}); status != http.StatusBadRequest || body["scimType"] != scimproto.TypeInvalidValue {
+		t.Fatalf("a binding that declared no custom extension must refuse one: %d %v", status, body)
+	}
+	status, plainSchemas := scimRawRequest(t, http.MethodGet, plainBase+"/Schemas", plainMint.Token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("/Schemas on the plain binding = %d %v", status, plainSchemas)
+	}
+	for _, r := range plainSchemas["Resources"].([]any) {
+		if m, _ := r.(map[string]any); m["id"] == acme {
+			t.Fatalf("a binding that declared no custom extension must not describe one: %v", plainSchemas)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SC1.g/SC2.g: presence state, and a request that changes nothing
 // ---------------------------------------------------------------------------
 
@@ -1364,6 +1550,12 @@ func runSCIMWireAdmissionOverHTTP(t *testing.T, db *store.DB) {
 	if err := svc.RevokeCredential(t.Context(), service.LocalPrincipal(orgAdmin), wireOrg, bindingID, newest); err != nil {
 		t.Fatal(err)
 	}
+	// A live credential of this fixture's own, for the legs that need the raw
+	// response bytes rather than the decoded map.
+	live, err := svc.MintCredential(t.Context(), service.LocalPrincipal(orgAdmin), wireOrg, bindingID, false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// A well-formed value of the same artifact type that names nothing.
 	unknown, _, err := crypto.NewArtifact(crypto.ArtifactSCIM)
@@ -1371,17 +1563,19 @@ func runSCIMWireAdmissionOverHTTP(t *testing.T, db *store.DB) {
 		t.Fatal(err)
 	}
 
-	deadStatus, deadBody := scimRawRequest(t, http.MethodGet, base+"/Users", revoked.Token, nil)
-	unknownStatus, unknownBody := scimRawRequest(t, http.MethodGet, base+"/Users", unknown, nil)
+	deadStatus, deadBytes, _ := scimRawResponse(t, http.MethodGet, base+"/Users", revoked.Token, nil)
+	unknownStatus, unknownBytes, _ := scimRawResponse(t, http.MethodGet, base+"/Users", unknown, nil)
 	if deadStatus != http.StatusUnauthorized || unknownStatus != http.StatusUnauthorized {
 		t.Fatalf("both must be 401: revoked=%d unknown=%d", deadStatus, unknownStatus)
 	}
-	// BYTES, not sentiment: a body that differed by a word would let a caller
-	// enumerate which credentials once existed.
-	dead, _ := json.Marshal(deadBody)
-	none, _ := json.Marshal(unknownBody)
-	if string(dead) != string(none) {
-		t.Fatalf("a revoked credential and an unknown one answer differently:\n  revoked: %s\n  unknown: %s", dead, none)
+	// THE BYTES OFF THE SOCKET, not a re-marshalled map: key order, whitespace
+	// and number formatting are part of what an attacker measures, and a
+	// round trip through this test's own encoder would normalize all of them
+	// away. A body that differed by one word would let a caller enumerate
+	// which credentials once existed.
+	if !bytes.Equal(deadBytes, unknownBytes) {
+		t.Fatalf("a revoked credential and an unknown one answer differently:\n  revoked: %q\n  unknown: %q",
+			deadBytes, unknownBytes)
 	}
 	// The control: the binding's LIVE credential still works, so the two 401s
 	// above are the admission decision and not a broken mount.
@@ -1402,24 +1596,54 @@ func runSCIMWireAdmissionOverHTTP(t *testing.T, db *store.DB) {
 			t.Fatalf("admission fixture user = %d %v", status, body)
 		}
 	}
+	// EXACTLY the bound, on both members: a page that reported the bound in
+	// `itemsPerPage` while returning a different number of resources would be
+	// lying about its own answer, and `<= bound` accepts a server that returns
+	// one row and calls it a page.
+	for range bound {
+		if status, body := call(http.MethodPost, "/Users", map[string]any{
+			"schemas":  []string{scimproto.SchemaUser},
+			"userName": randomUserName(t), "externalId": randomUserName(t),
+		}); status != http.StatusCreated {
+			t.Fatalf("admission fixture user = %d %v", status, body)
+		}
+	}
 	status, body := call(http.MethodGet, "/Users?count=999999", nil)
 	if status != http.StatusOK {
 		t.Fatalf("an over-large count must be CLAMPED, not refused: %d %v", status, body)
 	}
-	if got := numberField(t, body, "itemsPerPage"); got > bound {
-		t.Fatalf("itemsPerPage = %d, above this provider's bound of %d", got, bound)
+	if got := numberField(t, body, "itemsPerPage"); got != bound {
+		t.Fatalf("itemsPerPage = %d, want exactly this provider's bound of %d", got, bound)
+	}
+	if resources, _ := body["Resources"].([]any); len(resources) != bound {
+		t.Fatalf("the page carries %d resources but the bound is %d", len(resources), bound)
+	}
+	if got := numberField(t, body, "totalResults"); got <= bound {
+		t.Fatalf("the directory must exceed the bound for the clamp to mean anything, totalResults = %d", got)
 	}
 
-	// The body bound is a REFUSAL, by name. It is answered before the resource
-	// is parsed, and it is 413 rather than a SCIM 400: an oversized body is an
-	// admission decision, not an invalid resource.
+	// The body bound is a REFUSAL, by name, with ONE status: 413. An oversized
+	// body is an admission decision, not an invalid resource — and, like every
+	// other wire refusal, it is ranked behind authentication.
 	huge := map[string]any{
 		"schemas": []string{scimproto.SchemaUser}, "userName": "huge@example.test",
 		"externalId": "huge", "nickName": strings.Repeat("x", (1<<20)+1024),
 	}
-	if status, body := call(http.MethodPost, "/Users", huge); status != http.StatusRequestEntityTooLarge &&
-		status != http.StatusBadRequest {
-		t.Fatalf("an over-bound body = %d, want the named admission refusal: %v", status, body)
+	if status, _, unauth := scimRawResponse(t, http.MethodPost, base+"/Users", "hik_1_scim_notatoken", huge); status != http.StatusUnauthorized {
+		t.Fatalf("an over-bound body, unauthenticated = %d, want 401: %v", status, unauth)
+	}
+	status, hugeBytes, hugeBody := scimRawResponse(t, http.MethodPost, base+"/Users", live.Token, huge)
+	if status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("an over-bound body = %d, want exactly 413: %v", status, hugeBody)
+	}
+	// The exact body, byte for byte: the ADR names this refusal, so its
+	// rendering is pinned rather than merely "an error of some kind".
+	wantBytes, err := json.Marshal(scimproto.ErrBodyTooLarge.Body())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(hugeBytes), wantBytes) {
+		t.Fatalf("the over-bound refusal body drifted:\n  got:  %s\n  want: %s", hugeBytes, wantBytes)
 	}
 }
 

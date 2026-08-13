@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/admission"
 	"github.com/Dunky13/hikyo/internal/audit"
 	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Dunky13/hikyo/internal/scimproto"
 	"github.com/Dunky13/hikyo/internal/service"
 )
 
@@ -641,7 +644,18 @@ const MaxRequestBytes = 1 << 20
 
 func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
+		// The SCIM wire bounds and shape-checks its own body, BEFORE contract
+		// validation and with its refusal ranked behind authentication.
+		// http.MaxBytesReader cannot be used there: it fails the read, and the
+		// contract validator's own body handling turns that into a
+		// pre-authentication Wenv 400 describing the request — which is the
+		// thing the wire must never do.
+		wire := isSCIMWireRequest(r)
+		if wire {
+			if !a.scimBodyIsOneValue(w, r) {
+				return
+			}
+		} else if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 		}
 		err := api.ValidateRequest(r)
@@ -661,6 +675,49 @@ func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 			writeError(w, apigen.ErrorCodeBadRequest, detail)
 		}
 	})
+}
+
+// scimBodyIsOneValue enforces the single-JSON-value rule on a SCIM wire body
+// and answers the request itself when it is broken. It reports whether the
+// chain may continue.
+func isSCIMWireRequest(r *http.Request) bool {
+	operation, ok := api.OperationIDFor(r)
+	return ok && api.IsSCIMWireOperation(operation)
+}
+
+func (a *API) scimBodyIsOneValue(w http.ResponseWriter, r *http.Request) bool {
+	if r.Body == nil {
+		return true
+	}
+	// One byte past the bound: a short read proves it fits.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, MaxRequestBytes+1))
+	if err != nil {
+		a.writeSCIMRequestError(w, r, scimproto.ErrInvalidSyntax("The request body could not be read."))
+		return false
+	}
+	if int64(len(raw)) > MaxRequestBytes {
+		// An over-bound body is an ADMISSION decision (§9), not an invalid
+		// resource: one status, 413, with the ADR's own named refusal.
+		a.writeSCIMRequestError(w, r, scimproto.ErrBodyTooLarge)
+		return false
+	}
+	// The body is consumed, so it is put back for the binder either way.
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return true
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var decoded any
+	if err := dec.Decode(&decoded); err != nil {
+		a.writeSCIMRequestError(w, r, scimproto.ErrInvalidSyntax("The request body is not valid JSON."))
+		return false
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		a.writeSCIMRequestError(w, r,
+			scimproto.ErrInvalidSyntax("The request body carries content after the resource."))
+		return false
+	}
+	return true
 }
 
 // SlideSessionClocks is the post-response idle-clock touch. It runs after the

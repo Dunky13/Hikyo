@@ -43,25 +43,30 @@ func scimRefusal[T any](err error, pick map[int]func(scimBody) T) T {
 // ---------------------------------------------------------------------------
 
 func (a *API) ScimServiceProviderConfig(ctx context.Context, req apigen.ScimServiceProviderConfigRequestObject) (apigen.ScimServiceProviderConfigResponseObject, error) {
-	if err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding); err != nil {
+	if _, err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding); err != nil {
 		return scimServiceProviderConfigRefusal(err), nil
 	}
 	return apigen.ScimServiceProviderConfig200ApplicationScimPlusJSONResponse(
 		scimproto.ServiceProviderConfig(a.SCIMWire.PageBound())), nil
 }
 
+// The two documents that describe SCHEMAS are per-binding: they render the
+// extensions THIS binding declared, which is the same closed set ingest
+// enforces and a rendered resource may name.
 func (a *API) ScimResourceTypes(ctx context.Context, req apigen.ScimResourceTypesRequestObject) (apigen.ScimResourceTypesResponseObject, error) {
-	if err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding); err != nil {
+	declared, err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding)
+	if err != nil {
 		return scimResourceTypesRefusal(err), nil
 	}
-	return apigen.ScimResourceTypes200ApplicationScimPlusJSONResponse(scimproto.ResourceTypes()), nil
+	return apigen.ScimResourceTypes200ApplicationScimPlusJSONResponse(scimproto.ResourceTypes(declared)), nil
 }
 
 func (a *API) ScimSchemas(ctx context.Context, req apigen.ScimSchemasRequestObject) (apigen.ScimSchemasResponseObject, error) {
-	if err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding); err != nil {
+	declared, err := a.SCIMWire.Discovery(ctx, scimActor(ctx, req.Binding), domain.OrgID(req.Org), req.Binding)
+	if err != nil {
 		return scimSchemasRefusal(err), nil
 	}
-	return apigen.ScimSchemas200ApplicationScimPlusJSONResponse(scimproto.Schemas()), nil
+	return apigen.ScimSchemas200ApplicationScimPlusJSONResponse(scimproto.Schemas(declared)), nil
 }
 
 // ---------------------------------------------------------------------------

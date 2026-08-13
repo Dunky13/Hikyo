@@ -651,6 +651,18 @@ func membershipEvent(c scimContext, id string, added, removed []string) grantEve
 // re-assertion cycle, so it must not clear the post-restore state (§9.1's exit
 // is re-mint PLUS a completed cycle) and must not lower a staleness warning
 // that no directory traffic has earned.
-func (s *SCIM) Discovery(ctx context.Context, actor Actor, org domain.OrgID, bindingID string) error {
-	return s.wireTx(ctx, actor, org, bindingID, authz.OpSCIMDiscovery, nil)
+// It returns the binding's DECLARED schema extensions, because the three
+// documents are per-binding truth: a binding whose subject source lives under a
+// custom URN describes that URN, and one that does not, does not.
+func (s *SCIM) Discovery(ctx context.Context, actor Actor, org domain.OrgID, bindingID string) ([]scimproto.ExtensionDecl, error) {
+	var declared []scimproto.ExtensionDecl
+	err := s.wireTx(ctx, actor, org, bindingID, authz.OpSCIMDiscovery,
+		func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c scimContext, now time.Time) ([]grantEventInput, error) {
+			declared = c.declaredExtensions()
+			return nil, nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	return declared, nil
 }

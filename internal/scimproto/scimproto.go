@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Dunky13/hikyo/internal/domain"
 )
 
 // Schema URIs, the only ones this server speaks.
@@ -70,6 +72,25 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("scim: %d: %s", e.Status, e.Detail)
 	}
 	return fmt.Sprintf("scim: %d %s: %s", e.Status, e.SCIMType, e.Detail)
+}
+
+// Unwrap makes an RFC error answer the domain sentinel a caller outside the
+// wire would test for. The two vocabularies have to coexist: a refusal is a
+// SCIM error on the wire and an invalid request everywhere else, and without
+// this a service returning one would be unclassifiable off the wire.
+func (e *Error) Unwrap() error {
+	switch {
+	case e.Status >= 500:
+		return nil
+	case e.Status == http.StatusNotFound:
+		return domain.ErrNotFound
+	case e.Status == http.StatusConflict:
+		return domain.ErrConflict
+	case e.Status == http.StatusUnauthorized:
+		return domain.ErrUnauthenticated
+	default:
+		return domain.ErrInvalid
+	}
 }
 
 // Body renders the error as the RFC 7644 wire object.
@@ -394,31 +415,69 @@ func NormalizeActive(v any) (bool, *Error) {
 	return false, bad(TypeInvalidValue, "The active attribute must be a boolean.")
 }
 
-// DeclaredExtensions is the closed set of schema extensions this server
-// declares in `/ResourceTypes` and describes in `/Schemas`. It is the single
-// source of truth for both the discovery documents and the `schemas` array on
-// a rendered resource, so those two can never disagree — a resource declaring
-// a URI discovery does not describe is a resource no conformant client can
-// interpret, and discovery that omits a URI resources declare is not the
-// "closed truth of what this server implements" §8 requires.
-var DeclaredExtensions = []string{SchemaEnterpriseExt}
+// ExtensionDecl is one schema extension a binding DECLARES. §5.1 admits
+// `externalId` or "a declared enterprise/custom extension path" as a subject
+// source, and declaration at binding creation is what closes the set: an
+// extension is describable in discovery precisely because a binding named it.
+type ExtensionDecl struct {
+	// URN is the extension schema.
+	URN string
+	// Attribute is the one attribute the binding names at that URN. It is
+	// empty for the built-in enterprise extension, whose attribute set is
+	// fixed and fully described.
+	Attribute string
+}
+
+// EnterpriseExtension is declared by every binding: it is built in, its
+// attributes are the RFC's, and a connector may send them whether or not this
+// binding's subject source lives there.
+func EnterpriseExtension() ExtensionDecl { return ExtensionDecl{URN: SchemaEnterpriseExt} }
+
+// Declares reports whether a URN is in a declared set.
+func Declares(declared []ExtensionDecl, urn string) bool {
+	for _, d := range declared {
+		if strings.EqualFold(d.URN, urn) {
+			return true
+		}
+	}
+	return false
+}
 
 // SchemasFor returns the schema URIs a rendered User must declare: the core one
 // plus every DECLARED extension present among its round-tripped attributes.
 //
-// An undeclared `urn:`-keyed object is stored and returned verbatim as display
-// metadata — this server does not lose data an identity provider sends — but it
-// is deliberately NOT added to `schemas`: claiming conformance to a schema
-// discovery never described is the half-implemented state §8 forbids by name.
-func SchemasFor(attributes map[string]any) []string {
+// The declared set and the discovery documents are built from the SAME list, so
+// a resource can never claim conformance to a schema `/Schemas` does not
+// describe — and an UNDECLARED extension never reaches here at all, because
+// ingest refuses it by name.
+func SchemasFor(attributes map[string]any, declared []ExtensionDecl) []string {
 	out := []string{SchemaUser}
-	for _, ext := range DeclaredExtensions {
-		if _, present := attributes[ext]; present {
-			out = append(out, ext)
+	for _, ext := range declared {
+		if _, present := attributes[ext.URN]; present {
+			out = append(out, ext.URN)
 		}
 	}
 	sort.Strings(out[1:])
 	return out
+}
+
+// UndeclaredExtension returns the first `urn:`-keyed top-level attribute that
+// no declared extension covers, or "". A resource carrying one is refused: this
+// server's discovery is "the closed truth of what it implements" (§8), and
+// storing an attribute under a schema it never described would make that claim
+// false the moment the resource were read back.
+func UndeclaredExtension(attributes map[string]any, declared []ExtensionDecl) string {
+	names := make([]string, 0, len(attributes))
+	for k := range attributes {
+		names = append(names, k)
+	}
+	sort.Strings(names) // a deterministic refusal names the same schema every time
+	for _, k := range names {
+		if strings.HasPrefix(strings.ToLower(k), "urn:") && !Declares(declared, k) {
+			return k
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +995,12 @@ func ErrMutability(detail string) *Error { return bad(TypeMutability, "%s", deta
 // ErrInvalidValue is the type / missing-required refusal.
 func ErrInvalidValue(detail string) *Error { return bad(TypeInvalidValue, "%s", detail) }
 
+// ErrInvalidSyntax is the RFC's `invalidSyntax`: a body that is not a valid
+// resource at all. It is the shape the transport hands back when the request
+// could not even be bound — the same refusal DecodeUser makes, rendered from
+// one place so the two cannot disagree.
+func ErrInvalidSyntax(detail string) *Error { return bad(TypeInvalidSyntax, "%s", detail) }
+
 // AsError unwraps an *Error from an error chain, so a transport can render the
 // protocol shape without type-switching on every call site.
 func AsError(err error) (*Error, bool) {
@@ -989,15 +1054,16 @@ func ServiceProviderConfig(maxResults int) map[string]any {
 // The User type declares its supported schema EXTENSION, because a binding
 // whose subject source is an extension path is describing an attribute a
 // connector can only learn about from here.
-func ResourceTypes() map[string]any {
+func ResourceTypes(declared []ExtensionDecl) map[string]any {
 	types := []any{
 		map[string]any{
 			"schemas": []string{SchemaResourceType},
 			"id":      "User", "name": "User", "endpoint": "/Users",
 			"description": "SCIM core User", "schema": SchemaUser,
-			// Derived from the SAME closed list `SchemasFor` renders from, so a
-			// resource can never declare a schema this document omits.
-			"schemaExtensions": declaredExtensions(),
+			// Derived from the SAME declared list `SchemasFor` renders from and
+			// ingest enforces, so a resource can never declare a schema this
+			// document omits and no attribute can be stored under one.
+			"schemaExtensions": schemaExtensionEntries(declared),
 			"meta":             map[string]any{"resourceType": "ResourceType"},
 		},
 		map[string]any{
@@ -1011,13 +1077,13 @@ func ResourceTypes() map[string]any {
 	return ListResponse(len(types), Page{StartIndex: 1, Count: len(types)}, types)
 }
 
-// declaredExtensions renders DeclaredExtensions as RFC 7643 schemaExtension
+// schemaExtensionEntries renders a declared set as RFC 7643 schemaExtension
 // entries. None is required: an identity provider that sends only core
 // attributes provisions perfectly well.
-func declaredExtensions() []any {
-	out := make([]any, 0, len(DeclaredExtensions))
-	for _, ext := range DeclaredExtensions {
-		out = append(out, map[string]any{"schema": ext, "required": false})
+func schemaExtensionEntries(declared []ExtensionDecl) []any {
+	out := make([]any, 0, len(declared))
+	for _, ext := range declared {
+		out = append(out, map[string]any{"schema": ext.URN, "required": false})
 	}
 	return out
 }
@@ -1038,7 +1104,7 @@ func attr(name, typ, mutability, uniqueness string, required, caseExact, multi b
 // `caseExact: false` (which is why it is refused as a subject source),
 // `externalId` byte-exact, and the subject-source attribute immutable — every
 // one of those is a refusal this server actually makes.
-func Schemas() map[string]any {
+func Schemas(declared []ExtensionDecl) map[string]any {
 	user := map[string]any{
 		"schemas": []string{SchemaSchemaRes},
 		"id":      SchemaUser, "name": "User",
@@ -1104,6 +1170,26 @@ func Schemas() map[string]any {
 		},
 		"meta": map[string]any{"resourceType": "Schema"},
 	}
-	out := []any{user, group, enterprise}
+	out := []any{user, group}
+	for _, ext := range declared {
+		if strings.EqualFold(ext.URN, SchemaEnterpriseExt) {
+			out = append(out, enterprise)
+			continue
+		}
+		// A CUSTOM extension is described by exactly what this server accepts
+		// under it: the one attribute the binding declared as its subject
+		// source, immutable per resource (§5.1's write-once). Enumerating more
+		// would be describing attributes nothing implements.
+		out = append(out, map[string]any{
+			"schemas": []string{SchemaSchemaRes},
+			"id":      ext.URN, "name": "DeclaredExtension",
+			"description": "A custom extension declared by this binding. Only the attribute " +
+				"below is accepted under it, and it is the binding's write-once subject source.",
+			"attributes": []any{
+				attr(ext.Attribute, "string", "immutable", "server", false, true, false),
+			},
+			"meta": map[string]any{"resourceType": "Schema"},
+		})
+	}
 	return ListResponse(len(out), Page{StartIndex: 1, Count: len(out)}, out)
 }

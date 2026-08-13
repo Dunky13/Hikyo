@@ -231,6 +231,21 @@ func isCoreSchemaURN(urn string) bool {
 	return strings.HasPrefix(strings.ToLower(urn), "urn:ietf:params:scim:schemas:core:")
 }
 
+// SplitExtensionPath splits a subject-source extension path into its schema
+// URN and the attribute it names. It reports false for a path that is not an
+// extension path at all (`externalId`), so callers do not have to re-derive
+// the shape CheckSubjectSource already validated.
+func SplitExtensionPath(path string) (urn, attribute string, ok bool) {
+	if !strings.HasPrefix(path, "urn:") {
+		return "", "", false
+	}
+	i := strings.LastIndex(path, ":")
+	if i <= len("urn:") || i == len(path)-1 {
+		return "", "", false
+	}
+	return path[:i], path[i+1:], true
+}
+
 // SCIMOriginKey is the identity half of a `scim(binding, mapping_row, group)`
 // origin (§2). The three parts are encoded into `grant_origins.subject`, which
 // is one column, so the encoding is here rather than spread across writers.

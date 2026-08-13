@@ -3,6 +3,7 @@ package isolation
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -457,7 +458,7 @@ func runSCIMStalenessThreshold(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Discovery(ctx, service.SCIMCredentialActor(mint.Token, binding.ID), orgA, binding.ID); err != nil {
+	if _, err := s.Discovery(ctx, service.SCIMCredentialActor(mint.Token, binding.ID), orgA, binding.ID); err != nil {
 		t.Fatal(err)
 	}
 	view, err = s.GetBinding(ctx, service.LocalPrincipal(orgAdmin), orgA, binding.ID)
@@ -631,6 +632,79 @@ func runSCIMAttentionStatePairs(t *testing.T, db *store.DB) {
 		if !cleared[string(state)] {
 			t.Errorf("attention state %q is never cleared with an audit event — "+
 				"a state that cannot be left is a permanent warning", state)
+		}
+	}
+}
+
+// TestSCIMPayloadBoundsAreEnforcedAtWrite is §10's typing rules as REFUSALS.
+// The positive control lives in TestSCIMPayloadSchemasAreValidatedOnWrite; this
+// is the negative half, one case per rule the registry claims to enforce. A
+// validator with no failing case is a validator nobody has run.
+func TestSCIMPayloadBoundsAreEnforcedAtWrite(t *testing.T) {
+	good := sha256.Sum256([]byte("subject"))
+	digest := hex.EncodeToString(good[:])
+	ids := make([]string, 0, 201)
+	for i := range 201 {
+		ids = append(ids, fmt.Sprintf("acc_%03d", i))
+	}
+
+	cases := []struct {
+		name   string
+		typ    audit.EventType
+		mutate func(audit.Payload)
+	}{
+		{"a subject digest that is not hex", audit.EventSCIMUserProvisioned,
+			func(p audit.Payload) { p["subject_digest"] = strings.Repeat("z", 64) }},
+		{"a subject digest of the wrong length", audit.EventSCIMUserProvisioned,
+			func(p audit.Payload) { p["subject_digest"] = digest[:63] }},
+		{"a subject digest in upper-case hex", audit.EventSCIMUserProvisioned,
+			func(p audit.Payload) { p["subject_digest"] = strings.ToUpper(digest) }},
+		{"the plaintext subject where its digest belongs", audit.EventSCIMUserProvisioned,
+			func(p audit.Payload) { p["subject_digest"] = "alice@example.test" }},
+		{"a 201-id membership list", audit.EventSCIMGroupMembership,
+			func(p audit.Payload) { p["added_accounts"] = ids }},
+		{"a 257-byte IdP string", audit.EventSCIMGroupCreated,
+			func(p audit.Payload) { p["display_name"] = strings.Repeat("d", 257) }},
+	}
+	for _, c := range cases {
+		spec, ok := audit.Spec(c.typ)
+		if !ok {
+			t.Fatalf("%s has no registry row", c.typ)
+		}
+		envelope, trail, scope := scimAuditEnvelope(t, c.typ, spec)
+		// The CONTROL first: the same payload, unmutated, passes — so a failure
+		// below is the rule under test and not an envelope problem.
+		envelope.Payload = validPayloadFor(spec.Schema)
+		if err := audit.Validate(envelope, trail, scope); err != nil {
+			t.Fatalf("%s: the control payload was refused: %v", c.typ, err)
+		}
+		envelope.Payload = validPayloadFor(spec.Schema)
+		c.mutate(envelope.Payload)
+		if err := audit.Validate(envelope, trail, scope); err == nil {
+			t.Errorf("%s (%s): accepted at the write boundary; §10's rule is not enforced", c.typ, c.name)
+		}
+	}
+
+	// And the boundary values themselves are ACCEPTED, so the bounds are
+	// bounds rather than off-by-one refusals.
+	for _, c := range []struct {
+		name   string
+		typ    audit.EventType
+		mutate func(audit.Payload)
+	}{
+		{"exactly 200 ids", audit.EventSCIMGroupMembership,
+			func(p audit.Payload) { p["added_accounts"] = ids[:200] }},
+		{"exactly 256 bytes", audit.EventSCIMGroupCreated,
+			func(p audit.Payload) { p["display_name"] = strings.Repeat("d", 256) }},
+		{"a real digest", audit.EventSCIMUserProvisioned,
+			func(p audit.Payload) { p["subject_digest"] = digest }},
+	} {
+		spec, _ := audit.Spec(c.typ)
+		envelope, trail, scope := scimAuditEnvelope(t, c.typ, spec)
+		envelope.Payload = validPayloadFor(spec.Schema)
+		c.mutate(envelope.Payload)
+		if err := audit.Validate(envelope, trail, scope); err != nil {
+			t.Errorf("%s (%s): the boundary value was refused: %v", c.typ, c.name, err)
 		}
 	}
 }

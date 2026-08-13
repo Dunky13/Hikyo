@@ -17,6 +17,7 @@ import (
 	"github.com/Dunky13/hikyo/internal/crypto"
 	"github.com/Dunky13/hikyo/internal/domain"
 	"github.com/Dunky13/hikyo/internal/samlsp"
+	"github.com/Dunky13/hikyo/internal/scimproto"
 	"github.com/Dunky13/hikyo/internal/store"
 )
 
@@ -179,6 +180,41 @@ func (s *SCIM) loadBinding(
 		return scimContext{}, ErrSCIMProviderUnavailable
 	}
 	return out, nil
+}
+
+// declaredExtensions is the closed set of schema extensions THIS BINDING
+// declares (§5.1's "declared enterprise/custom extension path"). The enterprise
+// extension is always in it — it is built in and fully described — plus the
+// schema URN of the binding's own subject source when that source is an
+// extension path.
+//
+// One list feeds three things that must never disagree: what discovery
+// advertises, what a rendered resource may declare in `schemas`, and what
+// ingest accepts. Declaration at binding creation is what closes the set;
+// without it "custom extension" meant "any URN at all", and discovery could
+// not be the closed truth §8 requires.
+func (c scimContext) declaredExtensions() []scimproto.ExtensionDecl {
+	out := []scimproto.ExtensionDecl{scimproto.EnterpriseExtension()}
+	urn, attribute, ok := domain.SplitExtensionPath(c.binding.SubjectSource)
+	if !ok || strings.EqualFold(urn, scimproto.SchemaEnterpriseExt) {
+		return out
+	}
+	return append(out, scimproto.ExtensionDecl{URN: urn, Attribute: attribute})
+}
+
+// checkDeclaredSchemas refuses an attribute stored under a schema this binding
+// never declared.
+func (c scimContext) checkDeclaredSchemas(attributes map[string]any) error {
+	if urn := scimproto.UndeclaredExtension(attributes, c.declaredExtensions()); urn != "" {
+		// An RFC error, so the refusal NAMES the schema on the wire — a fixed
+		// "the request is not valid" would leave a connector guessing which of
+		// its attributes this server would not take. It answers
+		// domain.ErrInvalid off the wire, so a below-the-network caller
+		// classifies it like any other invalid request.
+		return scimproto.ErrInvalidValue(fmt.Sprintf(
+			"This binding declares no schema extension %q; discovery lists the ones it does.", urn))
+	}
+	return nil
 }
 
 // providerFacts is what the binding needs to know about its referenced
@@ -740,11 +776,18 @@ func sanitizedList(in []string, max int) []string {
 // It is nil in production and costs one atomic load per phase. The same shape
 // as the resolution surface's query seam, and pinned by the same test
 // (TestQueryObserverIsTestOnly): it must have no production installer.
-var scimPhaseObserver atomic.Pointer[func(string)]
+var scimPhaseObserver atomic.Pointer[func(string, map[string]int)]
 
 // SetSCIMPhaseObserver installs the observer and returns a restore func. It is
 // exported for internal/isolation only; nothing in production installs one.
-func SetSCIMPhaseObserver(fn func(string)) func() {
+//
+// The callback runs SYNCHRONOUSLY INSIDE the transaction, so returning from it
+// is what lets the transaction continue: a fixture that blocks in it has paused
+// the act at that boundary. `state` carries the facts the phase is about, read
+// under the transaction's own proof — the only way to see uncommitted
+// intermediate state, since an outside reader sees the pre-transaction
+// snapshot on both engines.
+func SetSCIMPhaseObserver(fn func(phase string, state map[string]int)) func() {
 	prev := scimPhaseObserver.Load()
 	scimPhaseObserver.Store(&fn)
 	return func() {
@@ -779,6 +822,17 @@ func markSCIMPhaseN(phase string, n int) {
 
 func markSCIMPhase(phase string) {
 	if fn := scimPhaseObserver.Load(); fn != nil {
-		(*fn)(phase)
+		(*fn)(phase, nil)
+	}
+}
+
+// scimPhaseObserved reports whether anyone is watching, so a phase that would
+// have to READ to describe itself does not pay for that in production.
+func scimPhaseObserved() bool { return scimPhaseObserver.Load() != nil }
+
+// markSCIMPhaseState marks a phase boundary with the state it produced.
+func markSCIMPhaseState(phase string, state map[string]int) {
+	if fn := scimPhaseObserver.Load(); fn != nil {
+		(*fn)(phase, state)
 	}
 }

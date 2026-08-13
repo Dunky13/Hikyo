@@ -274,9 +274,100 @@ func runSCIMTeardownPhaseOrder(t *testing.T, db *store.DB) {
 	connection := queryString(t, db,
 		`SELECT connection_principal_id FROM scim_bindings WHERE id = '`+bindingID+`'`)
 
+	// The observer PAUSES the teardown at every phase boundary: it runs inside
+	// the transaction, so returning from it is the release. While paused, the
+	// fixture asserts that phase's POSTCONDITION on state read under the
+	// transaction's own proof — the only vantage from which uncommitted
+	// intermediate state is visible at all, since an outside reader sees the
+	// pre-transaction snapshot on both engines.
+	//
+	// A wrong ORDER now fails on state rather than on a label: credentials must
+	// already be dead while the directory is still there, the connection must
+	// still hold its grant while origins are being released, and so on.
+	type boundary struct {
+		phase string
+		state map[string]int
+	}
 	var phases []string
-	restore := service.SetSCIMPhaseObserver(func(p string) { phases = append(phases, p) })
-	if err := s.DeleteBinding(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID); err != nil {
+	arrived := make(chan boundary)
+	released := make(chan struct{})
+	restore := service.SetSCIMPhaseObserver(func(p string, state map[string]int) {
+		if state == nil {
+			// A lock mark, not a teardown boundary.
+			phases = append(phases, p)
+			return
+		}
+		arrived <- boundary{phase: p, state: state}
+		<-released
+	})
+
+	deleted := make(chan error, 1)
+	go func() {
+		deleted <- s.DeleteBinding(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID)
+	}()
+
+	// Each postcondition is what MUST already be true at that boundary, and
+	// what must NOT be true yet.
+	want := []struct {
+		phase string
+		check func(t *testing.T, st map[string]int)
+	}{
+		{"credentials-revoked=1", func(t *testing.T, st map[string]int) {
+			if st["live_credentials"] != 0 {
+				t.Errorf("credentials must be dead FIRST, %d still live", st["live_credentials"])
+			}
+			if st["directory_users"] != 1 || st["binding_rows"] != 1 {
+				t.Errorf("nothing else may be gone yet: %v", st)
+			}
+			if st["connection_grants"] == 0 {
+				t.Errorf("the connection must still hold its structural grant: %v", st)
+			}
+		}},
+		{"origins-released=1", func(t *testing.T, st map[string]int) {
+			if st["connection_grants"] == 0 {
+				t.Errorf("the connection is retired in the NEXT phase, not this one: %v", st)
+			}
+			if st["directory_users"] != 1 {
+				t.Errorf("the directory survives until phase 4: %v", st)
+			}
+		}},
+		{"connection-retired=1", func(t *testing.T, st map[string]int) {
+			if st["connection_grants"] != 0 {
+				t.Errorf("the structural grant must be gone by now: %v", st)
+			}
+			if st["directory_users"] != 1 || st["binding_rows"] != 1 {
+				t.Errorf("the directory and the binding row outlive the connection: %v", st)
+			}
+		}},
+		{"directory-deleted=1", func(t *testing.T, st map[string]int) {
+			if st["directory_users"] != 0 || st["directory_groups"] != 0 {
+				t.Errorf("the directory must be gone: %v", st)
+			}
+			if st["binding_rows"] != 1 {
+				t.Errorf("the binding row goes LAST: %v", st)
+			}
+		}},
+		{"binding-deleted=1", func(t *testing.T, st map[string]int) {
+			if st["binding_rows"] != 0 {
+				t.Errorf("the binding row must be gone: %v", st)
+			}
+		}},
+	}
+	for _, w := range want {
+		got := <-arrived
+		phases = append(phases, got.phase)
+		if got.phase != w.phase {
+			restore()
+			close(released)
+			t.Fatalf("teardown reached %q where §6 requires %q", got.phase, w.phase)
+		}
+		w.check(t, got.state)
+		released <- struct{}{}
+	}
+	// The observer stays installed until the transaction has returned, so the
+	// lock's own exit mark is recorded; the channel join is what orders the
+	// two goroutines' writes to `phases`.
+	if err := <-deleted; err != nil {
 		restore()
 		t.Fatalf("binding delete: %v", err)
 	}
@@ -289,14 +380,14 @@ func runSCIMTeardownPhaseOrder(t *testing.T, db *store.DB) {
 	// the connection, one directory user was deleted, one binding row went.
 	// The teardown holds §9's per-binding lock for its whole run, so its own
 	// enter/exit pair brackets the five ordered phases.
-	want := []string{
+	wantOrder := []string{
 		"wire-enter:" + bindingID,
 		"credentials-revoked=1", "origins-released=1", "connection-retired=1",
 		"directory-deleted=1", "binding-deleted=1",
 		"wire-exit:" + bindingID,
 	}
-	if strings.Join(phases, ",") != strings.Join(want, ",") {
-		t.Fatalf("teardown ran out of §6's order, or a phase did nothing:\n  got:  %v\n  want: %v", phases, want)
+	if strings.Join(phases, ",") != strings.Join(wantOrder, ",") {
+		t.Fatalf("teardown ran out of §6's order, or a phase did nothing:\n  got:  %v\n  want: %v", phases, wantOrder)
 	}
 
 	// Every end state the order exists to produce.
@@ -386,7 +477,7 @@ func runSCIMPerBindingSerializationOrder(t *testing.T, db *store.DB) {
 	var mu sync.Mutex
 	var phases []string
 	var slept bool
-	restore := service.SetSCIMPhaseObserver(func(p string) {
+	restore := service.SetSCIMPhaseObserver(func(p string, _ map[string]int) {
 		mu.Lock()
 		phases = append(phases, p)
 		first := !slept && strings.HasPrefix(p, "wire-enter:")

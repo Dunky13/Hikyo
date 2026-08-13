@@ -571,6 +571,54 @@ landed, and where to look:
   passing test whose subject is "this does not work yet" is not evidence the
   clause holds.
 
+### Rebased onto main after #61/#50 and the Hikyo rebrand
+
+The branch was rebased onto `origin/main` after #61 (machine identities), #50
+(flat values) and the Wenv → Hikyo rebrand landed. Two things a later reader
+needs:
+
+- **The migration is `00016_scim.sql`** in both dialects (main took 00013, 00014
+  and 00015).
+- **`scim-credential` is deliberately NOT `machine-credential`.** #61 landed and
+  declares `machine-credential` on no route; it serves the service-account
+  taxonomy (`wl`/`au` values, environment-keyed disclosure and reauthentication
+  conjuncts). The provisioning connection is a different principal class with a
+  different formula and a different mint ceremony, so the eligibility names stay
+  separate. Likewise the two reauthentication seams: #61 uses the
+  environment-keyed `ConsumeReauthWindow`, this ticket uses
+  `VerifyReauthProof`/`ConsumeReauthEvidence` because an org-scoped mint has no
+  environment to key a window on.
+
+### Discovery is closed by DECLARATION (R3)
+
+§5.1 admits `externalId` or "a declared enterprise/custom extension path" as a
+subject source, and DECLARATION is what closes the set. A binding's subject
+source declares its schema extension; `scimContext.declaredExtensions()` is the
+enterprise extension plus that URN, and it feeds all three things that must
+agree:
+
+- `/ResourceTypes` advertises exactly those extensions;
+- `/Schemas` describes them — a custom URN with exactly the one attribute the
+  binding named, immutable, because that is exactly what this server accepts
+  under it;
+- a rendered resource's `schemas` array may name only those, and INGEST refuses
+  an attribute under any other URN by name.
+
+The two schema documents are therefore per-binding: `Discovery()` returns the
+binding's declarations and the handlers render from them. A binding that
+declared nothing custom refuses the same extension another binding accepts,
+which is the point.
+
+### The SCIM wire answers nothing before it authenticates (R3)
+
+Wire bodies are excluded from `validateAgainstContract`; the protocol layer
+already owns resource parsing, and the two properties the transport still had
+to hold — one JSON value, within the bound — moved into `API.scimBodyIsOneValue`,
+which runs BEFORE contract validation (it must: `http.MaxBytesReader` fails the
+read, and the validator turns that into a pre-auth Wenv 400) and whose refusals
+are ranked behind authentication by `writeSCIMRequestError`. The generated
+binder's own failures route there too. Non-SCIM routes are unchanged.
+
 ### Two behaviour changes these fixtures forced
 
 1. **Discovery emits nothing.** §10 makes the discovery endpoints the one SCIM

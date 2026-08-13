@@ -50,7 +50,7 @@ type scimClause struct {
 var scimCriteria = map[string]scimClause{
 	// --- SC1: the wire surface, the protocol contract, the credential --------
 	"SC1.a": {Text: "discovery trio matches implemented truth",
-		Fixtures: []string{"TestDiscoveryIsTheClosedTruth", "runSCIMDemo", "assertDiscoveryTrio", "runSCIMOktaSequence", "runSCIMEntraSequence"}},
+		Fixtures: []string{"TestDiscoveryIsTheClosedTruth", "runSCIMDemo", "assertDiscoveryTrio", "runSCIMOktaSequence", "runSCIMEntraSequence", "runSCIMDeclaredExtensions"}},
 	"SC1.b": {Text: "user + group CRUD over the wire",
 		Fixtures: []string{"runSCIMDemo", "runSCIMUserLifecycle", "runSCIMOktaSequence", "runSCIMEntraSequence"}},
 	"SC1.c": {Text: "all four filters including `displayName eq` group discovery",
@@ -69,8 +69,8 @@ var scimCriteria = map[string]scimClause{
 		Fixtures: []string{"TestNamedRefusalsCarryTheirExactCodes", "runSCIMDemo", "runSCIMPatchMatrixOverTheWire"}},
 	"SC1.j": {Text: "subject change refused (write-once), including by explicit removal",
 		Fixtures: []string{"runSCIMUserLifecycle", "runSCIMPutReplacementSemantics", "runSCIMDemo", "runSCIMPresenceAndNoOp"}},
-	"SC1.k": {Text: "`userName` refused as subject source at config time",
-		Fixtures: []string{"runSCIMBindingLifecycle"}},
+	"SC1.k": {Text: "`userName` refused as subject source at config time; the declared extension set is closed and discovery derives from it",
+		Fixtures: []string{"runSCIMBindingLifecycle", "runSCIMDeclaredExtensions"}},
 	"SC1.l": {Text: "credential presented against the wrong binding path",
 		Fixtures: []string{"runSCIMBindingLifecycle", "runSCIMLifecycle", "runSCIMWireMismatchOverDiscovery"}},
 	"SC1.m": {Text: "binding uniqueness race: concurrent create resolves to one row, named conflict",
@@ -170,7 +170,7 @@ var scimCriteria = map[string]scimClause{
 	"SC4.j": {Text: "[CI] registry completeness over every SCIM operation incl. directory_read on reads",
 		Fixtures: []string{"TestInvariant06OperationRegistryCompleteness", "runSCIMLifecycle", "runSCIMDiscoveryIsAnnotatedNotSilent"}},
 	"SC4.k": {Text: "[CI] payload-schema validation fixture per registry entry",
-		Fixtures: []string{"TestSCIMPayloadSchemasAreValidatedOnWrite"}},
+		Fixtures: []string{"TestSCIMPayloadSchemasAreValidatedOnWrite", "TestSCIMPayloadBoundsAreEnforcedAtWrite"}},
 	"SC4.l": {Text: "[CI] 3-user push = 3 provisioned events + per-grant events, no aggregation",
 		Fixtures: []string{"runSCIMPushEmitsPerEvent"}},
 	"SC4.m": {Text: "[CI] `ew_` redaction on IdP-supplied strings",

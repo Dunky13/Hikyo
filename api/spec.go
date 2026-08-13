@@ -255,12 +255,41 @@ func ValidateRequest(r *http.Request) error {
 		Route:      route,
 		Options: &openapi3filter.Options{
 			AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+			// The SCIM WIRE routes' bodies are validated by the protocol layer,
+			// after the provisioning credential authenticates — not here.
+			//
+			// Contract validation runs before any credential is resolved, so a
+			// body check here answers an unauthenticated caller with a Wenv 400
+			// describing what is wrong with their request. The wire's contract
+			// is that nothing about a request is answered before the caller has
+			// proved they may ask; the uniform 401 is the whole answer.
+			//
+			// Nothing is lost: the SCIM body schema is deliberately open
+			// (`additionalProperties: true`, no required members), so this
+			// check only ever rejected "not a JSON object" — which
+			// `scimproto.DecodeUser`/`DecodeGroup`/`ParsePatch` reject
+			// themselves, post-auth, as an RFC 7644 `invalidSyntax`.
+			ExcludeRequestBody: IsSCIMWireOperation(route.Operation.OperationID),
 		},
 	}
 	if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
 		return &ValidationError{Member: offendingMember(err), Err: err}
 	}
 	return nil
+}
+
+// IsSCIMWireOperation reports whether a contract operation is one of the
+// identity provider's own protocol endpoints, as opposed to the SCIM
+// ADMINISTRATION surface (which is ordinary domain surface under a human
+// session and is validated pre-auth like everything else).
+//
+// The two families are told apart by their operation-id shape, which is a
+// convention this function makes load-bearing: wire operations are
+// `scim<Verb>`, administration operations are `<verb>Scim<Noun>`. The contract
+// cross-check test pins that both families are non-empty, so a renamed
+// operation cannot silently move a route from one side to the other.
+func IsSCIMWireOperation(operationID string) bool {
+	return strings.HasPrefix(operationID, "scim")
 }
 
 // ValidateResponse checks a recorded response against the contract. This is

@@ -38,7 +38,10 @@ type SCIMWireService interface {
 	PatchGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string, in service.SCIMGroupInput) (service.SCIMGroupResource, error)
 	DeleteGroup(ctx context.Context, actor service.Actor, org domain.OrgID, binding, id string) error
 
-	Discovery(ctx context.Context, actor service.Actor, org domain.OrgID, binding string) error
+	// Discovery authenticates a probe and returns the binding's DECLARED schema
+	// extensions, so the two schema documents describe exactly what this
+	// binding accepts and renders.
+	Discovery(ctx context.Context, actor service.Actor, org domain.OrgID, binding string) ([]scimproto.ExtensionDecl, error)
 	Authenticate(ctx context.Context, actor service.Actor, org domain.OrgID, binding string) error
 	Unsupported(ctx context.Context, actor service.Actor, org domain.OrgID, binding, what string) error
 
@@ -243,7 +246,9 @@ func renderSCIMUser(u service.SCIMUserResource) scimBody {
 	// client can interpret — and breaks extension-path subject sources, whose
 	// whole value lives under such a URI.
 	out := scimBody{
-		"schemas":  scimproto.SchemasFor(u.Attributes),
+		// Computed in the SERVICE, where the binding's declarations are known:
+		// the transport cannot know what a binding declared.
+		"schemas":  u.Schemas,
 		"id":       u.ID,
 		"userName": u.UserName,
 		"active":   u.Active,

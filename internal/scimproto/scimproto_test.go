@@ -388,13 +388,17 @@ func TestIdPStringsAreBounded(t *testing.T) {
 // discovery never mentioned is the half-implemented state §8 forbids by name,
 // and it used to be reachable — `SchemasFor` echoed any `urn:`-keyed attribute
 // straight into `schemas`.
+// testDeclared is a binding that declares only the built-in extension — the
+// ordinary case. The custom-declaration case has its own test below.
+var testDeclared = []ExtensionDecl{EnterpriseExtension()}
+
 func TestDiscoveryDescribesEverySchemaAResourceCanDeclare(t *testing.T) {
 	described := map[string]bool{}
-	for _, r := range Schemas()["Resources"].([]any) {
+	for _, r := range Schemas(testDeclared)["Resources"].([]any) {
 		described[r.(map[string]any)["id"].(string)] = true
 	}
 	advertised := map[string]bool{}
-	for _, r := range ResourceTypes()["Resources"].([]any) {
+	for _, r := range ResourceTypes(testDeclared)["Resources"].([]any) {
 		m := r.(map[string]any)
 		advertised[m["schema"].(string)] = true
 		for _, e := range m["schemaExtensions"].([]any) {
@@ -414,7 +418,7 @@ func TestDiscoveryDescribesEverySchemaAResourceCanDeclare(t *testing.T) {
 		SchemaEnterpriseExt:                      map[string]any{"department": "x"},
 		"urn:example:params:scim:schemas:custom": map[string]any{"anything": "y"},
 		"nickName":                               "z",
-	})
+	}, testDeclared)
 	for _, schema := range rendered {
 		if !advertised[schema] {
 			t.Errorf("a rendered resource declares %s, which /ResourceTypes does not advertise", schema)
@@ -423,10 +427,56 @@ func TestDiscoveryDescribesEverySchemaAResourceCanDeclare(t *testing.T) {
 	if len(rendered) != 2 {
 		t.Fatalf("want the core schema plus the one DECLARED extension present, got %v", rendered)
 	}
+	// An UNDECLARED extension is named by the ingest guard, so it never
+	// reaches rendering at all.
+	if got := UndeclaredExtension(map[string]any{
+		"urn:example:params:scim:schemas:custom": map[string]any{"anything": "y"},
+	}, testDeclared); got != "urn:example:params:scim:schemas:custom" {
+		t.Fatalf("UndeclaredExtension = %q, want the undeclared URN", got)
+	}
+}
+
+// TestDiscoveryDescribesADeclaredCustomExtension is §5.1's other half: a
+// binding whose subject source lives under a CUSTOM URN declares that URN, so
+// discovery describes it — with exactly the attribute the binding named, which
+// is exactly what this server accepts under it.
+func TestDiscoveryDescribesADeclaredCustomExtension(t *testing.T) {
+	const urn = "urn:example:params:scim:schemas:extension:acme:2.0:User"
+	declared := []ExtensionDecl{EnterpriseExtension(), {URN: urn, Attribute: "employeeId"}}
+
+	var described map[string]any
+	for _, r := range Schemas(declared)["Resources"].([]any) {
+		if m := r.(map[string]any); m["id"] == urn {
+			described = m
+		}
+	}
+	if described == nil {
+		t.Fatalf("a declared custom extension must be described by /Schemas")
+	}
+	attrs, _ := described["attributes"].([]any)
+	if len(attrs) != 1 || attrs[0].(map[string]any)["name"] != "employeeId" {
+		t.Fatalf("the description must carry exactly the declared attribute, got %v", attrs)
+	}
+	var advertised bool
+	for _, r := range ResourceTypes(declared)["Resources"].([]any) {
+		m := r.(map[string]any)
+		for _, e := range m["schemaExtensions"].([]any) {
+			if e.(map[string]any)["schema"] == urn {
+				advertised = true
+			}
+		}
+	}
+	if !advertised {
+		t.Fatal("a declared custom extension must be advertised by /ResourceTypes")
+	}
+	// And it is accepted on ingest, where an undeclared one is not.
+	if got := UndeclaredExtension(map[string]any{urn: map[string]any{"employeeId": "1"}}, declared); got != "" {
+		t.Fatalf("a declared extension must be accepted on ingest, got %q", got)
+	}
 }
 
 func TestDiscoveryIsTheClosedTruth(t *testing.T) {
-	types := ResourceTypes()
+	types := ResourceTypes(testDeclared)
 	resources, _ := types["Resources"].([]any)
 	if len(resources) != 2 {
 		t.Fatalf("the resource set is closed at User and Group, got %d", len(resources))
@@ -451,7 +501,7 @@ func TestDiscoveryIsTheClosedTruth(t *testing.T) {
 	}
 
 	byID := map[string]map[string]any{}
-	for _, r := range Schemas()["Resources"].([]any) {
+	for _, r := range Schemas(testDeclared)["Resources"].([]any) {
 		m := r.(map[string]any)
 		byID[m["id"].(string)] = m
 	}

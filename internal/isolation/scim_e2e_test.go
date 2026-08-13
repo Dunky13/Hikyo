@@ -620,7 +620,7 @@ func runSCIMLifecycle(t *testing.T, db *store.DB) {
 		scimproto.Filter{Shape: scimproto.FilterNone}, scimproto.Page{StartIndex: 1, Count: 10}); err != nil {
 		t.Fatalf("scim user list: %v", err)
 	}
-	if err := s.Discovery(ctx, wire, orgA, bindingID); err != nil {
+	if _, err := s.Discovery(ctx, wire, orgA, bindingID); err != nil {
 		t.Fatalf("scim discovery: %v", err)
 	}
 	off := false

@@ -3,6 +3,7 @@ package isolation
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -450,6 +451,36 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 		t.Fatal("setup: the soon-to-be-deprovisioned user should hold the mapped grant")
 	}
 
+	// `goes` LOGS IN before the backup is taken, so the drill has a REAL
+	// session to carry across it — the artifact a stale backup would restore
+	// alongside the stale grant, and the one thing a human actually holds.
+	// A fabricated token proves only that nonsense is refused.
+	goesStart, err := auth.OIDCStart(ctx, "okta", "login", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	goesCode, goesState := driveIdP(t, goesStart.AuthURL+"&sub=goes")
+	login, err := auth.OIDCCallback(ctx, "okta", goesCode, goesState, "", "", goesStart.BindingCookie, "")
+	if err != nil {
+		t.Fatalf("pre-backup login: %v", err)
+	}
+	goesSession := login.Login.SessionToken
+	if goesSession == "" {
+		t.Fatal("the pre-backup login must mint a real session")
+	}
+	// It works, and it reaches the object the mapping's `read` grant covers.
+	// Without this control the denials below would prove nothing.
+	_, projects, _ := services(db)
+	protectedOp := func(token string) error {
+		_, err := projects.Get(ctx, service.Bearer(token), scopeProject(orgA, prjA1))
+		return err
+	}
+	if err := protectedOp(goesSession); err != nil {
+		t.Fatalf("the pre-backup session must reach a protected operation: %v", err)
+	}
+	generationBefore := queryInt(t, db,
+		`SELECT session_generation FROM principals WHERE id = '`+string(goesPrincipal)+`'`)
+
 	// THE BACKUP. A snapshot of exactly what a restore would bring back for
 	// `goes`: the grant row the mapping created and the `scim` origin holding
 	// it. Taking it as ROWS rather than as a flag is what makes the restore
@@ -471,6 +502,16 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	}
 	if held(t, db, goesPrincipal, domain.CapRead, scope) {
 		t.Fatal("the post-backup deprovision must release the grant it authorized")
+	}
+	// §5.3: the deprovision advances the generation UNCONDITIONALLY, so the
+	// session minted before it is already dead — and this is the exact denial
+	// the restore must not undo.
+	if after := queryInt(t, db,
+		`SELECT session_generation FROM principals WHERE id = '`+string(goesPrincipal)+`'`); after <= generationBefore {
+		t.Fatalf("the deprovision must advance the generation: %d -> %d", generationBefore, after)
+	}
+	if err := protectedOp(goesSession); !isUnauth(err) {
+		t.Fatalf("the pre-backup session must die with the deprovision, got %v", err)
 	}
 
 	// THE RESTORE. Two things happen at once, and the drill needs both:
@@ -510,14 +551,23 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	// a stale backup is dangerous: `goes` was withdrawn at the identity
 	// provider AFTER the backup was taken, so the restored rows still show them
 	// authorized. The drill's claim is that they are never AUTHORIZED at any
-	// point in the window — the epoch bump makes every restored link inert, so
-	// there is no session they can reach the grant through.
-	goesStart, err := auth.OIDCStart(ctx, "okta", "login", "", "", "")
+	// point in the window — the epoch bump makes every restored session and
+	// every restored link inert, so there is no door left to reach the grant
+	// through.
+	//
+	// The REAL pre-backup session first: a restore brings the session row back
+	// with everything else, and it must still be refused.
+	execRaw(t, db, `UPDATE sessions SET session_generation = `+
+		strconv.FormatInt(generationBefore, 10)+` WHERE principal_id = '`+string(goesPrincipal)+`'`)
+	if err := protectedOp(goesSession); !isUnauth(err) {
+		t.Fatalf("a RESTORED session of a post-backup-deprovisioned user must be refused, got %v", err)
+	}
+	relogin, err := auth.OIDCStart(ctx, "okta", "login", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	goesCode, goesState := driveIdP(t, goesStart.AuthURL+"&sub=goes")
-	if _, err := auth.OIDCCallback(ctx, "okta", goesCode, goesState, "", "", goesStart.BindingCookie, ""); !isUnauth(err) {
+	reCode, reState := driveIdP(t, relogin.AuthURL+"&sub=goes")
+	if _, err := auth.OIDCCallback(ctx, "okta", reCode, reState, "", "", relogin.BindingCookie, ""); !isUnauth(err) {
 		t.Fatalf("a user withdrawn after the backup must not be able to log in during the restore window, got %v", err)
 	}
 	// And no wire push can re-bless them either: every credential is dead.
@@ -525,9 +575,10 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 		service.SCIMUserInput{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("the restore window must refuse the whole wire surface, got %v", err)
 	}
-	// A PROTECTED OPERATION attempted as `goes`, through the only door a human
-	// has: an authenticated request. Every artifact they could present is
-	// refused, so the restored grant row is unreachable for the whole window.
+	// A PROTECTED OPERATION attempted as `goes`, through every door a human
+	// has: the restored session above, a fresh login above, and the degenerate
+	// artifacts below. All are refused, so the restored grant row is
+	// unreachable for the whole window.
 	//
 	// Stated exactly, because the difference matters: the ROW is back — that is
 	// what a restore does, and dropping it at reconciliation commit is §9.1's
@@ -540,7 +591,7 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 		t.Fatal("the restore must actually have brought the stale grant row back, or this window proves nothing")
 	}
 	for _, artifact := range []string{"", "hik_1_ses_restored_nonsense"} {
-		if _, err := grantSvc(db).List(ctx, service.Bearer(artifact), orgAScope); !isUnauth(err) {
+		if err := protectedOp(artifact); !isUnauth(err) {
 			t.Fatalf("a protected operation during the restore window must fail authentication, got %v", err)
 		}
 	}
@@ -573,6 +624,11 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 		`SELECT credential_epoch FROM external_identities WHERE subject = 'stays'`); after != linkEpochBefore {
 		t.Fatalf("re-assertion must not re-bless a restored identity link: epoch %d -> %d",
 			linkEpochBefore, after)
+	}
+	// The restored session is STILL refused after re-assertion — SCIM rebuilt
+	// origins, and origins are not authentication.
+	if err := protectedOp(goesSession); !isUnauth(err) {
+		t.Fatalf("re-assertion must not revive a restored session, got %v", err)
 	}
 	// And the link is still inert: the login is refused after re-assertion too.
 	postStart, err := auth.OIDCStart(ctx, "okta", "login", "", "", "")

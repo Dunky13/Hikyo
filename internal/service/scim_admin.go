@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Dunky13/hikyo/internal/audit"
@@ -355,6 +356,51 @@ func (s *SCIM) refreshBindingAttention(
 	return append(events, cured...), nil
 }
 
+// markTeardown marks one §6 phase boundary with the state that phase produced,
+// read INSIDE the transaction under its own proof. It is the only vantage from
+// which intermediate state is visible at all: an outside reader sees the
+// pre-transaction snapshot on both engines, so a fixture that watched from
+// there could only ever confirm the end state.
+//
+// The observer's callback runs synchronously here, so a fixture may block in
+// it — the transaction is genuinely paused at this boundary until it returns.
+// The reads cost nothing in production, where no observer is installed.
+func (s *SCIM) markTeardown(
+	ctx context.Context, r store.Repos, az *authz.TxAuthorizer, p authz.Proof,
+	c scimContext, connection domain.PrincipalID, phase string, did int,
+) {
+	if !scimPhaseObserved() {
+		return
+	}
+	state := map[string]int{"did": did}
+	now := s.now()
+	if creds, err := r.SCIM().Credentials(ctx, p, c.binding.ID); err == nil {
+		state["credentials"] = len(creds)
+		live := 0
+		for _, cred := range creds {
+			if cred.Live(now) {
+				live++
+			}
+		}
+		state["live_credentials"] = live
+	}
+	if users, err := r.SCIM().Users(ctx, p, c.binding.ID); err == nil {
+		state["directory_users"] = len(users)
+	}
+	if groups, err := r.SCIM().Groups(ctx, p, c.binding.ID); err == nil {
+		state["directory_groups"] = len(groups)
+	}
+	if rows, err := az.GrantRowsForPrincipal(ctx, connection); err == nil {
+		state["connection_grants"] = len(rows)
+	}
+	if _, err := r.SCIM().Binding(ctx, p, c.binding.ID); err == nil {
+		state["binding_rows"] = 1
+	} else {
+		state["binding_rows"] = 0
+	}
+	markSCIMPhaseState(phase+"="+strconv.Itoa(did), state)
+}
+
 // reconcilePostRestore raises §9.1's post-restore state.
 //
 // A restore is not an operation this tree performs — #76 owns the
@@ -500,6 +546,8 @@ func (s *SCIM) DeleteBinding(ctx context.Context, actor Actor, org domain.OrgID,
 		}
 		now := s.now()
 
+		connection := domain.PrincipalID(c.binding.ConnectionPrincipalID)
+
 		// (1) credentials first. The count is not in the payload: §10's field
 		// list for this event is "org, provider ref, actor", and how many
 		// credentials died is already one `scim.credential_revoked` per
@@ -513,7 +561,7 @@ func (s *SCIM) DeleteBinding(ctx context.Context, actor Actor, org domain.OrgID,
 		if err != nil {
 			return err
 		}
-		markSCIMPhaseN("credentials-revoked", int(revoked))
+		s.markTeardown(ctx, r, az, p, c, connection, "credentials-revoked", int(revoked))
 
 		// (2) every origin the binding holds, for every user it provisioned.
 		users, err := r.SCIM().Users(ctx, p, id)
@@ -551,18 +599,17 @@ func (s *SCIM) DeleteBinding(ctx context.Context, actor Actor, org domain.OrgID,
 			}
 		}
 
-		markSCIMPhaseN("origins-released", releasedOrigins)
+		s.markTeardown(ctx, r, az, p, c, connection, "origins-released", releasedOrigins)
 
 		// (3) the connection's structural origin, then the principal, then the
 		// binding's own rows. The RESTRICT foreign key on grant_origins is what
 		// makes the ordering a database fact rather than a comment.
-		connection := domain.PrincipalID(c.binding.ConnectionPrincipalID)
 		structural, err := releaseStructural(ctx, az, connection, id)
 		if err != nil {
 			return err
 		}
 		events = append(events, structural...)
-		markSCIMPhaseN("connection-retired", len(structural))
+		s.markTeardown(ctx, r, az, p, c, connection, "connection-retired", len(structural))
 
 		directory := len(users)
 		if err := r.SCIM().DeleteGroupMembersForBinding(ctx, p, id); err != nil {
@@ -599,11 +646,11 @@ func (s *SCIM) DeleteBinding(ctx context.Context, actor Actor, org domain.OrgID,
 		if err := r.SCIM().DeleteCredentialsForBinding(ctx, p, id); err != nil {
 			return err
 		}
-		markSCIMPhaseN("directory-deleted", directory)
+		s.markTeardown(ctx, r, az, p, c, connection, "directory-deleted", directory)
 		if err := r.SCIM().DeleteBinding(ctx, p, id); err != nil {
 			return err
 		}
-		markSCIMPhaseN("binding-deleted", 1)
+		s.markTeardown(ctx, r, az, p, c, connection, "binding-deleted", 1)
 		// The connection is retired under the same PROOF, after its binding row
 		// is gone (that row references it). `connection` was read from the
 		// binding under this proof, and the statement can only remove a

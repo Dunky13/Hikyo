@@ -106,7 +106,7 @@ func (s *SCIM) recordMismatch(ctx context.Context, m mismatchError) error {
 // shared grant row is real and is handled at the row — unique origin keys plus
 // serializable transactions with bounded retry.
 //
-// A nil body is the discovery path: preamble only, no events, no attention
+// The discovery operation stops after the preamble: no events, no attention
 // reconciliation (§10; see SCIM.Discovery).
 func (s *SCIM) wireTx(
 	ctx context.Context, actor Actor, org domain.OrgID, bindingID string, op authz.Operation,
@@ -159,16 +159,16 @@ func (s *SCIM) wireTxOnce(
 		}
 		markSCIMPhase("wire-enter:" + bindingID)
 		defer markSCIMPhase("wire-exit:" + bindingID)
-		// A nil body is the DISCOVERY path (§10): everything above this line —
-		// authentication, authorization, the binding load, the serialization lock
-		// and the contact record — happens, and nothing below it does. No
-		// attention reconciliation, no audit event. See SCIM.Discovery.
-		if body == nil {
-			return nil
-		}
 		events, err := body(ctx, r, az, c, now)
 		if err != nil {
 			return err
+		}
+		// DISCOVERY (§10) stops here: everything above — authentication,
+		// authorization, the binding load, the serialization lock and the
+		// contact record — happens, and nothing below does. No attention
+		// reconciliation, no audit event. See SCIM.Discovery.
+		if op == authz.OpSCIMDiscovery {
+			return nil
 		}
 		cleared, err := s.clearAttention(ctx, r, c, domain.AttentionStale, "", "")
 		if err != nil {
@@ -200,8 +200,15 @@ type SCIMUserResource struct {
 	Active     bool
 	Groups     []string
 	Attributes map[string]any
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Schemas is the `schemas` array this resource declares: the core User
+	// schema plus every extension THIS BINDING declared that the resource
+	// actually carries. It is computed here, beside the binding, rather than
+	// in the transport — the transport cannot know what a binding declared,
+	// and a resource declaring a schema discovery does not describe is the
+	// half-implemented state §8 forbids.
+	Schemas   []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // SCIMUserInput is a create or a full replacement. It is DESIRED STATE: PUT is
@@ -282,6 +289,9 @@ func (s *SCIM) CreateUser(ctx context.Context, actor Actor, org domain.OrgID, bi
 			}
 			id, err := newID("scu")
 			if err != nil {
+				return nil, err
+			}
+			if err := c.checkDeclaredSchemas(in.Attributes); err != nil {
 				return nil, err
 			}
 			attrs, err := marshalAttributes(in.Attributes)
@@ -539,6 +549,9 @@ func (s *SCIM) mutateUser(
 					// dropped every attribute the request did not mention,
 					// which is what PUT means and PATCH does not.
 					desired = mergeAttributes(stored, in.Attributes)
+				}
+				if err := c.checkDeclaredSchemas(desired); err != nil {
+					return nil, err
 				}
 				attrs, err := marshalAttributes(desired)
 				if err != nil {
@@ -856,6 +869,7 @@ func (s *SCIM) renderUser(ctx context.Context, r store.Repos, c scimContext, row
 	out := SCIMUserResource{
 		ID: row.ID, ExternalID: row.ExternalID, UserName: row.UserName,
 		Active: row.Active, Attributes: attrs,
+		Schemas:   scimproto.SchemasFor(attrs, c.declaredExtensions()),
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
 	for _, m := range memberships {
