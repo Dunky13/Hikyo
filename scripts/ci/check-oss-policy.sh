@@ -96,7 +96,7 @@ require_file "$security_txt"
 require_text "$security_txt" 'Contact: https://github.com/Dunky13/hikyo/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
 require_text "$security_txt" 'Expires:'
-require_text "$security_txt" 'Canonical: https://dunky13.github.io/hikyo/.well-known/security.txt'
+require_text "$security_txt" 'Canonical: https://hikyo.app/.well-known/security.txt'
 source_expires=$(awk -F ': ' '$1 == "Expires" {print $2}' "$security_txt")
 "$NODE_BIN" -e '
 const expiry = Date.parse(process.argv[1]);
@@ -148,13 +148,16 @@ EOF
 
 require_text "$site_root/index.html" 'Every value is explicit'
 require_text "$site_root/index.html" 'Mozilla Public License 2.0'
-require_text "$site_root/index.html" 'href="/hikyo/docs/"'
+require_text "$site_root/index.html" '<link rel="canonical" href="https://hikyo.app/">'
+require_text "$site_root/index.html" 'href="/docs/"'
+reject_text "$site_root/index.html" 'href="/hikyo/'
 reject_text "$site_root/index.html" 'validated, inherited secrets'
 reject_text "$site_root/index.html" 'MIT licensed'
 
 require_text "$site_root/docs/index.html" 'Getting started'
-require_text "$site_root/docs/index.html" 'href="/hikyo/docs/getting-started/"'
-require_text "$site_root/docs/index.html" 'href="/hikyo/docs/installation/"'
+require_text "$site_root/docs/index.html" 'href="/docs/getting-started/"'
+require_text "$site_root/docs/index.html" 'href="/docs/installation/"'
+reject_text "$site_root/docs/index.html" 'href="/hikyo/'
 require_text "$site_root/docs/getting-started/index.html" 'Build Hikyo from source'
 require_text "$site_root/docs/getting-started/index.html" 'authority is single-use'
 require_text "$site_root/docs/installation/index.html" 'has no published stable release yet'
@@ -180,11 +183,16 @@ require_text "$site_root/governance/index.html" 'Twelve consecutive months witho
 require_text "$site_root/trademark/index.html" 'Permission is required to offer a hosted or packaged service'
 require_text "$site_root/contributing/index.html" 'Developer Certificate of Origin'
 require_text "$site_root/license/index.html" 'Mozilla Public License Version 2.0'
-require_text "$site_root/security/index.html" 'href="/hikyo/support/"'
-require_text "$site_root/support/index.html" 'href="/hikyo/security/"'
+require_text "$site_root/security/index.html" 'href="/support/"'
+require_text "$site_root/support/index.html" 'href="/security/"'
 reject_text "$site_root/security/index.html" 'href="./SUPPORT.md"'
 reject_text "$site_root/support/index.html" 'href="./SECURITY.md"'
 reject_text "$site_root/trademark/index.html" 'href="./SECURITY.md"'
 reject_text "$site_root/contributing/index.html" 'href="./SECURITY.md"'
+
+if grep -R -F --include='*.html' '="/hikyo/' "$site_root" >/dev/null; then
+	printf 'OSS policy gate: served site contains stale /hikyo/ URLs\n' >&2
+	exit 1
+fi
 
 printf 'OSS policy gate: O4-O6 source and served-site assertions passed\n'

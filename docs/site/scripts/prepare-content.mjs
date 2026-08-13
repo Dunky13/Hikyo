@@ -21,11 +21,11 @@ const pages = [
 ];
 
 const siteLinks = new Map([
-  ['./CONTRIBUTING.md', '/hikyo/contributing/'],
-  ['./GOVERNANCE.md', '/hikyo/governance/'],
-  ['./SECURITY.md', '/hikyo/security/'],
-  ['./SUPPORT.md', '/hikyo/support/'],
-  ['./TRADEMARK.md', '/hikyo/trademark/'],
+  ['./CONTRIBUTING.md', '/contributing/'],
+  ['./GOVERNANCE.md', '/governance/'],
+  ['./SECURITY.md', '/security/'],
+  ['./SUPPORT.md', '/support/'],
+  ['./TRADEMARK.md', '/trademark/'],
 ]);
 
 for (const page of pages) {
