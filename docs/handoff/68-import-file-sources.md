@@ -346,7 +346,7 @@ no import path that reaches age/GPG without reaching the cloud backends.
 | Connector fixtures | `internal/importer/connector_test.go` | (a) true-positive mapping per source, (b) adversarial parser fixtures (wrong kind, duplicate key, binary value, malformed), (c) hostile-error sanitization asserted against the value bytes that produced the refusal, (d) every bound fails loud naming itself, (e) the shared sanitized spawn path, on a real child process |
 | Plan / grammar / artifacts | `internal/importer/plan_test.go` | Valid names byte-preserved; the documented transform; hard stops; near-miss; `new \| set` buckets; enumerated overwrite; secret-by-default; template downgrades and types; renames surfaced and recorded; post-transform collision; trim preflight; single-Secret root targeting; existing declarations not re-declared; template/manifest strict round-trip and version-mismatch refusal |
 | Human-only | `internal/authz/authz_test.go` | The chokepoint predicate: machines refused, humans not, local host authority exempt, per-operation not global |
-| Cross-engine (sqlite **and** postgres) | `internal/conformance/import_test.go` | Phase-1 presence + token movement (incl. `set → set` with a changed value); phase-2 strictness, skip-by-default, enumerated overwrite; **phase-2 replay against moved state rejects by occurrence token, naming the key**; fabricated token indistinguishable from stale; definitions-revision mismatch; per-source fixture E2E for **all three** connectors (k8s, infisical, sops) with the collision, rename, typing and classification matrices — the sops leg is also the only E2E that decrypts through `WithSanitized` and asserts the plaintext hint downgrades nothing |
+| Cross-engine (sqlite **and** postgres) | `internal/conformance/import_test.go` | Phase-1 presence + token movement (incl. `set → set` with a changed value); phase-2 strictness, skip-by-default, enumerated overwrite; imported values materialized into the committed snapshot; **phase-2 replay against moved state rejects by occurrence token, naming the key**; fabricated token indistinguishable from stale; definitions-revision mismatch; per-source fixture E2E for **all three** connectors (k8s, infisical, sops) with the collision, rename, typing and classification matrices — the sops leg is also the only E2E that decrypts through `WithSanitized` and asserts the plaintext hint downgrades nothing |
 | Security regressions | `internal/importer/connector_test.go`, `internal/conformance/import_test.go` | Oracle closure (precondition authorizes the union); per-file bound before the bytes are resident; alias bomb refused at the named bound with allocation asserted; hostile `kind`/`type`/name never echoed; personal overrides charged before they are skipped; run deadline interrupts decryption |
 | Golden CLI | `internal/cli/golden_test.go` + `testdata/` | `help.txt`, `exit-codes.txt` — including `import` with no source and no terminal being a hard error rather than a hung prompt — plus `-o json` shape fixtures for the two new response types (`value-occurrences-json.json`, `value-import-json.json`) |
 | Audit | `internal/isolation/audit_e2e_test.go` | `value.imported` has a real emitter; `cli:import` exemption pinned in `testdata/audited_exemptions.json` |
@@ -386,14 +386,15 @@ HIKYO_TEST_POSTGRES_DSN='postgres://…' go test ./internal/conformance/ ./inter
 - The `--out-dir` artifact names are fixed: `definitions-bundle.json`,
   `mapping.json`, `run-manifest.json`, `values-<env-id>.json`.
 
-### #51 (publish pipeline / drafts / snapshots)
+### #51 (publish pipeline / drafts / snapshots) — integrated
 
-`values import` writes through the **current** `#50` value write path
-(`writeCell` → `Values().Put`), because no publish pipeline exists. When #51
-lands, phase 2 should funnel through it — the ADR's "every import is a
-value-bearing import funnelling through the publish pipeline" is satisfied in
-letter only until then. The audit shape (`value.set` per key + `value.imported`
-per run) should survive that move unchanged.
+After #51 landed, `values import` retained its immediate, atomic bulk-write
+contract and now calls the shared `republish` pipeline once after all imported
+cells land. Validation, immutable snapshot creation, revision allocation,
+change-token derivation and `revision.published` therefore commit in the same
+transaction as the imported cells. A fully skipped run creates no revision.
+The original audit shape remains: `value.set` per key plus `value.imported` per
+run, with the shared revision event added by materialization.
 
 ## Not built (and why)
 

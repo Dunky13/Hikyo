@@ -2514,20 +2514,28 @@ paths:
     put:
       operationId: setValue
       tags: [values]
-      summary: Set one value.
+      summary: Stage one value edit.
       description: |
-        The caller SUPPLIES the plaintext, so no reveal is involved on any
-        side: the formula is `edit` AND `publish` on the environment that is
-        about to deliver it. The value is validated against the key's
-        declaration before it commits, because in this slice what commits is
-        what the environment delivers.
+        This STAGES; it does not publish. The edit lands in the caller's own
+        working state as a pending change with an immutable version id, and the
+        environment keeps delivering what it delivered until a publish names
+        that id.
 
-        A key that is `forbidden_in` this environment refuses the write, by
-        name. A key that is not declared refuses too - typing a name that does
-        not exist is a key CREATION, an explicit act elsewhere.
+        The formula is `edit` ALONE: `edit` confers no delivery power and a
+        draft is never a disclosure, so staging must not require `publish`.
+        Edit-without-publish is the propose-and-review flow.
+
+        SAVING IS FREE. The value is not validated here, and a key that is
+        `forbidden_in` this environment may still be staged: a draft is the
+        user's scratchpad, and blocking a save pushes work in progress into
+        external notepads, which for secrets is exactly where it must not go.
+        Every one of those refusals fires at publish instead, by name.
+
+        A key that is not declared still refuses - typing a name that does not
+        exist is a key CREATION, an explicit act elsewhere.
       x-hikyo-class: tenant
-      x-hikyo-operation: value.set
-      x-hikyo-formula: [edit@environment, publish@environment]
+      x-hikyo-operation: value.stage
+      x-hikyo-formula: [edit@environment]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       requestBody:
@@ -2538,11 +2546,11 @@ paths:
               $ref: "#/components/schemas/SetValueRequest"
       responses:
         "200":
-          description: The cell as stored. It never echoes the value back.
+          description: The staged pending change. It never echoes the value back.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValueCell"
+                $ref: "#/components/schemas/PendingChange"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2558,20 +2566,27 @@ paths:
     delete:
       operationId: clearValue
       tags: [values]
-      summary: Clear a value to `absent`.
+      summary: Stage a clear to `absent`.
       description: |
-        With nothing to inherit from, this is the whole of "remove this value
-        now": there is no layer underneath for it to fall back to. A key
-        `required_in` this environment refuses to be cleared, naming key and
-        environment.
+        Stages the `set` to `absent` transition; it does not publish. With
+        nothing to inherit from, this is the whole of "remove this value now":
+        there is no layer underneath for it to fall back to.
+
+        A key `required_in` this environment may be staged for clearing and
+        the publish that would commit it is what refuses, naming key and
+        environment. Saving is free; publish is the authority.
       x-hikyo-class: tenant
-      x-hikyo-operation: value.clear
-      x-hikyo-formula: [edit@environment, publish@environment]
+      x-hikyo-operation: value.stage
+      x-hikyo-formula: [edit@environment]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       responses:
-        "204":
-          description: The cell is absent. Clearing an already-absent cell says the same thing.
+        "200":
+          description: The staged pending change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingChange"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -6431,6 +6446,349 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimResource"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: publishPendingChanges
+      tags: [revisions]
+      summary: Publish a selection of your own pending changes.
+      description: |
+        SELECTIVE. The body names version ids, and only those - plus whatever
+        key-group closure pulls in - are committed. Every other pending change,
+        the caller's own unselected ones and every other principal's, is
+        invisible to the computation, so the materialized snapshot always
+        corresponds to a state the publisher previewed.
+
+        A publish carries ONLY the caller's own pending changes. There is no
+        cross-user hand-off of staged work: a key group whose members carry a
+        pending change owned by another principal is refused, loud, naming the
+        group and the key, never silently split.
+
+        The whole operation is one serializable transaction holding the
+        per-project lock. A version whose published cell has moved since it was
+        staged is refused loud rather than rebased, and a `required_in` key
+        left absent vetoes the publish naming key and environment.
+
+        Publishing a version whose environment differs from the addressed one
+        is permitted and each such environment is authorized for `publish`
+        separately, immediately before commit.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.publish
+      x-hikyo-formula: [publish@environment]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishRequest"
+      responses:
+        "200":
+          description: What committed, and which environments advanced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: getEnvironmentSignals
+      tags: [revisions]
+      summary: The matrix signals for one environment.
+      description: |
+        The two "changed" signals the matrix renders, plus the environment's
+        current revision. `pending_version_id` is the caller's OWN live draft
+        for the cell - the id a selective publish names; `pending_by_others`
+        is the quieter collision marker and carries no id, no owner and no
+        operation, because another principal's draft is write-presence and
+        nothing more.
+
+        Both signals degrade to write-presence for `secret` keys: they report
+        that someone WROTE here, never that the plaintext differs from the
+        published one. A comparison status is itself an oracle.
+
+        This is also the advisory stream's documented POLLING FALLBACK: the
+        same facts, pulled under the caller's own authorization.
+      x-hikyo-class: tenant
+      x-hikyo-operation: revision.signals
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The environment's signals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvironmentSignals"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: listRevisions
+      tags: [revisions]
+      summary: One environment's revision history, newest first.
+      description: |
+        LINEAGE ONLY: revision numbers, publishers, timestamps, the pinned
+        schema revision, and which keys changed. It never contains a value in
+        any form - not a plaintext, not a length, not a digest, not a
+        changed-from marker. That is what lets lineage be retained forever
+        while payloads are collected by retention policy.
+      x-hikyo-class: tenant
+      x-hikyo-operation: revision.list
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The history.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - name: revision
+        in: path
+        required: true
+        description: The revision number, or `latest`.
+        schema:
+          type: string
+          pattern: "^(latest|[1-9][0-9]{0,18})$"
+    get:
+      operationId: getRevision
+      tags: [revisions]
+      summary: One revision, with its change token.
+      description: |
+        The change token is DERIVED here from the current root token key over
+        the snapshot's delivery manifest; it is never stored. That is what
+        makes `rotate-token-key` move every token while content, revision
+        numbers and pinned input revisions stay exactly where they are.
+
+        The token is non-secret metadata by construction - keyed, so
+        unforgeable and un-invertible without the key, which is why it may flow
+        into pod annotations and logs. The key set it accompanies carries names
+        and classifications and no values.
+      x-hikyo-class: tenant
+      x-hikyo-operation: revision.show
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevisionDetail"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: exportValues
+      tags: [values]
+      summary: Export one environment's resolved snapshot.
+      description: |
+        The one BULK-DISCLOSURE verb, and what "fetch resolved" actually is. It
+        reads a committed snapshot, never live values.
+
+        The formulas are stated separately because the capabilities imply
+        nothing about each other: current material is `read` AND `reveal`;
+        historical material - any revision that is not the latest - is `read`
+        AND `reveal-history`. Without `reveal`, `config` values are returned in
+        plaintext (classification IS the sensitivity boundary) and `secret`
+        keys report write-presence with no value.
+
+        It is a POST because disclosure is an ACT: one audit event is written
+        per disclosed key, durably, before any plaintext leaves the server.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.export-reveal
+      x-hikyo-formula: [read@environment, reveal@environment]
+      # Human-session only, and the omission is a decision. A machine principal
+      # CAN export - `read` alone returns `config` plaintext and `secret`
+      # write-presence - but the route's declared formula is the revealing one,
+      # and no machine class in the permission ADR's allowlists may hold
+      # `reveal` today: machine `reveal` arrives through the source-of-truth
+      # ADR's explicit per-project operator opt-in, which is not modelled yet.
+      # Declaring an eligibility the registry cannot honour would be a lie on
+      # the wire; this joins when the opt-in lands.
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExportValuesRequest"
+      responses:
+        "200":
+          description: The resolved snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportedValues"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/events:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: watchProjectEvents
+      tags: [revisions]
+      summary: The advisory live-update stream (SSE).
+      description: |
+        Server-sent events, metadata only. An event says that something
+        changed - an environment advanced (`revision.published`), a principal
+        staged a draft (`pending.staged`), a published cell moved
+        (`cell.changed`) - and never what it changed to. It carries no value
+        in any form and NO CHANGE TOKEN.
+
+        `cell.changed` claims exactly what the publish knew: that cell
+        advanced. A subscriber holding a draft on the named cell derives "my
+        draft is stale" from its own draft plus this event; the server never
+        asserts staleness it did not check.
+
+        Every event is authorized against the environment it names, at emit
+        time, so a grant revoked mid-session takes effect on the NEXT event
+        rather than at the next reconnect. Events referencing objects the
+        recipient may not see are dropped, and an event reduced to nothing is
+        not sent.
+
+        ADVISORY ONLY: correctness never depends on delivery. `Last-Event-ID`
+        replays nothing; a reconnecting client refetches current state from the
+        signals endpoint, which is the documented polling fallback. A client
+        that cannot keep up is disconnected rather than buffered. Connection
+        admission is bounded per principal, per organization, and instance-wide;
+        a refusal is 429. Accepted streams begin with a jittered `retry:` hint.
+      x-hikyo-class: tenant
+      x-hikyo-operation: advisory.watch
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/instance/rotate-token-key:
+    post:
+      operationId: rotateTokenKey
+      tags: [instance]
+      summary: Rotate the root change-token key.
+      description: |
+        Mints a new root token key, retires the old one, and derives every
+        subsequent change token under it.
+
+        WHAT IT DOES NOT TOUCH: no snapshot's content, no revision number, and
+        no pinned input revision moves. It cannot - a change token is never
+        stored, it is derived at read from the live key over the snapshot's
+        delivery manifest, so there is no cache to invalidate and nothing to
+        resume after a crash.
+
+        Every outstanding delivery cursor mismatches once and every consumer
+        performs one full fetch. This is NOT a restart wave.
+
+        It rides `rotate-dek`: the capability set is closed and names four
+        rotation atoms for five rotation verbs, and the root token key is a
+        tier-3 key alongside the DEKs.
+      x-hikyo-class: instance
+      x-hikyo-operation: crypto.rotate-token-key
+      x-hikyo-formula: [rotate-dek@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The rotation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenKeyRotation"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
 components:
   securitySchemes:
     hikyoSession:
@@ -7302,6 +7660,290 @@ components:
           items:
             $ref: "#/components/schemas/KeyName"
 
+    PendingChange:
+      type: object
+      description: |
+        One draft in the caller's own working state. `version_id` is the
+        IMMUTABLE id a selective publish names; editing the same cell mints a
+        new one and collects this row rather than mutating it.
+
+        It never carries the staged value. A draft holds real material and that
+        material is reveal-gated exactly as a published one is.
+      required: [version_id, key_id, name, classification, operation, staged_from_revision, created_at]
+      additionalProperties: false
+      properties:
+        version_id:
+          $ref: "#/components/schemas/ID"
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        operation:
+          type: string
+          description: What publishing this draft does to the cell.
+          enum: [set, unset]
+        staged_from_revision:
+          type: integer
+          format: int64
+          description: |
+            The environment's published revision when the edit was staged.
+            Provenance a client shows; the freshness check is per entry.
+        created_at:
+          type: string
+          format: date-time
+    PublishRequest:
+      type: object
+      required: [version_ids]
+      additionalProperties: false
+      properties:
+        version_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: |
+            The pending-change version ids to commit. Naming an id the caller
+            does not own, or one that has been superseded or already published,
+            is refused loud rather than resolved to whatever the owner typed
+            since.
+          items:
+            $ref: "#/components/schemas/ID"
+    PublishResult:
+      type: object
+      required: [published, closed_in, environments]
+      additionalProperties: false
+      properties:
+        published:
+          type: array
+          description: Every version id that committed, closure included.
+          items:
+            $ref: "#/components/schemas/ID"
+        closed_in:
+          type: array
+          description: |
+            The version ids key-group closure pulled in beyond what the caller
+            named, so the caller can tell what it asked for from what the
+            coupling required.
+          items:
+            $ref: "#/components/schemas/ID"
+        environments:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublishedEnvironment"
+    PublishedEnvironment:
+      type: object
+      required: [environment_id, revision, schema_revision, change_token, changed_keys]
+      additionalProperties: false
+      properties:
+        environment_id:
+          $ref: "#/components/schemas/ID"
+        revision:
+          type: integer
+          format: int64
+        schema_revision:
+          type: integer
+          format: int64
+          description: The pinned schema revision this snapshot was validated at.
+        change_token:
+          type: string
+          description: |
+            The keyed, versioned change token for this snapshot. Non-secret by
+            construction: it is an HMAC under a per-scope key, so it is
+            unforgeable and un-invertible, which is why it may travel in pod
+            annotations and logs.
+        changed_keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangedKey"
+    ChangedKey:
+      type: object
+      description: |
+        One lineage row. It carries a key id, the key's name at that revision
+        and the transition - and nothing derived from a value.
+      required: [key_id, name, change]
+      additionalProperties: false
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        change:
+          type: string
+          enum: [added, edited, removed]
+    RevisionList:
+      type: object
+      required: [items, count]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Revision"
+        count:
+          type: integer
+    Revision:
+      type: object
+      required: [revision, schema_revision, published_by, published_at, changed_keys]
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          format: int64
+        schema_revision:
+          type: integer
+          format: int64
+        published_by:
+          $ref: "#/components/schemas/ID"
+        published_at:
+          type: string
+          format: date-time
+        changed_keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangedKey"
+    RevisionDetail:
+      type: object
+      required: [revision, schema_revision, published_by, published_at, changed_keys, change_token, keys]
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          format: int64
+        schema_revision:
+          type: integer
+          format: int64
+        published_by:
+          $ref: "#/components/schemas/ID"
+        published_at:
+          type: string
+          format: date-time
+        changed_keys:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangedKey"
+        change_token:
+          type: string
+        keys:
+          type: array
+          description: |
+            The delivered key set of THIS revision, under the schema revision
+            it pinned. Names and classifications only; values live behind the
+            export verb and its formula.
+          items:
+            $ref: "#/components/schemas/SnapshotKey"
+    SnapshotKey:
+      type: object
+      required: [key_id, name, classification]
+      additionalProperties: false
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+    EnvironmentSignals:
+      type: object
+      required: [environment_id, revision, cells]
+      additionalProperties: false
+      properties:
+        environment_id:
+          $ref: "#/components/schemas/ID"
+        revision:
+          type: integer
+          format: int64
+          description: The environment's current published revision, 0 when never materialized.
+        cells:
+          type: array
+          items:
+            $ref: "#/components/schemas/CellSignal"
+    CellSignal:
+      type: object
+      required: [key_id, name, classification, pending_by_others]
+      additionalProperties: false
+      properties:
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        pending_version_id:
+          $ref: "#/components/schemas/ID"
+        pending_operation:
+          type: string
+          enum: [set, unset]
+        pending_by_others:
+          type: boolean
+          description: |
+            At least one OTHER principal holds a draft here. Write-presence and
+            nothing more: no id, no owner, no operation.
+        changed_in_revision:
+          type: integer
+          format: int64
+          description: Set to the environment's LATEST revision when this cell changed in
+            it, absent otherwise. This is the revision ADR's "recently
+            changed" signal, which names only the last published revision --
+            it is not a per-cell last-change history; older changes live in
+            the revision list.
+    ExportValuesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The revision to export; omitted means the latest.
+        reveal:
+          type: boolean
+          description: |
+            Ask for `secret` plaintext. Without it a `secret` key reports
+            write-presence and no value; `config` values are returned either
+            way, because classification IS the sensitivity boundary.
+    ExportedValues:
+      type: object
+      required: [revision, items, count]
+      additionalProperties: false
+      properties:
+        revision:
+          type: integer
+          format: int64
+          description: The revision actually served.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportedValue"
+        count:
+          type: integer
+    ExportedValue:
+      type: object
+      required: [name, classification, revealed]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        revealed:
+          type: boolean
+        value:
+          type: string
+          description: Present only when `revealed` is true.
+    TokenKeyRotation:
+      type: object
+      required: [token_key_version]
+      additionalProperties: false
+      properties:
+        token_key_version:
+          type: integer
+          format: int64
+          description: |
+            The new root token key version. Operator bookkeeping only - the
+            change token's public contract carries the SCHEME version, never
+            the key version, because a consumer that could tell key versions
+            apart could tell a rotation from a content change.
     ValueCell:
       type: object
       description: |
@@ -8218,11 +8860,13 @@ components:
           $ref: "#/components/schemas/KeyClassification"
         presence:
           type: string
-          enum: [required, forbidden, optional]
+          enum: [required, forbidden, optional, set]
           description: |
-            The key's declared presence for the addressed environment. When
-            values land this enumeration gains `set`, and the change token starts
-            moving with values.
+            What the fetch reports about this key in the addressed
+            environment. `set` is a key the committed snapshot actually
+            delivers (#51 -- values landed, and the change token moves with
+            them); the other three are the declared presence rules for keys
+            the snapshot does not carry.
 
     DeliveryResponse:
       type: object

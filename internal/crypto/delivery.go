@@ -91,7 +91,7 @@ func (k *Keyring) scopedCursorKey(orgID, projectID, envID string) ([]byte, error
 	info = appendLP(info, []byte(orgID))
 	info = appendLP(info, []byte(projectID))
 	info = appendLP(info, []byte(envID))
-	key, err := hkdf.Key(sha256.New, k.token.key, nil, string(info), KeySize)
+	key, err := hkdf.Key(sha256.New, k.rootTokenKey(), nil, string(info), KeySize)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: derive scoped cursor key: %w", err)
 	}

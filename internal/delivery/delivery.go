@@ -23,16 +23,14 @@ import (
 // prevent.
 const ManifestVersion = "v1"
 
-// Presence is what a manifest row says about a key's value in one environment.
+// Presence is what the fetch surface reports about a key in one environment.
 //
-// TODAY every delivered key is `absent`-valued, because no value tables exist
-// (#50/#51). What the manifest therefore carries is the DECLARED presence rule
-// for this environment — required, forbidden or optional — which is exactly the
-// authorized projection of what exists: the key catalogue plus presence, no
-// plaintext anywhere. When values land, `set` joins this enumeration and the
-// rows gain the config plaintext and the secret write-presence the schema ADR
-// specifies. The seam is Row: its shape is the manifest, and the token is
-// computed over it.
+// It is NOT part of the manifest: the change token covers DELIVERED CONTENT
+// only (revision ADR), so tightening `required_in` -- which changes what a
+// future publish may commit, not what this snapshot delivers -- must not move
+// the token and fire a rollout wave. `set` joined the enumeration with #51:
+// a key the snapshot delivers is `set`, and one it does not carries whichever
+// declared rule applies to it.
 type Presence string
 
 const (
@@ -42,6 +40,8 @@ const (
 	PresenceForbidden Presence = "forbidden"
 	// PresenceOptional is neither.
 	PresenceOptional Presence = "optional"
+	// PresenceSet is a key the snapshot actually delivers.
+	PresenceSet Presence = "set"
 )
 
 // Row is one delivery-manifest entry: an ordered `(key, classification,
@@ -55,7 +55,16 @@ const (
 type Row struct {
 	Key            string
 	Classification string
-	Presence       Presence
+	// Value is the plaintext the snapshot delivers for this key. It is the
+	// third element of the ADR's triple, and it is why the token moves when a
+	// value moves -- which is the whole point of a change token.
+	//
+	// The manifest is computed server-side, from a snapshot the server already
+	// holds in plaintext for the length of the operation, and the token that
+	// comes out is KEYED: it is unforgeable and un-invertible without the
+	// scoped key, so it flows into pod annotations and logs as ordinary
+	// non-secret metadata while the values it covers never leave the server.
+	Value string
 }
 
 // Manifest is the canonical encoding the change token is computed over.
@@ -74,7 +83,7 @@ func Manifest(rows []Row) []byte {
 	for _, r := range sorted {
 		out = appendField(out, r.Key)
 		out = appendField(out, r.Classification)
-		out = appendField(out, string(r.Presence))
+		out = appendField(out, r.Value)
 	}
 	return out
 }

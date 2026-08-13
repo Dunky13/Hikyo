@@ -145,6 +145,7 @@ type Json = Record<string, unknown>;
 /** zCreated is every create response this fixture reads: it needs the id. */
 const zCreated = z.object({ id: z.string() });
 const zServiceAccount = z.object({ id: z.string(), principal_id: z.string() });
+const zStaged = z.object({ version_id: z.string() });
 const zEnrolStart = z.object({ otpauth_uri: z.string() });
 const zRotated = z.object({ session_token: z.string() });
 const zWhoAmI = z.object({ principal: z.object({ id: z.string() }) });
@@ -445,39 +446,61 @@ export async function seedTenant(
       declaration: { rule: { type: 'string' } },
     });
   }
+  // Since #51 a value PUT only STAGES a pending change; delivery and the
+  // matrix's published state come from the selective publish that follows.
+  // The fixture publishes everything it staged, per environment, because the
+  // flows exercise PUBLISHED values — staging is its own surface.
+  const devVersions: string[] = [];
   for (const [name, value] of [
     ['DB_PASSWORD', 'hunter2-development'],
     ['STRIPE_SECRET_KEY', 'sk_test_development'],
     ['ROTATE_ME', 'rotate-me-development'],
     ['LOG_LEVEL', 'debug'],
   ] as const) {
-    await call(
+    const staged = await call(
       token,
       'PUT',
       `/api/v1/orgs/${org}/projects/${project}/environments/${dev}/values/${name}`,
-      zIgnored,
+      zStaged,
       { value },
     );
+    devVersions.push(staged.version_id);
   }
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${project}/environments/${dev}/publish`,
+    zIgnored,
+    { version_ids: devVersions },
+  );
 
   // Production carries its own material, so the protected-environment flow
   // stands on its own rather than on whatever an earlier test copied there.
   // Seeded BEFORE the protected flag is set, because a protected destination
   // is exactly what the ceremony gates.
+  const prodVersions: string[] = [];
   for (const [name, value] of [
     ['DB_PASSWORD', 'hunter2-production'],
     ['STRIPE_SECRET_KEY', 'sk_live_production'],
     ['ROTATE_ME', 'rotate-me-production'],
     ['LOG_LEVEL', 'warn'],
   ] as const) {
-    await call(
+    const staged = await call(
       token,
       'PUT',
       `/api/v1/orgs/${org}/projects/${project}/environments/${prod}/values/${name}`,
-      zIgnored,
+      zStaged,
       { value },
     );
+    prodVersions.push(staged.version_id);
   }
+  await call(
+    token,
+    'POST',
+    `/api/v1/orgs/${org}/projects/${project}/environments/${prod}/publish`,
+    zIgnored,
+    { version_ids: prodVersions },
+  );
 
   // Development gets an explicit sliding window. The INSTANCE default is 0 —
   // fail-closed, and the concrete default is the operations spec's to fix — so

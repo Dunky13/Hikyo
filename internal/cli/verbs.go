@@ -74,6 +74,8 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"folder":           runFolder,
 	"key":              runKey,
 	"values":           runValues,
+	"revision":         runRevision,
+	"rotate-token-key": runRotateTokenKey,
 	"instance-config":  runInstanceConfig,
 	"doctor":           runDoctor,
 	"access":           runAccess,
@@ -141,13 +143,16 @@ hierarchy:
 values:                                            --env selects the environment
   hikyo values list [--reveal] [--output-file PATH | --dangerously-print]
   hikyo values get <KEY> [--reveal] [--output-file PATH | --dangerously-print]
-  hikyo values set <KEY> (--stdin | --value-file PATH)   never a value on argv
-  hikyo values set <KEY> --clear                    clear to absent
+  hikyo values set <KEY> (--stdin | --value-file PATH)   stages; publish commits
+  hikyo values set <KEY> --clear                    stages a clear to absent
   hikyo values declare <KEY> --envs <env,env> (--stdin | --value-file PATH)
   hikyo values diff --left <env> --right <env> [--reveal] [--output-file PATH | --dangerously-print]
   hikyo values copy --from <env> --to <env,env> --keys <KEY,KEY> [--confirm-protected]
   hikyo values import --file <values-file> [--manifest <run-manifest.json>]
       [--overwrite KEY,KEY]                       strict: undeclared keys are refused
+  hikyo values pending                              your drafts, and the ids to publish
+  hikyo values publish --versions <id,id>           selective; closes over key groups
+  hikyo values export [--revision N] [--reveal] [--output-file PATH | --dangerously-print]
 
 import:                                            authors artifacts, then stops
   hikyo import --from <k8s|sops|infisical> --project <p> --environment <e>
@@ -160,6 +165,11 @@ import:                                            authors artifacts, then stops
   state moved since you reviewed it. --env names the SOURCE slice inside an
   export; --environment names the target. Nothing is renamed invisibly and
   nothing already set is overwritten without naming it.
+
+revisions:                                         --env selects the environment
+  hikyo revision list                               lineage only, never values
+  hikyo revision show [<N>|latest]                  carries the change token
+  hikyo rotate-token-key --yes                      new token key; one full fetch, no restart wave
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

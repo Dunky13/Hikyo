@@ -307,6 +307,26 @@ const (
 	// investigator filtering "who read this key" must not have to know four
 	// spellings.
 	EventValueRevealed EventType = "disclosure.value_revealed"
+	// value.staged records an edit landing in the actor's own WORKING STATE
+	// (#51). It is deliberately its own type rather than a `value.set` with a
+	// flag: a draft delivers nothing, so an investigator asking "when did this
+	// environment start delivering X" must not have to filter staged edits out
+	// of the answer. It carries the immutable version id, which is what a
+	// later revision.published names, so the two events chain without either
+	// carrying material.
+	EventValueStaged EventType = "value.staged"
+	// revision.published records ONE environment advancing to a new revision.
+	// Every materialization emits it -- a selective publish, a declare, a copy,
+	// a clone, an environment's creation, and a semantic schema change's
+	// fan-out -- with `trigger` saying which act produced it. It records
+	// numbers, never keys' values: `changed_keys` is a COUNT, because the names
+	// live in the revision lineage, which has its own permanent retention.
+	EventRevisionPublished EventType = "revision.published"
+	// crypto.token_key_rotated records `rotate-token-key`. Instance trail,
+	// because the root token key is instance-scoped crypto material; the
+	// payload is the new version and nothing else, since a token key is never
+	// exported, displayed or compared.
+	EventTokenKeyRotated EventType = "crypto.token_key_rotated"
 	// disclosure.value_copied is one event per key per DESTINATION for every
 	// server-side duplication: copy-to, bulk-apply and clone-at-creation. It
 	// records the source environment, because "material this environment's
@@ -1085,12 +1105,44 @@ var registry = map[EventType]TypeSpec{
 		"name":           {Kind: KindFreeText, Required: true},
 		"classification": {Kind: KindString, Required: true},
 	}),
-	// cell | diff | copy | clone — where the plaintext went. Never what it was.
+	// cell | diff | copy | clone | export — where the plaintext went. Never
+	// what it was. `revision` is present only on the export surface, which is
+	// the one disclosure that reads a snapshot rather than the live cell, and
+	// an investigator needs to know WHICH revision was opened.
 	EventValueRevealed: hierarchyEvent(Schema{
-		"key_id":  {Kind: KindString, Required: true},
-		"name":    {Kind: KindFreeText, Required: true},
-		"surface": {Kind: KindString, Required: true},
+		"key_id":   {Kind: KindString, Required: true},
+		"name":     {Kind: KindFreeText, Required: true},
+		"surface":  {Kind: KindString, Required: true},
+		"revision": {Kind: KindInt},
 	}),
+	// Drafts and publishing (#51).
+	EventValueStaged: hierarchyEvent(Schema{
+		"key_id":         {Kind: KindString, Required: true},
+		"name":           {Kind: KindFreeText, Required: true},
+		"classification": {Kind: KindString, Required: true},
+		"operation":      {Kind: KindString, Required: true},
+		"version_id":     {Kind: KindString, Required: true},
+	}),
+	EventRevisionPublished: hierarchyEvent(Schema{
+		"revision":        {Kind: KindInt, Required: true},
+		"schema_revision": {Kind: KindInt, Required: true},
+		"changed_keys":    {Kind: KindInt, Required: true},
+		"pending_count":   {Kind: KindInt, Required: true},
+		"trigger":         {Kind: KindString, Required: true},
+	}),
+	EventTokenKeyRotated: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			// Spelled `key_version`, not `token_key_version`: invariant 4's
+			// schema half forbids a `token_`-prefixed payload field, and the
+			// guard is a name-shape rule worth keeping literal rather than
+			// carving an exception into.
+			"key_version": {Kind: KindInt, Required: true},
+		},
+	},
 	// `operation` is copy | bulk-apply | clone: the same formula authorizes
 	// all three, and the trail still has to say which act it was.
 	EventValueCopied: hierarchyEvent(Schema{

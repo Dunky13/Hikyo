@@ -205,6 +205,9 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		db.Close()
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
+	// The advisory channel is in-process fan-out: one per server, wired into
+	// every surface that announces a change.
+	advisory := service.NewAdvisory()
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin}
 	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
@@ -242,17 +245,21 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// The keyring reaches the value surface (#50): clone-at-creation and
 		// every value write re-seal under the project data key, in the
 		// transaction that writes the row.
-		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc},
+		Environments: &service.Environments{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
 		Folders:      &service.Folders{DB: db},
-		Keys:         &service.Keys{DB: db},
+		Keys:         &service.Keys{DB: db, Keyring: kr, Advisory: advisory},
 		// The reveal ceremony (#58): the value surface's disclosure routes
 		// consume the SAME reauthentication window machinery the passkey and
 		// TOTP reauth endpoints open, so both sides take the one Auth. A
 		// Values without it refuses every disclosure rather than disclosing
 		// without a ceremony.
-		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc},
+		// One Advisory across the value and revision surfaces: staging and
+		// publishing both announce on the same channel, and two channels would
+		// mean a subscriber saw half the events.
+		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
+		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
-		KeyGroups: &service.KeyGroups{DB: db},
+		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory},
 		// One Auth across the grant surface, the settings knob and the machine
 		// identity surface: the reauthentication conjunct a machine widening
 		// carries is the SAME window machinery human disclosure consumes, so

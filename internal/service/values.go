@@ -70,6 +70,9 @@ const (
 type Values struct {
 	DB      *store.DB
 	Keyring *crypto.Keyring
+	// Advisory receives the metadata-only staging events, AFTER commit. Nil
+	// disables the channel; correctness never depends on delivery.
+	Advisory *Advisory
 	// Auth supplies the reveal guard (#58): every route in the formula table
 	// that carries a `reveal` conjunct consumes this session's reauthentication
 	// window over the environment it discloses in, for exactly the keys it
@@ -389,15 +392,137 @@ func openCell(sealer *crypto.ProjectSealer, entry store.ValueEntry) (string, err
 	return string(plain), nil
 }
 
-// Set writes one value into one environment: the actor SUPPLIES the plaintext,
-// so no reveal is involved on any side — the formula is `edit ∧ publish` on the
-// environment that is about to deliver it.
-func (s *Values) Set(ctx context.Context, actor Actor, scope domain.Scope, keyName, value string) (ValueCell, error) {
-	cells, err := s.declare(ctx, actor, scope, []string{string(scope.Env)}, keyName, value)
-	if err != nil {
-		return ValueCell{}, err
+// StagedChange is one draft as reported to its owner.
+type StagedChange struct {
+	// VersionID is the immutable version id a selective publish names.
+	VersionID          string
+	KeyID              string
+	Name               string
+	Classification     string
+	Operation          string
+	StagedFromRevision int64
+	CreatedAt          time.Time
+}
+
+// Set stages one edit into the caller's own working state.
+//
+// IT PUBLISHES NOTHING. An edit to a `(key, environment)` is saved immediately
+// as a pending change owned by the caller, recorded against the published
+// revision it was staged from, and delivery does not move until a publish names
+// its version id. The formula is therefore `edit` ALONE -- `edit` confers no
+// delivery power, and edit-without-publish IS the propose-and-review flow the
+// permission ADR says it is.
+//
+// SAVING IS FREE. The value is not validated here and a `required_in` key may
+// be cleared here: a draft is the user's scratchpad, and blocking a save pushes
+// work in progress into external notepads, which for secrets is exactly where
+// it must not go. Every one of those refusals lives at publish instead.
+func (s *Values) Set(ctx context.Context, actor Actor, scope domain.Scope, keyName, value string) (StagedChange, error) {
+	return s.stage(ctx, actor, scope, keyName, store.PendingSet, value)
+}
+
+// Unset stages a clear: the cell goes to `absent` when the draft is published.
+func (s *Values) Unset(ctx context.Context, actor Actor, scope domain.Scope, keyName string) (StagedChange, error) {
+	return s.stage(ctx, actor, scope, keyName, store.PendingUnset, "")
+}
+
+func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, keyName string,
+	operation store.PendingOperation, value string) (StagedChange, error) {
+	if scope.Env == "" {
+		return StagedChange{}, fmt.Errorf("%w: a value addresses an environment", domain.ErrInvalid)
 	}
-	return cells[0], nil
+	sealer, err := s.sealer(ctx, actor, authz.OpValueStage, scope)
+	if err != nil {
+		return StagedChange{}, err
+	}
+	var out StagedChange
+	var keyID, keyNameOut string
+	var owner domain.PrincipalID
+	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		out = StagedChange{}
+		caller, err := actor.resolve(ctx, az, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpValueStage, scope)
+		if err != nil {
+			return err
+		}
+		// One serialization domain per project: the draft records the published
+		// entry it was staged against, and a concurrent publish must not slip
+		// between reading that entry and writing the row that pins it.
+		if err := r.Projects().Lock(ctx, p); err != nil {
+			return err
+		}
+		key, err := findKey(ctx, r.Catalogue(), p, keyName)
+		if err != nil {
+			return err
+		}
+		revision, err := currentRevision(ctx, r, p)
+		if err != nil {
+			return err
+		}
+		baseline := ""
+		switch entry, err := r.Values().Get(ctx, p, key.ID); {
+		case errors.Is(err, domain.ErrNotFound):
+			// `absent` at staging time. The empty string is the baseline, and it
+			// is a real value here rather than a missing one: a cell that gains
+			// a published value after this point makes the draft stale.
+		case err != nil:
+			return err
+		default:
+			baseline = entry.ID
+		}
+		versionID, err := newID("pcv")
+		if err != nil {
+			return err
+		}
+		var sealed []byte
+		if operation == store.PendingSet {
+			if sealed, err = sealer.SealField(
+				pendingAAD(string(scope.Org), string(scope.Project), string(scope.Env), key.ID, versionID),
+				[]byte(schema.Normalize(value))); err != nil {
+				return err
+			}
+		}
+		now := store.CanonTime(time.Now())
+		if err := r.Pending().Stage(ctx, p, store.NewPendingChange{
+			ID: versionID, KeyID: key.ID, OwnerID: string(caller.Principal),
+			Operation: operation, Ciphertext: sealed,
+			StagedFromRevision: revision, StagedFromEntry: baseline, CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+		ev, err := domainEvent(ctx, audit.EventValueStaged, caller.Principal,
+			audit.Object{Type: "key", ID: key.ID}, audit.Payload{
+				"key_id":         key.ID,
+				"name":           audit.SanitizeFreeText(key.Name),
+				"classification": key.Classification,
+				"operation":      string(operation),
+				"version_id":     versionID,
+			})
+		if err != nil {
+			return err
+		}
+		if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+			return err
+		}
+		keyID, keyNameOut, owner = key.ID, key.Name, caller.Principal
+		out = StagedChange{
+			VersionID: versionID, KeyID: key.ID, Name: key.Name,
+			Classification: key.Classification, Operation: string(operation),
+			StagedFromRevision: revision, CreatedAt: now,
+		}
+		return nil
+	})
+	if err != nil {
+		return StagedChange{}, err
+	}
+	// Post-commit: the matrix's quieter "another user has a pending change here"
+	// marker is exactly this fact, and it must not be announced for a draft
+	// whose transaction rolled back.
+	s.Advisory.staged(scope, keyID, keyNameOut, owner)
+	return out, nil
 }
 
 // Declare is declare-into-environments: ONE supplied plaintext into several
@@ -433,8 +558,9 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 		return nil, err
 	}
 	var out []ValueCell
+	var advanced []PublishedEnvironment
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		out = nil
+		out, advanced = nil, nil
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -481,6 +607,16 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 			if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
 				return err
 			}
+			// Declare is a supplied-plaintext write that DELIVERS -- its locked
+			// formula carries `publish` on every destination, and #50 shipped it
+			// as an immediate write. It therefore materializes each destination
+			// rather than staging: a value that is authorized as delivered and
+			// then does not deliver would be a third state nobody asked for.
+			env, err := republish(ctx, r, az, caller, sealer, s.Keyring, envScope, time.Now().UTC(), "declare")
+			if err != nil {
+				return err
+			}
+			advanced = append(advanced, env)
 			out = append(out, ValueCell{
 				KeyID: key.ID, Name: key.Name, Classification: key.Classification,
 				Set: true, UpdatedAt: updatedAt, UpdatedBy: string(caller.Principal),
@@ -491,63 +627,8 @@ func (s *Values) declare(ctx context.Context, actor Actor, scope domain.Scope, e
 	if err != nil {
 		return nil, err
 	}
+	s.Advisory.published(scope, advanced)
 	return out, nil
-}
-
-// Clear takes a cell to `absent`. With nothing to inherit from, this is the
-// whole of "remove this value now" — the superseded model's delete-vs-mask
-// distinction dissolved with the layers that made it a distinction.
-//
-// A key `required_in` this environment refuses to be cleared, naming key and
-// environment: what commits here is what the environment delivers, so clearing
-// it would leave a required key absent — the publish veto, evaluated at the
-// only moment this slice has.
-func (s *Values) Clear(ctx context.Context, actor Actor, scope domain.Scope, keyName string) error {
-	return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
-		caller, err := actor.resolve(ctx, az, time.Now().UTC())
-		if err != nil {
-			return err
-		}
-		p, err := az.Authorize(ctx, caller, authz.OpValueClear, scope)
-		if err != nil {
-			return err
-		}
-		if err := r.Projects().Lock(ctx, p); err != nil {
-			return err
-		}
-		key, err := findKey(ctx, r.Catalogue(), p, keyName)
-		if err != nil {
-			return err
-		}
-		rows, err := r.Catalogue().ListPresence(ctx, p)
-		if err != nil {
-			return err
-		}
-		if presenceOfKey(key, rows).Required.Covers(string(scope.Env)) {
-			return fmt.Errorf("%w: key %q is `required_in` environment %s and cannot be cleared there",
-				domain.ErrInvalid, key.Name, scope.Env)
-		}
-		existed, err := r.Values().Clear(ctx, p, key.ID)
-		if err != nil {
-			return err
-		}
-		// Clearing an already-absent cell is a no-op success: nothing
-		// transitioned, so no value.cleared event is emitted for a change that
-		// never happened. The response stays uniform — a 2xx either way.
-		if !existed {
-			return nil
-		}
-		ev, err := domainEvent(ctx, audit.EventValueCleared, caller.Principal,
-			audit.Object{Type: "key", ID: key.ID}, audit.Payload{
-				"key_id":         key.ID,
-				"name":           audit.SanitizeFreeText(key.Name),
-				"classification": key.Classification,
-			})
-		if err != nil {
-			return err
-		}
-		return r.Audit().InsertTenant(ctx, p, ev)
-	})
 }
 
 // Get reads one cell. reveal asks for `secret` plaintext and carries the
@@ -919,8 +1000,10 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 		return CopyResult{}, err
 	}
 	var out CopyResult
+	var advanced []PublishedEnvironment
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out = CopyResult{}
+		advanced = nil
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -966,12 +1049,19 @@ func (s *Values) Copy(ctx context.Context, actor Actor, scope domain.Scope, req 
 			if err != nil {
 				return err
 			}
+			published, err := republish(ctx, r, az, caller, sealer, s.Keyring, destScope,
+				store.CanonTime(time.Now()), operation)
+			if err != nil {
+				return err
+			}
+			advanced = append(advanced, published)
 		}
 		return nil
 	})
 	if err != nil {
 		return CopyResult{}, err
 	}
+	s.Advisory.published(scope, advanced)
 	return out, nil
 }
 

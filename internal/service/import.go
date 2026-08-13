@@ -333,8 +333,12 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 	}
 
 	var result ImportResult
+	var published PublishedEnvironment
+	advanced := false
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		result = ImportResult{}
+		published = PublishedEnvironment{}
+		advanced = false
 		caller, err := actor.resolve(ctx, az, time.Now().UTC())
 		if err != nil {
 			return err
@@ -421,6 +425,18 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 		}
 		sort.Strings(result.Imported)
 		sort.Strings(result.Skipped)
+		// Import is an immediate, publish-authorized bulk write, like declare and
+		// copy. Materialize its final state once, after every cell has landed, so
+		// delivery and revision history advance atomically with the import rather
+		// than exposing value_entries that no committed snapshot contains.
+		if len(result.Imported) > 0 {
+			published, err = republish(ctx, r, az, caller, sealer, s.Keyring, scope,
+				store.CanonTime(time.Now()), "import")
+			if err != nil {
+				return err
+			}
+			advanced = true
+		}
 
 		run, err := domainEvent(ctx, audit.EventValueImported, caller.Principal,
 			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{
@@ -435,6 +451,9 @@ func (s *Values) Import(ctx context.Context, actor Actor, scope domain.Scope, re
 	})
 	if err != nil {
 		return ImportResult{}, err
+	}
+	if advanced {
+		s.Advisory.published(scope, []PublishedEnvironment{published})
 	}
 	return result, nil
 }

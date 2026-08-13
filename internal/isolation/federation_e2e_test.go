@@ -4,8 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -115,14 +117,77 @@ func seedDeliveryCatalogue(t *testing.T, db *store.DB) {
 	t.Helper()
 	for _, stmt := range []string{
 		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at)
-		 VALUES ('key_fed_url', 'org_a', 'prj_a1', 'DATABASE_URL', '', 'config', '', FALSE, '', '{}', 'all', 'none', NULL, ` + ts + `)`,
+		 VALUES ('key_fed_url', 'org_a', 'prj_a1', 'DATABASE_URL', '', 'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
 		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at)
-		 VALUES ('key_fed_pw', 'org_a', 'prj_a1', 'DATABASE_PASSWORD', '', 'secret', '', FALSE, '', '{}', 'explicit', 'none', NULL, ` + ts + `)`,
-		`INSERT INTO key_presence_environments (org_id, project_id, key_id, environment_id, rule)
-		 VALUES ('org_a', 'prj_a1', 'key_fed_pw', 'env_a1', 'required')`,
+		 VALUES ('key_fed_pw', 'org_a', 'prj_a1', 'DATABASE_PASSWORD', '', 'secret', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
 	} {
 		execRaw(t, db, stmt)
 	}
+	// #51: DELIVERY READS ONLY COMMITTED SNAPSHOTS, or fails closed. Seeding
+	// the catalogue is therefore no longer enough to make a fetch answer — the
+	// environments must be MATERIALIZED, and an environment is materialized by
+	// publishing into it.
+	//
+	// Both keys get real values, which is also what makes the change-token
+	// assertions meaningful for the first time: the manifest is
+	// `(key, classification, value)` triples, so a token that did not move with
+	// a value would be a token no consumer could use.
+	//
+	// NEITHER KEY CARRIES A PRESENCE RULE, and that is deliberate under #51.
+	// A `required_in` rule is a standing obligation on every LATER
+	// materialization of that environment — and this fixture's project is
+	// shared with the audit suite, which creates environments and keys of its
+	// own afterwards. A `mode: all` requirement here would veto those,
+	// coupling two unrelated suites through the schema. The presence veto has
+	// its own scenarios; this fixture only needs values that deliver.
+	// `definitions-edit` rides along because a semantic schema change is now
+	// part of what the delivery tests exercise: reclassification and presence
+	// edits are the two ways a snapshot moves without a value moving.
+	for i, capability := range []string{"edit", "publish", "definitions-edit"} {
+		execRaw(t, db, fmt.Sprintf(
+			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+			 VALUES ('g_del_%d', '%s', '%s', 'org_a', 'prj_a1', NULL, %s)`,
+			i, identAdmin, capability, ts))
+	}
+	// Both env_a1 keys land in ONE publish, which is also the ordinary shape:
+	// a publish names a set of version ids and materializes once.
+	publishDeliveryValues(t, db, envA1, map[string]string{
+		"DATABASE_URL": "postgres://dev", "DATABASE_PASSWORD": "dev-secret",
+	})
+	publishDeliveryValues(t, db, envProd, map[string]string{"DATABASE_URL": "postgres://prod"})
+}
+
+// publishDeliveryValues stages a batch of values and publishes exactly those
+// versions, as the fixture administrator. It is the two-step every delivering
+// write is made of under #51: `edit` stages, `publish` commits, and nothing
+// delivers in between.
+func publishDeliveryValues(t *testing.T, db *store.DB, env domain.EnvID, values map[string]string) {
+	t.Helper()
+	actor := service.LocalPrincipal(identAdmin)
+	scope := scopeEnv(orgA, prjA1, env)
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	versions := make([]string, 0, len(names))
+	for _, name := range names {
+		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name])
+		if err != nil {
+			t.Fatalf("stage %s in %s: %v", name, env, err)
+		}
+		versions = append(versions, staged.VersionID)
+	}
+	if _, err := revisionSvc(t, db).Publish(t.Context(), actor, scope, versions); err != nil {
+		t.Fatalf("publish %v in %s: %v", names, env, err)
+	}
+}
+
+// revisionSvc is the publish pipeline with a live keyring: a snapshot is
+// sealed material, so there is nothing to fake here either.
+func revisionSvc(t *testing.T, db *store.DB) *service.Revisions {
+	t.Helper()
+	return &service.Revisions{DB: db, Keyring: probeKeyring(t, db)}
 }
 
 // grantMachineRead gives a service account `read` at one environment through the
@@ -269,13 +334,14 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			for _, k := range res.Keys {
 				presence[k.Name] = k.Presence
 			}
-			if presence["DATABASE_PASSWORD"] != delivery.PresenceRequired {
-				t.Errorf("secret presence for DATABASE_PASSWORD = %q, want required in env_a1",
-					presence["DATABASE_PASSWORD"])
-			}
-			if presence["DATABASE_URL"] != delivery.PresenceRequired {
-				t.Errorf("config presence for DATABASE_URL = %q, want required (mode: all)",
-					presence["DATABASE_URL"])
+			// Every delivered key is `set`: it is in the payload because the
+			// snapshot RESOLVED it. The declared presence rule is no longer
+			// what a fetch reports — the delivered key set is exactly the keys
+			// that resolve, under the schema revision the snapshot pinned.
+			for _, name := range []string{"DATABASE_PASSWORD", "DATABASE_URL"} {
+				if presence[name] != delivery.PresenceSet {
+					t.Errorf("presence for %s = %q, want set (the snapshot delivers it)", name, presence[name])
+				}
 			}
 
 			// THE DEFAULT AUDIENCE IS REFUSED. Same identity, same signature,
@@ -1333,6 +1399,50 @@ func TestFederationTokenCapsSQLite(t *testing.T) {
 	if n := queryInt(t, db,
 		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%unknown-issuer%'"); n == 0 {
 		t.Error("the unknown-issuer refusal was not recorded by cause")
+	}
+}
+
+func TestFederationTokenAgeCannotExpireMidFlightSQLite(t *testing.T) {
+	runFederationTokenAgeCannotExpireMidFlight(t, seededDB(t, openSQLite))
+}
+
+func TestFederationTokenAgeCannotExpireMidFlightPostgres(t *testing.T) {
+	runFederationTokenAgeCannotExpireMidFlight(t, seededDB(t, openPostgres))
+}
+
+// runFederationTokenAgeCannotExpireMidFlight proves the authoritative,
+// in-transaction binding check revalidates Hikyo's own age cap. Signature-time
+// validation happens before OnValidated; advancing the clock there models a
+// slow delivery preflight without sleeping.
+func runFederationTokenAgeCannotExpireMidFlight(t *testing.T, db *store.DB) {
+	r := newFedRig(t, db)
+	shape := oidctest.KubernetesShape("prod", "age-racer", "uid-age-racer", "https://kubernetes.default.svc")
+	r.configureIssuer(t, domain.IssuerKubernetes, []string{shape.DefaultAudience})
+	r.bindShape(t, "wl-age-race", shape, hikyoAudience)
+
+	token, err := r.idp.MintShape(shape, hikyoAudience, r.clk.Now(), oidcfed.MaxTokenSpan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validated := false
+	r.fed.OnValidated = func() {
+		validated = true
+		r.clk.advance(oidcfed.MaxTokenAge + time.Second)
+		r.fed.OnValidated = nil
+	}
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("token crossing the age cap during validation = %v, want the uniform refusal", err)
+	}
+	if !validated {
+		t.Fatal("OnValidated was not called; mid-flight timing was not tested")
+	}
+	if n := queryInt(t, db,
+		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%token-age%'"); n != 1 {
+		t.Fatalf("mid-flight age-cap refusal audit count = %d, want 1 token-age event", n)
+	}
+	if n := queryInt(t, db,
+		"SELECT COUNT(*) FROM audit_instance_events WHERE type = 'identity.federation_refused' AND payload LIKE '%unbound%'"); n != 0 {
+		t.Fatalf("mid-flight age-cap refusal was misclassified as unbound %d time(s)", n)
 	}
 }
 

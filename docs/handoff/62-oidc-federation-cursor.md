@@ -409,15 +409,19 @@ accepts, which is precisely the gap the predicate exists to close.
    disposition. The fetch path now exists but delivers **no plaintext**, so a
    disclosure event naming a key whose value was not disclosed would be a false
    record. Reasoning is recorded in `internal/audit/registry.go`.
-5. **The in-transaction refusal leg records ONE cause (`unbound`).** Which of
+5. **Binding-dependent failures on the in-transaction refusal leg record ONE
+   cause (`unbound`).** Which of
    "unbound identity", "revoked binding" and "failed binding predicate" happened
    is exactly what the uniform response withholds — and, more concretely, the
    resolution surface hands the predicate a *decoy* binding on a miss (so the
    unbound case is not the cheap case), which means the predicate's verdict on a
    miss is the decoy's. Reporting it as a cause would sometimes report the decoy.
+   Caller-invariant timing failures rechecked on this leg are the exception:
+   they depend only on the signed claims and authoritative clock, so token age
+   remains individually reported without revealing whether a binding exists.
    The pre-transaction causes (unknown issuer, unavailable keys, stale keys,
-   signature, token age, audience) *are* reported individually, because nothing
-   decoy-shaped produces them.
+   signature, token age, audience) are likewise reported individually, because
+   nothing decoy-shaped produces them.
 6. **Bindings share `max_live_credentials` and the lifetime clamp/enumeration
    with bearer tokens.** That is what the ADR asks for (same ceiling, same
    opt-in), and it is a consequence of the one-table decision: a service account

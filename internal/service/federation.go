@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dunky13/hikyo/internal/admission"
@@ -691,9 +692,24 @@ type FederatedCaller struct {
 	// Check is the binding half of validation, closed over the issuer
 	// configuration and the token's claims. The chokepoint refuses a nil one.
 	Check authz.BindingPredicate
-	// Cause is the closed refusal cause when validation failed, for the audit
-	// event. Empty on success.
-	Cause string
+	// refusalCause carries only caller-invariant failures discovered by the
+	// in-transaction predicate. Binding-dependent failures stay collapsed to
+	// `unbound`, because the predicate also runs against a decoy binding.
+	refusalCause *federationRefusalCause
+}
+
+type federationRefusalCause struct{ value atomic.Pointer[string] }
+
+func (c *federationRefusalCause) store(value string) {
+	v := value
+	c.value.Store(&v)
+}
+
+func (c *federationRefusalCause) load() string {
+	if value := c.value.Load(); value != nil {
+		return *value
+	}
+	return ""
 }
 
 // Authenticate is the PRE-TRANSACTION half of federated authentication: peek at
@@ -776,9 +792,11 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 	if s.OnValidated != nil {
 		s.OnValidated()
 	}
+	postValidationCause := &federationRefusalCause{}
 	return FederatedCaller{
-		IssuerID: issuer.ID,
-		Subject:  claims.Subject,
+		IssuerID:     issuer.ID,
+		Subject:      claims.Subject,
+		refusalCause: postValidationCause,
 		Check: func(current authz.FederationIssuer, b authz.Binding) error {
 			// THE POLICY THIS REQUEST WAS VALIDATED UNDER MUST STILL BE THE
 			// CURRENT ONE. Everything above ran outside a transaction against
@@ -797,7 +815,7 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 			// The IN-TRANSACTION row feeds the check, not the snapshot, so even a
 			// change this comparison somehow failed to notice cannot widen what is
 			// accepted.
-			return oidcfed.CheckBinding(oidcfed.Issuer{
+			err := oidcfed.CheckBinding(oidcfed.Issuer{
 				ID: current.ID, Issuer: current.Issuer, Type: current.Type,
 				Mode: current.Mode, StaticJWKS: current.StaticJWKS,
 				RefusedAudiences: current.RefusedAudiences,
@@ -805,7 +823,19 @@ func (s *Federation) Authenticate(ctx context.Context, presented string) (Federa
 				Audience:           b.Audience,
 				RequiredClaimsJSON: b.RequiredClaimsJSON,
 				ReactivatedAt:      b.ReactivatedAt,
-			}, claims, now)
+				// The clock is read when the PREDICATE runs -- inside the
+				// authorizing transaction -- not captured at validation time. The
+				// sealer preflight between the two can take real time, and a token
+				// whose `exp`, `nbf`, or Hikyo-owned age cap passes during it must
+				// be refused by the authentication this delivery actually rides.
+			}, claims, s.now())
+			// Timing failures depend only on the presented token and the
+			// authoritative clock, never on the real-or-decoy binding. Preserve
+			// their audit cause; every binding-dependent failure remains `unbound`.
+			if errors.Is(err, oidcfed.ErrTokenAge) || errors.Is(err, oidcfed.ErrTokenInvalid) {
+				postValidationCause.store(refusalCause(err))
+			}
+			return err
 		},
 	}, nil
 }
@@ -848,8 +878,11 @@ func issuerPolicyMoved(before, current authz.FederationIssuer) bool {
 // PRE-transaction causes (unknown issuer, unavailable or stale keys, signature,
 // token age, audience) are reported individually, because nothing decoy-shaped
 // is involved in producing them.
-func (s *Federation) RecordBindingRefusal(ctx context.Context, issuer string) error {
-	return s.recordRefusal(ctx, issuer, causeFedUnbound)
+func (s *Federation) RecordBindingRefusal(ctx context.Context, issuer, cause string) error {
+	if cause == "" {
+		cause = causeFedUnbound
+	}
+	return s.recordRefusal(ctx, issuer, cause)
 }
 
 // refusalCause maps a validation error onto the closed audit enum. By class,

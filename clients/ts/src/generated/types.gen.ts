@@ -400,6 +400,194 @@ export type ClonedEnvironment = {
 };
 
 /**
+ * One draft in the caller's own working state. `version_id` is the
+ * IMMUTABLE id a selective publish names; editing the same cell mints a
+ * new one and collects this row rather than mutating it.
+ *
+ * It never carries the staged value. A draft holds real material and that
+ * material is reveal-gated exactly as a published one is.
+ *
+ */
+export type PendingChange = {
+    version_id: Id;
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    /**
+     * What publishing this draft does to the cell.
+     */
+    operation: 'set' | 'unset';
+    /**
+     * The environment's published revision when the edit was staged.
+     * Provenance a client shows; the freshness check is per entry.
+     *
+     */
+    staged_from_revision: number;
+    created_at: string;
+};
+
+export type PublishRequest = {
+    /**
+     * The pending-change version ids to commit. Naming an id the caller
+     * does not own, or one that has been superseded or already published,
+     * is refused loud rather than resolved to whatever the owner typed
+     * since.
+     *
+     */
+    version_ids: Array<Id>;
+};
+
+export type PublishResult = {
+    /**
+     * Every version id that committed, closure included.
+     */
+    published: Array<Id>;
+    /**
+     * The version ids key-group closure pulled in beyond what the caller
+     * named, so the caller can tell what it asked for from what the
+     * coupling required.
+     *
+     */
+    closed_in: Array<Id>;
+    environments: Array<PublishedEnvironment>;
+};
+
+export type PublishedEnvironment = {
+    environment_id: Id;
+    revision: number;
+    /**
+     * The pinned schema revision this snapshot was validated at.
+     */
+    schema_revision: number;
+    /**
+     * The keyed, versioned change token for this snapshot. Non-secret by
+     * construction: it is an HMAC under a per-scope key, so it is
+     * unforgeable and un-invertible, which is why it may travel in pod
+     * annotations and logs.
+     *
+     */
+    change_token: string;
+    changed_keys: Array<ChangedKey>;
+};
+
+/**
+ * One lineage row. It carries a key id, the key's name at that revision
+ * and the transition - and nothing derived from a value.
+ *
+ */
+export type ChangedKey = {
+    key_id: Id;
+    name: KeyName;
+    change: 'added' | 'edited' | 'removed';
+};
+
+export type RevisionList = {
+    items: Array<Revision>;
+    count: number;
+};
+
+export type Revision = {
+    revision: number;
+    schema_revision: number;
+    published_by: Id;
+    published_at: string;
+    changed_keys: Array<ChangedKey>;
+};
+
+export type RevisionDetail = {
+    revision: number;
+    schema_revision: number;
+    published_by: Id;
+    published_at: string;
+    changed_keys: Array<ChangedKey>;
+    change_token: string;
+    /**
+     * The delivered key set of THIS revision, under the schema revision
+     * it pinned. Names and classifications only; values live behind the
+     * export verb and its formula.
+     *
+     */
+    keys: Array<SnapshotKey>;
+};
+
+export type SnapshotKey = {
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+};
+
+export type EnvironmentSignals = {
+    environment_id: Id;
+    /**
+     * The environment's current published revision, 0 when never materialized.
+     */
+    revision: number;
+    cells: Array<CellSignal>;
+};
+
+export type CellSignal = {
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    pending_version_id?: Id;
+    pending_operation?: 'set' | 'unset';
+    /**
+     * At least one OTHER principal holds a draft here. Write-presence and
+     * nothing more: no id, no owner, no operation.
+     *
+     */
+    pending_by_others: boolean;
+    /**
+     * Set to the environment's LATEST revision when this cell changed in it, absent otherwise. This is the revision ADR's "recently changed" signal, which names only the last published revision -- it is not a per-cell last-change history; older changes live in the revision list.
+     */
+    changed_in_revision?: number;
+};
+
+export type ExportValuesRequest = {
+    /**
+     * The revision to export; omitted means the latest.
+     */
+    revision?: number;
+    /**
+     * Ask for `secret` plaintext. Without it a `secret` key reports
+     * write-presence and no value; `config` values are returned either
+     * way, because classification IS the sensitivity boundary.
+     *
+     */
+    reveal?: boolean;
+};
+
+export type ExportedValues = {
+    /**
+     * The revision actually served.
+     */
+    revision: number;
+    items: Array<ExportedValue>;
+    count: number;
+};
+
+export type ExportedValue = {
+    name: KeyName;
+    classification: KeyClassification;
+    revealed: boolean;
+    /**
+     * Present only when `revealed` is true.
+     */
+    value?: string;
+};
+
+export type TokenKeyRotation = {
+    /**
+     * The new root token key version. Operator bookkeeping only - the
+     * change token's public contract carries the SCHEME version, never
+     * the key version, because a consumer that could tell key versions
+     * apart could tell a rotation from a content change.
+     *
+     */
+    token_key_version: number;
+};
+
+/**
  * One `(key, environment)` cell.
  *
  * PRESENCE IS THE SINGLE BOOLEAN `set`. That is the whole presence
@@ -1038,12 +1226,14 @@ export type DeliveredKey = {
     name: string;
     classification: KeyClassification;
     /**
-     * The key's declared presence for the addressed environment. When
-     * values land this enumeration gains `set`, and the change token starts
-     * moving with values.
+     * What the fetch reports about this key in the addressed
+     * environment. `set` is a key the committed snapshot actually
+     * delivers (#51 -- values landed, and the change token moves with
+     * them); the other three are the declared presence rules for keys
+     * the snapshot does not carry.
      *
      */
-    presence: 'required' | 'forbidden' | 'optional';
+    presence: 'required' | 'forbidden' | 'optional' | 'set';
 };
 
 /**
@@ -6537,9 +6727,9 @@ export type ClearValueError = ClearValueErrors[keyof ClearValueErrors];
 
 export type ClearValueResponses = {
     /**
-     * The cell is absent. Clearing an already-absent cell says the same thing.
+     * The staged pending change.
      */
-    204: void;
+    200: PendingChange;
 };
 
 export type ClearValueResponse = ClearValueResponses[keyof ClearValueResponses];
@@ -6681,9 +6871,9 @@ export type SetValueError = SetValueErrors[keyof SetValueErrors];
 
 export type SetValueResponses = {
     /**
-     * The cell as stored. It never echoes the value back.
+     * The staged pending change. It never echoes the value back.
      */
-    200: ValueCell;
+    200: PendingChange;
 };
 
 export type SetValueResponse = SetValueResponses[keyof SetValueResponses];
@@ -12493,3 +12683,429 @@ export type ScimSearchGroupsErrors = {
 };
 
 export type ScimSearchGroupsError = ScimSearchGroupsErrors[keyof ScimSearchGroupsErrors];
+
+export type PublishPendingChangesData = {
+    body: PublishRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish';
+};
+
+export type PublishPendingChangesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type PublishPendingChangesError = PublishPendingChangesErrors[keyof PublishPendingChangesErrors];
+
+export type PublishPendingChangesResponses = {
+    /**
+     * What committed, and which environments advanced.
+     */
+    200: PublishResult;
+};
+
+export type PublishPendingChangesResponse = PublishPendingChangesResponses[keyof PublishPendingChangesResponses];
+
+export type GetEnvironmentSignalsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals';
+};
+
+export type GetEnvironmentSignalsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetEnvironmentSignalsError = GetEnvironmentSignalsErrors[keyof GetEnvironmentSignalsErrors];
+
+export type GetEnvironmentSignalsResponses = {
+    /**
+     * The environment's signals.
+     */
+    200: EnvironmentSignals;
+};
+
+export type GetEnvironmentSignalsResponse = GetEnvironmentSignalsResponses[keyof GetEnvironmentSignalsResponses];
+
+export type ListRevisionsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions';
+};
+
+export type ListRevisionsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListRevisionsError = ListRevisionsErrors[keyof ListRevisionsErrors];
+
+export type ListRevisionsResponses = {
+    /**
+     * The history.
+     */
+    200: RevisionList;
+};
+
+export type ListRevisionsResponse = ListRevisionsResponses[keyof ListRevisionsResponses];
+
+export type GetRevisionData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        /**
+         * The revision number, or `latest`.
+         */
+        revision: string;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}';
+};
+
+export type GetRevisionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetRevisionError = GetRevisionErrors[keyof GetRevisionErrors];
+
+export type GetRevisionResponses = {
+    /**
+     * The revision.
+     */
+    200: RevisionDetail;
+};
+
+export type GetRevisionResponse = GetRevisionResponses[keyof GetRevisionResponses];
+
+export type ExportValuesData = {
+    body: ExportValuesRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export';
+};
+
+export type ExportValuesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ExportValuesError = ExportValuesErrors[keyof ExportValuesErrors];
+
+export type ExportValuesResponses = {
+    /**
+     * The resolved snapshot.
+     */
+    200: ExportedValues;
+};
+
+export type ExportValuesResponse = ExportValuesResponses[keyof ExportValuesResponses];
+
+export type WatchProjectEventsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/events';
+};
+
+export type WatchProjectEventsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type WatchProjectEventsError = WatchProjectEventsErrors[keyof WatchProjectEventsErrors];
+
+export type WatchProjectEventsResponses = {
+    /**
+     * An event stream.
+     */
+    200: string;
+};
+
+export type WatchProjectEventsResponse = WatchProjectEventsResponses[keyof WatchProjectEventsResponses];
+
+export type RotateTokenKeyData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/rotate-token-key';
+};
+
+export type RotateTokenKeyErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RotateTokenKeyError = RotateTokenKeyErrors[keyof RotateTokenKeyErrors];
+
+export type RotateTokenKeyResponses = {
+    /**
+     * The rotation.
+     */
+    200: TokenKeyRotation;
+};
+
+export type RotateTokenKeyResponse = RotateTokenKeyResponses[keyof RotateTokenKeyResponses];

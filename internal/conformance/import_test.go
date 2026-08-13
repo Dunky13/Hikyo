@@ -83,9 +83,7 @@ func scenarioImportPresence(t *testing.T, db *store.DB) {
 	}
 
 	// A write advances the occurrence: absent -> set.
-	if _, err := values.Set(t.Context(), actor, prod, "DB_URL", "postgres://one"); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, prod, "DB_URL", "postgres://one")
 	second, err := values.Occurrences(t.Context(), actor, prod, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -106,9 +104,7 @@ func scenarioImportPresence(t *testing.T, db *store.DB) {
 
 	// THE case a bucket label cannot catch: `set` -> `set` with a CHANGED
 	// value. The bucket is identical; the occurrence is not.
-	if _, err := values.Set(t.Context(), actor, prod, "DB_URL", "postgres://two"); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, prod, "DB_URL", "postgres://two")
 	third, err := values.Occurrences(t.Context(), actor, prod, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +153,21 @@ func scenarioImportStrict(t *testing.T, db *store.DB) {
 	}
 	if strings.Join(result.Imported, ",") != "API_KEY,DB_URL" {
 		t.Fatalf("imported = %v", result.Imported)
+	}
+	// Import is an immediate publish-authorized write. Its values must be in the
+	// committed snapshot that delivery reads, not only in value_entries.
+	exported, _, err := revisionSvc(t, db).Export(t.Context(), actor, prod, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshotted bool
+	for _, value := range exported {
+		if value.Name == "DB_URL" && value.Value == "one" && value.Revealed {
+			snapshotted = true
+		}
+	}
+	if !snapshotted {
+		t.Fatalf("imported DB_URL was absent from committed snapshot: %+v", exported)
 	}
 
 	// Skip-by-default makes a re-run idempotent, and names what it skipped.
@@ -240,9 +251,7 @@ func scenarioImportMovedState(t *testing.T, db *store.DB) {
 	// Now MOVE the state between phase 1 and phase 2, and replay the SAME
 	// manifest. Both keys moved (both were absent at review and are set now),
 	// so both are rejected by name and nothing is written.
-	if _, err := values.Set(t.Context(), actor, prod, "DB_URL", "someone-else"); err != nil {
-		t.Fatal(err)
-	}
+	publishValue(t, db, values, actor, prod, "DB_URL", "someone-else")
 	replay := pre
 	_, err = values.Import(t.Context(), actor, prod, service.ImportRequest{
 		Entries: entries, Overwrite: []string{"DB_URL", "API_KEY"}, Precondition: &replay,

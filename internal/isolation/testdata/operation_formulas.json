@@ -1,5 +1,21 @@
 [
   {
+    "operation": "advisory.event",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "advisory.watch",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
     "operation": "audit.export-env",
     "class": "tenant",
     "level": "environment",
@@ -77,6 +93,14 @@
     "level": "org",
     "formula": [
       "credential-reset@org"
+    ]
+  },
+  {
+    "operation": "crypto.rotate-token-key",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "rotate-dek@instance"
     ]
   },
   {
@@ -680,6 +704,30 @@
     ]
   },
   {
+    "operation": "revision.list",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "revision.show",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "revision.signals",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
     "operation": "saml-provider.delete",
     "class": "instance",
     "level": "instance",
@@ -1028,11 +1076,45 @@
     ]
   },
   {
+    "operation": "value.export",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
+    "operation": "value.export-reveal",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment",
+      "reveal@environment"
+    ]
+  },
+  {
+    "operation": "value.export-reveal-history",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment",
+      "reveal-history@environment"
+    ]
+  },
+  {
     "operation": "value.list",
     "class": "tenant",
     "level": "environment",
     "formula": [
       "read@environment"
+    ]
+  },
+  {
+    "operation": "value.publish",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "publish@environment"
     ]
   },
   {
@@ -1059,6 +1141,14 @@
     "formula": [
       "edit@environment",
       "publish@environment"
+    ]
+  },
+  {
+    "operation": "value.stage",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "edit@environment"
     ]
   }
 ]
