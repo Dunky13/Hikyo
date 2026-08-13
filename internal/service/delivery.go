@@ -303,7 +303,11 @@ func (s *Delivery) recordUnbound(ctx context.Context, actor Actor, cause error) 
 	if !errors.Is(cause, domain.ErrUnauthenticated) {
 		return cause
 	}
-	if auditErr := s.Federation.RecordBindingRefusal(ctx, actor.federated.IssuerID); auditErr != nil {
+	refusalCause := ""
+	if actor.federated.refusalCause != nil {
+		refusalCause = actor.federated.refusalCause.load()
+	}
+	if auditErr := s.Federation.RecordBindingRefusal(ctx, actor.federated.IssuerID, refusalCause); auditErr != nil {
 		return auditErr
 	}
 	return cause
