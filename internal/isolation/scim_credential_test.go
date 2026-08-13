@@ -25,7 +25,11 @@ func TestSCIMCredentialLifecyclePostgres(t *testing.T) {
 
 func runSCIMCredentialLifecycle(t *testing.T, db *store.DB) {
 	ctx := t.Context()
-	now := time.Now().UTC()
+	// Pinned at the credential layout's microsecond resolution: ExpiresAt
+	// round-trips through storage, so a nanosecond-bearing pin loses its
+	// sub-microsecond tail there and the ceiling comparison drifts by <1µs
+	// (surfaced on Linux CI; macOS clocks rarely carry nanoseconds).
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	s := scimSvc(db)
 	s.Now = func() time.Time { return now }
 	// A short instance ceiling, so "clamped to the ceiling" is observable

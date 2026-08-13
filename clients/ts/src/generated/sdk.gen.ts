@@ -2,7 +2,7 @@
 
 import { type Client, type Options as Options2, type TDataShape, urlSearchParamsBodySerializer } from './client';
 import { client } from './client.gen';
-import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
+import type { ApplyEnvTemplateData, ApplyEnvTemplateErrors, ApplyEnvTemplateResponses, ApplyInstanceTemplateData, ApplyInstanceTemplateErrors, ApplyInstanceTemplateResponses, ApplyOrgTemplateData, ApplyOrgTemplateErrors, ApplyOrgTemplateResponses, ApplyProjectTemplateData, ApplyProjectTemplateErrors, ApplyProjectTemplateResponses, AuthMethodsData, AuthMethodsErrors, AuthMethodsResponses, BeginRecoveryData, BeginRecoveryErrors, BeginRecoveryResponses, ClearValueData, ClearValueErrors, ClearValueResponses, CloneEnvironmentData, CloneEnvironmentErrors, CloneEnvironmentResponses, CompromiseRetireSamlSpKeyData, CompromiseRetireSamlSpKeyErrors, CompromiseRetireSamlSpKeyResponses, CopyValuesData, CopyValuesErrors, CopyValuesResponses, CreateEnvGrantData, CreateEnvGrantErrors, CreateEnvGrantResponses, CreateEnvironmentData, CreateEnvironmentErrors, CreateEnvironmentResponses, CreateFederatedBindingData, CreateFederatedBindingErrors, CreateFederatedBindingResponses, CreateFederationIssuerData, CreateFederationIssuerErrors, CreateFederationIssuerResponses, CreateFolderData, CreateFolderErrors, CreateFolderResponses, CreateInstanceGrantData, CreateInstanceGrantErrors, CreateInstanceGrantResponses, CreateKeyData, CreateKeyErrors, CreateKeyGroupData, CreateKeyGroupErrors, CreateKeyGroupResponses, CreateKeyResponses, CreateOrgData, CreateOrgErrors, CreateOrgGrantData, CreateOrgGrantErrors, CreateOrgGrantResponses, CreateOrgResponses, CreateProjectData, CreateProjectErrors, CreateProjectGrantData, CreateProjectGrantErrors, CreateProjectGrantResponses, CreateProjectResponses, CreateScimBindingData, CreateScimBindingErrors, CreateScimBindingResponses, CreateScimMappingData, CreateScimMappingErrors, CreateScimMappingResponses, CreateServiceAccountData, CreateServiceAccountErrors, CreateServiceAccountResponses, DeclareValuesData, DeclareValuesErrors, DeclareValuesResponses, DeleteEnvironmentData, DeleteEnvironmentErrors, DeleteEnvironmentResponses, DeleteFederationIssuerData, DeleteFederationIssuerErrors, DeleteFederationIssuerResponses, DeleteFolderData, DeleteFolderErrors, DeleteFolderResponses, DeleteKeyData, DeleteKeyErrors, DeleteKeyGroupData, DeleteKeyGroupErrors, DeleteKeyGroupResponses, DeleteKeyResponses, DeleteOidcProviderData, DeleteOidcProviderErrors, DeleteOidcProviderResponses, DeleteOrgData, DeleteOrgErrors, DeleteOrgResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeleteSamlProviderData, DeleteSamlProviderErrors, DeleteSamlProviderResponses, DeleteScimBindingData, DeleteScimBindingErrors, DeleteScimBindingResponses, DeleteScimMappingData, DeleteScimMappingErrors, DeleteScimMappingResponses, DeleteServiceAccountData, DeleteServiceAccountErrors, DeleteServiceAccountResponses, DiffValuesData, DiffValuesErrors, DiffValuesResponses, EnrolPasskeyFinishData, EnrolPasskeyFinishErrors, EnrolPasskeyFinishResponses, EnrolPasskeyStartData, EnrolPasskeyStartErrors, EnrolPasskeyStartResponses, EnrolTotpConfirmData, EnrolTotpConfirmErrors, EnrolTotpConfirmResponses, EnrolTotpStartData, EnrolTotpStartErrors, EnrolTotpStartResponses, EstablishCredentialData, EstablishCredentialErrors, EstablishCredentialResponses, FetchDeliveryData, FetchDeliveryErrors, FetchDeliveryResponses, GetCredentialPolicyData, GetCredentialPolicyErrors, GetCredentialPolicyResponses, GetEnvironmentData, GetEnvironmentErrors, GetEnvironmentResponses, GetEnvironmentSettingsData, GetEnvironmentSettingsErrors, GetEnvironmentSettingsResponses, GetFolderData, GetFolderErrors, GetFolderResponses, GetKeyData, GetKeyErrors, GetKeyGroupData, GetKeyGroupErrors, GetKeyGroupResponses, GetKeyResponses, GetMetaData, GetMetaErrors, GetMetaResponses, GetOidcProviderData, GetOidcProviderErrors, GetOidcProviderResponses, GetOrgData, GetOrgErrors, GetOrgResponses, GetProjectData, GetProjectErrors, GetProjectResponses, GetRevealWindowData, GetRevealWindowErrors, GetRevealWindowResponses, GetSamlProviderData, GetSamlProviderErrors, GetSamlProviderResponses, GetScimBindingData, GetScimBindingErrors, GetScimBindingResponses, GetScimCredentialData, GetScimCredentialErrors, GetScimCredentialResponses, GetValueData, GetValueErrors, GetValueResponses, LinkIdentityData, LinkIdentityErrors, LinkIdentityResponses, ListEnvironmentsData, ListEnvironmentsErrors, ListEnvironmentsResponses, ListFederationIssuersData, ListFederationIssuersErrors, ListFederationIssuersResponses, ListFoldersData, ListFoldersErrors, ListFoldersResponses, ListIdentitiesData, ListIdentitiesErrors, ListIdentitiesResponses, ListInstanceGrantsData, ListInstanceGrantsErrors, ListInstanceGrantsResponses, ListKeyGroupsData, ListKeyGroupsErrors, ListKeyGroupsResponses, ListKeysData, ListKeysErrors, ListKeysResponses, ListMachineCredentialsData, ListMachineCredentialsErrors, ListMachineCredentialsResponses, ListMyOrgsData, ListMyOrgsErrors, ListMyOrgsResponses, ListOidcProvidersData, ListOidcProvidersErrors, ListOidcProvidersResponses, ListOrgGrantsData, ListOrgGrantsErrors, ListOrgGrantsResponses, ListOrgsData, ListOrgsErrors, ListOrgsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectGrantsData, ListProjectGrantsErrors, ListProjectGrantsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListSamlProvidersData, ListSamlProvidersErrors, ListSamlProvidersResponses, ListSamlSpKeysData, ListSamlSpKeysErrors, ListSamlSpKeysResponses, ListScimBindingsData, ListScimBindingsErrors, ListScimBindingsResponses, ListScimCredentialsData, ListScimCredentialsErrors, ListScimCredentialsResponses, ListScimDirectoryGroupsData, ListScimDirectoryGroupsErrors, ListScimDirectoryGroupsResponses, ListScimDirectoryUsersData, ListScimDirectoryUsersErrors, ListScimDirectoryUsersResponses, ListScimMappingsData, ListScimMappingsErrors, ListScimMappingsResponses, ListServiceAccountsData, ListServiceAccountsErrors, ListServiceAccountsResponses, ListValuesData, ListValuesErrors, ListValuesResponses, LocalLoginData, LocalLoginErrors, LocalLoginResponses, LogoutData, LogoutErrors, LogoutResponses, MintMachineCredentialData, MintMachineCredentialErrors, MintMachineCredentialResponses, MintScimCredentialData, MintScimCredentialErrors, MintScimCredentialResponses, OidcCallbackData, OidcCallbackErrors, OidcCallbackResponses, OidcStartData, OidcStartErrors, OidcStartResponses, PasskeyLoginFinishData, PasskeyLoginFinishErrors, PasskeyLoginFinishResponses, PasskeyLoginStartData, PasskeyLoginStartErrors, PasskeyLoginStartResponses, PatchSamlProviderData, PatchSamlProviderErrors, PatchSamlProviderResponses, PutOidcProviderData, PutOidcProviderErrors, PutOidcProviderResponses, PutSamlProviderData, PutSamlProviderErrors, PutSamlProviderResponses, ReauthPasskeyFinishData, ReauthPasskeyFinishErrors, ReauthPasskeyFinishResponses, ReauthPasskeyStartData, ReauthPasskeyStartErrors, ReauthPasskeyStartResponses, ReauthTotpData, ReauthTotpErrors, ReauthTotpResponses, ReclassifyKeyData, ReclassifyKeyErrors, ReclassifyKeyResponses, RefreshSamlProviderMetadataData, RefreshSamlProviderMetadataErrors, RefreshSamlProviderMetadataResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RemovePasskeyData, RemovePasskeyErrors, RemovePasskeyResponses, RemoveTotpData, RemoveTotpErrors, RemoveTotpResponses, RenameEnvironmentData, RenameEnvironmentErrors, RenameEnvironmentResponses, RenameFolderData, RenameFolderErrors, RenameFolderResponses, RenameKeyData, RenameKeyErrors, RenameKeyGroupData, RenameKeyGroupErrors, RenameKeyGroupResponses, RenameKeyResponses, RenameOrgData, RenameOrgErrors, RenameOrgResponses, RenameProjectData, RenameProjectErrors, RenameProjectResponses, ReorderEnvironmentsData, ReorderEnvironmentsErrors, ReorderEnvironmentsResponses, ResetCredentialData, ResetCredentialErrors, ResetCredentialResponses, RetireSamlSpKeyData, RetireSamlSpKeyErrors, RetireSamlSpKeyResponses, RevealValueData, RevealValueDiffData, RevealValueDiffErrors, RevealValueDiffResponses, RevealValueErrors, RevealValueResponses, RevealValuesData, RevealValuesErrors, RevealValuesResponses, RevokeEnvGrantData, RevokeEnvGrantErrors, RevokeEnvGrantResponses, RevokeInstanceGrantData, RevokeInstanceGrantErrors, RevokeInstanceGrantResponses, RevokeMachineCredentialData, RevokeMachineCredentialErrors, RevokeMachineCredentialResponses, RevokeOrgGrantData, RevokeOrgGrantErrors, RevokeOrgGrantResponses, RevokeProjectGrantData, RevokeProjectGrantErrors, RevokeProjectGrantResponses, RevokeScimCredentialData, RevokeScimCredentialErrors, RevokeScimCredentialResponses, RotateSamlSpKeyData, RotateSamlSpKeyErrors, RotateSamlSpKeyResponses, SamlAcsData, SamlAcsErrors, SamlAcsResponses, SamlMetadataData, SamlMetadataErrors, SamlMetadataResponses, SamlStartData, SamlStartErrors, SamlStartResponses, ScimBulkData, ScimBulkErrors, ScimCreateGroupData, ScimCreateGroupErrors, ScimCreateGroupResponses, ScimCreateUserData, ScimCreateUserErrors, ScimCreateUserResponses, ScimDeleteGroupData, ScimDeleteGroupErrors, ScimDeleteGroupResponses, ScimDeleteUserData, ScimDeleteUserErrors, ScimDeleteUserResponses, ScimGetGroupData, ScimGetGroupErrors, ScimGetGroupResponses, ScimGetUserData, ScimGetUserErrors, ScimGetUserResponses, ScimListGroupsData, ScimListGroupsErrors, ScimListGroupsResponses, ScimListUsersData, ScimListUsersErrors, ScimListUsersResponses, ScimMeData, ScimMeErrors, ScimPatchGroupData, ScimPatchGroupErrors, ScimPatchGroupResponses, ScimPatchUserData, ScimPatchUserErrors, ScimPatchUserResponses, ScimReplaceGroupData, ScimReplaceGroupErrors, ScimReplaceGroupResponses, ScimReplaceUserData, ScimReplaceUserErrors, ScimReplaceUserResponses, ScimResourceTypesData, ScimResourceTypesErrors, ScimResourceTypesResponses, ScimSchemasData, ScimSchemasErrors, ScimSchemasResponses, ScimSearchGroupsData, ScimSearchGroupsErrors, ScimSearchUsersData, ScimSearchUsersErrors, ScimServiceProviderConfigData, ScimServiceProviderConfigErrors, ScimServiceProviderConfigResponses, SetCredentialPolicyData, SetCredentialPolicyErrors, SetCredentialPolicyResponses, SetEnvironmentSettingsData, SetEnvironmentSettingsErrors, SetEnvironmentSettingsResponses, SetKeyGroupData, SetKeyGroupErrors, SetKeyGroupResponses, SetValueData, SetValueErrors, SetValueResponses, StepUpPasskeyFinishData, StepUpPasskeyFinishErrors, StepUpPasskeyFinishResponses, StepUpPasskeyStartData, StepUpPasskeyStartErrors, StepUpPasskeyStartResponses, StepUpTotpData, StepUpTotpErrors, StepUpTotpResponses, UnlinkIdentityData, UnlinkIdentityErrors, UnlinkIdentityResponses, UpdateFederationIssuerData, UpdateFederationIssuerErrors, UpdateFederationIssuerResponses, UpdateKeyDeclarationData, UpdateKeyDeclarationErrors, UpdateKeyDeclarationResponses, UpdateKeyMetadataData, UpdateKeyMetadataErrors, UpdateKeyMetadataResponses, UpdateScimMappingData, UpdateScimMappingErrors, UpdateScimMappingResponses, WhoamiData, WhoamiErrors, WhoamiResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -2005,6 +2005,139 @@ export const setCredentialPolicy = <ThrowOnError extends boolean = false>(option
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * List the configured OIDC federation issuers.
+ *
+ * Instance-scoped, never org- or project-scoped: an org-scoped issuer would
+ * let an org admin add a provider and mint identities authenticating into
+ * the instance.
+ *
+ * Audited rather than silent — reading which external authorities the
+ * instance trusts to name principals is not a bare tenant read.
+ *
+ */
+export const listFederationIssuers = <ThrowOnError extends boolean = false>(options?: Options<ListFederationIssuersData, ThrowOnError>) => (options?.client ?? client).get<ListFederationIssuersResponses, ListFederationIssuersErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/federation-issuers',
+    ...options
+});
+
+/**
+ * Configure an OIDC federation issuer.
+ *
+ * The issuer string is stored and matched BYTE-EXACT, with no
+ * canonicalization step. OpenID Connect defines `iss` as case-sensitive, so
+ * any normalization that folds case, resolves a URL or strips a trailing
+ * slash can merge two distinct external issuers into one configuration —
+ * and the uniqueness constraint would enforce the merge rather than catch
+ * it.
+ *
+ */
+export const createFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<CreateFederationIssuerData, ThrowOnError>) => (options.client ?? client).post<CreateFederationIssuerResponses, CreateFederationIssuerErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/federation-issuers',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Remove an issuer configuration.
+ *
+ * Refused with 409 while live bindings still name it. A cascade would
+ * deprovision N workloads under an operation whose name says
+ * "configuration", and an orphaning delete would leave bindings that
+ * silently stop authenticating. The operator revokes the bindings first,
+ * which is the same act stated honestly.
+ *
+ */
+export const deleteFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<DeleteFederationIssuerData, ThrowOnError>) => (options.client ?? client).delete<DeleteFederationIssuerResponses, DeleteFederationIssuerErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/federation-issuers/{issuer}',
+    ...options
+});
+
+/**
+ * Move an issuer's JWKS source or refused audiences.
+ *
+ * The mutable half only. The issuer string and the platform type cannot
+ * move: changing either would silently re-point every binding underneath at
+ * a different external authority, which is a replacement, not an edit.
+ *
+ */
+export const updateFederationIssuer = <ThrowOnError extends boolean = false>(options: Options<UpdateFederationIssuerData, ThrowOnError>) => (options.client ?? client).patch<UpdateFederationIssuerResponses, UpdateFederationIssuerErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/instance/federation-issuers/{issuer}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Mint a federated `(issuer, subject)` binding. Nothing at rest.
+ *
+ * The full authorization formula is `manage-identities(project)` AND a
+ * disclosure capability over EVERY environment reachable in the resulting
+ * post-state AND reauthentication — the same formula a bearer mint carries,
+ * and for the same reason: the actor decides which external identity may
+ * speak as this service account, and that identity reaches everything the
+ * account's grants reach.
+ *
+ * There is no PUT and no PATCH. Bindings are IMMUTABLE; a change is a
+ * replacement mint through this route naming `replaces`, so the predecessor
+ * is revoked and the successor inserted in one transaction. Editing in place
+ * would let a principal without `reveal` re-point a production binding at an
+ * identity they control while the recorded authorization stayed behind.
+ *
+ * Bindings are LISTED and DELETED through the credentials routes: a binding
+ * is a credential row, so a second pair of routes over the same rows would
+ * be two places for one formula to drift.
+ *
+ */
+export const createFederatedBinding = <ThrowOnError extends boolean = false>(options: Options<CreateFederatedBindingData, ThrowOnError>) => (options.client ?? client).post<CreateFederatedBindingResponses, CreateFederatedBindingErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Fetch the authorized projection, conditionally.
+ *
+ * The machine fetch surface. Presenting a current cursor answers
+ * `current: true` with NO content and no key names — only a fetch that
+ * actually delivers values is a disclosure — and either disposition emits
+ * exactly one immutable access record.
+ *
+ * Authorization is evaluated on the conditional path EXACTLY as on the
+ * delivering path, so a caller who has lost `read` receives the uniform
+ * nonexistent response rather than "current".
+ *
+ * Today there are no value tables, so what is delivered is the key
+ * catalogue and each key's declared presence for this environment: config
+ * keys and secret PRESENCE only, no plaintext anywhere. That is the surface
+ * the Compose and Kubernetes integrations consume, and it is the seam the
+ * value tables land behind.
+ *
+ * Both a `hik_` bearer credential and an externally issued OIDC ID token
+ * authenticate here, with identical authority: a machine principal's
+ * authority is the union of the grants on its service account and nothing
+ * else, so there is no per-credential scope for either kind to widen.
+ *
+ */
+export const fetchDelivery = <ThrowOnError extends boolean = false>(options: Options<FetchDeliveryData, ThrowOnError>) => (options.client ?? client).get<FetchDeliveryResponses, FetchDeliveryErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery',
+    ...options
 });
 
 /**

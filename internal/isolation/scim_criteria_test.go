@@ -157,14 +157,8 @@ var scimCriteria = map[string]scimClause{
 		Fixtures: []string{"runSCIMRestoreDrill"}},
 	"SC4.g": {Text: "restore drill: restored identity links stay inert; re-assertion does not re-bless one",
 		Fixtures: []string{"runSCIMRestoreDrill"}},
-	"SC4.h": {Text: "restore drill: `scim` origins dropped at reconciliation commit",
-		// NOT COVERED. The rule needs the operator's quarantine/commit flow to
-		// hook into, and #55 punted that to #76, so there is no seam to drop a
-		// restored origin at. TestSCIMRestoreOriginDropIsBlockedOn76 is a
-		// TRIPWIRE that fails the day the flow appears; it asserts the absence,
-		// which is the opposite of proving the clause.
-		Fixtures: []string{"TestSCIMRestoreOriginDropIsBlockedOn76"},
-		Blocked:  "#76 (restore quarantine/commit flow)"},
+	"SC4.h": {Text: "restore drill: ARCHIVED `scim` origins dropped at reconciliation commit, manual origins committed, post-restore origins kept",
+		Fixtures: []string{"runSCIMRestoreDrill", "runSCIMReconcileKeepsFreshOrigins"}},
 	"SC4.i": {Text: "every attention state entered AND cleared with its audit pair",
 		Fixtures: []string{"runSCIMAttentionStatePairs", "runOneLockoutPath"}},
 	"SC4.j": {Text: "[CI] registry completeness over every SCIM operation incl. directory_read on reads",
@@ -225,8 +219,10 @@ func TestSCIMCriteriaMatrixIsComplete(t *testing.T) {
 	// not.
 	// The blocked set is pinned too: a clause may be DECLARED not covered, but
 	// the number of them may not grow quietly, and a clause that becomes
-	// provable must lose its Blocked marker rather than keep it as cover.
-	const blockedClauses = 1
+	// provable must lose its Blocked marker rather than keep it as cover. It is
+	// ZERO: SC4.h was the last one, and #76's reconciliation commit gave it the
+	// seam it was waiting for.
+	const blockedClauses = 0
 	if blocked != blockedClauses {
 		t.Errorf("%d clauses are declared not-covered, pinned at %d — a clause was blocked or unblocked "+
 			"without updating the pin", blocked, blockedClauses)

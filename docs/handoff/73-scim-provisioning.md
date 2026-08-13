@@ -8,10 +8,9 @@ auth, SAML SP).
 
 **State: complete, green on both engines.** Schema, release engine, service,
 SCIM protocol, HTTP transport (admin REST + the identity provider's wire), the
-`hikyo scim` CLI family, and every acceptance fixture the ADR names except one
-clause that is structurally blocked on #76 — see
-[Blocked on #76](#blocked-on-76), which ships with a tripwire rather than a
-silent gap.
+`hikyo scim` CLI family, and every acceptance fixture the ADR names — including
+§9.1's restored-origin rule, which landed once #76 shipped the reconciliation
+commit it needed (see [SC4.h](#sc4h-restored-scim-origins-are-dropped-at-the-reconciliation-commit)).
 
 ## What exists
 
@@ -343,24 +342,6 @@ while adding the SCIM block; fixed rather than filed, because a drop list that
 is right in one harness and wrong in the other is a trap for whoever adds the
 next migration.
 
-## Blocked on #76
-
-Exactly one §9.1 clause has no seam in this tree: *"restored `scim` origins are
-dropped at reconciliation commit, not committed — the operator's commit covers
-`manual` origins only; a row whose only restored origins were `scim` is not
-re-activated."* The operator's quarantine/commit flow is #76's and does not
-exist, so there is nothing to hook the drop into.
-
-It ships as a **tripwire, not a gap**:
-`isolation.TestSCIMRestoreOriginDropIsBlockedOn76` fails the day a
-`restore.commit` / `recovery.commit` / `restore.reconcile` operation appears,
-naming the clause that must be implemented with it. Everything else §9.1 asks
-for IS implemented and fixtured (see the criteria map): the credential verifier
-is permanently dead by the epoch comparison in `resolveSCIMCredential`,
-re-assertion rebuilds exactly current IdP truth, a post-backup-deprovisioned
-user is never authorized at any point after restore, and restored identity
-links stay inert under #54's own rule — re-assertion does not re-bless one.
-
 ## Disposition items (human)
 
 All five were carried to the orchestrator and ACCEPTED; they are recorded here
@@ -565,11 +546,100 @@ landed, and where to look:
   id answers 400 pre-authentication. It reveals only that the caller's own
   identifier is malformed — never whether a tenant exists — and the pattern is
   one shared component used by every route in the contract.
-- **SC4.h is declared NOT COVERED** in the criteria matrix (`Blocked: "#76"`),
-  not covered-by-tripwire. `TestSCIMRestoreOriginDropIsBlockedOn76` asserts the
-  behaviour is ABSENT and fires the day #76's quarantine/commit flow lands; a
-  passing test whose subject is "this does not work yet" is not evidence the
-  clause holds.
+- **SC4.h is COVERED as of #76** — see the section below. The tripwire is gone
+  and the criteria matrix carries no blocked clauses at all (`blockedClauses`
+  is pinned at 0).
+
+### SC4.h: restored `scim` origins are dropped at the reconciliation commit
+
+§9.1's last clause landed once #76 shipped the flow it needed. #76's restore
+advances `restore_epoch` and strips every principal's `reconciled_epoch`, so
+every grant is INERT until an operator commits that principal back, one at a
+time, under local host authority.
+
+**Where the rule lives:** `internal/store/authn/restore.go`
+`Resolver.ReconcilePrincipal` — the one statement every reconciliation routes
+through. Before it stamps the principal it takes the principal-row lock every
+grant writer takes (#54 B14) and runs two statements
+(`DropRestoredSCIMOrigins`, `DeleteOriginlessGrantsForPrincipal`, both dialects,
+both `hikyo:authn-resolution`-annotated and content-pinned):
+
+1. every ARCHIVED `scim` origin this principal holds is deleted;
+2. any grant row whose last origin that was goes with it.
+
+**ARCHIVED, not merely `scim`.** The commit refuses archived truth; it does not
+get to destroy LIVE truth. The operator reconciles the binding's provisioning
+connection first — that is the only way the wire comes back — so the identity
+provider's next cycle can assert something new about a user who is still
+unreconciled, and those origins are current truth. Filtering on kind and
+principal alone dropped them with the archived ones, and the originless cleanup
+then deleted grants the IdP was asserting right then: access lost until the next
+cycle, roughly forty minutes later, for a user whose authority never lapsed.
+(Caught in review on PR #104; `runSCIMReconcileKeepsFreshOrigins` fails without
+the predicate.)
+
+Provenance is `grant_origins.created_at` against
+`auth_instance_state.reactivated_at`, the instant the restored instance came
+back — #76's own anchor, used the way the machine-identity ADR uses it for the
+federated `iat` floor: a row stamped at or before the restore came out of the
+archive, a row stamped after it was written by this instance since. `NULL` means
+never restored, so the comparison is NULL and the statement matches nothing,
+which is right: a reconciliation with no restore behind it has no archived rows
+to refuse. The boundary is `<=` rather than `<` so an ambiguous stamp is treated
+as ARCHIVED — dropping a live origin costs one IdP cycle, re-activating an
+archived one is the security failure the rule exists to prevent. No migration and
+no new marker column: #76 already stamps when the instance came back, and origins
+already carry `created_at`.
+
+It is deliberately NOT in the service: a second commit path added later would
+otherwise silently re-activate what this one refuses. It runs unconditionally
+rather than gated on the restore state — a reconciliation with nothing restored
+matches nothing, and gating would make the guarantee conditional on a second
+fact being right.
+
+**What survives, and why.** `manual` origins commit — that is the affirmative
+half of "the commit covers manual origins only". `structural` survives because a
+provisioning connection's own `scim-provision` grant is created WITH the binding
+and nothing would ever recreate it; `lockout-retention` survives because it
+exists precisely to keep an org administrable, and dropping it at restore would
+lock out the org at the moment it most needs administering.
+
+**One production change the clause forced.** `setMembers` was a DELTA
+reconciler: it applied a group's mapping rows only for members the push ADDED.
+After a restore dropped the binding's origins, the identity provider's next
+cycle asserts the same membership it always did — no delta, so nothing was
+rebuilt, and those users stayed unauthorized until somebody happened to change
+the group. It is now desired-state: the mappings are applied for every member
+the push asserts. `applyMappings` is additive and idempotent (an existing row
+gains an origin rather than a duplicate, and emits nothing when nothing was
+created), so the only visible difference is exactly the case this exists for.
+
+**Fixture:** `runSCIMRestoreDrill` (`internal/isolation/scim_login_e2e_test.go`)
+runs the whole sequence through #76's own restore closure —
+`service.CompleteRestore` under `tx.Reconcile`, the same act the restore
+transaction performs — and asserts, in order: a real pre-backup session reaches
+a protected operation; the post-backup deprovision kills it; the restore brings
+the stale grant and its `scim` origin back and nothing authorizes; reconciling
+`goes` DROPS that origin and its row and leaves them unauthorized; reconciling
+`stays` commits their hand grant and does NOT commit their SCIM-held one;
+reconciling the connection leaves its `structural` grant intact; re-mint plus
+re-assertion rebuilds exactly what the IdP currently asserts; and the restored
+identity link stays inert throughout, before and after re-assertion.
+
+Its sibling `runSCIMReconcileKeepsFreshOrigins` drives the ORDER that exposes
+the provenance question: restore, reconcile the connection, re-mint, let the
+identity provider assert something new about a user who is STILL unreconciled,
+and only then reconcile that user. The archived origin and its grant drop; the
+fresh origin and its grant survive. The two halves are told apart by SCOPE
+rather than by capability — same template, different project — because a
+template expands to several capabilities, and a fixture discriminating on
+capability would be reading that expansion rather than an origin's provenance.
+
+**Interaction with the `post_restore` attention state:** none, and that is by
+construction. #76's gate is per-principal authorization; ours is a binding-level
+warning raised when every credential a binding holds predates the current epoch,
+cleared by re-mint plus the first completed re-assertion cycle. They observe the
+same event from two surfaces and neither reads the other's state.
 
 ### Rebased onto main after #61/#50 and the Hikyo rebrand
 
@@ -577,8 +647,8 @@ The branch was rebased onto `origin/main` after #61 (machine identities), #50
 (flat values) and the Wenv → Hikyo rebrand landed. Two things a later reader
 needs:
 
-- **The migration is `00016_scim.sql`** in both dialects (main took 00013, 00014
-  and 00015).
+- **The migration is `00017_scim.sql`** in both dialects (main took 00013 through
+  00016).
 - **`scim-credential` is deliberately NOT `machine-credential`.** #61 landed and
   declares `machine-credential` on no route; it serves the service-account
   taxonomy (`wl`/`au` values, environment-keyed disclosure and reauthentication

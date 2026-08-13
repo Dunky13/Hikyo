@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -389,6 +388,138 @@ func runSCIMPerBindingSerialization(t *testing.T, db *store.DB) {
 	}
 }
 
+// TestSCIMReconcileKeepsFreshOrigins is SC4.h's other edge, and the one a
+// naive filter gets wrong: the reconciliation commit must refuse ARCHIVED
+// truth without destroying LIVE truth.
+//
+// The reachable sequence: a restore leaves every principal inert; the operator
+// reconciles the binding's provisioning connection and re-mints, so the wire
+// comes back; the identity provider's next cycle asserts something NEW about a
+// user who is STILL unreconciled, creating fresh `scim` origins; and only then
+// does the operator reconcile that user. A commit filtering on origin kind and
+// principal alone would drop those fresh origins with the archived ones and
+// delete the grants the IdP is asserting right now — access lost until the next
+// cycle, roughly forty minutes later, for a user whose authority never lapsed.
+//
+// §9.1's sentence is precise about this: re-assertion "rebuilds exactly what
+// the IdP currently asserts". Reconciliation refuses archived truth; it does
+// not get to destroy live truth.
+func TestSCIMReconcileKeepsFreshOriginsSQLite(t *testing.T) {
+	runSCIMReconcileKeepsFreshOrigins(t, seededDB(t, openSQLite))
+}
+func TestSCIMReconcileKeepsFreshOriginsPostgres(t *testing.T) {
+	runSCIMReconcileKeepsFreshOrigins(t, seededDB(t, openPostgres))
+}
+
+func runSCIMReconcileKeepsFreshOrigins(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	s := scimSvc(db)
+	bindingID, token := newSCIMBinding(t, db, "okta")
+	wire := service.SCIMCredentialActor(token, bindingID)
+
+	user, err := s.CreateUser(ctx, wire, orgA, bindingID, service.SCIMUserInput{
+		UserName: "both@okta.test", ExternalID: "both", SubjectRaw: "both",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := principalOf(t, db, accountOf(t, db, user.ID))
+	scope := domain.Scope{Org: orgA, Project: prjA1}
+
+	// THE ARCHIVED HALF: a group and a mapping that existed when the backup was
+	// taken, granting `read`.
+	archived, err := s.CreateGroup(ctx, wire, orgA, bindingID, service.SCIMGroupInput{
+		DisplayName: "Archived Readers", Members: []string{user.ID}, MembersPresent: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMapping(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID,
+		service.SCIMMappingSpec{GroupID: archived.ID, Template: domain.TemplateViewer, ProjectID: string(prjA1)}); err != nil {
+		t.Fatal(err)
+	}
+	if !held(t, db, principal, domain.CapRead, scope) {
+		t.Fatal("setup: the archived mapping must have granted read")
+	}
+
+	// THE RESTORE. Every principal goes inert; the archived rows are exactly as
+	// the backup left them.
+	if err := runRestoreClosure(ctx, db, store.Manifest{
+		Format: "hikyo-backup/1", Engine: db.Engine(), SchemaVersion: 18, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// The operator reconciles the binding's provisioning CONNECTION and
+	// re-mints, which is the only way the identity provider gets back on the
+	// wire. The provisioned human is deliberately NOT reconciled yet — that is
+	// the window this test is about.
+	restoreSvc := &service.Restore{DB: db}
+	connection := domain.PrincipalID(queryString(t, db,
+		`SELECT connection_principal_id FROM scim_bindings WHERE id = '`+bindingID+`'`))
+	for _, p := range []domain.PrincipalID{orgAdmin, connection} {
+		if _, err := restoreSvc.Reconcile(ctx, p); err != nil {
+			t.Fatalf("reconcile %s: %v", p, err)
+		}
+	}
+	remint, err := s.MintCredential(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID, false, "")
+	if err != nil {
+		t.Fatalf("re-mint: %v", err)
+	}
+	rewire := service.SCIMCredentialActor(remint.Token, bindingID)
+
+	// The identity provider's next cycle is minutes to hours later (§9 puts
+	// Entra at roughly forty). The clock is moved rather than slept: this test
+	// is about the PROVENANCE of an origin row, not about how many microseconds
+	// two statements take, and a fixture that depends on the latter is a
+	// fixture that flakes.
+	s.Now = func() time.Time { return time.Now().UTC().Add(time.Hour) }
+
+	// THE FRESH HALF: the IdP asserts something NEW about this still-inert user
+	// — a second group, mapped into a DIFFERENT project — so the origins it
+	// creates now are live truth, not archive. The scope is what tells the two
+	// apart: same capability, same template, different chain, so a fixture that
+	// discriminated on capability alone would be reading a template's expansion
+	// rather than an origin's provenance.
+	fresh, err := s.CreateGroup(ctx, rewire, orgA, bindingID, service.SCIMGroupInput{
+		DisplayName: "Fresh Editors", Members: []string{user.ID}, MembersPresent: true,
+	})
+	if err != nil {
+		t.Fatalf("re-assertion: %v", err)
+	}
+	if _, err := s.CreateMapping(ctx, service.LocalPrincipal(orgAdmin), orgA, bindingID,
+		service.SCIMMappingSpec{GroupID: fresh.ID, Template: domain.TemplateViewer, ProjectID: string(prjA2)}); err != nil {
+		t.Fatalf("fresh mapping: %v", err)
+	}
+	freshOrigins := queryInt(t, db,
+		`SELECT COUNT(*) FROM grant_origins AS o INNER JOIN grants AS g ON g.id = o.grant_id `+
+			`WHERE o.kind = 'scim' AND g.principal_id = '`+string(principal)+`' AND g.project_id = 'prj_a2'`)
+	if freshOrigins == 0 {
+		t.Fatal("setup: the re-assertion must have created a fresh scim origin")
+	}
+
+	// THE COMMIT. Archived origins go; fresh ones stay.
+	if _, err := restoreSvc.Reconcile(ctx, principal); err != nil {
+		t.Fatalf("reconcile the provisioned human: %v", err)
+	}
+	if n := queryInt(t, db,
+		`SELECT COUNT(*) FROM grant_origins AS o INNER JOIN grants AS g ON g.id = o.grant_id `+
+			`WHERE o.kind = 'scim' AND g.principal_id = '`+string(principal)+`' AND g.project_id = 'prj_a1'`); n != 0 {
+		t.Fatal("§9.1: an ARCHIVED scim origin must still be dropped at the reconciliation commit")
+	}
+	if held(t, db, principal, domain.CapRead, scope) {
+		t.Fatal("§9.1: a grant whose only origin was archived must not be re-activated")
+	}
+	if n := queryInt(t, db,
+		`SELECT COUNT(*) FROM grant_origins AS o INNER JOIN grants AS g ON g.id = o.grant_id `+
+			`WHERE o.kind = 'scim' AND g.principal_id = '`+string(principal)+`' AND g.project_id = 'prj_a2'`); n != freshOrigins {
+		t.Fatal("§9.1: the commit must not drop origins the identity provider asserted AFTER the restore")
+	}
+	if !held(t, db, principal, domain.CapRead, domain.Scope{Org: orgA, Project: prjA2}) {
+		t.Fatal("§9.1: re-assertion rebuilds what the IdP currently asserts — reconciliation must not destroy it")
+	}
+}
+
 // TestSCIMRestoreDrill is SC4's restore drill (#73 §9.1), for every clause that
 // HAS a seam in this tree. The one that does not — "restored `scim` origins are
 // dropped at reconciliation commit" — is blocked on #76's quarantine/commit
@@ -485,6 +616,13 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	// `goes`: the grant row the mapping created and the `scim` origin holding
 	// it. Taking it as ROWS rather than as a flag is what makes the restore
 	// below a restore rather than a re-run of the sync.
+	// `stays` also holds a HAND grant, so the commit's affirmative half — manual
+	// origins DO commit — has something to be true about.
+	if _, err := grantSvc(db).Create(ctx, service.LocalPrincipal(admin), service.GrantSpec{
+		Target: staysPrincipal, Capability: domain.CapEdit, Scope: scope,
+	}); err != nil {
+		t.Fatalf("hand grant: %v", err)
+	}
 	backupGrant := queryString(t, db,
 		`SELECT id FROM grants WHERE principal_id = '`+string(goesPrincipal)+`' AND capability = 'read'`)
 	backupOrigin := queryString(t, db,
@@ -531,7 +669,16 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 		trueLit = "TRUE"
 	}
 	execRaw(t, db, `UPDATE scim_users SET active = `+trueLit+` WHERE id = '`+goes.ID+`'`)
-	execRaw(t, db, `UPDATE auth_instance_state SET credential_epoch = credential_epoch + 1 WHERE id = 1`)
+	// …and the RESTORE ITSELF: #76's own closure, the same act the restore
+	// transaction runs against restored state. It advances the restore epoch
+	// (every verifier, session and identity link becomes inert by predicate)
+	// and strips every principal's reconciliation stamp, so nothing authorizes
+	// until an operator commits it back one principal at a time.
+	if err := runRestoreClosure(ctx, db, store.Manifest{
+		Format: "hikyo-backup/1", Engine: db.Engine(), SchemaVersion: 17, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
 
 	if _, err := s.GetUser(ctx, wire, orgA, binding.ID, stays.ID); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("a restored credential verifier must be permanently dead, got %v", err)
@@ -580,20 +727,74 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	// artifacts below. All are refused, so the restored grant row is
 	// unreachable for the whole window.
 	//
-	// Stated exactly, because the difference matters: the ROW is back — that is
-	// what a restore does, and dropping it at reconciliation commit is §9.1's
-	// rule that #76 owns and this tree cannot yet implement (SC4.h, declared
-	// NOT COVERED in the criteria matrix). What IS proved here is that no
-	// reachable principal can exercise it: authentication is the gate the
-	// restore closed, and it stays closed until the operator reconciles the
-	// link — which SCIM re-assertion provably does not do.
-	if !held(t, db, goesPrincipal, domain.CapRead, scope) {
-		t.Fatal("the restore must actually have brought the stale grant row back, or this window proves nothing")
+	// The stale ROW is genuinely back — that is what a restore does, and it is
+	// what §9.1's rule is about. Nothing can reach it: every principal is
+	// unreconciled, so no grant authorizes at all yet.
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM grant_origins WHERE grant_id = '`+backupGrant+
+		`' AND kind = 'scim'`); n != 1 {
+		t.Fatal("the restore must actually have brought the stale scim origin back, or this window proves nothing")
 	}
 	for _, artifact := range []string{"", "hik_1_ses_restored_nonsense"} {
 		if err := protectedOp(artifact); !isUnauth(err) {
 			t.Fatalf("a protected operation during the restore window must fail authentication, got %v", err)
 		}
+	}
+
+	// ---------------------------------------------------------------------
+	// SC4.h — the reconciliation commit (#73 §9.1, on #76's flow)
+	// ---------------------------------------------------------------------
+	//
+	// The operator commits one principal at a time. The commit covers `manual`
+	// origins ONLY: every restored `scim` origin is dropped in the same act,
+	// and a row whose only restored origins were `scim` is not re-activated.
+	restoreSvc := &service.Restore{DB: db}
+
+	// `goes` first — the user the identity provider withdrew after the backup.
+	// Their grant's only origin was `scim`, so the commit drops the origin AND
+	// the row, and the user is not authorized at this point either.
+	if _, err := restoreSvc.Reconcile(ctx, goesPrincipal); err != nil {
+		t.Fatalf("reconcile goes: %v", err)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM grant_origins WHERE grant_id = '`+backupGrant+
+		`' AND kind = 'scim'`); n != 0 {
+		t.Fatal("§9.1: a restored `scim` origin must be DROPPED at reconciliation commit, not committed")
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM grants WHERE id = '`+backupGrant+`'`); n != 0 {
+		t.Fatal("§9.1: a row whose only restored origins were `scim` must not be re-activated")
+	}
+	if held(t, db, goesPrincipal, domain.CapRead, scope) {
+		t.Fatal("a post-backup-deprovisioned user must not be authorized by the reconciliation commit")
+	}
+
+	// `stays` next — the user the identity provider still asserts. Their HAND
+	// grant commits, because manual origins are exactly what the commit covers;
+	// their SCIM-held grant does not, because it awaits re-assertion.
+	if _, err := restoreSvc.Reconcile(ctx, staysPrincipal); err != nil {
+		t.Fatalf("reconcile stays: %v", err)
+	}
+	if !held(t, db, staysPrincipal, domain.CapEdit, scope) {
+		t.Fatal("§9.1: the operator's commit covers `manual` origins — a hand grant must come back")
+	}
+	if held(t, db, staysPrincipal, domain.CapRead, scope) {
+		t.Fatal("§9.1: a SCIM-held grant must not be re-activated by the commit; re-assertion rebuilds it")
+	}
+
+	// The administrator is reconciled too — the restore made everybody inert,
+	// including whoever has to repair the binding — and so is the binding's
+	// own provisioning connection, whose structural `scim-provision` grant is
+	// what lets the identity provider back onto the wire at all. Its structural
+	// origin SURVIVES the commit: it was created with the binding, not asserted
+	// by the IdP, so nothing would ever recreate it.
+	if _, err := restoreSvc.Reconcile(ctx, admin); err != nil {
+		t.Fatalf("reconcile admin: %v", err)
+	}
+	connection := domain.PrincipalID(queryString(t, db,
+		`SELECT connection_principal_id FROM scim_bindings WHERE id = '`+binding.ID+`'`))
+	if _, err := restoreSvc.Reconcile(ctx, connection); err != nil {
+		t.Fatalf("reconcile the provisioning connection: %v", err)
+	}
+	if !held(t, db, connection, domain.CapSCIMProvision, orgAScope) {
+		t.Fatal("§9.1 drops `scim` origins, not `structural` ones: the connection's own grant must survive")
 	}
 
 	// The org admin RE-MINTS, which is the only way back onto the wire.
@@ -638,31 +839,5 @@ func runSCIMRestoreDrill(t *testing.T, db *store.DB) {
 	postCode, postState := driveIdP(t, postStart.AuthURL+"&sub=stays")
 	if _, err := auth.OIDCCallback(ctx, "okta", postCode, postState, "", "", postStart.BindingCookie, ""); !isUnauth(err) {
 		t.Fatalf("SCIM re-assertion must not substitute for operator reconciliation, got %v", err)
-	}
-}
-
-// TestSCIMRestoreOriginDropIsBlockedOn76 pins the ONE §9.1 clause with no seam
-// in this tree: "restored `scim` origins are dropped at reconciliation commit,
-// not committed". The operator's quarantine/commit flow is #76's and does not
-// exist, so there is nothing to hook the drop into.
-//
-// This is a tripwire, not a skip: it fails the day that flow appears, so the
-// clause is implemented WITH it rather than discovered missing afterwards.
-func TestSCIMRestoreOriginDropIsBlockedOn76(t *testing.T) {
-	// Matched by PREFIX, not by three guessed spellings: a tripwire whose one
-	// unacceptable failure mode is a silent false negative must not depend on
-	// #76 choosing a name this test predicted. A false positive costs a human
-	// one read of this comment, which is the safe direction.
-	//
-	// No operation carries either prefix today — `credential-reset.*` is its
-	// own family, and `recovery.break_glass_grant` is an audit EVENT, not an
-	// operation — so this is quiet until the flow actually exists.
-	for op := range facts.Operations() {
-		name := string(op)
-		if strings.HasPrefix(name, "restore.") || strings.HasPrefix(name, "recovery.") {
-			t.Fatalf("a restore/recovery operation (%s) has landed: §9.1's rule — restored `scim` origins are "+
-				"DROPPED at reconciliation commit, so a row whose only restored origins were `scim` is not "+
-				"re-activated — must now be implemented and fixtured here", name)
-		}
 	}
 }

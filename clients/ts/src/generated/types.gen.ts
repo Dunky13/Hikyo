@@ -604,7 +604,7 @@ export type ServiceAccountKind = 'workload' | 'automation';
  * rather than a schema change.
  *
  */
-export type CredentialKind = 'hikyo-token';
+export type CredentialKind = 'hikyo-token' | 'oidc-federation';
 
 /**
  * `indefinite` is a VALUE, not a large number: it is unreachable by
@@ -642,6 +642,9 @@ export type ServiceAccountList = {
  * value is displayed exactly once, at mint, and is never retrievable
  * afterwards.
  *
+ * A row of kind `oidc-federation` carries no `prefix_hint` — a binding has
+ * no minted value to hint at — and carries the binding members instead.
+ *
  */
 export type MachineCredential = {
     id: Id;
@@ -650,9 +653,34 @@ export type MachineCredential = {
      * The non-secret leading slice of the minted value - the grammar
      * prefix plus a few body characters, enough to tell two live
      * credentials apart and far short of anything a search can narrow.
+     * Absent for an `oidc-federation` row.
      *
      */
-    prefix_hint: string;
+    prefix_hint?: string;
+    /**
+     * `oidc-federation` only: the byte-exact issuer this binding trusts.
+     */
+    issuer?: string;
+    /**
+     * `oidc-federation` only: the byte-exact `sub` it names.
+     */
+    subject?: string;
+    /**
+     * `oidc-federation` only: the audience it accepts, never the issuer's default.
+     */
+    audience?: string;
+    /**
+     * `oidc-federation` only: every pinned claim, all of which validation requires.
+     */
+    required_claims?: Array<FederatedClaimPin>;
+    /**
+     * `oidc-federation` only, and null unless this binding has been through
+     * a restore. When set, the binding permanently refuses any token whose
+     * `iat` is not strictly after this instant plus the maximum accepted
+     * positive clock skew.
+     *
+     */
+    reactivated_at?: Timestamp;
     lifetime: CredentialLifetime;
     expires_at?: Timestamp;
     created_at: Timestamp;
@@ -710,6 +738,246 @@ export type MintCredentialResult = {
      *
      */
     clamped: boolean;
+};
+
+/**
+ * The federation issuer's platform. It is DECLARED rather than inferred
+ * from the issuer URL, because the per-platform binding rules differ — a
+ * Forgejo or GitHub Actions binding MUST pin `event_name`, a Kubernetes one
+ * has no such claim — and inferring the type from a URL would let renaming
+ * a deployment change the security rules that apply to it.
+ *
+ */
+export type IssuerType = 'kubernetes' | 'forgejo' | 'github-actions';
+
+/**
+ * Where the issuer's signing keys come from. `discovery` is the default:
+ * keys are fetched and cached with a bounded staleness window. `static` is
+ * the configured alternative for air-gapped installations and for
+ * deployments whose issuer discovery endpoint this instance cannot reach —
+ * deliberately not the default, because a static-only installation breaks
+ * silently on the day someone rotates the issuer's keys.
+ *
+ */
+export type JwksMode = 'discovery' | 'static';
+
+/**
+ * One instance-scoped issuer configuration. There is deliberately no
+ * `static_jwks` property on the READ shape: the document is configuration
+ * an operator supplied and can re-supply, nothing needs it back, and a read
+ * surface that returned it would carry a key document for no reason.
+ *
+ */
+export type FederationIssuer = {
+    id: Id;
+    /**
+     * The byte-exact `iss`. Nothing folds case, resolves the URL or strips
+     * a trailing slash: OpenID Connect defines `iss` as case-sensitive, so
+     * any normalization could merge two distinct external issuers into one
+     * configuration.
+     *
+     */
+    issuer: string;
+    issuer_type: IssuerType;
+    jwks_mode: JwksMode;
+    /**
+     * The issuer's DEFAULT audiences, which no binding may name and which
+     * no token may carry. At least one is required: a Kubernetes API-server
+     * audience is whatever that cluster was configured with and is not
+     * derivable, so an empty list would silently accept the audience that
+     * must be refused.
+     *
+     */
+    refused_audiences: Array<string>;
+    created_at: Timestamp;
+    created_by: Id;
+    updated_at?: Timestamp;
+    updated_by?: Id;
+    /**
+     * How many bindings name this issuer, LIVE OR HISTORICAL, so an operator
+     * sees the blast radius before attempting a delete — which is refused
+     * while any remain. Revoked bindings count: erasing the issuer a past
+     * binding trusted erases what it trusted, and the foreign key would
+     * refuse the delete anyway with a driver message instead of a reason.
+     *
+     */
+    live_bindings: number;
+};
+
+export type FederationIssuerList = {
+    items: Array<FederationIssuer>;
+    count: number;
+};
+
+export type CreateFederationIssuerRequest = {
+    /**
+     * The byte-exact `iss`, `https://` only. Discovery and JWKS are fetched
+     * from this URL, so an `http` issuer would rest the instance's whole
+     * federation trust on whoever holds the network path.
+     *
+     */
+    issuer: string;
+    issuer_type: IssuerType;
+    jwks_mode: JwksMode;
+    /**
+     * The JWKS document, required under `static` mode and refused under
+     * `discovery`. The pairing is total: a document stored but unused is a
+     * key set nobody rotates.
+     *
+     */
+    static_jwks?: string;
+    refused_audiences: Array<string>;
+};
+
+/**
+ * The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
+ * changing either would silently re-point every binding underneath at a
+ * different external authority, which is a replacement, not an edit.
+ *
+ */
+export type UpdateFederationIssuerRequest = {
+    jwks_mode: JwksMode;
+    static_jwks?: string;
+    refused_audiences: Array<string>;
+};
+
+/**
+ * One pinned claim, as a DISCRIMINATED scalar rather than a free-form JSON
+ * value. Exactly one of `string_value`, `number_value` or `bool_value` is
+ * set, and that is what makes "a string is never folded to a number" true
+ * at the wire boundary rather than only inside the validator:
+ * `repository_id: 123` and `repository_id: "123"` are two different
+ * requests that cannot be mistaken for one another, and a 64-bit repository
+ * id survives without passing through a float.
+ *
+ * A pin naming none or several values is refused rather than resolved by
+ * precedence.
+ *
+ */
+export type FederatedClaimPin = {
+    claim: string;
+    string_value?: string;
+    number_value?: number;
+    bool_value?: boolean;
+};
+
+/**
+ * A binding names exactly one service account, matched byte-for-byte on
+ * `(issuer, subject)`. There are no wildcards, no namespace patterns, no
+ * path prefixes, no case folding and no JIT provisioning: a pattern rule
+ * such as "any ServiceAccount in namespace prod" would hand a Hikyo
+ * principal to anyone holding `create serviceaccount` in that namespace, a
+ * far wider group than cluster-admin.
+ *
+ */
+export type CreateBindingRequest = {
+    /**
+     * The byte-exact `iss` of a configured issuer.
+     */
+    issuer: string;
+    subject: string;
+    /**
+     * Mandatory, and may not be the issuer's default. A Kubernetes token
+     * minted for the default API-server audience would otherwise
+     * authenticate here, and a Forgejo Actions audience defaults to
+     * `<instance>/<owner>`, shared across every repository that owner has.
+     *
+     */
+    audience: string;
+    /**
+     * Every pinned claim, all of which validation requires. A Forgejo or
+     * GitHub Actions binding MUST pin `event_name`: `pull_request_target`
+     * carries the ordinary ref-form subject — the default branch's subject,
+     * the one a production binding names — so the protection comes from the
+     * pinned event, never from the subject's shape.
+     *
+     */
+    required_claims: Array<FederatedClaimPin>;
+    indefinite?: boolean;
+    lifetime_seconds?: number;
+    /**
+     * The binding this one supersedes. Bindings are IMMUTABLE, so every
+     * change is a replacement mint carrying the full formula: the
+     * predecessor is revoked and the successor inserted in one transaction.
+     *
+     */
+    replaces?: Id;
+};
+
+export type FederatedBinding = {
+    credential: MachineCredential;
+    issuer_id: Id;
+    /**
+     * True when the instance ceiling shortened the requested lifetime.
+     */
+    clamped: boolean;
+    /**
+     * The predecessor this mint revoked, absent for a first issue.
+     */
+    replaced_id?: Id;
+};
+
+/**
+ * One key as the machine surface delivers it. There is deliberately NO
+ * value property, and its absence is not a placeholder: no plaintext
+ * crosses this surface, so the ticket that adds values has to add the
+ * member deliberately.
+ *
+ */
+export type DeliveredKey = {
+    name: string;
+    classification: KeyClassification;
+    /**
+     * The key's declared presence for the addressed environment. When
+     * values land this enumeration gains `set`, and the change token starts
+     * moving with values.
+     *
+     */
+    presence: 'required' | 'forbidden' | 'optional';
+};
+
+/**
+ * Either the authorized projection, or the statement that the presented
+ * cursor is current — in which case `keys` is empty and NOTHING was
+ * disclosed. Only a fetch that actually delivers values is a disclosure.
+ *
+ */
+export type DeliveryResponse = {
+    /**
+     * True when the presented cursor named the state the server was about
+     * to serve.
+     *
+     */
+    current: boolean;
+    /**
+     * The opaque cursor for the state this answer describes, returned on
+     * BOTH dispositions so a caller told "current" can keep polling without
+     * re-fetching to learn its own cursor.
+     *
+     * It is bound to four things — the change token, the caller's
+     * authorized delivery projection, the principal's authorization
+     * revision, and the pin generation — never to content alone. Any
+     * authorization movement therefore invalidates it and produces a full
+     * authorized delivery rather than a "current" answer.
+     *
+     */
+    cursor: string;
+    /**
+     * The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
+     * a content digest, so it is unforgeable and un-invertible without the
+     * server key and may flow into pod annotations, logs and
+     * change-detection caches as ordinary non-secret metadata.
+     *
+     */
+    change_token: string;
+    /**
+     * The project's monotonic key-catalogue revision.
+     */
+    schema_revision: number;
+    /**
+     * Empty when `current` is true.
+     */
+    keys: Array<DeliveredKey>;
 };
 
 export type CredentialPolicy = {
@@ -1513,18 +1781,51 @@ export type Passkey = {
     last_used_at: Timestamp;
 };
 
-/**
- * A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
- * deliberately open: identity providers send and expect attributes this
- * provider stores as round-tripped display metadata, and pinning the
- * shape here would make a conformant IdP's request a contract violation.
- * What IS closed lives in the server: the subject source, the filter
- * grammar, the PATCH matrix and the error mapping, each with its own
- * named refusal.
- *
- */
-export type ScimResource = {
-    [key: string]: unknown;
+export type CreateScimBindingRequest = {
+    provider_kind: 'oidc' | 'saml';
+    provider_slug: string;
+    /**
+     * `externalId` or a declared enterprise/custom extension path.
+     * `userName` is refused by name: RFC 7643 defines it
+     * `caseExact: false` and server-unique, which contradicts byte-exact
+     * identity material.
+     *
+     */
+    subject_source: string;
+    /**
+     * SAML bindings only. A scalar SCIM attribute cannot carry the locked
+     * SAML subject, so the binding declares the NameID PROFILE and the
+     * subject-source attribute supplies the NameID value alone.
+     *
+     */
+    nameid_format?: string;
+    nameid_qualifier?: string;
+    /**
+     * Presence is carried separately from value because an absent
+     * qualifier and an empty one are different inputs to the injective
+     * encoder, and collapsing them would make two SAML subjects collide.
+     *
+     */
+    nameid_qualifier_present?: boolean;
+    nameid_sp_qualifier?: string;
+    nameid_sp_qualifier_present?: boolean;
+};
+
+export type MintScimCredentialRequest = {
+    /**
+     * The reauthentication proof: a TOTP code, or the account password
+     * where no factor is enrolled. Minting a provisioning credential is
+     * `manage-members(org)` AND reauthentication, so a stolen elevated
+     * session cannot issue a durable bearer on its own.
+     *
+     */
+    proof?: string;
+    /**
+     * Requires the instance opt-in, which is default-off. Without it an
+     * indefinite credential is refused by name.
+     *
+     */
+    indefinite?: boolean;
 };
 
 /**
@@ -1603,6 +1904,64 @@ export type ScimBindingList = {
     count: number;
 };
 
+/**
+ * Server-authored consequence language. It is authored on the server, not
+ * in a client, because the locked rule is about what the human is TOLD,
+ * and a client rendering its own wording is a second, unreviewed policy.
+ *
+ */
+export type ScimBlastWarning = {
+    code: 'org_scope' | 'reveal_expanding' | 'production_environment' | 'populated_group';
+    severity: 'warning' | 'critical';
+    message: string;
+};
+
+export type ScimCredential = {
+    id: Id;
+    binding_id: Id;
+    created_at: Timestamp;
+    expires_at?: Timestamp;
+    revoked_at?: Timestamp;
+    last_used_at?: Timestamp;
+    live: boolean;
+};
+
+export type ScimCredentialList = {
+    items: Array<ScimCredential>;
+    count: number;
+};
+
+export type ScimDirectoryGroup = {
+    id: Id;
+    display_name: string;
+    external_id?: string;
+    member_count: number;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+};
+
+export type ScimDirectoryGroupList = {
+    items: Array<ScimDirectoryGroup>;
+    count: number;
+};
+
+export type ScimDirectoryUser = {
+    id: Id;
+    user_name: string;
+    external_id?: string;
+    account_id: Id;
+    active: boolean;
+    groups: Array<Id>;
+    created_at: Timestamp;
+    updated_at: Timestamp;
+    attention: Array<ScimAttention>;
+};
+
+export type ScimDirectoryUserList = {
+    items: Array<ScimDirectoryUser>;
+    count: number;
+};
+
 export type ScimMapping = {
     id: Id;
     binding_id: Id;
@@ -1644,39 +2003,12 @@ export type ScimMappingRequest = {
     environment_id?: string;
 };
 
-/**
- * Server-authored consequence language. It is authored on the server, not
- * in a client, because the locked rule is about what the human is TOLD,
- * and a client rendering its own wording is a second, unreviewed policy.
- *
- */
-export type ScimBlastWarning = {
-    code: 'org_scope' | 'reveal_expanding' | 'production_environment' | 'populated_group';
-    severity: 'warning' | 'critical';
-    message: string;
-};
-
 export type ScimMappingResult = {
     mapping: ScimMapping;
     warnings: Array<ScimBlastWarning>;
     members_affected: number;
     grants_created: number;
     origins_released: number;
-};
-
-export type ScimCredential = {
-    id: Id;
-    binding_id: Id;
-    created_at: Timestamp;
-    expires_at?: Timestamp;
-    revoked_at?: Timestamp;
-    last_used_at?: Timestamp;
-    live: boolean;
-};
-
-export type ScimCredentialList = {
-    items: Array<ScimCredential>;
-    count: number;
 };
 
 export type ScimMintResult = {
@@ -1696,82 +2028,18 @@ export type ScimMintResult = {
     rotated: boolean;
 };
 
-export type ScimDirectoryUser = {
-    id: Id;
-    user_name: string;
-    external_id?: string;
-    account_id: Id;
-    active: boolean;
-    groups: Array<Id>;
-    created_at: Timestamp;
-    updated_at: Timestamp;
-    attention: Array<ScimAttention>;
-};
-
-export type ScimDirectoryUserList = {
-    items: Array<ScimDirectoryUser>;
-    count: number;
-};
-
-export type ScimDirectoryGroup = {
-    id: Id;
-    display_name: string;
-    external_id?: string;
-    member_count: number;
-    created_at: Timestamp;
-    updated_at: Timestamp;
-};
-
-export type ScimDirectoryGroupList = {
-    items: Array<ScimDirectoryGroup>;
-    count: number;
-};
-
-export type CreateScimBindingRequest = {
-    provider_kind: 'oidc' | 'saml';
-    provider_slug: string;
-    /**
-     * `externalId` or a declared enterprise/custom extension path.
-     * `userName` is refused by name: RFC 7643 defines it
-     * `caseExact: false` and server-unique, which contradicts byte-exact
-     * identity material.
-     *
-     */
-    subject_source: string;
-    /**
-     * SAML bindings only. A scalar SCIM attribute cannot carry the locked
-     * SAML subject, so the binding declares the NameID PROFILE and the
-     * subject-source attribute supplies the NameID value alone.
-     *
-     */
-    nameid_format?: string;
-    nameid_qualifier?: string;
-    /**
-     * Presence is carried separately from value because an absent
-     * qualifier and an empty one are different inputs to the injective
-     * encoder, and collapsing them would make two SAML subjects collide.
-     *
-     */
-    nameid_qualifier_present?: boolean;
-    nameid_sp_qualifier?: string;
-    nameid_sp_qualifier_present?: boolean;
-};
-
-export type MintScimCredentialRequest = {
-    /**
-     * The reauthentication proof: a TOTP code, or the account password
-     * where no factor is enrolled. Minting a provisioning credential is
-     * `manage-members(org)` AND reauthentication, so a stolen elevated
-     * session cannot issue a durable bearer on its own.
-     *
-     */
-    proof?: string;
-    /**
-     * Requires the instance opt-in, which is default-off. Without it an
-     * indefinite credential is refused by name.
-     *
-     */
-    indefinite?: boolean;
+/**
+ * A SCIM 2.0 resource or message, as RFC 7643/7644 shapes it. It is
+ * deliberately open: identity providers send and expect attributes this
+ * provider stores as round-tripped display metadata, and pinning the
+ * shape here would make a conformant IdP's request a contract violation.
+ * What IS closed lives in the server: the subject source, the filter
+ * grammar, the PATCH matrix and the error mapping, each with its own
+ * named refusal.
+ *
+ */
+export type ScimResource = {
+    [key: string]: unknown;
 };
 
 /**
@@ -1858,16 +2126,36 @@ export type WebauthnCredentialId = Id;
 export type ResetTargetPrincipal = Id;
 
 /**
+ * Federation issuer identifier. It is the server-minted id, not the issuer
+ * URL: a URL in a path segment would have to be escaped, and an escaping
+ * rule on a byte-exact identity is a canonicalization step waiting to
+ * happen.
+ *
+ */
+export type FederationIssuerId = Id;
+
+/**
+ * The opaque cursor a previous fetch returned. Absent means a full
+ * authorized delivery. A cursor is never parsed by the caller and never
+ * constructed by one: the server recomputes it for the state it is about to
+ * serve and compares.
+ *
+ */
+export type DeliveryCursor = string;
+
+/**
  * SCIM binding identifier.
  */
 export type ScimBindingId = Id;
 
 /**
- * A server-minted resource identifier. The identity provider can only
- * reference ids this server minted.
+ * Desired page size. It is a REQUEST: a value above this provider's bound
+ * is answered with the bound rather than refused.
+ *
+ * Typed `string` and unconstrained for the same reason as `startIndex`.
  *
  */
-export type ScimResourceId = Id;
+export type ScimCount = string;
 
 /**
  * An RFC 7644 filter, closed to `attribute eq "value"` over the four
@@ -1885,6 +2173,29 @@ export type ScimResourceId = Id;
 export type ScimFilter = string;
 
 /**
+ * A server-minted resource identifier. The identity provider can only
+ * reference ids this server minted.
+ *
+ */
+export type ScimResourceId = Id;
+
+/**
+ * Present only so its presence can be REFUSED by name with 501. Sorting
+ * is advertised absent in ServiceProviderConfig and is not
+ * half-implemented. Unconstrained: see `filter`.
+ *
+ */
+export type ScimSortBy = string;
+
+/**
+ * Present only so its presence can be REFUSED by name with 501, exactly
+ * like `sortBy`. Refusing one and ignoring the other would be the
+ * half-implementation the ADR forbids. Unconstrained: see `filter`.
+ *
+ */
+export type ScimSortOrder = string;
+
+/**
  * 1-based index of the first result; a value below 1 is read as 1, per
  * RFC 7644 §3.4.2.4.
  *
@@ -1896,31 +2207,6 @@ export type ScimFilter = string;
  *
  */
 export type ScimStartIndex = string;
-
-/**
- * Desired page size. It is a REQUEST: a value above this provider's bound
- * is answered with the bound rather than refused.
- *
- * Typed `string` and unconstrained for the same reason as `startIndex`.
- *
- */
-export type ScimCount = string;
-
-/**
- * Present only so its presence can be REFUSED by name with 501, exactly
- * like `sortBy`. Refusing one and ignoring the other would be the
- * half-implementation the ADR forbids. Unconstrained: see `filter`.
- *
- */
-export type ScimSortOrder = string;
-
-/**
- * Present only so its presence can be REFUSED by name with 501. Sorting
- * is advertised absent in ServiceProviderConfig and is not
- * half-implemented. Unconstrained: see `filter`.
- *
- */
-export type ScimSortBy = string;
 
 export type GetMetaData = {
     body?: never;
@@ -9181,6 +9467,427 @@ export type SetCredentialPolicyResponses = {
 };
 
 export type SetCredentialPolicyResponse = SetCredentialPolicyResponses[keyof SetCredentialPolicyResponses];
+
+export type ListFederationIssuersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/federation-issuers';
+};
+
+export type ListFederationIssuersErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListFederationIssuersError = ListFederationIssuersErrors[keyof ListFederationIssuersErrors];
+
+export type ListFederationIssuersResponses = {
+    /**
+     * The configured issuers.
+     */
+    200: FederationIssuerList;
+};
+
+export type ListFederationIssuersResponse = ListFederationIssuersResponses[keyof ListFederationIssuersResponses];
+
+export type CreateFederationIssuerData = {
+    body: CreateFederationIssuerRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/federation-issuers';
+};
+
+export type CreateFederationIssuerErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateFederationIssuerError = CreateFederationIssuerErrors[keyof CreateFederationIssuerErrors];
+
+export type CreateFederationIssuerResponses = {
+    /**
+     * The configured issuer.
+     */
+    201: FederationIssuer;
+};
+
+export type CreateFederationIssuerResponse = CreateFederationIssuerResponses[keyof CreateFederationIssuerResponses];
+
+export type DeleteFederationIssuerData = {
+    body?: never;
+    path: {
+        /**
+         * Federation issuer identifier. It is the server-minted id, not the issuer
+         * URL: a URL in a path segment would have to be escaped, and an escaping
+         * rule on a byte-exact identity is a canonicalization step waiting to
+         * happen.
+         *
+         */
+        issuer: Id;
+    };
+    query?: never;
+    url: '/api/v1/instance/federation-issuers/{issuer}';
+};
+
+export type DeleteFederationIssuerErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteFederationIssuerError = DeleteFederationIssuerErrors[keyof DeleteFederationIssuerErrors];
+
+export type DeleteFederationIssuerResponses = {
+    /**
+     * Deleted.
+     */
+    204: void;
+};
+
+export type DeleteFederationIssuerResponse = DeleteFederationIssuerResponses[keyof DeleteFederationIssuerResponses];
+
+export type UpdateFederationIssuerData = {
+    body: UpdateFederationIssuerRequest;
+    path: {
+        /**
+         * Federation issuer identifier. It is the server-minted id, not the issuer
+         * URL: a URL in a path segment would have to be escaped, and an escaping
+         * rule on a byte-exact identity is a canonicalization step waiting to
+         * happen.
+         *
+         */
+        issuer: Id;
+    };
+    query?: never;
+    url: '/api/v1/instance/federation-issuers/{issuer}';
+};
+
+export type UpdateFederationIssuerErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateFederationIssuerError = UpdateFederationIssuerErrors[keyof UpdateFederationIssuerErrors];
+
+export type UpdateFederationIssuerResponses = {
+    /**
+     * The issuer as written.
+     */
+    200: FederationIssuer;
+};
+
+export type UpdateFederationIssuerResponse = UpdateFederationIssuerResponses[keyof UpdateFederationIssuerResponses];
+
+export type CreateFederatedBindingData = {
+    body: CreateBindingRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Service-account identifier.
+         */
+        serviceAccount: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings';
+};
+
+export type CreateFederatedBindingErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateFederatedBindingError = CreateFederatedBindingErrors[keyof CreateFederatedBindingErrors];
+
+export type CreateFederatedBindingResponses = {
+    /**
+     * The created binding.
+     */
+    201: FederatedBinding;
+};
+
+export type CreateFederatedBindingResponse = CreateFederatedBindingResponses[keyof CreateFederatedBindingResponses];
+
+export type FetchDeliveryData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: {
+        /**
+         * The opaque cursor a previous fetch returned. Absent means a full
+         * authorized delivery. A cursor is never parsed by the caller and never
+         * constructed by one: the server recomputes it for the state it is about to
+         * serve and compares.
+         *
+         */
+        cursor?: string;
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery';
+};
+
+export type FetchDeliveryErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type FetchDeliveryError = FetchDeliveryErrors[keyof FetchDeliveryErrors];
+
+export type FetchDeliveryResponses = {
+    /**
+     * The authorized projection, or the statement that the cursor is current.
+     */
+    200: DeliveryResponse;
+};
+
+export type FetchDeliveryResponse = FetchDeliveryResponses[keyof FetchDeliveryResponses];
 
 export type ListScimBindingsData = {
     body?: never;

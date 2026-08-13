@@ -187,6 +187,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteOriginlessGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "a3995eb06a94904a81ecd77108d1e41c59a7780fbe45a91777e409dd71b7c5ec"
+  },
+  {
+    "engine": "postgres",
     "name": "DeletePendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "de3e3cf0a2de5c05ab5ec340129598cf840929bc37c322ce0a77360a779df451"
@@ -274,6 +280,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "848f0fe3ce8a4f1ca5d8f819696cb66997d72de72efbac64e3090050460a8df0"
+  },
+  {
+    "engine": "postgres",
+    "name": "DropRestoredSCIMOrigins",
+    "annotation": "authn-resolution",
+    "hash": "3d2bf22b6f70735b2b08b42a658d01242a18f8eec720809866bd9888b612c04f"
   },
   {
     "engine": "postgres",
@@ -1231,6 +1243,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteOriginlessGrantsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "66f3008c7296dec9a50911b490f1d5c6f3a4b2e04b7188f47c3b014842483f67"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeletePendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "9cac0a620bc7fa2b5289015dddd8be9beb8d4c0c5166617f25c6bfffe0351904"
@@ -1318,6 +1336,12 @@
     "name": "DisableWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "8b28aa8f530e6ef3ef812866a0daa85c83c7f6092d35ed2357dd959ab3603435"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DropRestoredSCIMOrigins",
+    "annotation": "authn-resolution",
+    "hash": "865e04d6b5541dd33657a310569dcccf05ca85561f25eccfef5edded1d13ff96"
   },
   {
     "engine": "sqlite",

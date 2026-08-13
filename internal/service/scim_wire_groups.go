@@ -328,11 +328,11 @@ func (s *SCIM) setMembers(
 	var events []grantEventInput
 	var added, removed []string
 	for _, id := range desired {
-		if have[id] {
-			continue
-		}
 		// A member reference resolving to no user THIS BINDING provisioned is
 		// refused by name: the IdP can only reference ids this server minted.
+		// Checked for EVERY member of the desired set, not only the new ones —
+		// a push naming a member that does not exist is refused whether or not
+		// somebody else in the same list is new.
 		user, err := r.SCIM().User(ctx, c.proof, c.binding.ID, id)
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, nil, nil, ErrSCIMUnknownMember
@@ -340,16 +340,28 @@ func (s *SCIM) setMembers(
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		memberID, err := newID("sgm")
-		if err != nil {
-			return nil, nil, nil, err
+		// DESIRED STATE, not a delta: the mappings are applied for every member
+		// the push asserts, whether or not this push is what made them one.
+		// `applyMappings` is additive and idempotent — an existing row gains an
+		// origin rather than a duplicate, and emits nothing when nothing was
+		// created — so the only visible difference is the case this exists for:
+		// after a restore has DROPPED the binding's `scim` origins (§9.1), the
+		// identity provider's next cycle asserts the same membership it always
+		// did, and that assertion has to rebuild them. A delta-only reconciler
+		// left those users unauthorized until somebody happened to change the
+		// group.
+		if !have[id] {
+			memberID, err := newID("sgm")
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if err := r.SCIM().AddGroupMember(ctx, c.proof, store.SCIMGroupMember{
+				ID: memberID, BindingID: c.binding.ID, GroupID: groupID, UserID: id, CreatedAt: now,
+			}); err != nil {
+				return nil, nil, nil, err
+			}
+			added = append(added, user.AccountID)
 		}
-		if err := r.SCIM().AddGroupMember(ctx, c.proof, store.SCIMGroupMember{
-			ID: memberID, BindingID: c.binding.ID, GroupID: groupID, UserID: id, CreatedAt: now,
-		}); err != nil {
-			return nil, nil, nil, err
-		}
-		added = append(added, user.AccountID)
 		if !user.Active {
 			continue // an inactive user holds no origins; membership is recorded, not granted
 		}

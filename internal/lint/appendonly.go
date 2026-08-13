@@ -294,6 +294,9 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// route, and the classification-totality invariant keeps that true.
 	"AdvanceRestoreEpoch": true,
 	"ReconcilePrincipal":  true,
+	// #73 section 9.1: the reconciliation commit drops restored `scim` origins
+	// and any grant row they were the last hold on, in the same act.
+	"dropRestoredSCIMOrigins": true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,
