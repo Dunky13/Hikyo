@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -34,6 +35,17 @@ type Config struct {
 	TrustedProxyCIDRs []string
 	AutoMigrate       bool
 	Store             Datastore
+
+	// DirectoryProxy is the OPTIONAL forward proxy the outbound directory
+	// client tunnels through, from HIKYO_DIRECTORY_PROXY. Empty is the default
+	// and means direct egress.
+	//
+	// It is EXPLICIT CONFIGURATION and nothing else: http.ProxyFromEnvironment
+	// is deliberately not consulted anywhere, because ambient HTTP_PROXY
+	// discovery would let a process's environment redirect authenticated fleet
+	// traffic. https only — the CONNECT request names the remote host, so a
+	// plaintext proxy publishes the fleet topology to the path.
+	DirectoryProxy string
 
 	// ExternalOrigin is the instance's public origin (scheme + host), used to
 	// build per-provider OIDC redirect URIs (A1). Never derived from a request
@@ -185,6 +197,13 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		if err != nil {
 			return nil, nil, err
 		}
+		// Admission consumes an int in the limiter. Keep the serialized config
+		// portable across architectures instead of allowing uint32-to-int wrap on
+		// a 32-bit build.
+		if budget > math.MaxInt32 {
+			return nil, nil, fmt.Errorf(
+				"HIKYO_ADMISSION_BUDGET_MIB: %d exceeds the largest portable integer", budget)
+		}
 		cfg.AdmissionBudgetMiB = int(budget)
 
 		// The dev-only override. Fail-closed twice over: a non-dev process
@@ -213,6 +232,17 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		cfg.TrustedProxyCIDRs = trustedProxyCIDRs
 		if !isLoopbackListen(cfg.Listen) && len(cfg.TrustedProxyCIDRs) == 0 {
 			return nil, nil, fmt.Errorf("non-loopback plaintext listen %q requires HIKYO_TRUSTED_PROXY_CIDRS", cfg.Listen)
+		}
+		if raw := getenv("HIKYO_DIRECTORY_PROXY"); raw != "" {
+			u, err := url.Parse(raw)
+			if err != nil || u.Host == "" {
+				return nil, nil, fmt.Errorf("HIKYO_DIRECTORY_PROXY: %q is not a URL naming a host", raw)
+			}
+			if u.Scheme != "https" {
+				return nil, nil, fmt.Errorf("HIKYO_DIRECTORY_PROXY: %q must be https — a plaintext "+
+					"forward proxy publishes which installations this one talks to", raw)
+			}
+			cfg.DirectoryProxy = raw
 		}
 	}
 

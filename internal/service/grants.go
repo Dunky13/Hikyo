@@ -471,7 +471,13 @@ func (s *Auth) RequireDisclosureAuthority(
 		}
 	}
 	for _, env := range union(current, historical) {
-		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, PurposeMint, string(env), nil, now)
+		// No operation is named and no key set is enumerated: this conjunct is
+		// about reaching plaintext through a credential, not about one named
+		// disclosure. An UNBOUND window (every #54 ceremony) satisfies it; a
+		// window BOUND to a step-up's exact operation does not, and that refusal
+		// is correct — consent to reveal DATABASE_URL in a foreign shell is not
+		// consent to widen a machine credential's reach.
+		err := s.ConsumeReauthWindow(ctx, az, caller.SessionID, PurposeMint, string(env), "", nil, now)
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrNoReauthWindow), errors.Is(err, ErrReauthWindowExpired),
@@ -1150,7 +1156,27 @@ func checkPrincipalClass(class domain.PrincipalClass, capability domain.Capabili
 		return fmt.Errorf("%w: %q", ErrSystemCreatedOnly, capability)
 	}
 	if class == domain.ClassHuman {
+		// `instance-directory` is deliberately NOT refused here. It is the
+		// multi-instance ADR's own grantable atom for the viewing side — "on a
+		// multi-user install the admin grants the hop to exactly the humans who
+		// work across instances" — and refusing it to humans would close the
+		// surface the atom exists for. The machine half is refused below.
 		return nil
+	}
+	if capability == domain.CapInstanceDirector {
+		// A MACHINE holding `instance-directory` is the instance-connection
+		// principal and nothing else (#71), and its grant is system-created:
+		// `remote-credential create` writes principal, credential and grant as
+		// one unit at the store layer, and `revoke` retires all three together.
+		//
+		// The class allowlist alone would admit this write, because
+		// MachineMayHold(instance-connection, instance-directory) is true — it
+		// has to be, or the chokepoint could not evaluate the formula. That
+		// makes the allowlist the wrong guard here: it answers "may this
+		// principal HOLD it", and the question this API asks is "may it be
+		// ATTACHED BY HAND", whose answer is no. Without this branch a grant
+		// could outlive the credential binding that justifies it.
+		return fmt.Errorf("%w: %q", ErrSystemCreatedOnly, capability)
 	}
 	if !domain.MachineMayHold(class, capability) {
 		return fmt.Errorf("%w: class %q may not hold %q", ErrMachineCapability, class, capability)

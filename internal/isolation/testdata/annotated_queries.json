@@ -25,6 +25,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ApproveWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "df6f617122c04b3a57d21e5628efc5ba90665b459883ea3cebdbbc6d4b89a338"
+  },
+  {
+    "engine": "postgres",
     "name": "BindSessionToSAMLProvider",
     "annotation": "authn-resolution",
     "hash": "b5d86c12b60fdc2fdb44dd2e16bc2125228867912d25fa5903747154c73d6aad"
@@ -85,6 +91,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ConsumeWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "8d39738c4dc843ac59a99d86f6d465761458c8abac9149908a5368877d98b4e3"
+  },
+  {
+    "engine": "postgres",
     "name": "CountAccounts",
     "annotation": "authn-resolution",
     "hash": "69674cdbf1872963e0baa7585228d5d70c3d4bda332fe67a800c0e9840ddd419"
@@ -121,6 +133,18 @@
   },
   {
     "engine": "postgres",
+    "name": "CountRemotes",
+    "annotation": "instance-scoped",
+    "hash": "d5c86aafdea3d0248b03a0b9b2b37bdf25fb8522464d0c62eb27cec9f9b20cc1"
+  },
+  {
+    "engine": "postgres",
+    "name": "CreateInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "1a70e3a5c50e697cb5afe3ae663b4b1ec3f66c6e6abbe7e2cf29af6ac6bb6f55"
+  },
+  {
+    "engine": "postgres",
     "name": "CreateOIDCProvider",
     "annotation": "authn-resolution",
     "hash": "f5c5253e3cbfe6d6dc9dfb7ed1e805c3706fef1a8b1e978ff2e08ef7b6498ab4"
@@ -133,9 +157,21 @@
   },
   {
     "engine": "postgres",
+    "name": "CreateRemote",
+    "annotation": "instance-scoped",
+    "hash": "1a1b8110c33878fac6d1d02b3259d4696c4083380d4eb58c1cf4df9be4bb3ea1"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteExpiredSAMLReplay",
     "annotation": "authn-resolution",
     "hash": "ed638e4662868fd19c7eb790f2ed6cacba3d6665ec8133ce146d5151c0030061"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteExpiredWorkspaceHandoffs",
+    "annotation": "authn-resolution",
+    "hash": "869063b1e391f267d168752156bc0ccdab25c4dea62bc848b5cf164cce4b46e6"
   },
   {
     "engine": "postgres",
@@ -211,6 +247,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteRemote",
+    "annotation": "instance-scoped",
+    "hash": "19b2d2767fc3e6283a36513fbc393d7db7b6252b97486514faa9d7c27a6ccec8"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteRetiringSAMLSPKey",
     "annotation": "authn-resolution",
     "hash": "b716e5c85b7c3deb64752f900e1a2787f911989f39d625af9c11c3d24a137485"
@@ -238,6 +280,18 @@
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "11e96cfd8c2736f13ce55975ea910dd68640f6f14e38a4b3342d514804e3de27"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSessionForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "f3a8a11bd4080679caf08f04287f461c39e2e9a8c4ec63ef21a9eec162f7f278"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteSessionsForOrigin",
+    "annotation": "authn-resolution",
+    "hash": "59ff7d6b30bf9ed2700a8088fd9108185ce5f92e01d7d99a9a1f81d5d8bd2a14"
   },
   {
     "engine": "postgres",
@@ -274,6 +328,12 @@
     "name": "DeleteWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "92093928e009648fe75728b93f7d6cd033a5b0683e47fee32f0fed97d21f88b4"
+  },
+  {
+    "engine": "postgres",
+    "name": "DeleteWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "9e3f63443ed6b31528514b7fdc3f02af102fb32cd95e80e500f9ae4499c792aa"
   },
   {
     "engine": "postgres",
@@ -397,6 +457,12 @@
   },
   {
     "engine": "postgres",
+    "name": "GetInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "64c720cefb539d91dcda821b7dd5d4f375cf77a369b266bec4bd93b009851c97"
+  },
+  {
+    "engine": "postgres",
     "name": "GetOIDCProviderBySlug",
     "annotation": "authn-resolution",
     "hash": "0fc87d39348bfd633354fc898a1cbd7f681c8395299ea8223aa78c1871dbf454"
@@ -453,13 +519,31 @@
     "engine": "postgres",
     "name": "GetReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "bb640a11bf45ebade884e246f3012d30ada74c41402a94c1c1a48228e4923799"
+    "hash": "6bc2f4e7b3d73d709ac056514ccf26134172adceb1db417a07549ebf25dfd1c5"
   },
   {
     "engine": "postgres",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "19816dbfd2333bb4af1cfce7697245dea43bfb2c9286c348ef358b6522d4df46"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetRemote",
+    "annotation": "instance-scoped",
+    "hash": "006b8d8fd90045bb7ed248dacad602830cd43a717637b047aceb0d1ee8bec474"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetRemoteByName",
+    "annotation": "instance-scoped",
+    "hash": "a68b02d5ac442584d4bb7969377f0f1fc361379c57825c4f8e2b3f4399e5538b"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetRemoteSnapshot",
+    "annotation": "instance-scoped",
+    "hash": "b7897d305e8d4f6e7c868d52630df9fdb39555218280f1f951ce791582faea55"
   },
   {
     "engine": "postgres",
@@ -519,13 +603,13 @@
     "engine": "postgres",
     "name": "GetSessionByID",
     "annotation": "authn-resolution",
-    "hash": "efbaea85b10b67b36e346b410ed52a5a3817e7b2f899f937c77359c08d55c1e8"
+    "hash": "a1c88af333e86777e71383870c58ebb517bbaa017180f75a9740c35704aa6401"
   },
   {
     "engine": "postgres",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
-    "hash": "0477bd71cf4b9e0aa3f435438456c71bea56b27f9348648f7886a233ca117907"
+    "hash": "c50ced93f6c63fa3144d56604730f17358cadb7097f986fcbff816ed7f1d0a21"
   },
   {
     "engine": "postgres",
@@ -556,6 +640,12 @@
     "name": "GetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "e3e6f838763ce6a46e4bd22a64b18ca58f4239cda8cfb1c361a908b305b9dadf"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "4e885fb8287dd4058b4c539934ba4656b1c7931ad4bf1f2ab68bcc0bd8346248"
   },
   {
     "engine": "postgres",
@@ -639,7 +729,7 @@
     "engine": "postgres",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "a1ce272e0656027b787426fafa64c8ad308a78b598f848e4aff0ced3899b588b"
+    "hash": "9444e46e79158035f84d86483b62e89d838fb87dcc52af3979d47a82284da17c"
   },
   {
     "engine": "postgres",
@@ -687,7 +777,7 @@
     "engine": "postgres",
     "name": "InsertSession",
     "annotation": "authn-resolution",
-    "hash": "667da5bdb247df0e5a80c4a80134f8fd6d2ebd2912786fbaf464d905d1eaa27f"
+    "hash": "d5d7f4db9dda1d999aaf063f32b90e91ce3d0207ab6e72899a0058ca6773efb5"
   },
   {
     "engine": "postgres",
@@ -706,6 +796,36 @@
     "name": "InsertWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "ab6c402f0227f4d89f9d095023d10417a8c958fe4ddf3a5544c0de6b6cf68a5f"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "95be92f56efc49fa2449c7622175a2a47df6b630e8e28146f5fbc7b72a825272"
+  },
+  {
+    "engine": "postgres",
+    "name": "InsertWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "c04f8bff9bd76160c6fdc5fb9edecf0e99747d75c73e08c3b31ea872ab3a3474"
+  },
+  {
+    "engine": "postgres",
+    "name": "InstanceConnectionByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "259e6266d208fec0ebf448b04e93d2632adf9df1b404138c756ad123ea51fff6"
+  },
+  {
+    "engine": "postgres",
+    "name": "InstanceIdentity",
+    "annotation": "instance-scoped",
+    "hash": "430c49aafa3d35b912744d7e3552360e2efc663d542b0a4891cd4e5b2e38f477"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListAllProjects",
+    "annotation": "instance-scoped",
+    "hash": "be5159c9886d81dedcac17808f126b2d858322f74b939e41c48ae90d042e71d3"
   },
   {
     "engine": "postgres",
@@ -787,6 +907,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListInstanceConnections",
+    "annotation": "authn-resolution",
+    "hash": "1a27f2dc9107e038e32067cdfc138d621bc608e9a2e37182520a047350be7dc3"
+  },
+  {
+    "engine": "postgres",
     "name": "ListLockoutRetentionOrigins",
     "annotation": "authn-resolution",
     "hash": "0ea3a89bd963a49290e9754d3a80305083fd49525fdcb5de4ba5a7e7184be6f4"
@@ -829,6 +955,18 @@
   },
   {
     "engine": "postgres",
+    "name": "ListRemoteSnapshots",
+    "annotation": "instance-scoped",
+    "hash": "6c2d7428d204f356fc1caaeb2d7663883db5bb3d61f4851c1b7d6d84183573fa"
+  },
+  {
+    "engine": "postgres",
+    "name": "ListRemotes",
+    "annotation": "instance-scoped",
+    "hash": "a34a26d3d1efa537ef9ce54d82a3409ec901784aa84cb033244abeb4628a4411"
+  },
+  {
+    "engine": "postgres",
     "name": "ListSAMLProviders",
     "annotation": "authn-resolution",
     "hash": "77b9bcf7312b4be8cee4a7786f88b899e8c858451c43f18e679faf1c47594564"
@@ -853,6 +991,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListSessionsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "10fbed34cef07c89220b201eae3fe1a1882ddb5c3db84e2e4f48a5e289b28f42"
+  },
+  {
+    "engine": "postgres",
     "name": "ListUnreconciledPrincipals",
     "annotation": "authn-resolution",
     "hash": "ac1034e50c04345beedfce9353697b6a860aa5ea28698588ea50a86fd208ddaa"
@@ -865,9 +1009,21 @@
   },
   {
     "engine": "postgres",
+    "name": "ListWorkspaceOrigins",
+    "annotation": "authn-resolution",
+    "hash": "07770e65437f176e43f8ac69bd6b6f4c6b07d71c81d3e9b954ce85eff3bfccf8"
+  },
+  {
+    "engine": "postgres",
     "name": "LockCredentialPolicy",
     "annotation": "authn-resolution",
     "hash": "be0409f93d7b008687fc03b804a1268425e625d79a8820ce33ca7c64e8dbefae"
+  },
+  {
+    "engine": "postgres",
+    "name": "LockInstanceIdentityRow",
+    "annotation": "instance-scoped",
+    "hash": "5babd00a3796ac9190f998b1e4c73c39a0868dffcf12ad47a4e3f8e2914f939f"
   },
   {
     "engine": "postgres",
@@ -886,6 +1042,12 @@
     "name": "LockSAMLProviderForDelete",
     "annotation": "authn-resolution",
     "hash": "3d3e4b9bf6a519d6cfd39919b62804473f9408c1c2afe6d99a9641fd809de165"
+  },
+  {
+    "engine": "postgres",
+    "name": "LockWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "01aa221ffe0db4d264c976689d7f6843e2e28fe42620bb635895122e07210c35"
   },
   {
     "engine": "postgres",
@@ -909,7 +1071,7 @@
     "engine": "postgres",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
-    "hash": "c5bcba5a8487e50eaa30338a56804d824cbc7c7325ccd3c3f2862be2f6e92388"
+    "hash": "d6a81ebbace5365c7148826efad827daf672e7b66768db14dc5d25b565c4afee"
   },
   {
     "engine": "postgres",
@@ -928,6 +1090,18 @@
     "name": "ReconcilePrincipal",
     "annotation": "authn-resolution",
     "hash": "ef38161256d15ae1edbe86469e611bdade74d77f20bd74f196fd1fd6370de983"
+  },
+  {
+    "engine": "postgres",
+    "name": "RecordRemoteFetchFailure",
+    "annotation": "instance-scoped",
+    "hash": "201e65b37b33b477600d302ef11bd313ff454839f390aa443e5e669fec2e0a7a"
+  },
+  {
+    "engine": "postgres",
+    "name": "RenameRemote",
+    "annotation": "instance-scoped",
+    "hash": "3672f302fa6caeed1d9b274af5b5498a54818f332dec6cf14e294d4c62b13d28"
   },
   {
     "engine": "postgres",
@@ -955,6 +1129,12 @@
   },
   {
     "engine": "postgres",
+    "name": "RevokeInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "4e36908ada0148a9bf8da2aa585d118bf6c1f813bd27f4afff130eeb57ec4090"
+  },
+  {
+    "engine": "postgres",
     "name": "RevokeMachineCredential",
     "annotation": "authn-resolution",
     "hash": "b1673318627ac1ec92feaedbe7791e5116c1b150f3854e4642cb5c1e04dee012"
@@ -976,6 +1156,12 @@
     "name": "RotateSessionFactors",
     "annotation": "authn-resolution",
     "hash": "923e9ee53ea03a85a0c33d5584f419c19a6d1596962d994f9274bf04516f8c15"
+  },
+  {
+    "engine": "postgres",
+    "name": "SealedRemoteCredential",
+    "annotation": "instance-scoped",
+    "hash": "c00d7dfa31f8e1f2595882928efd88712ac74f9fd69969e61155ec829341a071"
   },
   {
     "engine": "postgres",
@@ -1006,6 +1192,12 @@
     "name": "StrandedRevealPrincipalsForEnvironment",
     "annotation": "authn-resolution",
     "hash": "95cd1f8c392587ce7700fa672088cb243f4b5581ec98a9537ec54e909eb1cdee"
+  },
+  {
+    "engine": "postgres",
+    "name": "TouchInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "3085ba4d0d99821110d446340b88eb828a2b265d0ae3e1c69c14b6d43e404232"
   },
   {
     "engine": "postgres",
@@ -1056,6 +1248,24 @@
     "hash": "27b152cf5c55d12f514084806822630971b0e7f5faae5603cd4fcc2737604ace"
   },
   {
+    "engine": "postgres",
+    "name": "WorkspaceHandoffByCode",
+    "annotation": "authn-resolution",
+    "hash": "18eeec5b43f932cc2828ba14de2eef6d15435d357d13feb424c657018ddacf9b"
+  },
+  {
+    "engine": "postgres",
+    "name": "WorkspaceHandoffByState",
+    "annotation": "authn-resolution",
+    "hash": "ce0057eb50bb4659efe9d8729c7e7ccc0c389a471d3d15d1490337a214257c42"
+  },
+  {
+    "engine": "postgres",
+    "name": "WriteRemoteSnapshot",
+    "annotation": "instance-scoped",
+    "hash": "eff2f29e0a490916d816fefa45b29199539f99d21bf953a59e55ab5259230817"
+  },
+  {
     "engine": "sqlite",
     "name": "AdvancePrincipalGeneration",
     "annotation": "authn-resolution",
@@ -1078,6 +1288,12 @@
     "name": "AdvanceWebAuthnSignCount",
     "annotation": "authn-resolution",
     "hash": "1402c9cb4fdad89f64263e82ef83f2f274fa8b8402c98ba98b1b4061f7170864"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ApproveWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "4b1c5eef6d0c89901e49563522fb7ce6644ea48173b29939b320241044c90021"
   },
   {
     "engine": "sqlite",
@@ -1141,6 +1357,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ConsumeWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "f0f129d9436bb726bb5daa4ad83f638ce51d30a5d971c36953d8732e888a5b5f"
+  },
+  {
+    "engine": "sqlite",
     "name": "CountAccounts",
     "annotation": "authn-resolution",
     "hash": "69674cdbf1872963e0baa7585228d5d70c3d4bda332fe67a800c0e9840ddd419"
@@ -1177,6 +1399,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "CountRemotes",
+    "annotation": "instance-scoped",
+    "hash": "d5c86aafdea3d0248b03a0b9b2b37bdf25fb8522464d0c62eb27cec9f9b20cc1"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CreateInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "e49d2f4b341b030cfd4945dbf16b84da802d252cb05df3d91f039155632ba26a"
+  },
+  {
+    "engine": "sqlite",
     "name": "CreateOIDCProvider",
     "annotation": "authn-resolution",
     "hash": "c42dd08dd3f40a1c8e97b602875c3dcdeec65754a90e9a5a5a02ca158fbacdb7"
@@ -1189,9 +1423,21 @@
   },
   {
     "engine": "sqlite",
+    "name": "CreateRemote",
+    "annotation": "instance-scoped",
+    "hash": "b49c203a3c38607420b2ec4dc18592cd9f172ab7863f56c08a6ff6b90d898dae"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteExpiredSAMLReplay",
     "annotation": "authn-resolution",
     "hash": "b29f86673369c5897a2785f6b08d78f2a0decb6189d14fdd20e80891581a4ef0"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteExpiredWorkspaceHandoffs",
+    "annotation": "authn-resolution",
+    "hash": "65d6ad5981b736a08f920a7a2c8d3e9c7534d542acbe45a15e128e59b9308804"
   },
   {
     "engine": "sqlite",
@@ -1267,6 +1513,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "DeleteRemote",
+    "annotation": "instance-scoped",
+    "hash": "d70c0f1411f45f78b73c373363e88b9835092a86994919f0d8b0d836b609d2e0"
+  },
+  {
+    "engine": "sqlite",
     "name": "DeleteRetiringSAMLSPKey",
     "annotation": "authn-resolution",
     "hash": "13dcc61ddcfc7b13adca2775f3775c9ab980dfbc818d486fe6aae1c0be1fd27a"
@@ -1294,6 +1546,18 @@
     "name": "DeleteSession",
     "annotation": "authn-resolution",
     "hash": "4c0c29fb3d9f50d5c04e9d5db62e3f64d8df43b42d5991d7c85276873e24167b"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSessionForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "216fd0d87dc4fac69a639871a9363128dc4510aacb1149935a36975680f9b515"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteSessionsForOrigin",
+    "annotation": "authn-resolution",
+    "hash": "ebf48f9f3ad64b0b027be788eb62642081ad6c47e17665630627657fb69696b4"
   },
   {
     "engine": "sqlite",
@@ -1330,6 +1594,12 @@
     "name": "DeleteWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "443d5378182f8dd2f6f7612fa18d5b8fdaa5dc76e134182ff77f6bc8f089a0ab"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "0938ce623760cab217c060f40c817df0f14f767ed92bfec07eb5426207dd29ba"
   },
   {
     "engine": "sqlite",
@@ -1453,6 +1723,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "GetInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "1bc41570f1b36adf31a9a999c3a45ddefff8e556c6958aa43cc20772f83fec2f"
+  },
+  {
+    "engine": "sqlite",
     "name": "GetOIDCProviderBySlug",
     "annotation": "authn-resolution",
     "hash": "8f0c1510ef41096cf92117b3287da005a1abc2cfece8c1ecdba485c18c2f0fcd"
@@ -1509,13 +1785,31 @@
     "engine": "sqlite",
     "name": "GetReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "0cc2e9e8342a8daf186e98879d806b6567a23cdb855196e3c7a2b58368b2eac2"
+    "hash": "f8bb140e321732295a5b176718634d0513b9abef02811fc6d105565c6d81e642"
   },
   {
     "engine": "sqlite",
     "name": "GetRecoveryCodes",
     "annotation": "authn-resolution",
     "hash": "cc0eb65452b1becf984e553ed3abdc8bebd6e6e56bbb8a2d6e031c61fc32a3ad"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetRemote",
+    "annotation": "instance-scoped",
+    "hash": "c205ac7cd0ca37dbe998bed950b2be4421d496aedba6bf98855bc91230c581b3"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetRemoteByName",
+    "annotation": "instance-scoped",
+    "hash": "aa263236b1c4d64a8109c072bf81ba000e36987b2679eca677cec7c7ba24cb48"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetRemoteSnapshot",
+    "annotation": "instance-scoped",
+    "hash": "0de7f65098757370e6c9b99b6644d9345422822480f5c08da2a37a315812f0e6"
   },
   {
     "engine": "sqlite",
@@ -1575,13 +1869,13 @@
     "engine": "sqlite",
     "name": "GetSessionByID",
     "annotation": "authn-resolution",
-    "hash": "699845a05ac030b01272bbee81e8ff3ffc7b64b97150a137b698bdc4d9428d39"
+    "hash": "afa6af6b0862c8ea7054d89a5f1f49f6f61689e594532fe5c7ea74ff2ee278e0"
   },
   {
     "engine": "sqlite",
     "name": "GetSessionByVerifier",
     "annotation": "authn-resolution",
-    "hash": "6f94fa7539b6cf250811594807f30968dadcef206c5a6aeb1adfd460f8cfb487"
+    "hash": "4063732ef152395aa882f358fe5370817a92b9ac4ad2668595334d767bb18643"
   },
   {
     "engine": "sqlite",
@@ -1612,6 +1906,12 @@
     "name": "GetWebAuthnUserHandle",
     "annotation": "authn-resolution",
     "hash": "49ede8bf33b8a3799dc5d97b64dbc7d3fba71bb8c5778160faefb5dc77ec74c5"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "6a7f483212b98c7b8ae7a6ebaace4044546fcc5657e45e7f7cce8ce1d316e6cc"
   },
   {
     "engine": "sqlite",
@@ -1695,7 +1995,7 @@
     "engine": "sqlite",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "7a6860ee1a30cd8cd57bb472839b579d09678804ccc04277caffe955440142a6"
+    "hash": "943626c0b9894298a182db06e02adefc9469611a4f5f619a7e742dc8f238084a"
   },
   {
     "engine": "sqlite",
@@ -1743,7 +2043,7 @@
     "engine": "sqlite",
     "name": "InsertSession",
     "annotation": "authn-resolution",
-    "hash": "782da14d7d18c3c19b5d7a2b4e0468dfffdf1a3429edde2b85b026e78c9fc195"
+    "hash": "9ef184559b2a5ad0bd27c1f7d5b59f0209507550564e03bf388d4e5f644187c8"
   },
   {
     "engine": "sqlite",
@@ -1762,6 +2062,36 @@
     "name": "InsertWebAuthnCredential",
     "annotation": "authn-resolution",
     "hash": "59c674c5cbc730bcf7d031cee0c0e4770d8978113f7e9c9c145ddee1967c4855"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertWorkspaceHandoff",
+    "annotation": "authn-resolution",
+    "hash": "2f3926419d88522613c13b86ec7f299a15841c580a096a86aac102a3bdd916ec"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InsertWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "820b2d63246d3f2029703da50cc123722342a9b73b6c7352becab9ba3c27fd58"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InstanceConnectionByVerifier",
+    "annotation": "authn-resolution",
+    "hash": "01d44851f7ea14e8eccc3d80fc8a828b03aa5c42f7ddddc7847cc54a1b25af9f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InstanceIdentity",
+    "annotation": "instance-scoped",
+    "hash": "430c49aafa3d35b912744d7e3552360e2efc663d542b0a4891cd4e5b2e38f477"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListAllProjects",
+    "annotation": "instance-scoped",
+    "hash": "be5159c9886d81dedcac17808f126b2d858322f74b939e41c48ae90d042e71d3"
   },
   {
     "engine": "sqlite",
@@ -1843,6 +2173,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListInstanceConnections",
+    "annotation": "authn-resolution",
+    "hash": "1a27f2dc9107e038e32067cdfc138d621bc608e9a2e37182520a047350be7dc3"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListLockoutRetentionOrigins",
     "annotation": "authn-resolution",
     "hash": "0ea3a89bd963a49290e9754d3a80305083fd49525fdcb5de4ba5a7e7184be6f4"
@@ -1885,6 +2221,18 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListRemoteSnapshots",
+    "annotation": "instance-scoped",
+    "hash": "6c2d7428d204f356fc1caaeb2d7663883db5bb3d61f4851c1b7d6d84183573fa"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ListRemotes",
+    "annotation": "instance-scoped",
+    "hash": "a34a26d3d1efa537ef9ce54d82a3409ec901784aa84cb033244abeb4628a4411"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListSAMLProviders",
     "annotation": "authn-resolution",
     "hash": "77b9bcf7312b4be8cee4a7786f88b899e8c858451c43f18e679faf1c47594564"
@@ -1909,6 +2257,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListSessionsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "99b234b5ff1eb47a8e98779309de76763e080bf519ade4fdbab4d7ce8bc1333c"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListUnreconciledPrincipals",
     "annotation": "authn-resolution",
     "hash": "ac1034e50c04345beedfce9353697b6a860aa5ea28698588ea50a86fd208ddaa"
@@ -1921,9 +2275,21 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListWorkspaceOrigins",
+    "annotation": "authn-resolution",
+    "hash": "07770e65437f176e43f8ac69bd6b6f4c6b07d71c81d3e9b954ce85eff3bfccf8"
+  },
+  {
+    "engine": "sqlite",
     "name": "LockCredentialPolicy",
     "annotation": "authn-resolution",
     "hash": "ffc968f6dd2917b75681a335ac60812211a286470497e37a64b379c6b3814daa"
+  },
+  {
+    "engine": "sqlite",
+    "name": "LockInstanceIdentityRow",
+    "annotation": "instance-scoped",
+    "hash": "b466c3349d89748a39885173dcecffd3b0619b5cfff89c6df6fdd3fdedc72b28"
   },
   {
     "engine": "sqlite",
@@ -1942,6 +2308,12 @@
     "name": "LockSAMLProviderForDelete",
     "annotation": "authn-resolution",
     "hash": "ded1aae6fc490e2dbf1bc5790536b50a3fabfb94e076a7d6db979b893a49282e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "LockWorkspaceOrigin",
+    "annotation": "authn-resolution",
+    "hash": "c448db647c0f9b2cf010cffa25660e1e2b3f8e2ff642940ce386894466137959"
   },
   {
     "engine": "sqlite",
@@ -1965,7 +2337,7 @@
     "engine": "sqlite",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
-    "hash": "74e889e4da1949c2356d7f0f84589dcde8b4de5b732038df22bf8a349e648360"
+    "hash": "927bb4a7a50553e3118b066cb53bcf1299685743daeaaf6c5768d55c6ee68d8f"
   },
   {
     "engine": "sqlite",
@@ -1984,6 +2356,18 @@
     "name": "ReconcilePrincipal",
     "annotation": "authn-resolution",
     "hash": "66ba2d7daadf156ad869f16ead2c023b833f5605b1680a7bd13005f13677f30e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "RecordRemoteFetchFailure",
+    "annotation": "instance-scoped",
+    "hash": "bbe2a990f915f7aabfd728a4b5b7f49b1d4eb92c14730fef146dcdca20cd0f9f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "RenameRemote",
+    "annotation": "instance-scoped",
+    "hash": "fd1d947323b0a156b63eab896300773157609cf6834503ae17e244b4666b2865"
   },
   {
     "engine": "sqlite",
@@ -2011,6 +2395,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "RevokeInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "631f59c4d521c2810f741acd6dac8fbc87c945856e239f9f8919041daafe3c0d"
+  },
+  {
+    "engine": "sqlite",
     "name": "RevokeMachineCredential",
     "annotation": "authn-resolution",
     "hash": "e241d508da945618875de9d91585e484d1658f07cc3745a529411b96e4775198"
@@ -2032,6 +2422,12 @@
     "name": "RotateSessionFactors",
     "annotation": "authn-resolution",
     "hash": "309615e6b1914ebde4c26a3d2ace561f9fe2c1256a182caca3196a1247f82352"
+  },
+  {
+    "engine": "sqlite",
+    "name": "SealedRemoteCredential",
+    "annotation": "instance-scoped",
+    "hash": "b9bde21fc56d19bfaab7e96f2085e673e995967a221cce6da73a3f1793b9375b"
   },
   {
     "engine": "sqlite",
@@ -2062,6 +2458,12 @@
     "name": "StrandedRevealPrincipalsForEnvironment",
     "annotation": "authn-resolution",
     "hash": "95cd1f8c392587ce7700fa672088cb243f4b5581ec98a9537ec54e909eb1cdee"
+  },
+  {
+    "engine": "sqlite",
+    "name": "TouchInstanceConnection",
+    "annotation": "authn-resolution",
+    "hash": "43b3e2bc12ad632d2172d7f0909aa2184aeedcdc70ce98b0ef42c9d0b7532bc0"
   },
   {
     "engine": "sqlite",
@@ -2110,5 +2512,23 @@
     "name": "UpdateSAMLProviderCAS",
     "annotation": "authn-resolution",
     "hash": "d061f9058bee068f5994e147f82ab3b9c36661b4fbbd4f7b3ceb9b6217392904"
+  },
+  {
+    "engine": "sqlite",
+    "name": "WorkspaceHandoffByCode",
+    "annotation": "authn-resolution",
+    "hash": "a40afd621e7cdd1f60c96f4e3abd6b9caad822c8a7b7cdea1bfe03e7b241411c"
+  },
+  {
+    "engine": "sqlite",
+    "name": "WorkspaceHandoffByState",
+    "annotation": "authn-resolution",
+    "hash": "6378a81f3ddaeca72eafd4a8796343fd177cbd82e631b862ad45918f88a2bd29"
+  },
+  {
+    "engine": "sqlite",
+    "name": "WriteRemoteSnapshot",
+    "annotation": "instance-scoped",
+    "hash": "ffe70f1655ed41bf8166d515f2f964ba8788b4b907211c611cb15694b0d93c3a"
   }
 ]

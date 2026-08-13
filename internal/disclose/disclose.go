@@ -162,12 +162,59 @@ func Confirm(prompt string, o Options) (bool, error) {
 	if _, err := fmt.Fprintf(tty, "%s [y/N]: ", prompt); err != nil {
 		return false, err
 	}
-	r, ok := tty.(io.Reader)
-	if !ok {
+	answer, err := readLine(tty, 8)
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// ConfirmName is the destructive-verb confirmation: the human types the
+// SUBJECT'S NAME, not a letter.
+//
+// A y/N prompt is answered by reflex and by a stray newline in a paste buffer;
+// typing the name cannot be. It is reserved for irreversible acts — asking for
+// a typed name on a reversible one only teaches people to type names.
+//
+// The comparison is EXACT: no case folding, no whitespace tolerance beyond the
+// surrounding trim, because "close enough to the name of the thing you are
+// destroying" is not a property worth having.
+func ConfirmName(prompt, want string, o Options) (bool, error) {
+	open := o.OpenTerminal
+	if open == nil {
+		open = openControllingTerminal
+	}
+	tty, err := open()
+	if err != nil {
 		return false, ErrNoDestination
 	}
-	// One byte at a time: the terminal is line-buffered and there is no
-	// bufio wrapper to leave holding unread input the caller may still want.
+	defer tty.Close()
+	if _, err := fmt.Fprintf(tty, "%s\ntype %q to confirm: ", prompt, want); err != nil {
+		return false, err
+	}
+	// The cap is generous rather than tight: it exists to stop an unbounded
+	// read on a terminal that never sends a newline, not to bound the name.
+	answer, err := readLine(tty, 256)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(answer) == want, nil
+}
+
+// readLine reads one line from the terminal, one byte at a time: it is
+// line-buffered and there is no bufio wrapper to leave holding unread input the
+// caller may still want. `limit` bounds the answer so a terminal that never sends
+// a newline cannot spin here forever.
+func readLine(tty io.WriteCloser, limit int) (string, error) {
+	r, ok := tty.(io.Reader)
+	if !ok {
+		return "", ErrNoDestination
+	}
 	var answer []byte
 	buf := make([]byte, 1)
 	for {
@@ -178,14 +225,9 @@ func Confirm(prompt string, o Options) (bool, error) {
 		if err != nil || (n > 0 && buf[0] == '\n') {
 			break
 		}
-		if len(answer) > 8 {
+		if len(answer) > limit {
 			break
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(string(answer))) {
-	case "y", "yes":
-		return true, nil
-	default:
-		return false, nil
-	}
+	return string(answer), nil
 }

@@ -86,6 +86,23 @@ func expiredBrowserCookies() []*http.Cookie {
 	}
 }
 
+// Cookie attributes are enforced again at the response boundary. Constructors
+// still declare the intended policy for readability, while these writers make
+// it impossible for a future caller to emit a session artifact insecurely.
+func writeHTTPOnlyCookie(w http.ResponseWriter, cookie *http.Cookie) {
+	secured := *cookie
+	secured.Secure = true
+	secured.HttpOnly = true
+	http.SetCookie(w, &secured)
+}
+
+func writeScriptReadableCookie(w http.ResponseWriter, cookie *http.Cookie) {
+	secured := *cookie
+	secured.Secure = true
+	secured.HttpOnly = false
+	http.SetCookie(w, &secured)
+}
+
 // safeMethod reports whether a method is defined not to change state. These
 // are exempt from the CSRF requirement because a cross-origin page can already
 // cause them and learn nothing: the response is unreadable to it.
@@ -162,7 +179,11 @@ func refuseUnauthenticated(w http.ResponseWriter) {
 // be merged — but the behaviour is one behaviour and lives in one place.
 func writeJSONWithCookies(w http.ResponseWriter, cookies []*http.Cookie, status int, body any) error {
 	for _, c := range cookies {
-		http.SetCookie(w, c)
+		if c.Name == browserCSRFCookie {
+			writeScriptReadableCookie(w, c)
+		} else {
+			writeHTTPOnlyCookie(w, c)
+		}
 	}
 	if body == nil {
 		w.WriteHeader(status)

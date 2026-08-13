@@ -425,6 +425,53 @@ const (
 	// authenticate like every other wire operation so an unauthenticated caller
 	// gets the uniform refusal rather than a 501 confirming the binding exists.
 	OpSCIMUnsupported Operation = "scim-unsupported.refuse"
+	// Multi-instance, the serving side (#71). The directory-serve operation is
+	// what an instance-connection credential presents against, and — per the
+	// ADR's amendment to the artifact-eligibility matrix — the ONLY operation
+	// it may reach. See internal/authz/eligibility.go for the other half of the
+	// confinement; the formula alone would not carry it, because a later
+	// operation adopting the same formula would widen every existing token.
+	//
+	// It is an instance-scope read that crosses org boundaries BY DESIGN: the
+	// listing is instance identity, version, health, and the names and counts
+	// of orgs and projects. That is why it is registered as its own operation
+	// and probe-classified instance-scope rather than riding any tenant read —
+	// there is no single tenant it addresses, and pretending otherwise would
+	// put a cross-org read behind a per-org probe contract.
+	OpRemoteDirectoryServe Operation = "remote.directory-serve"
+
+	// Multi-instance, the VIEWING side (#71). The split follows the ADR's own
+	// reasoning: CUSTODY of connections — add, remove, credential storage — is
+	// instance configuration and rides `instance-config`; VIEWING the directory
+	// is `instance-directory`, its own grantable atom, because reading is power
+	// and is never bundled. The org/project NAMES in the listing are the reason
+	// that gate exists: they are foreign structure, and the remote cannot scope
+	// them per-viewer without the proxy machinery the ADR rejects.
+	OpRemoteAdd    Operation = "remote.add"
+	OpRemoteList   Operation = "remote.list"
+	OpRemoteShow   Operation = "remote.show"
+	OpRemoteRename Operation = "remote.rename"
+	OpRemoteRemove Operation = "remote.remove"
+
+	// Multi-instance, the SERVING side (#71). Credential custody and the origin
+	// allowlist are both instance configuration.
+	OpRemoteCredentialCreate Operation = "remote-credential.create"
+	OpRemoteCredentialList   Operation = "remote-credential.list"
+	OpRemoteCredentialShow   Operation = "remote-credential.show"
+	OpRemoteCredentialRevoke Operation = "remote-credential.revoke"
+
+	OpWorkspaceOriginList   Operation = "workspace-origin.list"
+	OpWorkspaceOriginAdd    Operation = "workspace-origin.add"
+	OpWorkspaceOriginRemove Operation = "workspace-origin.remove"
+
+	// NOT REGISTERED, deliberately: the active-session listing and its revoke
+	// (#71 criterion 5). Both are SELF-SCOPED — they address the caller's own
+	// principal and nothing else — so they take the shape /api/v1/me/orgs
+	// already takes: no operation, no capability, wire-classified
+	// `unauthenticated` for enumeration uniformity, and the principal conjunct
+	// lives in the SQL rather than in a formula. Requiring a grant to end one's
+	// own session would make incident response depend on an authority an
+	// attacker may have just taken away.
 )
 
 // StoreOp names one store method in the trusted query registry. Every store
@@ -443,9 +490,12 @@ const (
 	StoreProjectsCreate StoreOp = "projects.Create"
 	StoreProjectsGet    StoreOp = "projects.Get"
 	StoreProjectsList   StoreOp = "projects.List"
-	StoreProjectsLock   StoreOp = "projects.Lock"
-	StoreProjectsRename StoreOp = "projects.Rename"
-	StoreProjectsDelete StoreOp = "projects.Delete"
+	// StoreProjectsListAll is the cross-org enumeration the multi-instance
+	// directory serves (#71). It belongs to instance-scope operations only.
+	StoreProjectsListAll StoreOp = "projects.ListAll"
+	StoreProjectsLock    StoreOp = "projects.Lock"
+	StoreProjectsRename  StoreOp = "projects.Rename"
+	StoreProjectsDelete  StoreOp = "projects.Delete"
 
 	StoreEnvironmentsCreate     StoreOp = "environments.Create"
 	StoreEnvironmentsGet        StoreOp = "environments.Get"
@@ -541,6 +591,26 @@ const (
 	// denial writer does NOT pass through these: it is the authorization
 	// package's own enumerated write path (audit-model ADR amendment part 4)
 	// and runs with no proof to verify.
+	// Multi-instance, the VIEWING side (#71). These are class=instance rows —
+	// instance-scope configuration and foreign structure at rest — so unlike
+	// the connection tables they ride the proof-gated repositories and need
+	// registry entries. Reaching the sealed credential is its own StoreOp so
+	// that an operation licensed to LIST remotes is not thereby licensed to
+	// present one.
+	StoreRemotesCreate    StoreOp = "remotes.Create"
+	StoreRemotesList      StoreOp = "remotes.List"
+	StoreRemotesGet       StoreOp = "remotes.Get"
+	StoreRemotesGetByName StoreOp = "remotes.GetByName"
+	StoreRemotesCount     StoreOp = "remotes.Count"
+	StoreRemotesRename    StoreOp = "remotes.Rename"
+	StoreRemotesDelete    StoreOp = "remotes.Delete"
+	StoreRemotesSealed    StoreOp = "remotes.SealedCredential"
+
+	StoreRemoteSnapshotsList  StoreOp = "remotes.Snapshots"
+	StoreRemoteSnapshotsGet   StoreOp = "remotes.Snapshot"
+	StoreRemoteSnapshotsWrite StoreOp = "remotes.WriteSnapshot"
+	StoreRemoteSnapshotsFail  StoreOp = "remotes.RecordFetchFailure"
+
 	StoreAuditTenantInsert   StoreOp = "audit.InsertTenant"
 	StoreAuditInstanceInsert StoreOp = "audit.InsertInstance"
 	StoreAuditTenantPage     StoreOp = "audit.PageTenant"
@@ -621,11 +691,23 @@ const (
 // op it can invoke is in this set. A wrongly listed op is caught by review
 // of this pinned table, exactly like the formula pins.
 var readOnlyStoreOps = map[StoreOp]bool{
-	StoreOrgsGet:                     true,
-	StoreOrgsList:                    true,
-	StoreOrgsCount:                   true,
-	StoreProjectsGet:                 true,
-	StoreProjectsList:                true,
+	StoreOrgsGet:             true,
+	StoreOrgsList:            true,
+	StoreOrgsCount:           true,
+	StoreProjectsGet:         true,
+	StoreProjectsList:        true,
+	StoreProjectsListAll:     true,
+	StoreRemotesList:         true,
+	StoreRemotesGet:          true,
+	StoreRemotesGetByName:    true,
+	StoreRemotesCount:        true,
+	StoreRemoteSnapshotsList: true,
+	StoreRemoteSnapshotsGet:  true,
+	// StoreRemotesSealed is deliberately ABSENT even though it mutates
+	// nothing. This set's only job is to license `audited: none`, and reading a
+	// stored credential is not something an unaudited operation may do — the
+	// fetch that presents it rides remote.list/show, which carry their own
+	// events.
 	StoreEnvironmentsGet:             true,
 	StoreEnvironmentsList:            true,
 	StoreEnvironmentsCount:           true,
@@ -641,6 +723,10 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreCatalogueGroupCount:         true,
 	StoreCataloguePresenceList:       true,
 	StoreCatalogueRevisionGet:        true,
+	StoreKeysActiveMasterWrappers:    true,
+	StoreKeysActiveTier3:             true,
+	StoreAuditTenantPage:             true,
+	StoreAuditInstancePage:           true,
 	StoreValuesGet:                   true,
 	StoreValuesList:                  true,
 	StoreValuesEnvironmentsWithValue: true,
@@ -651,10 +737,6 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreSnapshotsList:               true,
 	StoreSnapshotsEntries:            true,
 	StoreSnapshotsChanges:            true,
-	StoreKeysActiveMasterWrappers:    true,
-	StoreKeysActiveTier3:             true,
-	StoreAuditTenantPage:             true,
-	StoreAuditInstancePage:           true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -2380,6 +2462,163 @@ var operations = map[Operation]opSpec{
 		level:    domain.LevelOrg,
 		formula:  scimWireFormula,
 		storeOps: scimDiscoveryOps(),
+	},
+	// The serving side of the directory tier (#71). The formula is bare
+	// `instance-directory` at instance scope, evaluated on the CONNECTION
+	// PRINCIPAL's own grant — the viewing instance's grants confer nothing
+	// here, and the human on the other side is not a party to this call at all.
+	//
+	// One event per authenticated serve, in the access retention class: it is
+	// the machine-fetch stream shape, not a security event, and giving it
+	// security retention would bury the trail it shares with fetch traffic.
+	OpRemoteDirectoryServe: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceDirector, At: domain.LevelNone}},
+		// The listing is org and project NAMES and counts, so it reads both
+		// instance-scoped enumerations. Counts are len() of what it already
+		// read - a separate COUNT query would be a second read of the same
+		// fact that could disagree with the names beside it.
+		storeOps: map[StoreOp]bool{
+			StoreOrgsList:            true,
+			StoreProjectsListAll:     true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventRemoteDirectoryServed},
+	},
+
+	// The viewing side. `instance-config` for custody, `instance-directory`
+	// for the reads — the ADR's split, following the audit ADR's precedent
+	// that reading is power and is never bundled.
+	//
+	// Both READS carry two events, not one: the directory view itself and, per
+	// failing remote, a named fetch failure. They are on the same operation
+	// because the fetch happens BECAUSE of the view — a successful fetch is
+	// not separately evented, and a failing one is, precisely because the
+	// operator's fix differs per outcome.
+	OpRemoteAdd: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		// The list and snapshot reads are here because DUPLICATE-IDENTITY
+		// REFUSAL needs them: an add must know which instance identities the
+		// existing entries already name, or the ADR's "same identity from two
+		// entries" case is undetectable at the moment it can still be refused.
+		storeOps: map[StoreOp]bool{
+			StoreRemotesCount:         true,
+			StoreRemotesList:          true,
+			StoreRemoteSnapshotsList:  true,
+			StoreRemotesCreate:        true,
+			StoreRemoteSnapshotsWrite: true,
+			StoreAuditInstanceInsert:  true,
+		},
+		events: []audit.EventType{audit.EventRemoteAdded},
+	},
+	OpRemoteList: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceDirector, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreRemotesList:          true,
+			StoreRemotesSealed:        true,
+			StoreRemoteSnapshotsList:  true,
+			StoreRemoteSnapshotsWrite: true,
+			StoreRemoteSnapshotsFail:  true,
+			StoreAuditInstanceInsert:  true,
+		},
+		events: []audit.EventType{audit.EventRemoteDirectoryViewed, audit.EventRemoteFetchFailed},
+	},
+	OpRemoteShow: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceDirector, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreRemotesGet:           true,
+			StoreRemotesGetByName:     true,
+			StoreRemotesSealed:        true,
+			StoreRemoteSnapshotsGet:   true,
+			StoreRemoteSnapshotsWrite: true,
+			StoreRemoteSnapshotsFail:  true,
+			StoreAuditInstanceInsert:  true,
+		},
+		events: []audit.EventType{audit.EventRemoteDirectoryViewed, audit.EventRemoteFetchFailed},
+	},
+	OpRemoteRename: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreRemotesGet:          true,
+			StoreRemotesGetByName:    true,
+			StoreRemotesRename:       true,
+			StoreRemoteSnapshotsGet:  true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventRemoteRenamed},
+	},
+	OpRemoteRemove: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreRemotesGet:          true,
+			StoreRemotesGetByName:    true,
+			StoreRemotesDelete:       true,
+			StoreAuditInstanceInsert: true,
+		},
+		events: []audit.EventType{audit.EventRemoteRemoved},
+	},
+
+	// The serving side. The connection principal and its credential live on
+	// the resolution surface (they decide WHO a caller is), so these
+	// operations touch no proof-gated store method except the audit insert —
+	// the authorization still happens here, at the chokepoint, before the
+	// resolution-surface write runs.
+	OpRemoteCredentialCreate: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteCredentialMinted},
+	},
+	// Not `audited: none`: the permit rule admits only tenant-class bare-read
+	// operations, and reading which foreign installations may read this one's
+	// directory is not that.
+	OpRemoteCredentialList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteCredentialsListed},
+	},
+	OpRemoteCredentialShow: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteCredentialsListed},
+	},
+	OpRemoteCredentialRevoke: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteCredentialRevoked},
+	},
+
+	// The origin allowlist. Removal additionally revokes every workspace
+	// session bound to the origin, in the SAME transaction — which is why the
+	// remove operation carries the session-revoked event too.
+	OpWorkspaceOriginList: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteOriginAllowlistRead},
+	},
+	OpWorkspaceOriginAdd: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events:   []audit.EventType{audit.EventRemoteOriginAllowlistChanged},
+	},
+	OpWorkspaceOriginRemove: {
+		class:    ClassInstance,
+		formula:  Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{StoreAuditInstanceInsert: true},
+		events: []audit.EventType{
+			audit.EventRemoteOriginAllowlistChanged,
+			audit.EventRemoteWorkspaceSessionRevoked,
+		},
 	},
 }
 

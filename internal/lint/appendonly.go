@@ -249,6 +249,37 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"RevokeAllMachineCredentials": true,
 	"DeleteMachineCredentials":    true,
 	"TouchMachineCredential":      true,
+	// The instance connection (#71, multi-instance ADR). Same circularity as
+	// the machine credentials above and named for the same reason: the
+	// directory credential resolves at the chokepoint that authorize() runs in,
+	// so the row that decides who a connected instance IS cannot be written
+	// under a proof minted from that answer. Mint and revoke are themselves
+	// authorized under `instance-config` before they run; Touch is the
+	// last-used stamp a successful serve writes.
+	"MintInstanceConnection":   true,
+	"RevokeInstanceConnection": true,
+	"TouchInstanceConnection":  true,
+	// The workspace tier (#71). The origin allowlist is consulted at handoff
+	// issuance and by CORS, both of which run PRE-authentication; the handoff
+	// transaction resolves a caller exactly as a session verifier does. Neither
+	// can be gated behind a proof, because the proof is what the answer
+	// produces. The allowlist mutations ARE authorized under `instance-config`
+	// at the chokepoint before they run.
+	//
+	// RevokeWorkspaceSessionsForOrigin is the atomic kill switch's second half
+	// and runs in the SAME transaction as RemoveWorkspaceOrigin; it is named
+	// separately so removing the pairing is a visible change here.
+	// RevokeSessionForPrincipal is the self-scoped revoke behind the
+	// active-session listing (criterion 5) — its principal conjunct lives in
+	// the SQL, so it cannot reach another caller's row.
+	"AllowWorkspaceOrigin":             true,
+	"RemoveWorkspaceOrigin":            true,
+	"RevokeWorkspaceSessionsForOrigin": true,
+	"RevokeSessionForPrincipal":        true,
+	"CreateWorkspaceHandoff":           true,
+	"ApproveWorkspaceHandoff":          true,
+	"ConsumeWorkspaceHandoff":          true,
+	"SweepExpiredWorkspaceHandoffs":    true,
 	// The instance lifetime controls and the clamp they apply. Both are
 	// authorized at the chokepoint under `instance-config` before they run;
 	// the write rides this surface because credential_policy is class=authn.

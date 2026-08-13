@@ -4,10 +4,14 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { useSession } from '../api/session.ts';
 import { Login } from '../routes/Login.tsx';
 import { MachineAccess } from '../routes/MachineAccess.tsx';
-import { NotFound, Overview, Projects, Settings } from '../routes/Placeholder.tsx';
+import { NotFound, Overview, Projects } from '../routes/Placeholder.tsx';
+import { Remotes } from '../routes/Remotes.tsx';
+import { Sessions } from '../routes/Sessions.tsx';
 import { Shell } from '../routes/Shell.tsx';
 import { Values } from '../routes/Values.tsx';
-import { SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
+import { WorkspaceApprove } from '../routes/WorkspaceApprove.tsx';
+import { WorkspaceCallback } from '../routes/WorkspaceCallback.tsx';
+import { CHROMELESS, SURFACES, surfaceById, type Surface, type SurfaceId } from './navigation.ts';
 
 /**
  * ELEMENTS is what each locked surface renders.
@@ -23,12 +27,36 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   login: <Login />,
   overview: <Overview />,
   projects: <Projects />,
-  settings: <Settings />,
+  remotes: <Remotes />,
+  settings: <Sessions />,
   values: <Values />,
   'machine-access': <MachineAccess />,
+  'workspace-approve': <WorkspaceApprove />,
+  'workspace-callback': <WorkspaceCallback />,
 };
 
-const signedInSurfaces: readonly Surface[] = SURFACES.filter((s) => s.id !== 'login');
+/**
+ * The surfaces that render inside the chrome and behind a session: everything
+ * that is not chromeless. Complement of CHROMELESS rather than
+ * `section !== null`, because `values` has no section and is still a chromed,
+ * signed-in surface — see the note on CHROMELESS.
+ */
+const shellSurfaces: readonly Surface[] = SURFACES.filter((s) => !CHROMELESS.includes(s));
+
+/**
+ * The chromeless surfaces reachable WITHOUT a session.
+ *
+ * The approve page is here deliberately and it is the non-obvious one: a first
+ * establishment lands in a popup carrying no cookies for this instance at all,
+ * so bouncing it to `/login` would throw away the `state` the whole transaction
+ * is addressed by. It renders the sign-in form itself instead, and the URL —
+ * with its state — survives.
+ *
+ * The callback page is here for a duller reason: it only reads two query
+ * parameters and shouts them down a channel, and making that depend on a
+ * session would break the one arc where the human has no session yet.
+ */
+const publicSurfaces: readonly Surface[] = CHROMELESS;
 
 /**
  * The application root.
@@ -70,7 +98,9 @@ export function App() {
     <BrowserRouter>
       {live === null ? (
         <Routes>
-          <Route path={surfaceById('login').path} element={ELEMENTS.login} />
+          {publicSurfaces.map((surface) => (
+            <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
+          ))}
           <Route path="*" element={<Navigate to={surfaceById('login').path} replace />} />
         </Routes>
       ) : (
@@ -79,8 +109,13 @@ export function App() {
             path={surfaceById('login').path}
             element={<Navigate to={surfaceById('overview').path} replace />}
           />
+          {publicSurfaces
+            .filter((surface) => surface.id !== 'login')
+            .map((surface) => (
+              <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
+            ))}
           <Route element={<Shell session={live} />}>
-            {signedInSurfaces.map((surface) => (
+            {shellSurfaces.map((surface) => (
               <Route key={surface.id} path={surface.path} element={ELEMENTS[surface.id]} />
             ))}
             <Route path="*" element={<NotFound />} />
