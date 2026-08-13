@@ -11318,7 +11318,9 @@ components:
             the consented code.
         pkce_challenge:
           type: string
-          maxLength: 128
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
           description: S256 challenge (RFC 7636). Plain is not accepted.
         purpose:
           type: string
@@ -11389,7 +11391,9 @@ components:
           maxLength: 256
         pkce_verifier:
           type: string
-          maxLength: 256
+          minLength: 43
+          maxLength: 128
+          pattern: "^[A-Za-z0-9_-]{43,128}$"
         origin:
           type: string
           maxLength: 512

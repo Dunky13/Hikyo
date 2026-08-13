@@ -220,6 +220,10 @@ func (c *Client) httpClient(pin string) *http.Client {
 	dialer := &net.Dialer{Timeout: c.cfg.Deadline}
 
 	transport := &http.Transport{
+		// A transport is scoped to one Directory call because its pin is scoped
+		// to one remote. Keeping an idle pool on that short-lived transport
+		// would orphan the successful TLS or CONNECT socket after the response.
+		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			// Counted here, at the one place a connection is actually
 			// originated, so the instrumentation cannot be bypassed by a

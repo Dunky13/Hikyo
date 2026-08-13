@@ -153,21 +153,23 @@ func runRemoteLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("remote.origin_allowlist_read: %v", err)
 	}
 
+	verifierSeed := sha256.Sum256([]byte("remote lifecycle PKCE verifier"))
+	verifier := base64.RawURLEncoding.EncodeToString(verifierSeed[:])
+	sum := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
+
 	// A handoff refused at the transaction, which is the failure event's
 	// `start` stage. The origin is not allowlisted, and the refusal must still
 	// be audited even though the transaction rolls back — that is why the
 	// event rides the durable settlement path.
 	if _, err := workspace.StartHandoff(ctx, service.HandoffRequest{
 		Origin: "https://hostile.example", RedirectURI: "https://hostile.example/cb",
-		PKCEChallenge: "x", Purpose: authn.HandoffEstablishment,
+		PKCEChallenge: challenge, Purpose: authn.HandoffEstablishment,
 	}); !errors.Is(err, service.ErrOriginNotAllowed) {
 		t.Fatalf("a non-allowlisted origin must be refused at the transaction, got %v", err)
 	}
 
 	// The full establishment arc against the allowlisted origin.
-	verifier := "pkce-verifier-value-that-is-long-enough-to-be-real"
-	sum := sha256.Sum256([]byte(verifier))
-	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 	started, err := workspace.StartHandoff(ctx, service.HandoffRequest{
 		Origin: "https://shell.example", RedirectURI: "https://shell.example/workspace/callback",
 		PKCEChallenge: challenge, Purpose: authn.HandoffEstablishment,

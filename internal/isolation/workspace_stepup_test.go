@@ -65,7 +65,8 @@ func seedSessionFactors(t *testing.T, db *store.DB, p domain.PrincipalID, factor
 
 // pkcePair is one RFC 7636 S256 verifier and its challenge.
 func pkcePair(seed string) (verifier, challenge string) {
-	verifier = "pkce-verifier-" + seed + "-long-enough-to-be-a-real-one"
+	verifierSeed := sha256.Sum256([]byte(seed))
+	verifier = base64.RawURLEncoding.EncodeToString(verifierSeed[:])
 	sum := sha256.Sum256([]byte(verifier))
 	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
 }

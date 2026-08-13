@@ -666,8 +666,8 @@ func (s *Workspace) StartHandoff(ctx context.Context, req HandoffRequest) (Hando
 	if err != nil {
 		return HandoffStart{}, err
 	}
-	if req.PKCEChallenge == "" {
-		return HandoffStart{}, fmt.Errorf("%w: a PKCE challenge is required", domain.ErrInvalid)
+	if !validPKCEChallenge(req.PKCEChallenge) {
+		return HandoffStart{}, fmt.Errorf("%w: a PKCE S256 challenge must be 43 canonical base64url characters", domain.ErrInvalid)
 	}
 	// The redirect URI's authority IS the allowlist entry: a callback that
 	// does not live at the consented origin is not the consented code.
@@ -921,6 +921,9 @@ type WorkspaceSession struct {
 // Authorization header, nothing is ambient, and demanding a synchronizer token
 // on a non-cookie transport would be theatre.
 func (s *Workspace) RedeemHandoff(ctx context.Context, code, pkceVerifier, origin string) (WorkspaceSession, error) {
+	if !validPKCEVerifier(pkceVerifier) {
+		return WorkspaceSession{}, fmt.Errorf("%w: a PKCE verifier must be 43-128 canonical base64url characters", domain.ErrInvalid)
+	}
 	if err := crypto.ParseArtifact(code, crypto.ArtifactHandoffCode); err != nil {
 		return WorkspaceSession{}, ErrHandoffInvalid
 	}
@@ -1289,6 +1292,24 @@ func callerClass(caller authz.Identity) domain.PrincipalClass {
 func pkceS256(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func validPKCEChallenge(challenge string) bool {
+	if len(challenge) != 43 {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(challenge)
+	return err == nil && len(decoded) == sha256.Size &&
+		base64.RawURLEncoding.EncodeToString(decoded) == challenge
+}
+
+func validPKCEVerifier(verifier string) bool {
+	if len(verifier) < 43 || len(verifier) > 128 {
+		return false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(verifier)
+	return err == nil && len(decoded) >= sha256.Size &&
+		base64.RawURLEncoding.EncodeToString(decoded) == verifier
 }
 
 // ---------------------------------------------------------------------------

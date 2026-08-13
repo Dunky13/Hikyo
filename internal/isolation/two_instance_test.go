@@ -190,7 +190,8 @@ func TestTwoInstancesDirectoryAndWorkspace(t *testing.T) {
 	// server must originate nothing, and the counting dialer is what says so.
 	before := remotefetch.Dials()
 
-	verifier := "two-instance-pkce-verifier-value-long-enough"
+	verifierSeed := sha256.Sum256([]byte("two-instance PKCE verifier"))
+	verifier := base64.RawURLEncoding.EncodeToString(verifierSeed[:])
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 

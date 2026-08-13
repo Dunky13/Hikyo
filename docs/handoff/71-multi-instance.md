@@ -1977,3 +1977,8 @@ timing checks alongside both multi-instance tiers.
   shared pre-auth admission budget; remote names use the entity-name grammar;
   rename reloads the persisted last-known snapshot; proxy CONNECT writes and
   reads are deadline- and cancellation-bounded with failure-path close.
+- Exact-head Aikido follow-up findings were fixed in a normal follow-up commit:
+  per-fetch pinned transports disable keep-alives so no unreachable idle pool
+  retains TLS/CONNECT sockets, and PKCE is closed at both boundaries to
+  canonical base64url verifiers (43-128 characters) plus an exact 43-character
+  S256 challenge. Short, padded, non-base64url, and overlong values are tested.

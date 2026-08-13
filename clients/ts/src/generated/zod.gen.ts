@@ -1731,7 +1731,7 @@ export const zWorkspaceOriginRemoved = z.object({
 export const zStartWorkspaceHandoffRequest = z.object({
     origin: z.string().max(512),
     redirect_uri: z.string().max(512),
-    pkce_challenge: z.string().max(128),
+    pkce_challenge: z.string().length(43).regex(/^[A-Za-z0-9_-]{43}$/),
     purpose: z.enum(['establishment', 'step-up']),
     session: z.optional(zId),
     operation: z.optional(z.string().max(128)),
@@ -1756,7 +1756,7 @@ export const zWorkspaceHandoffApproved = z.object({
 
 export const zRedeemWorkspaceHandoffRequest = z.object({
     code: z.string().max(256),
-    pkce_verifier: z.string().max(256),
+    pkce_verifier: z.string().min(43).max(128).regex(/^[A-Za-z0-9_-]{43,128}$/),
     origin: z.string().max(512)
 });
 

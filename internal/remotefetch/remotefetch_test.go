@@ -192,6 +192,9 @@ func TestProxyIsExplicitConfigurationOnly(t *testing.T) {
 		t.Error("a proxy was configured from the environment; egress must traverse a forward " +
 			"proxy only under explicit instance configuration")
 	}
+	if !transport.DisableKeepAlives {
+		t.Error("a per-fetch transport retained an idle connection pool after its only request")
+	}
 
 	configured, err := New(Config{
 		Deadline: time.Second, ResponseCap: 1, FanOut: 1,
