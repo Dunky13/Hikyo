@@ -148,10 +148,11 @@ fi
 
 release_workflow_actual=$(printf '%s\n' '.github/workflows/release.yml' | "$classifier" --files)
 if ! printf '%s\n' "$release_workflow_actual" | jq -e '
+	.docs == true and
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .docs, .generated, .headline_guarantee, .test, .web] | all(. == false))
+	([.client, .generated, .headline_guarantee, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: release-workflow plan was wrong\n' >&2
 	printf 'actual: %s\n' "$release_workflow_actual" >&2

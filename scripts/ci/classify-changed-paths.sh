@@ -52,6 +52,7 @@ else
 			lint=true
 			;;
 		.github/workflows/release.yml)
+			docs=true
 			lint=true
 			release_snapshot=true
 			supply_chain_checks=true
