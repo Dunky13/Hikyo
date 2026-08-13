@@ -8884,6 +8884,7 @@ components:
                 $ref: "#/components/schemas/KeyName"
               value:
                 type: string
+                maxLength: 65536
         overwrite:
           type: array
           uniqueItems: true

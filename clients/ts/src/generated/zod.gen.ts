@@ -796,7 +796,7 @@ export const zImportPrecondition = z.object({
 export const zImportValuesRequest = z.object({
     entries: z.array(z.object({
         key: zKeyName,
-        value: z.string()
+        value: z.string().max(65536)
     })).min(1).max(5000),
     overwrite: z.optional(z.array(zKeyName)),
     precondition: z.optional(zImportPrecondition)

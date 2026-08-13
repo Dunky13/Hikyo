@@ -1995,6 +1995,9 @@ the revision, remote-directory, and workspace tiers.
   so import and multi-instance request/model families remain present together.
 - The API no-proxy closure pin includes both import routes; each serves this
   instance's own catalogue/value state and never fetches or forwards remotely.
+- Exact-head Aikido review found #111's import entries lacked the existing
+  64 KiB plaintext ceiling. The OpenAPI item schema and service boundary now
+  enforce it before validation or sealing, with both-engine conformance coverage.
 - The remote-rename snapshot regression compares the reloaded timestamp against
   its canonical store precision, avoiding nanosecond-versus-microsecond CI
   failures without weakening the persisted-state assertion.
