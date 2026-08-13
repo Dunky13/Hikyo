@@ -136,7 +136,7 @@ const fs = require("node:fs");
 const meta = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 for (const page of meta.pages) {
   if (page.startsWith("---")) continue;
-  console.log(page === "index" ? "docs/index.html" : `docs/${page}/index.html`);
+  console.log(page === "index" ? "docs/index.html" : "docs/" + page + "/index.html");
 }
 ' "$docs_meta"
 )
