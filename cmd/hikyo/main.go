@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"slices"
@@ -49,6 +51,10 @@ func run() int {
 		return runMigrate(ctx, args)
 	case cmd == "admin":
 		return runAdmin(ctx, args)
+	case cmd == "backup":
+		return runOperator(ctx, "backup", args, app.RunBackup)
+	case cmd == "restore":
+		return runOperator(ctx, "restore", args, app.RunRestore)
 	case slices.Contains(cli.Verbs, cmd):
 		return cli.Run(ctx, cli.IO{
 			Stdin:   os.Stdin,
@@ -98,22 +104,31 @@ func runServer(ctx context.Context, args []string) int {
 
 // runAdmin is the local-admin group: `hikyo admin create` on the server's own
 // host. It is a client verb of the same binary, not a new multicall mode -
-// the mode set (server/operator/migrate/client) is unchanged.
+// the mode set (server/operator/migrate/client) is unchanged. It shares
+// runOperator's shape: own flags, environment-only configuration.
 func runAdmin(ctx context.Context, args []string) int {
-	// No flags reach config: `admin` takes its own (--username, --output-file,
-	// …) and app.RunAdmin owns them. Configuration for this verb is
-	// environment-only, exactly as it is for the server it runs beside.
-	cfg, warnings, err := config.Load("admin", nil, os.Getenv, os.Environ())
+	return runOperator(ctx, "admin", args, app.RunAdmin)
+}
+
+// runOperator is the shared shape of the host-only operator verb groups
+// (`backup`, `restore`). Like `admin`, they take their own flags and read
+// configuration from the environment only - the same environment the server
+// beside them reads, so an operator cannot back up one datastore and restore
+// another by passing a different flag.
+func runOperator(ctx context.Context, name string, args []string,
+	run func(context.Context, *config.Config, *slog.Logger, []string, io.Writer) error,
+) int {
+	cfg, warnings, err := config.Load(name, nil, os.Getenv, os.Environ())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "hikyo admin:", err)
+		fmt.Fprintf(os.Stderr, "hikyo %s: %v\n", name, err)
 		return 2
 	}
 	log := app.Logger(cfg.Dev)
 	for _, w := range warnings {
 		log.Warn(w)
 	}
-	if err := app.RunAdmin(ctx, cfg, log, args, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "hikyo admin:", err)
+	if err := run(ctx, cfg, log, args, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "hikyo %s: %v\n", name, err)
 		return 1
 	}
 	return 0
@@ -156,6 +171,11 @@ version:
 
 local host authority (server host only):
   hikyo admin create --username USER
+  hikyo backup export [--out DIR]
+  hikyo backup keygen
+  hikyo restore run --from ARCHIVE --identity-file PATH
+  hikyo restore status
+  hikyo restore reconcile --principal ID
 
 client verbs:
   %v

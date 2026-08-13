@@ -167,7 +167,10 @@ SELECT id FROM environments
 WHERE org_id = sqlc.arg(org_id) AND project_id = sqlc.arg(project_id)
 ORDER BY id;
 
+-- Born reconciled to the current restore epoch, for the reason
+-- InsertPrincipal states (#76).
 -- hikyo:authn-resolution
 -- name: InsertMachinePrincipal :exec
-INSERT INTO principals (id, kind, class, session_generation, created_at)
-VALUES (sqlc.arg(id), 'machine', sqlc.arg(class), 1, sqlc.arg(created_at));
+INSERT INTO principals (id, kind, class, session_generation, created_at, reconciled_epoch)
+VALUES (sqlc.arg(id), 'machine', sqlc.arg(class), 1, sqlc.arg(created_at),
+        (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1));

@@ -206,7 +206,9 @@ DELETE FROM machine_credentials WHERE service_account_id = ?;
 -- name: ListEnvironmentIDsInProject :many
 SELECT id FROM environments WHERE org_id = ? AND project_id = ? ORDER BY id;
 
+-- Born reconciled to the current restore epoch, for the reason
+-- InsertPrincipal states (#76).
 -- hikyo:authn-resolution
 -- name: InsertMachinePrincipal :exec
-INSERT INTO principals (id, kind, class, session_generation, created_at)
-VALUES (?, 'machine', ?, 1, ?);
+INSERT INTO principals (id, kind, class, session_generation, created_at, reconciled_epoch)
+VALUES (?, 'machine', ?, 1, ?, (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1));

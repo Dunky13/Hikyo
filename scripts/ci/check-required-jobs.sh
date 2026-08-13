@@ -8,7 +8,7 @@ fi
 
 event=$1
 results=$2
-expected='["client","dco","docs","generated","lint","release-snapshot","supply-chain-checks","test","web"]'
+expected='["client","dco","docs","generated","headline-guarantee","lint","release-snapshot","supply-chain-checks","test","web"]'
 
 case "$event" in
 	pull_request)

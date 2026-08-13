@@ -56,6 +56,18 @@ type Config struct {
 	Argon2Parallelism  uint8
 	AdmissionBudgetMiB int
 
+	// Backup export configuration (#76, ops spec section 11). Recipients are
+	// PUBLIC age recipients; the private backup identity never touches this
+	// process, this configuration or the datastore — it is a separate custody
+	// store from the root key by requirement, not by convention.
+	//
+	// Dir is where automatic exports are published. It is REQUIRED when
+	// recipients are configured: an export policy with no destination is a
+	// backup that silently goes nowhere, which is the failure mode the loud
+	// skip exists to prevent.
+	BackupRecipients []string
+	BackupDir        string
+
 	// DevAdmissionPerIPPerMinute raises the per-source-IP pre-auth allowance.
 	// Zero means the locked default.
 	//
@@ -79,6 +91,8 @@ var knownEnv = map[string]bool{
 	"HIKYO_ARGON2_TIME":          true,
 	"HIKYO_ARGON2_PARALLELISM":   true,
 	"HIKYO_ADMISSION_BUDGET_MIB": true,
+	"HIKYO_BACKUP_RECIPIENTS":    true,
+	"HIKYO_BACKUP_DIR":           true,
 
 	// Development-only. Named so the deployment it does not belong in is
 	// obvious at a glance, and refused at boot outside --dev regardless.
@@ -202,6 +216,10 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		}
 	}
 
+	if err := loadBackupPolicy(cfg, getenv); err != nil {
+		return nil, nil, err
+	}
+
 	dbURL := getenv("HIKYO_DB")
 	switch {
 	case dbURL != "":
@@ -216,6 +234,23 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		return nil, nil, fmt.Errorf("no datastore configured: set HIKYO_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
 	}
 	return cfg, warnings, nil
+}
+
+// loadBackupPolicy resolves the export recipient set and destination. Both
+// halves fail loudly rather than degrading: an unparseable recipient list is
+// an error, and recipients without a destination are an error, because the
+// only quiet alternative is an instance that believes it is taking backups.
+func loadBackupPolicy(cfg *Config, getenv func(string) string) error {
+	for _, part := range strings.Split(getenv("HIKYO_BACKUP_RECIPIENTS"), ",") {
+		if r := strings.TrimSpace(part); r != "" {
+			cfg.BackupRecipients = append(cfg.BackupRecipients, r)
+		}
+	}
+	cfg.BackupDir = strings.TrimSpace(getenv("HIKYO_BACKUP_DIR"))
+	if len(cfg.BackupRecipients) > 0 && cfg.BackupDir == "" {
+		return errors.New("HIKYO_BACKUP_RECIPIENTS is set but HIKYO_BACKUP_DIR is not: an export policy with no destination writes nothing")
+	}
+	return nil
 }
 
 // uintEnv parses an unsigned tunable, failing loudly rather than falling back

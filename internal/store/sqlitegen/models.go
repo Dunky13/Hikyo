@@ -69,6 +69,8 @@ type AuthInstanceState struct {
 	ID              int64
 	CredentialEpoch int64
 	UpdatedAt       string
+	RestoreEpoch    int64
+	ReactivatedAt   sql.NullString
 }
 
 type CredentialAuthority struct {
@@ -269,6 +271,7 @@ type Principal struct {
 	CreatedAt         string
 	SessionGeneration int64
 	Class             sql.NullString
+	ReconciledEpoch   int64
 }
 
 type Project struct {

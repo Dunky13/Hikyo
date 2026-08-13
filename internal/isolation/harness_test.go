@@ -333,44 +333,18 @@ func openPostgres(t *testing.T) *store.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Children before parents; the keyring tables arrived with #43 and the
-	// human-authentication tables with #47 (sessions and accounts reference
-	// principals, so they drop first).
-	for _, table := range []string{
-		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
-		// so they drop first — a stale one fails the next re-migration's CREATE.
-		"webauthn_ceremonies", "webauthn_credentials",
-		"saml_transactions", "saml_replay", "saml_sp_keys",
-		"oidc_transactions", "external_identities",
-		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
-		"credential_authorities", "password_credentials", "sessions",
-		// oidc_providers is a PARENT of sessions (sessions.provider_id
-		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
-		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
-		"saml_providers", "oidc_providers", "accounts",
-		"auth_instance_state", "credential_policy",
-		// The key catalogue (#49) sits between projects and environments:
-		// presence rows reference both keys and environments, keys reference
-		// key_groups, and the schema-revision row references projects — so all
-		// four drop before the hierarchy they hang from.
-		// value_entries references BOTH keys and environments (#50), so it
-		// drops before either.
-		"value_entries",
-		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
-		// Machine identities (#61, migration 00014): machine_credentials
-		// references service_accounts, which references projects/principals.
-		"machine_credentials", "service_accounts",
-		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
-		// goes first of the pair.
-		"grant_origins", "grants", "folders", "environments", "projects", "principals",
-		"tier3_keys", "master_keys", "key_generations",
-		"audit_tenant_events", "audit_instance_events",
-		"orgs", "goose_db_version",
-	} {
-		if _, err := pre.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
-			pre.Close()
-			t.Fatal(err)
-		}
+	// Reset by dropping the SCHEMA, not an enumerated table list (#76). The
+	// list was two things at once and bad at both: a maintenance burden that
+	// every migration had to be remembered in, and — worse — a reset that
+	// could not recover from any state it did not anticipate. One aborted run
+	// leaving a table the list did not name, or a rename a failing test never
+	// undid, and every subsequent run failed on "cannot drop X because other
+	// objects depend on it" or "relation Y does not exist", cascading through
+	// the whole suite from a cause several runs in the past. A schema drop
+	// cannot have that failure mode: whatever is there, it is gone.
+	if _, err := pre.PG().Exec(t.Context(), "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
+		pre.Close()
+		t.Fatal(err)
 	}
 	pre.Close()
 	if err := migrate.Run(t.Context(), cfg); err != nil {

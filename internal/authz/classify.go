@@ -255,6 +255,16 @@ var wireRegistry = map[string]Class{
 	"cli:server":  ClassSystem,
 	"cli:migrate": ClassSystem,
 
+	// `hikyo backup` and `hikyo restore` (#76): the operator lifecycle, on the
+	// server's own host. System class, and the probe contract that matters is
+	// exactly the one the totality invariant asserts by finding no HTTP route
+	// — a restore endpoint reachable from the network would be an instance
+	// replacement one request away, and the reconciliation that follows a
+	// restore is unreachable by any other means anyway, because a restore
+	// leaves no principal able to authorize anything.
+	"cli:backup":  ClassSystem,
+	"cli:restore": ClassSystem,
+
 	// `hikyo version` (#46): local print of build metadata — no principal,
 	// no server, no store; the pre-auth contract is trivially total.
 	"cli:version": ClassUnauthenticated,
@@ -474,6 +484,21 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthAuthorityMinted, audit.EventAuthCredentialResetIssued,
 		audit.EventBreakGlassGrant,
 	},
+
+	// The operator lifecycle (#76). `backup` writes its export record;
+	// `restore` writes the reconstruction and one event per principal the
+	// operator reconciles afterwards.
+	"cli:backup":  {audit.EventBackupExported, audit.EventBackupExportSkipped},
+	"cli:restore": {audit.EventRestoreCompleted, audit.EventRestorePrincipalReconciled},
+
+	// The automatic pre-migration export (ops spec section 11) rides the two
+	// entry points that can apply a migration, so both of them now have an
+	// auditable act at the operation surface and leave the exemption fixture:
+	// an export taken (or LOUDLY SKIPPED for want of recipients) immediately
+	// before a schema change is the record that says whether there is
+	// anything to fall back to.
+	"cli:migrate": {audit.EventBackupExported, audit.EventBackupExportSkipped},
+	"cli:server":  {audit.EventBackupExported, audit.EventBackupExportSkipped},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.

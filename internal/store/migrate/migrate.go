@@ -28,21 +28,11 @@ import (
 // caller must refuse to serve (fail closed, loud).
 func Run(ctx context.Context, cfg store.Config) (err error) {
 	if cfg.Engine == store.EngineSQLite {
-		lockPath, pathErr := canonicalPath(cfg.Path)
-		if pathErr != nil {
-			return fmt.Errorf("migrate: resolve sqlite path: %w", pathErr)
-		}
-		fl := flock.New(lockPath + ".lock")
-		locked, lockErr := fl.TryLockContext(ctx, 100*time.Millisecond)
+		unlock, lockErr := lockSQLite(ctx, cfg.Path)
 		if lockErr != nil {
-			return fmt.Errorf("migrate: acquire sqlite migration lock: %w", lockErr)
+			return lockErr
 		}
-		if !locked {
-			return fmt.Errorf("migrate: sqlite migration lock %s.lock is held", lockPath)
-		}
-		defer func() {
-			err = errors.Join(err, fl.Unlock())
-		}()
+		defer func() { err = errors.Join(err, unlock()) }()
 	}
 	return withProvider(ctx, cfg, func(p *goose.Provider, _ *sql.DB) error {
 		if _, err := p.Up(ctx); err != nil {
@@ -50,6 +40,84 @@ func Run(ctx context.Context, cfg store.Config) (err error) {
 		}
 		return nil
 	})
+}
+
+// lockSQLite takes the advisory file lock beside the database for the whole
+// migration run, since sqlite's per-migration transactions do not lock the
+// run against a second process.
+func lockSQLite(ctx context.Context, path string) (func() error, error) {
+	lockPath, err := canonicalPath(path)
+	if err != nil {
+		return nil, fmt.Errorf("migrate: resolve sqlite path: %w", err)
+	}
+	fl := flock.New(lockPath + ".lock")
+	locked, err := fl.TryLockContext(ctx, 100*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("migrate: acquire sqlite migration lock: %w", err)
+	}
+	if !locked {
+		return nil, fmt.Errorf("migrate: sqlite migration lock %s.lock is held", lockPath)
+	}
+	return fl.Unlock, nil
+}
+
+// RunUpTo applies migrations up to and including version, and no further. It
+// exists for one caller: restore (#76), which must create the schema AT THE
+// ARCHIVE'S VERSION before loading the archive's rows, and only then roll
+// forward with Run. Migrating first and loading afterwards would mean loading
+// old rows into a newer shape — the case where a restore silently drops a
+// column a later migration added.
+func RunUpTo(ctx context.Context, cfg store.Config, version int64) (err error) {
+	if cfg.Engine == store.EngineSQLite {
+		unlock, lockErr := lockSQLite(ctx, cfg.Path)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer func() { err = errors.Join(err, unlock()) }()
+	}
+	return withProvider(ctx, cfg, func(p *goose.Provider, _ *sql.DB) error {
+		if _, err := p.UpTo(ctx, version); err != nil {
+			return fmt.Errorf("migrate: up to %d: %w", version, err)
+		}
+		return nil
+	})
+}
+
+// HasPending reports whether this binary embeds a migration the database has
+// not applied. It exists so the automatic pre-migration export (#76) runs
+// before a schema change and NOT before every ordinary restart — an export
+// per boot would be a backup policy nobody asked for and a disk bill nobody
+// budgeted.
+func HasPending(ctx context.Context, cfg store.Config) (bool, error) {
+	var pending bool
+	err := withProvider(ctx, cfg, func(p *goose.Provider, _ *sql.DB) error {
+		var err error
+		pending, err = p.HasPending(ctx)
+		return err
+	})
+	if err != nil {
+		return false, fmt.Errorf("migrate: pending check: %w", err)
+	}
+	return pending, nil
+}
+
+// MaxVersion reports the highest migration version this binary embeds. A
+// restore refuses an archive above it rather than guessing at a schema it
+// does not have.
+func MaxVersion(ctx context.Context, cfg store.Config) (int64, error) {
+	var max int64
+	err := withProvider(ctx, cfg, func(p *goose.Provider, _ *sql.DB) error {
+		for _, src := range p.ListSources() {
+			if src.Version > max {
+				max = src.Version
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return max, nil
 }
 
 // Check verifies the database schema matches this binary exactly: no

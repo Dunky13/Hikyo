@@ -55,11 +55,36 @@ func storeConfig(cfg *config.Config) store.Config {
 func RunMigrate(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	sc := storeConfig(cfg)
 	log.Info("applying migrations", "engine", sc.Engine)
+	rec, err := beforeMigration(ctx, cfg, log, sc)
+	if err != nil {
+		return err
+	}
 	if err := migrate.Run(ctx, sc); err != nil {
 		return err
 	}
+	recordPreMigration(ctx, cfg, log, rec)
 	log.Info("migrations current")
 	return nil
+}
+
+// beforeMigration runs the automatic pre-migration export, but only when this
+// binary actually has a migration to apply: an export per ordinary restart is
+// a backup policy nobody asked for.
+func beforeMigration(ctx context.Context, cfg *config.Config, log *slog.Logger, sc store.Config) (preMigrationRecord, error) {
+	pending, err := migrate.HasPending(ctx, sc)
+	if err != nil {
+		// Fail TOWARD the backup: a check that errors while the migration
+		// then succeeds would silently skip the one export standing between
+		// a bad migration and a rebuilt instance. Attempting the export costs
+		// at worst one unneeded artifact; if the store is truly down, the
+		// export preflight and the migration both say so.
+		log.Warn("pre-migration pending check failed; attempting the export anyway", "err", err)
+		return preMigrationExport(ctx, cfg, log)
+	}
+	if !pending {
+		return preMigrationRecord{}, nil
+	}
+	return preMigrationExport(ctx, cfg, log)
 }
 
 // Server is a booted, listening server that has not started serving yet.
@@ -138,7 +163,12 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	}
 	sc := storeConfig(cfg)
 
+	var migrationRecord preMigrationRecord
 	if cfg.AutoMigrate {
+		var err error
+		if migrationRecord, err = beforeMigration(ctx, cfg, log, sc); err != nil {
+			return nil, fmt.Errorf("boot: refusing to serve: %w", err)
+		}
 		if err := migrate.Run(ctx, sc); err != nil {
 			return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 		}
@@ -149,6 +179,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	if err := migrate.Check(ctx, sc); err != nil {
 		return nil, fmt.Errorf("boot: refusing to serve: %w", err)
 	}
+	recordPreMigration(ctx, cfg, log, migrationRecord)
 
 	root, err := resolveRootKey(cfg, log)
 	if err != nil {

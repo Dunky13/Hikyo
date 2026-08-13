@@ -252,6 +252,14 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"AddGrantOrigin":     true,
 	"ReleaseGrantOrigin": true,
 	"DeleteGrantRow":     true,
+	// Restore reconciliation (#76). These are the sharpest case of the same
+	// circularity: a restore leaves every session dead and every grant inert,
+	// so at the instant they run there is no principal in existence who could
+	// authorize them. Both are local-host-authority operations (the
+	// tenant-isolation ADR's SiteRecoveryReconcile), reachable from no network
+	// route, and the classification-totality invariant keeps that true.
+	"AdvanceRestoreEpoch": true,
+	"ReconcilePrincipal":  true,
 }
 
 // CheckDenialWriter enforces the enumerated-writer rule as a build failure,
