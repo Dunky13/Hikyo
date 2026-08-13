@@ -1,0 +1,84 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import '@fontsource/archivo/400.css';
+@import '@fontsource/archivo/500.css';
+@import '@fontsource/archivo/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+
+@theme {
+  --font-sans: 'Archivo', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --color-fd-background: oklch(0.965 0.008 200);
+  --color-fd-foreground: oklch(0.25 0.03 225);
+  --color-fd-muted: oklch(0.93 0.009 200);
+  --color-fd-muted-foreground: oklch(0.48 0.018 220);
+  --color-fd-popover: oklch(0.98 0.005 200);
+  --color-fd-popover-foreground: oklch(0.25 0.03 225);
+  --color-fd-card: oklch(0.95 0.008 200);
+  --color-fd-card-foreground: oklch(0.25 0.03 225);
+  --color-fd-border: oklch(0.76 0.014 215 / 45%);
+  --color-fd-primary: oklch(0.45 0.085 210);
+  --color-fd-primary-foreground: oklch(0.98 0.005 200);
+  --color-fd-secondary: oklch(0.92 0.012 205);
+  --color-fd-secondary-foreground: oklch(0.27 0.03 225);
+  --color-fd-accent: oklch(0.88 0.025 200 / 70%);
+  --color-fd-accent-foreground: oklch(0.3 0.05 215);
+  --color-fd-ring: oklch(0.55 0.09 205);
+}
+
+.dark {
+  --color-fd-background: oklch(0.19 0.012 220);
+  --color-fd-foreground: oklch(0.93 0.008 200);
+  --color-fd-muted: oklch(0.23 0.014 220);
+  --color-fd-muted-foreground: oklch(0.68 0.014 215);
+  --color-fd-popover: oklch(0.21 0.014 220);
+  --color-fd-popover-foreground: oklch(0.93 0.008 200);
+  --color-fd-card: oklch(0.22 0.014 220);
+  --color-fd-card-foreground: oklch(0.93 0.008 200);
+  --color-fd-border: oklch(0.52 0.016 215 / 28%);
+  --color-fd-primary: oklch(0.82 0.09 195);
+  --color-fd-primary-foreground: oklch(0.18 0.02 220);
+  --color-fd-secondary: oklch(0.25 0.016 220);
+  --color-fd-secondary-foreground: oklch(0.9 0.008 200);
+  --color-fd-accent: oklch(0.32 0.035 210 / 70%);
+  --color-fd-accent-foreground: oklch(0.9 0.035 195);
+  --color-fd-ring: oklch(0.75 0.09 195);
+}
+
+html,
+body {
+  background: var(--color-fd-background);
+  font-family: var(--font-sans);
+  letter-spacing: -0.006em;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-edit-link {
+  margin-block-start: 3rem;
+  border-block-start: 1px solid var(--color-fd-border);
+  padding-block-start: 1.25rem;
+}
+
+button,
+a {
+  border-radius: 0.25rem;
+}
+
+button {
+  min-height: 44px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

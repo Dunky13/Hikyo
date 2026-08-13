@@ -1,0 +1,60 @@
+---
+title: HTTP API
+description: Use Hikyo's versioned, contract-validated API without bypassing its security model.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/http-api.mdx
+---
+
+Hikyo exposes an OpenAPI 3.1 contract under `/api/v1`. The repository's
+[`api/openapi.yaml`](https://github.com/Dunky13/hikyo/blob/main/api/openapi.yaml)
+is the source of truth for routes, schemas, security, and operation semantics.
+
+## Start with discovery
+
+```bash
+curl --fail https://hikyo.example.com/api/v1/meta
+```
+
+The unauthenticated response reports the server version, API revision, and
+available authentication protocol flows. It contains no tenant configuration.
+
+## Authentication channels
+
+CLI clients present the stored session artifact as `Authorization: Bearer`.
+Browser sessions use secure HttpOnly cookies and a companion CSRF mechanism for
+state-changing requests.
+
+Do not copy browser cookies into automation. Use a service account credential
+or an OIDC federation binding.
+
+## Contract rules
+
+- Requests are validated before a handler runs.
+- Responses use one uniform error model.
+- Unauthorized and missing tenant resources have the same status and shape.
+- Responses may gain fields within `/api/v1`; clients must ignore unknown fields.
+- Open enums may gain values; closed enums do not.
+
+The contract records operation-specific authorization, accepted artifact types,
+and the minimum API revision. Generate clients from the checked-in document,
+then preserve unknown response fields and enum values.
+
+## API errors
+
+Treat the HTTP status and stable error code as machine-readable. Human detail is
+safe only where the contract permits it and must not be parsed as an API.
+
+Do not retry authentication or policy refusals. Retry unavailable responses only
+with bounded backoff and after respecting operation idempotency.
+
+## Health is outside the API
+
+`GET /healthz` and `GET /readyz` are unauthenticated operational probes. They
+are not tenant APIs and do not accept session credentials.
+
+## Compatibility
+
+Hikyo is still `0.x`; interfaces are not frozen. Match generated clients to the
+server revision and check `/api/v1/meta` before using a newer operation.
+
+For interactive work, prefer the [CLI](/hikyo/docs/cli-reference/). It implements
+trust establishment, target echoing, safe secret input, and display-once output.

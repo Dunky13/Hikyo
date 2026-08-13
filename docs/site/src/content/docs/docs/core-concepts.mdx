@@ -1,0 +1,56 @@
+---
+title: Core concepts
+description: The state and authorization rules Hikyo keeps explicit.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/core-concepts.mdx
+---
+
+Hikyo is designed around a small set of rules that stay visible in the API,
+browser UI, CLI, audit trail, and storage model.
+
+## The short version
+
+1. Scope every value to one organisation, project, and environment.
+2. Declare a key before writing its value.
+3. Treat `absent` as real state, not a missing default.
+4. Reveal secret plaintext only through an explicit disclosure action.
+5. Grant narrow capabilities to a principal at a named scope.
+
+## Values do not inherit
+
+A key declaration defines what a value means. Each environment then records its
+own state as either `set` or `absent`. Development cannot silently supply a
+default to production, and an empty cell is never ambiguous.
+
+## Secrets are a separate disclosure path
+
+Ordinary reads return classification and presence, not secret plaintext.
+Revealing or copying a secret is a deliberate, reauthenticated ceremony with a
+short remask window and its own audit event. Replacing a secret does not require
+reading its current value.
+
+## Validation happens at write time
+
+Declarations distinguish configuration from secrets and attach validation and
+presence rules. A write is accepted only when the new value and the resulting
+environment state are both valid. Required values cannot be cleared where their
+presence rule applies.
+
+## Authorization has one chokepoint
+
+Human sessions, machine identities, and local break-glass operations enter by
+different routes, but resource access is evaluated against the same explicit
+capability and scope model. Unauthorized resources remain indistinguishable from
+resources that do not exist.
+
+## Audit records describe the decision
+
+Security-sensitive events record the actor, object, outcome, and decision
+context without recording secret material. Local-host recovery actions remain
+distinguishable from ordinary network-authorized changes.
+
+## Go deeper
+
+- [Architecture](/hikyo/docs/architecture/) explains the process and trust boundaries.
+- [Hierarchy](/hikyo/docs/hierarchy/) explains organisations, projects, and environments.
+- [Values and secrets](/hikyo/docs/values-and-secrets/) explains declarations and disclosure.
+- [Identity and access](/hikyo/docs/identity-and-access/) explains principals and capabilities.

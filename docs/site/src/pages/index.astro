@@ -1,8 +1,9 @@
 ---
+import { repositoryUrl, siteUrl, themeBootstrapScript } from '../lib/site';
 import '../styles/landing.css';
 
-const base = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
-const repository = 'https://github.com/Dunky13/hikyo';
+const base = siteUrl();
+const repository = repositoryUrl;
 const links = {
   contributing: `${base}contributing/`,
   docs: `${base}docs/`,
@@ -26,12 +27,7 @@ const links = {
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <link rel="canonical" href="https://dunky13.github.io/hikyo/" />
     <title>Hikyo — fully open secrets and configuration</title>
-    <script is:inline>
-      (() => {
-        const stored = localStorage.getItem('starlight-theme');
-        document.documentElement.dataset.theme = stored === 'light' ? 'light' : 'dark';
-      })();
-    </script>
+    <script is:inline set:html={themeBootstrapScript}></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -311,6 +307,8 @@ const links = {
     </footer>
 
     <script>
+      import { themeStorageKey } from '../lib/site';
+
       const button = document.querySelector<HTMLButtonElement>('.theme-toggle');
       const label = button?.querySelector<HTMLElement>('.theme-label');
 
@@ -323,7 +321,7 @@ const links = {
       renderTheme(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
       button?.addEventListener('click', () => {
         const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('starlight-theme', theme);
+        localStorage.setItem(themeStorageKey, theme);
         renderTheme(theme);
       });
     </script>

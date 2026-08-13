@@ -1,0 +1,93 @@
+---
+title: Machine identities
+description: Connect workloads with scoped service accounts, bearer credentials, or OIDC federation.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/machine-identities.mdx
+---
+
+Use a service account for a workload or automation job. Give it only the
+capabilities and scope required by that workload.
+
+## Create and grant
+
+```bash
+hikyo sa create --name payments-deploy --kind workload
+hikyo access grant add \
+  --principal <service-account-id> \
+  --capability <read-capability>
+```
+
+Record the returned stable ID. List its grants before minting a credential.
+
+## Bearer credential
+
+Mint to a new protected file:
+
+```bash
+hikyo sa credential mint \
+  --sa <service-account-id> \
+  --lifetime 720h \
+  --output-file ./hikyo-token
+```
+
+The credential is shown once. A workload supplies it with `--token-file` or
+`HIKYO_TOKEN`; Hikyo has no `--token` flag.
+
+Prefer `--token-file`. Environment variables remain visible to the process and
+may be copied by diagnostic tooling.
+
+Rotate before expiry, distribute the new credential, verify it, then revoke the
+old credential. A rotate command does not make distribution atomic.
+
+## Credential policy
+
+The instance policy limits lifetime, indefinite credentials, and the number of
+live credentials per service account.
+
+```bash
+hikyo instance-config credential-policy get
+hikyo sa credential list --sa <service-account-id>
+```
+
+Change policy only after checking existing workloads. Tightening a limit may
+require staged rotation.
+
+## OIDC federation
+
+Federation removes stored bearer credentials. Configure a trusted issuer, then
+create an immutable binding from exact claims to one service account.
+
+Bindings do not accept wildcards or prefixes. Every platform binding must pin
+its immutable identifiers:
+
+- GitHub Actions: `repository_id`, `repository_owner_id`, and `event_name`.
+- Kubernetes: `/kubernetes.io/serviceaccount/uid`.
+- Forgejo: `repository` and `event_name`.
+
+Create a replacement binding for a change; do not edit the old binding in
+place:
+
+```bash
+hikyo sa binding create \
+  --sa <service-account-id> \
+  --issuer <issuer-url> \
+  --subject <subject> \
+  --audience <audience> \
+  --claim name=value \
+  --replaces <old-credential-id>
+```
+
+The server revokes the predecessor and inserts the successor in one transaction.
+There is no overlap window in which to verify both. Validate the new formula
+before invoking replacement, then test the successor immediately afterward.
+
+## Delete
+
+```bash
+hikyo sa credential revoke --sa <service-account-id> --id <credential-id>
+hikyo sa delete --id <service-account-id>
+```
+
+Deletion is not a substitute for incident rotation. Revoke exposed credentials
+immediately, then investigate their audit history.
+
+Next: [review identity and access](/hikyo/docs/identity-and-access/).

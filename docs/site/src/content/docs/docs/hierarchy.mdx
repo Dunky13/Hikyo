@@ -1,0 +1,70 @@
+---
+title: Hierarchy
+description: Model organisations, projects, environments, folders, keys, and groups.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/hierarchy.mdx
+---
+
+Hikyo uses a fixed hierarchy. It gives every value and every grant an explicit
+scope.
+
+```text
+instance
+`-- organisation
+    `-- project
+        |-- environment
+        |-- folder
+        |   `-- key
+        `-- key group
+```
+
+## Organisation
+
+An organisation is the administrative boundary for related projects and
+members. Organisation-scoped capabilities can affect every project below it.
+
+## Project
+
+A project owns its environments, catalogue, folders, and project settings.
+Deleting a project is irreversible and shreds its encryption key.
+
+Use one project for values that share owners, deployment environments, and an
+access policy. Split projects when any of those boundaries differ.
+
+## Environment
+
+An environment is one complete value state for a project. It is not a layer.
+No environment inherits from another.
+
+Cloning an environment copies its current values once. Later changes remain
+independent. Reordering changes display order, not precedence.
+
+## Folder and key
+
+Folders organise the catalogue. A key has a stable identity, name,
+classification, declaration, description, and presence rules.
+
+Renaming or moving a key does not create a new key. Reclassifying between
+configuration and secret is a separate, audited ceremony.
+
+## Key group
+
+A group models keys that must obey one all-or-none presence rule. It is useful
+for credentials or connection settings that only work as a complete set.
+
+## A practical model
+
+For an application with development and production deployments:
+
+```text
+organisation: platform
+project:      payments-api
+environments: development, production
+folder:       database
+keys:         DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD
+```
+
+Declare `DATABASE_PASSWORD` as a secret. Put related database keys in a group
+when a partial configuration would be invalid.
+
+Next: [declare value rules](/hikyo/docs/values-and-secrets/) and
+[learn target resolution](/hikyo/docs/contexts/).

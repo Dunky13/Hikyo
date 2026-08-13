@@ -1,0 +1,65 @@
+---
+title: Identity and access
+description: Understand principals, sessions, capabilities, scopes, and recovery boundaries.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/identity-and-access.mdx
+---
+
+Hikyo separates identity from authorization. Authentication proves a principal;
+a scoped capability decides what that principal may do.
+
+## Principal types
+
+| Principal | Typical use | Credential |
+| --- | --- | --- |
+| Human account | Browser and interactive CLI | Password, session, and optional factors |
+| Service account | Workload or automation | Bearer credential or federated identity |
+
+An instance capability is an instance-scoped grant held by a principal, not a
+third principal type. A machine identity does not get a separate, broader
+policy model.
+
+## Capabilities and scope
+
+A grant combines one principal, one capability atom, and one scope. Scopes may
+be instance, organisation, project, or environment level.
+
+Prefer the narrowest scope that permits the task. A deployment reader usually
+needs one project and environment, not the full organisation.
+
+```bash
+hikyo access grant add \
+  --principal <principal-id> \
+  --capability <capability>
+```
+
+Use `access grant list` before and after a change. Use a named grant template
+when the built-in role exactly matches the job.
+
+## Human sessions
+
+The local CLI login prompts on the controlling terminal. Passwords never cross
+argv. Sessions are stored in the local Hikyo state directory with mode `0600`.
+
+```bash
+hikyo login https://hikyo.example.com --local --as alice
+hikyo whoami --instance https://hikyo.example.com
+hikyo logout --instance https://hikyo.example.com
+```
+
+## Account recovery
+
+Credential-establishment and recovery authorities are single-use, expiring,
+and do not create sessions. Deliver them out of band.
+
+The local `hikyo admin` path exists for bootstrap and break-glass recovery. Host
+authority is separate from network authorization and may perform named recovery
+operations that the network path refuses. Those actions remain distinct in the
+audit trail.
+
+## Indistinguishable refusal
+
+An unauthorized resource returns the same external result as a missing one.
+This prevents resource discovery through permission errors.
+
+Next: [configure a human target](/hikyo/docs/contexts/) or
+[create a machine identity](/hikyo/docs/machine-identities/).

@@ -1,0 +1,15 @@
+{
+  "title": "Hikyo",
+  "pages": [
+    "docs",
+    "---Project policy---",
+    "security",
+    "support",
+    "governance",
+    "trademark",
+    "contributing",
+    "license",
+    "---Release trust---",
+    "release"
+  ]
+}

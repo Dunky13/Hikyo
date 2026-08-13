@@ -1,0 +1,94 @@
+---
+title: SCIM provisioning
+description: Bind an identity provider, map groups to scoped roles, and rotate provisioning credentials.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/scim.mdx
+---
+
+SCIM provisioning belongs to one organisation and one configured OIDC or SAML
+provider. A binding starts with no credential and no group mappings.
+
+## 1. Create a binding
+
+```bash
+hikyo scim binding create \
+  --org <org-id> \
+  --provider workforce \
+  --kind saml
+```
+
+Provider kind is required because an OIDC and SAML provider may share a name.
+The default subject source is `externalId`; `userName` is refused as identity
+material because it is mutable.
+
+The command prints the organisation-scoped SCIM base URL and binding ID. Copy
+the URL into the identity provider only after creating a credential.
+
+## 2. Mint the provisioning credential
+
+```bash
+hikyo scim credential mint <binding-id> \
+  --org <org-id> \
+  --output-file ./hikyo-scim-token
+```
+
+The CLI prompts for an account-security proof. The token is displayed once and
+the output file is created with mode `0600`.
+
+Configure the identity provider, run a limited test, then remove the local token
+file when its protected destination owns the credential.
+
+## 3. Observe provisioned groups
+
+```bash
+hikyo scim user list <binding-id> --org <org-id>
+hikyo scim group list <binding-id> --org <org-id>
+```
+
+Use the server-minted SCIM group ID from this view when defining a mapping. Do
+not substitute a display name.
+
+## 4. Map a group to a role
+
+Project scope is explicit:
+
+```bash
+hikyo scim mapping add <binding-id> \
+  --org <org-id> \
+  --group <scim-group-id> \
+  --template <role-template> \
+  --project <project-id> \
+  --env <environment-id>
+```
+
+For organisation-wide authority, pass `--org-scope`. Hikyo never defaults to
+that widest scope. `--org-scope` and project or environment flags conflict.
+
+Adding or updating a mapping applies its grants and reports affected members.
+Removing a row releases grants created from that mapping in the same transaction.
+
+## Rotate a credential
+
+Mint another credential for the binding. Existing authority stays live, so this
+is an overlap rotation:
+
+1. Mint the replacement to a new protected file.
+2. Update the identity provider.
+3. Confirm a provisioning request succeeds.
+4. Revoke the old credential by ID.
+
+```bash
+hikyo scim credential list <binding-id> --org <org-id>
+hikyo scim credential revoke <binding-id> <old-credential-id> --org <org-id>
+```
+
+## Remove a binding
+
+```bash
+hikyo scim binding delete <binding-id> --org <org-id>
+```
+
+Deletion revokes provisioning credentials, releases provisioned grants, and
+retires the connection. Accounts and identity links survive.
+
+Inspect mapping and credential lists before deletion. Exporting their IDs and
+scopes makes the blast radius reviewable without exposing tokens.

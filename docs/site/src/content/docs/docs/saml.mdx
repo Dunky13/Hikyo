@@ -1,0 +1,86 @@
+---
+title: SAML identity provider
+description: Configure SAML metadata, confirm trust changes, and rotate service-provider keys.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/saml.mdx
+---
+
+SAML administration is an authenticated network operation. It requires the
+instance-configuration capability; host access alone does not configure it.
+
+## Before creation
+
+Obtain the identity provider's metadata through a trusted channel. Record the
+byte-exact entity ID, expected SSO endpoints, and signing-certificate
+fingerprints independently.
+
+Set `HIKYO_EXTERNAL_ORIGIN` to the stable public HTTPS origin first. SAML
+redirect and callback identity must not depend on a temporary listener address.
+
+## Create from metadata
+
+Use exactly one metadata source:
+
+```bash
+hikyo instance-config provider create \
+  --kind saml \
+  --name workforce \
+  --display-name "Workforce SSO" \
+  --entity-id <byte-exact-entity-id> \
+  --metadata-file ./idp-metadata.xml
+```
+
+For a URL-backed provider, replace `--metadata-file` with `--metadata-url`.
+Creation selects exactly one descriptor by entity ID.
+
+Hikyo may refuse the first attempt with a metadata diff. Compare every endpoint
+and certificate with the independent record, then rerun using only the printed
+`--confirm-endpoint` and `--confirm-fingerprint` flags you verified.
+
+## Inspect and test
+
+```bash
+hikyo instance-config provider show workforce --kind saml
+hikyo doctor --instance hikyo.example.com
+```
+
+Keep local password login working until SAML login and recovery are verified for
+more than one administrator. SAML does not remove the local authentication floor.
+
+## Refresh metadata
+
+```bash
+hikyo instance-config provider refresh-metadata workforce
+```
+
+File-backed providers supply the replacement document with `--metadata-file`.
+URL-backed providers fetch their configured source.
+
+A changed endpoint or certificate requires explicit confirmation again. Treat
+an unexpected diff as a security event, not a routine click-through.
+
+## Disable or remove
+
+```bash
+hikyo instance-config provider disable workforce --kind saml
+hikyo instance-config provider remove workforce --kind saml
+```
+
+Disabling prevents new use and invalidates the provider's sessions while
+retaining configuration. Removal deletes the provider configuration.
+
+## Rotate SAML service-provider keys
+
+List current keys, add an overlapping successor, update the identity provider,
+then retire the predecessor:
+
+```bash
+hikyo instance-config saml-sp-key list
+hikyo instance-config saml-sp-key rotate
+hikyo instance-config saml-sp-key retire <old-fingerprint>
+```
+
+For a known compromise, use `compromise-retire <fingerprint>`. Hikyo erases the
+named active key and mints its replacement without an overlap window.
+
+Test SAML login and logout after any provider or key change. Preserve provider
+warnings and audit evidence with the change record.

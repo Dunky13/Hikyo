@@ -1,0 +1,116 @@
+---
+title: Create your first project
+description: Create an organisation, project, environments, key, and first validated value from the CLI.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/first-project.mdx
+---
+
+This guide starts after the local server and first administrator exist. It
+creates a small project and writes one non-secret configuration value.
+
+You will copy opaque IDs from JSON output. Hikyo accepts names in some places,
+but IDs keep every target explicit while learning the model.
+
+## 1. Log in and enrol a second factor
+
+```bash
+hikyo login http://127.0.0.1:8080 --local --as admin
+hikyo account factor enrol-totp --output-file ./hikyo-otpauth-uri
+hikyo account factor confirm-totp
+hikyo account factor step-up
+hikyo whoami -o json
+```
+
+Import the provisioning URI into an authenticator before confirming it. Use a
+fresh code for confirmation, then another fresh code for step-up. Delete the
+URI file after confirmation.
+
+Organisation creation requires recent multi-factor assurance. This is why the
+quick path does not skip account security.
+
+## 2. Create an organisation
+
+```bash
+hikyo org create --name demo -o json
+```
+
+Copy the organisation `id`. Also copy `principal.id` from `hikyo whoami -o
+json`, then grant the first administrator tenant access:
+
+```bash
+hikyo access grant template \
+  --org <org-id> \
+  --principal <principal-id> \
+  --template admin \
+  -o json
+```
+
+Changing your own grants revokes your current session. Log in and step up again
+before continuing:
+
+```bash
+hikyo login http://127.0.0.1:8080 --local --as admin
+hikyo account factor step-up
+```
+
+## 3. Create a project and environments
+
+```bash
+hikyo project create --org <org-id> --name checkout -o json
+hikyo env create --org <org-id> --project <project-id> --name development -o json
+hikyo env create --org <org-id> --project <project-id> --name production -o json
+```
+
+Copy the project ID and both environment IDs from the responses. Values do not
+inherit between environments; each cell starts as `absent`.
+
+## 4. Save a local context
+
+```bash
+hikyo context create checkout-dev \
+  --instance http://127.0.0.1:8080 \
+  --org <org-id> \
+  --project <project-id> \
+  --env <development-env-id>
+
+hikyo context show checkout-dev
+```
+
+A context stores targets, not credentials. Hikyo has no global active context,
+so each command names it with `--context`.
+
+## 5. Declare and set a value
+
+```bash
+hikyo key create \
+  --context checkout-dev \
+  --name LOG_LEVEL \
+  --classification config \
+  --declaration '{"rule":{"type":"string"}}' \
+  --required-in all
+
+printf '%s' 'debug' > ./log-level.txt
+hikyo values set LOG_LEVEL \
+  --context checkout-dev \
+  --value-file ./log-level.txt
+rm ./log-level.txt
+```
+
+The declaration is saved before the value. Hikyo validates every later write
+against that declaration and tracks presence independently in each environment.
+
+## 6. Inspect the result
+
+```bash
+hikyo key show LOG_LEVEL --context checkout-dev
+hikyo values get LOG_LEVEL --context checkout-dev
+hikyo values diff \
+  --context checkout-dev \
+  --left <development-env-id> \
+  --right <production-env-id>
+```
+
+The diff should show `LOG_LEVEL` set in development and absent in production.
+No value silently falls through from one environment to another.
+
+Next: learn the [value workflows](/hikyo/docs/values-workflows/) or connect a
+workload with a [machine identity](/hikyo/docs/machine-identities/).

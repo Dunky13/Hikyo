@@ -1,0 +1,76 @@
+---
+title: CLI reference
+description: Find Hikyo command families, target rules, output contracts, and exit codes.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/cli-reference.mdx
+---
+
+Run `hikyo` for the exact help shipped by your binary. This page is a map, not a
+replacement for version-matched help.
+
+## Server and host operator
+
+| Command family | Purpose |
+| --- | --- |
+| `server`, `migrate` | Serve Hikyo and manage schema state. |
+| `admin` | Bootstrap and break-glass account authority on the server host. |
+| `backup`, `restore` | Export, reconstruct, inspect, and reconcile an instance. |
+| `version` | Print build identity. |
+
+## Authentication and local state
+
+| Command family | Purpose |
+| --- | --- |
+| `login`, `logout`, `whoami` | Manage the local human session. |
+| `account` | Establish credentials, factors, recovery, and reset. |
+| `context` | Store named targets and trusted instance references. |
+| `doctor` | Report server-authoritative provider health. |
+
+Passwords and authorities are read from the controlling terminal. Sessions are
+stored locally and are never printed as a login receipt.
+
+## Domain resources
+
+| Command family | Purpose |
+| --- | --- |
+| `org`, `project`, `env` | Manage hierarchy. |
+| `folder`, `key` | Manage the catalogue and declarations. |
+| `values` | List, get, set, clear, diff, copy, and bulk declare. |
+| `access`, `project-settings` | Manage grants, members, and protected environments. |
+
+Most list and show commands accept `-o table|json`. JSON shapes may gain fields;
+automation must ignore unknown fields.
+
+## Identity providers and machines
+
+| Command family | Purpose |
+| --- | --- |
+| `sa` | Service accounts, credentials, and federation bindings. |
+| `instance-config` | SAML, federation issuers, credential policy, and instance keys. |
+| `scim` | Provisioning bindings, mappings, credentials, users, and groups. |
+
+Display-once values use one of three destinations: a new mode-`0600` file, an
+interactive terminal, or explicit `--dangerously-print`.
+
+## Target flags
+
+The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
+`--context`. Resolution is documented in [contexts and targets](/hikyo/docs/contexts/).
+
+## Exit codes
+
+| Code | Meaning | Typical response |
+| --- | --- | --- |
+| `0` | Success | Continue. |
+| `1` | Internal failure | Preserve error and server logs. |
+| `2` | Usage error | Correct verb, arguments, or flags. |
+| `3` | Authentication failure | Log in or replace credential. |
+| `4` | Refused | Satisfy the named safety or policy condition. |
+| `5` | Not found or unauthorized | Check target and authorization. |
+| `6` | Unavailable | Retry only after checking service health. |
+
+Code `5` deliberately combines missing and unauthorized resources.
+
+## Commands not yet implemented
+
+`run`, `render`, `sync`, `adopt`, `definitions`, and `import` are reserved but
+not implemented in the current 0.x build. The binary refuses them explicitly.

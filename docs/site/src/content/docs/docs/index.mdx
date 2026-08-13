@@ -1,0 +1,59 @@
+---
+title: Hikyo documentation
+description: Learn Hikyo from first run through production operation, automation, and recovery.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/index.mdx
+---
+
+Hikyo is a self-hosted control plane for validated secrets and configuration.
+Every value is explicitly `set` or `absent` in every environment. There is no
+inheritance, hidden fallback, or paid operational core.
+
+Choose the path that matches what you need to do now.
+
+<Cards>
+  <Card title="Getting started" href="/hikyo/docs/getting-started/">
+    Build the binary, run a local instance, and create the first administrator.
+  </Card>
+  <Card title="Installation" href="/hikyo/docs/installation/">
+    Choose between local evaluation, a reusable source build, and production preparation.
+  </Card>
+  <Card title="Create your first project" href="/hikyo/docs/first-project/">
+    Create environments, declare a key, and save your first validated value.
+  </Card>
+  <Card title="Self-hosting" href="/hikyo/docs/self-hosting/">
+    Define the datastore, root key, network, origin, and backup boundaries.
+  </Card>
+  <Card title="Operate and recover" href="/hikyo/docs/backup-and-restore/">
+    Back up, restore, reconcile access, upgrade, and diagnose an instance.
+  </Card>
+</Cards>
+
+## Documentation map
+
+| If you want to… | Start here |
+| --- | --- |
+| Install Hikyo | [Installation](/hikyo/docs/installation/) |
+| Build the binary | [Build from source](/hikyo/docs/build-from-source/) |
+| Complete a first workflow | [Create your first project](/hikyo/docs/first-project/) |
+| Understand the system boundary | [Architecture](/hikyo/docs/architecture/) |
+| Model teams and applications | [Hierarchy](/hikyo/docs/hierarchy/) |
+| Declare and change values safely | [Values and secrets](/hikyo/docs/values-and-secrets/) |
+| Configure local CLI targets | [Contexts and targets](/hikyo/docs/contexts/) |
+| Connect a workload | [Machine identities](/hikyo/docs/machine-identities/) |
+| Secure or recover an account | [Account security](/hikyo/docs/account-security/) |
+| Connect an identity provider | [SAML](/hikyo/docs/saml/) or [SCIM](/hikyo/docs/scim/) |
+| Configure a server | [Configuration](/hikyo/docs/configuration/) |
+| Recover from an archive | [Backup and restore](/hikyo/docs/backup-and-restore/) |
+| Look up commands or routes | [CLI reference](/hikyo/docs/cli-reference/) or [HTTP API](/hikyo/docs/http-api/) |
+
+<Callout type="warn" title="0.x development">
+  Hikyo interfaces are not frozen until the `1.0.0` release gate passes.
+  Prerelease builds are unsupported. These docs track the `main` branch.
+</Callout>
+
+## Load-bearing policy
+
+- [Security](/hikyo/security/) — private reporting and disclosure timelines.
+- [Support](/hikyo/support/) — exactly one supported release line.
+- [Governance](/hikyo/governance/) — public authority and amendment rules.
+- [License](/hikyo/license/) — MPL-2.0 and the permanent no-enterprise-directory pledge.

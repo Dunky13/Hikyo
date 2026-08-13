@@ -1,0 +1,27 @@
+---
+import { siteUrl, themeBootstrapScript } from '../lib/site';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'Hikyo documentation' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#1b2225" />
+    <link rel="icon" type="image/svg+xml" href={siteUrl('favicon.svg')} />
+    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    <title>{title} — Hikyo</title>
+    <script is:inline set:html={themeBootstrapScript}></script>
+  </head>
+  <body class="flex min-h-screen flex-col">
+    <slot />
+  </body>
+</html>

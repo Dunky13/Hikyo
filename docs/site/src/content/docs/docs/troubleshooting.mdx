@@ -1,0 +1,81 @@
+---
+title: Troubleshooting
+description: Diagnose startup, readiness, trust, authentication, targeting, and restore failures.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/troubleshooting.mdx
+---
+
+Start with the failing boundary. Preserve the exact command, exit code, server
+log entry, and binary version before changing configuration.
+
+## Server does not start
+
+| Message names… | Cause | Fix |
+| --- | --- | --- |
+| `HIKYO_DB` | Production has no valid datastore. | Set an explicit SQLite path or PostgreSQL DSN. |
+| root key | Source is missing, ambiguous, malformed, or too widely readable. | Configure one 64-hex key source; set file mode `0600`. |
+| trusted proxy CIDRs | Plaintext listener is non-loopback without a proxy boundary. | Bind loopback or name the actual proxy CIDRs. |
+| pending migrations | Auto-migrate is off. | Review, back up, then run `hikyo migrate`. |
+| schema newer than binary | The binary is older than the database. | Deploy a compatible binary or restore a compatible archive. |
+
+Unknown `HIKYO_*` names warn because a typo otherwise looks like a working
+default. Correct the name; do not suppress the warning.
+
+## Health works, readiness fails
+
+`/healthz` proves only that the process responds. `/readyz` also checks the
+datastore. Inspect database reachability, TLS verification, credentials, locks,
+and schema state.
+
+## Public URL fails, local probes work
+
+Check DNS, certificate validity, reverse-proxy upstream, forwarded host and
+scheme, and `HIKYO_EXTERNAL_ORIGIN`. Confirm the proxy source address is inside
+`HIKYO_TRUSTED_PROXY_CIDRS`.
+
+## CLI refuses an instance
+
+The CLI does not silently trust first use. For an interactive URL, confirm the
+certificate identity from a controlling terminal. For automation, provision a
+trust bundle through the credential channel.
+
+Use these commands to inspect local state without changing the server:
+
+```bash
+hikyo context list
+hikyo context show <name>
+hikyo whoami --instance <reference>
+```
+
+## Command targets the wrong scope
+
+Read the target echo on standard error. Resolution is per dimension: flag,
+environment, nearest `.hikyo.json`, then named context.
+
+Temporarily clear `HIKYO_INSTANCE`, `HIKYO_ORG`, `HIKYO_PROJECT`, and
+`HIKYO_ENV`, then retry with explicit flags. Do not delete contexts as a first
+diagnostic step.
+
+## Authentication fails
+
+Run `hikyo whoami`. Exit code `3` means the credential is absent, expired, or
+invalid. Log in again for a human session, or rotate and redistribute the
+machine credential.
+
+After a restore, every restored authenticator is intentionally inert. Use
+`hikyo restore status`, reconcile approved humans, and re-mint machine tokens.
+
+## A secret cannot be revealed
+
+Confirm the key is classified as secret, the target environment is correct,
+the principal holds the reveal capability, and the output file does not exist.
+
+A refusal is not a reason to use `--dangerously-print`. Fix authorization or
+the output destination.
+
+## Collect a useful report
+
+Include the version, command family, exit code, redacted error, datastore engine,
+and whether health and readiness pass. Never attach root keys, sessions, bearer
+credentials, backup identities, recovery authorities, or revealed values.
+
+Report vulnerabilities through the [private security channels](/hikyo/security/).

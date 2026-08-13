@@ -1,0 +1,101 @@
+---
+title: Account security and recovery
+description: Enrol TOTP, create recovery codes, step up, and recover a human account.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/account-security.mdx
+---
+
+Account-security commands read passwords, TOTP codes, and authorities from the
+controlling terminal. They do not accept those secrets as flags.
+
+## Enrol TOTP
+
+Start enrolment while logged in:
+
+```bash
+hikyo account factor enrol-totp \
+  --output-file ./hikyo-otpauth-uri
+```
+
+The CLI prompts for the current password, stages enrolment, and delivers the
+provisioning URI once. Import it into an authenticator, then confirm:
+
+```bash
+hikyo account factor confirm-totp
+```
+
+The confirmation code is prompted with terminal echo disabled. Confirmation
+rotates the acting session and stores the replacement token locally.
+
+Delete the provisioning file after the authenticator is confirmed. Anyone who
+retains its seed can generate future codes.
+
+## Step up a session
+
+Some operations require recent multi-factor assurance:
+
+```bash
+hikyo account factor step-up
+hikyo whoami
+```
+
+Step-up prompts for a TOTP code, rotates the session, and reports the active
+factors. The previous session token is dead when the server responds.
+
+## Generate recovery codes
+
+```bash
+hikyo account recovery-codes regenerate \
+  --output-file ./hikyo-recovery-codes
+```
+
+The CLI prompts for TOTP, or the password when no factor exists. It replaces the
+whole recovery-code batch atomically and rotates the session.
+
+Store codes outside the device that holds the password and authenticator. Each
+code is single-use. Regeneration immediately voids every old code.
+
+## Recover with a code
+
+From a trusted client with no active session:
+
+```bash
+hikyo account recovery begin \
+  --instance https://hikyo.example.com \
+  --as alice \
+  --output-file ./hikyo-recovery-authority
+```
+
+The CLI prompts for one recovery code and returns a single-use credential
+authority. It does not create a session.
+
+Establish the replacement password from the controlling terminal:
+
+```bash
+hikyo account establish-credential \
+  --instance https://hikyo.example.com \
+  --as alice
+```
+
+Then delete the authority and log in normally. Neither the authority nor the
+new password may cross argv, an environment variable, or a pipe.
+
+## Administrator reset
+
+A network administrator with the required capability can issue an authority:
+
+```bash
+hikyo account reset-credential <principal-id> \
+  --output-file ./hikyo-reset-authority
+```
+
+Deliver it to the account holder out of band. Issuing it revokes that account's
+sessions. The holder consumes it with `account establish-credential`.
+
+Targets holding an instance-scoped capability have no network reset path. Use
+the audited host-only `hikyo admin reset-credential` break-glass command.
+
+## Passkeys
+
+Passkey enrolment, listing, and removal are browser-only in the current build.
+The CLI refuses `hikyo account passkey ...` instead of silently substituting a
+different ceremony.

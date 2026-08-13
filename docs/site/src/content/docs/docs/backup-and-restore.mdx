@@ -1,0 +1,99 @@
+---
+title: Backup and restore
+description: Create encrypted exports, prove they can restore, and reconcile access safely.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/backup-and-restore.mdx
+---
+
+Hikyo backup and restore are host-only commands. They operate on the configured
+datastore and have no network API.
+
+## What an archive protects
+
+One age-encrypted archive contains a consistent datastore snapshot and its
+wrapped key hierarchy. The export process does not read the Hikyo root key.
+
+Decrypting the archive requires the backup identity. Reading restored values
+also requires the original root key. Store those two secrets separately.
+
+## 1. Generate a backup identity
+
+```bash
+hikyo backup keygen --output-file /secure-custody/hikyo-backup-identity
+```
+
+The private identity is delivered once. The command prints its public recipient,
+which is safe to place in server configuration.
+
+Do not store the identity beside the root key. Two files in one password manager
+are one failure domain.
+
+## 2. Configure automatic pre-migration exports
+
+```text
+HIKYO_BACKUP_RECIPIENTS=age1...
+HIKYO_BACKUP_DIR=/var/backups/hikyo
+```
+
+Before applying a pending migration, Hikyo writes an export when this policy is
+complete. A configured export that fails blocks the migration.
+
+No configured policy causes a loud, durable skip but does not block migration.
+There are no down migrations, so the only downgrade path is restore.
+
+## 3. Run a manual export
+
+```bash
+hikyo backup export
+```
+
+The command refuses to write an unencrypted archive. You may override the
+destination with `--out` and repeat `--recipient` for a complete replacement
+recipient set.
+
+Verify the reported path, byte count, engine, and schema version. Move a copy to
+storage that does not share the instance's failure domain.
+
+## 4. Restore into an empty target
+
+Stop the server. Configure `HIKYO_DB` for a new SQLite path or an empty
+PostgreSQL database, then run:
+
+```bash
+hikyo restore run \
+  --from /var/backups/hikyo/<archive> \
+  --identity-file /secure-custody/hikyo-backup-identity
+```
+
+Hikyo authenticates the complete archive before touching the target. It refuses
+engine mismatches, unsupported schema versions, and non-empty targets.
+
+Use the original root key when starting the restored server. The backup identity
+alone cannot make restored values readable.
+
+## 5. Reconcile identities
+
+A restore advances the credential epoch. Every restored password, factor,
+passkey, session, bearer credential, federation link, and single-use authority
+is inert.
+
+```bash
+hikyo restore status
+hikyo restore reconcile --principal <principal-id>
+```
+
+Reconcile one human principal at a time after confirming it should regain its
+restored grants. Re-mint and redistribute machine bearer credentials; they are
+never reactivated.
+
+## Restore drill definition
+
+A successful drill proves all of these:
+
+1. Off-host archive and backup identity are available.
+2. The archive restores into an empty target.
+3. The original root key boots the restored data.
+4. One approved principal can be reconciled.
+5. A new machine credential reaches a test workload.
+
+Record the binary version, archive, elapsed time, and evidence. An export job
+alone is not a recovery test.

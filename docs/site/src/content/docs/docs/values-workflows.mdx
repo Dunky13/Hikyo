@@ -1,0 +1,86 @@
+---
+title: Value workflows
+description: Create, inspect, compare, copy, set, clear, and reveal values safely.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/values-workflows.mdx
+---
+
+These workflows assume the instance is trusted, the user is logged in, and the
+target resolves through flags, environment, a pin file, or a context.
+
+## Inspect presence
+
+```bash
+hikyo values list --context production
+hikyo values get DATABASE_PASSWORD --context production
+```
+
+An ordinary secret read returns metadata and presence, not plaintext. Use this
+path for inventory and health checks.
+
+## Set from a protected file
+
+```bash
+hikyo values set DATABASE_PASSWORD \
+  --context production \
+  --value-file /run/secrets/new-database-password
+```
+
+The value file is read locally. Keep its permissions narrow and remove it when
+its owning secret-delivery mechanism does not manage its lifecycle.
+
+## Set from the terminal
+
+```bash
+hikyo values set FEATURE_MODE --context production --stdin
+```
+
+Type the value, then end input. Do not put a value after a command-line flag.
+Command arguments are visible through shell history and process inspection.
+
+## Clear a value
+
+```bash
+hikyo values set OPTIONAL_ENDPOINT --context production --clear
+```
+
+Clear records `absent`. Hikyo refuses the change when the declaration requires
+the key in that environment.
+
+## Compare environments
+
+```bash
+hikyo values diff \
+  --context production \
+  --left development \
+  --right production
+```
+
+The ordinary diff compares state without exposing secret plaintext. Add reveal
+only when the comparison requires it and write the result to a protected file.
+
+## Copy selected values
+
+```bash
+hikyo values copy \
+  --context production \
+  --from staging \
+  --to production \
+  --keys API_BASE_URL,FEATURE_MODE
+```
+
+Copy is explicit about source, destinations, and keys. Protected destinations
+require the extra confirmation flag and the corresponding authorization.
+
+## Reveal one secret
+
+```bash
+hikyo values get DATABASE_PASSWORD \
+  --context production \
+  --reveal \
+  --output-file ./database-password
+```
+
+The output path must not already exist. Consume it, then remove it through your
+normal secure-file procedure.
+
+Next: [connect automation](/hikyo/docs/machine-identities/).

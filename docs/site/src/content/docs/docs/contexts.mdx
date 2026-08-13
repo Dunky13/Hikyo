@@ -1,0 +1,76 @@
+---
+title: Contexts and targets
+description: Make every CLI command resolve an explicit, visible target.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/contexts.mdx
+---
+
+Every network command resolves an instance. Resource commands may also require
+an organisation, project, and environment.
+
+## Resolution order
+
+Hikyo resolves each dimension independently. The first value wins:
+
+1. `--instance`, `--org`, `--project`, or `--env` flag.
+2. Matching `HIKYO_*` environment variable.
+3. The nearest `.hikyo.json` file, walking toward the filesystem root.
+4. A named context selected by `--context` or `HIKYO_CONTEXT`.
+
+If only the instance is unresolved, the CLI uses the trust-store entry when
+exactly one exists. Zero or multiple entries remain an error. Organisation,
+project, and environment never receive this fallback.
+
+There is no persistent active context. This prevents yesterday's global target
+from silently directing today's disclosure command.
+
+## Establish trust and create a context
+
+```bash
+hikyo context create production \
+  --instance https://hikyo.example.com \
+  --org platform \
+  --project payments-api \
+  --env production
+```
+
+For a new URL, the CLI shows the certificate identity and requires confirmation
+on a controlling terminal. Automation must receive a trust bundle through a
+protected channel.
+
+```bash
+hikyo context list
+hikyo context show production
+hikyo whoami --context production
+```
+
+## Pin a repository
+
+Commit a non-secret `.hikyo.json` when a repository has a natural target:
+
+```json
+{
+  "instance": "hikyo.example.com",
+  "org": "platform",
+  "project": "payments-api",
+  "env": "development"
+}
+```
+
+The `instance` is an established local reference, not an origin or credential.
+A repository cannot make the CLI trust an unknown server.
+
+Override only the dimension that changes:
+
+```bash
+hikyo values list --env production
+```
+
+The CLI echoes the resolved disclosure target to standard error before it
+reveals or copies values. Read that line before confirming.
+
+## Local state
+
+State lives in `HIKYO_STATE_DIR`, then `$XDG_STATE_HOME/hikyo`, then
+`~/.local/state/hikyo`. Trust, contexts, and sessions use restrictive modes.
+
+Next: [run common value tasks](/hikyo/docs/values-workflows/).

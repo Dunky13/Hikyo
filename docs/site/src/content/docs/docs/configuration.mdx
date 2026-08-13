@@ -1,0 +1,90 @@
+---
+title: Server configuration
+description: Configure the datastore, network, cryptography, authentication cost, and backup policy.
+editUrl: https://github.com/Dunky13/hikyo/edit/main/docs/site/src/content/docs/docs/configuration.mdx
+---
+
+Production configuration is explicit. Unknown `HIKYO_*` variables produce a
+warning, while malformed security settings stop startup.
+
+## Server flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--listen ADDR` | `127.0.0.1:8080` | Plaintext application listener. |
+| `--root-key-file PATH` | none | Mode-`0600`, 64-hex-character root key. |
+| `--auto-migrate=BOOL` | `true` | Apply pending migrations before serving. |
+| `--dev` | off | Evaluation datastore, root key, and text logs. |
+
+Do not use `--dev` for real secret material or any non-loopback deployment.
+
+## Production network baseline
+
+| Variable | Meaning |
+| --- | --- |
+| `HIKYO_DB` | Required: `sqlite:PATH` or `postgres://...` datastore. |
+| `HIKYO_EXTERNAL_ORIGIN` | Set explicitly to the canonical public HTTPS origin. |
+| `HIKYO_TRUSTED_PROXY_CIDRS` | Required for non-loopback listen: allowed proxy networks. |
+
+When origin is unset, Hikyo derives `http://<listen>`. That fallback supports a
+loopback evaluation, not a public HTTPS deployment or stable WebAuthn identity.
+
+The proxy list is mandatory only when the listener is not loopback. It is not a
+list of browser client networks; it names the proxies allowed to reach Hikyo.
+
+## Root key
+
+Choose exactly one source:
+
+- `--root-key-file PATH`, including a service-manager credential path.
+- `HIKYO_ROOT_KEY`, the weakest delivery tier.
+
+The key must be 64 hexadecimal characters. Keep it outside the datastore and
+outside the backup identity's custody store.
+
+## Datastore
+
+SQLite uses `HIKYO_DB=sqlite:/absolute/path/hikyo.db`. Ensure the service user
+owns the parent directory and no other user can read it.
+
+Remote PostgreSQL must name one host explicitly and use
+`sslmode=verify-full` or `sslmode=verify-ca`. Multi-host DSNs and remote
+plaintext connections are refused.
+
+## Authentication cost controls
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HIKYO_ARGON2_MEMORY_KIB` | `65536` | Memory per Argon2id operation. |
+| `HIKYO_ARGON2_TIME` | `3` | Argon2id time cost. |
+| `HIKYO_ARGON2_PARALLELISM` | `2` | Argon2id parallelism. |
+| `HIKYO_ADMISSION_BUDGET_MIB` | `272` | Process-wide memory admission budget. |
+
+Tune these together under representative load. A malformed value is a startup
+error, not a fallback to the default.
+
+`HIKYO_DEV_ADMISSION_PER_IP_PER_MINUTE` is for development only. A production
+server refuses to start when it is present.
+
+## Backup policy
+
+| Variable | Meaning |
+| --- | --- |
+| `HIKYO_BACKUP_RECIPIENTS` | Comma-separated age public recipients. |
+| `HIKYO_BACKUP_DIR` | Destination for automatic pre-migration exports. |
+
+Recipients without a destination are a configuration error. When neither is
+configured, migrations continue but record a loud skip with no recovery archive.
+
+## Client variables
+
+| Variable | Purpose |
+| --- | --- |
+| `HIKYO_STATE_DIR` | Override local trust, context, and session storage. |
+| `HIKYO_TRUST_BUNDLE` | Provision trust for non-interactive automation. |
+| `HIKYO_CONTEXT` | Select a named context for one invocation. |
+| `HIKYO_INSTANCE`, `HIKYO_ORG`, `HIKYO_PROJECT`, `HIKYO_ENV` | Supply target dimensions. |
+| `HIKYO_TOKEN` | Supply a machine credential when a token file is unavailable. |
+
+Prefer flags for visible, one-off target changes and `--token-file` for machine
+credentials. See [contexts and targets](/hikyo/docs/contexts/).

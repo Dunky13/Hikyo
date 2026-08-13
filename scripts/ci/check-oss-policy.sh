@@ -117,6 +117,7 @@ require_text "$repo_root/SUPPORT.md" 'Prereleases are never supported.'
 
 for path in \
 	.well-known/security.txt \
+	api/search.json \
 	index.html \
 	security/index.html \
 	support/index.html \
@@ -127,11 +128,40 @@ for path in \
 	require_file "$site_root/$path"
 done
 
+docs_meta="$repo_root/docs/site/src/content/docs/docs/meta.json"
+require_file "$docs_meta"
+docs_pages=$(
+	"$NODE_BIN" -e '
+const fs = require("node:fs");
+const meta = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+for (const page of meta.pages) {
+  if (page.startsWith("---")) continue;
+  console.log(page === "index" ? "docs/index.html" : "docs/" + page + "/index.html");
+}
+' "$docs_meta"
+)
+while IFS= read -r path; do
+	require_file "$site_root/$path"
+done <<EOF
+$docs_pages
+EOF
+
 require_text "$site_root/index.html" 'Every value is explicit'
 require_text "$site_root/index.html" 'Mozilla Public License 2.0'
 require_text "$site_root/index.html" 'href="/hikyo/docs/"'
 reject_text "$site_root/index.html" 'validated, inherited secrets'
 reject_text "$site_root/index.html" 'MIT licensed'
+
+require_text "$site_root/docs/index.html" 'Getting started'
+require_text "$site_root/docs/index.html" 'href="/hikyo/docs/getting-started/"'
+require_text "$site_root/docs/index.html" 'href="/hikyo/docs/installation/"'
+require_text "$site_root/docs/getting-started/index.html" 'Build Hikyo from source'
+require_text "$site_root/docs/getting-started/index.html" 'authority is single-use'
+require_text "$site_root/docs/installation/index.html" 'has no published stable release yet'
+require_text "$site_root/docs/build-from-source/index.html" 'frozen lockfiles prevent dependency resolution'
+require_text "$site_root/docs/first-project/index.html" 'Changing your own grants revokes your current session'
+require_text "$site_root/docs/core-concepts/index.html" 'Values do not inherit'
+require_text "$site_root/docs/self-hosting/index.html" 'Production startup is fail-closed'
 
 cmp "$security_txt" "$site_root/.well-known/security.txt" >/dev/null || {
 	printf 'OSS policy gate: served security.txt differs from its canonical source\n' >&2
