@@ -52,8 +52,9 @@ Date: 2026-08-14
 
 ## Remote verification
 
-- Final `main` is `9bb4622fdb10bd46ec3fb928fddf3f08cca701d7`.
-- Main CI run `31807138041` and Pages run `31807138102` passed on that SHA.
+- The Pages-repair baseline is
+  `9bb4622fdb10bd46ec3fb928fddf3f08cca701d7`; main CI run `31807138041`
+  and Pages run `31807138102` passed on that SHA.
 - The canonical Pages site and live security policy passed, all three rulesets
   remain active, and the old personal repository URL redirects to the
   organization repository.
