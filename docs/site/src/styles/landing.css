@@ -152,16 +152,11 @@ button {
   letter-spacing: -0.02em;
 }
 
-.brand-glyph {
-  display: grid;
+.brand-logo {
+  display: block;
   width: 1.5rem;
   height: 1.5rem;
-  place-items: center;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-family: var(--mono);
-  font-size: 0.875rem;
+  flex: 0 0 auto;
 }
 
 .nav-links {

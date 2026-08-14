@@ -50,7 +50,15 @@ export function Docs({
       <DocsLayout
         tree={tree}
         githubUrl={repositoryUrl}
-        nav={{ title: 'hikyo', url: siteUrl() }}
+        nav={{
+          title: (
+            <>
+              <img className="size-6 shrink-0" src={siteUrl('favicon.svg')} alt="" aria-hidden="true" />
+              <span>hikyo</span>
+            </>
+          ),
+          url: siteUrl(),
+        }}
         links={[
           { text: 'Getting started', url: siteUrl('docs/getting-started/') },
           { text: 'Security', url: siteUrl('security/') },
