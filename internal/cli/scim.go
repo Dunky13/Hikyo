@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
 // The SCIM administration verbs (#73), spelled by api-cli-spellings §1:

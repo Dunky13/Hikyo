@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/audit"
-	"github.com/Dunky13/hikyo/internal/remotefetch"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // Multi-instance transport (#71). Nothing here relays a request to another

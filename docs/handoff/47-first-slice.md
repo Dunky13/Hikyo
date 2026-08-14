@@ -1,6 +1,6 @@
 # Handoff: #47 first slice — OpenAPI 3.1 API, CLI skeleton, bootstrap admin, local login
 
-Issue: https://github.com/Dunky13/hikyo/issues/47 (parent #41). Specs, all on
+Issue: https://github.com/Hikyo-Org/hikyo/issues/47 (parent #41). Specs, all on
 `wayfinder-docs`: `docs/adr/api-cli-surface.md`, `docs/spec/api-cli-spellings.md`,
 `docs/adr/human-auth.md` (bootstrap + local floor slice), `docs/adr/mvp-boundary.md`
 rows S1/S2/A1, and the operative 2026-08-07 OpenAPI 3.1 amendment banner in

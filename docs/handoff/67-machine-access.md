@@ -3,7 +3,7 @@
 Parent #41. Binds the frozen prototype `prototype/machine-access/` —
 **iteration 3, locked** (Marc, 2026-08-05, ticket #31: tabbed inventory, row
 expansion leading with credentials and bindings, journey full-width **below**)
-— plus [machine-identities.md](https://github.com/Dunky13/hikyo/blob/wayfinder-docs/docs/adr/machine-identities.md)
+— plus [machine-identities.md](https://github.com/Hikyo-Org/hikyo/blob/wayfinder-docs/docs/adr/machine-identities.md)
 (#17), the Compose (#18) and Kubernetes (#19) ADRs, and mvp-boundary row **S3**
 (`machine access: all three tabs + row expansion + display-once mint`, desktop
 and mobile, pinned assertion set).

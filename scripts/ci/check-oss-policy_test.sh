@@ -63,7 +63,7 @@ cp "$repo_root/docs/site/public/.well-known/security.txt" \
 	"$fixture_dir/docs/site/public/.well-known/security.txt"
 cp "$fixture_dir/docs/site/public/.well-known/security.txt" \
 	"$fixture_dir/site/.well-known/security.txt"
-sed 's#Dunky13/hikyo/security/advisories/new#wrong/repository/security/advisories/new#' \
+sed 's#Hikyo-Org/hikyo/security/advisories/new#wrong/repository/security/advisories/new#' \
 	"$fixture_dir/.github/ISSUE_TEMPLATE/config.yml" \
 	>"$fixture_dir/config-wrong.yml"
 mv "$fixture_dir/config-wrong.yml" "$fixture_dir/.github/ISSUE_TEMPLATE/config.yml"

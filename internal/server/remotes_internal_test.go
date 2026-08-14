@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/admission"
-	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
 )
 
 func TestWorkspaceAdmissionChargesTheSharedPreAuthBudget(t *testing.T) {

@@ -1,6 +1,6 @@
 # Handoff: #55 permission model, full — grants, role templates, protected environments
 
-Issue: https://github.com/Dunky13/hikyo/issues/55 (parent #41, blocked by #48 and
+Issue: https://github.com/Hikyo-Org/hikyo/issues/55 (parent #41, blocked by #48 and
 #54 — both merged). Governing spec: `docs/adr/permission-model.md` on
 `wayfinder-docs` (locked 2026-07-31, plus the SCIM, flat-model and
 multi-instance amendments), acceptance row A2 in `docs/adr/mvp-boundary.md`.

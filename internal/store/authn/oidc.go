@@ -7,9 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store/pggen"
-	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
+	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
 
 // OIDC login/link/reauth resolution (#54, human-auth ADR - The OIDC

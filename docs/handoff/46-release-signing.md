@@ -1,6 +1,6 @@
 # Handoff: #46 release and signing pipeline
 
-Issue: https://github.com/Dunky13/hikyo/issues/46. Fixed-point commit before
+Issue: https://github.com/Hikyo-Org/hikyo/issues/46. Fixed-point commit before
 this work: `8bfeef1`.
 
 ## What exists

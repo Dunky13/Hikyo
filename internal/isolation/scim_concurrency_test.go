@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 // The SCIM concurrency fixtures (#73 SC1.m, SC2.f, SC3.j, SC4.d).

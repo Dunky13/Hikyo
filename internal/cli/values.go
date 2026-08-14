@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
 )
 
 // The value verbs (#50): `hikyo values get|set|diff|copy`.

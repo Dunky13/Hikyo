@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/tx"
-	"github.com/Dunky13/hikyo/internal/webauthntest"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
+	"github.com/Hikyo-Org/hikyo/internal/webauthntest"
 )
 
 // TestBreakGlassHasNoNetworkRoute asserts the break-glass reset

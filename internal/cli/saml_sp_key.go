@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 func runSAMLSPKey(ctx context.Context, ios IO, args []string) error {

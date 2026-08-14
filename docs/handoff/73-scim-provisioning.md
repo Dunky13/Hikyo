@@ -1,6 +1,6 @@
 # Handoff: #73 SCIM provisioning
 
-Issue: https://github.com/Dunky13/hikyo/issues/73. Governing spec:
+Issue: https://github.com/Hikyo-Org/hikyo/issues/73. Governing spec:
 `docs/adr/scim-provisioning.md` (locked 2026-08-06), with endpoint and CLI
 spellings in `docs/adr/api-cli-spellings.md` §1. Builds directly on #55
 (permission model, `docs/handoff/55-permission-model.md`) and #54/#72 (human

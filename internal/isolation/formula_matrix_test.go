@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
 // mvp-boundary A2: the per-formula matrix, DRIVEN BY THE AUTHORIZATION

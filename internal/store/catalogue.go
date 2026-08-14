@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 )
 
 // The key catalogue's storage shapes (#49). "Catalogue" rather than "Keys":

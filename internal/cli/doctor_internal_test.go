@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 func TestDoctorResultsUseServerWarningsWithoutRecalculation(t *testing.T) {

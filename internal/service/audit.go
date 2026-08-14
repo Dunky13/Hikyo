@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Dunky13/hikyo/internal/audit"
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
 // Audits is the audit trail's read surface (#45, audit-model ADR § Storage

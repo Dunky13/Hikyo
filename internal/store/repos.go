@@ -14,9 +14,9 @@ import (
 	sqlite "modernc.org/sqlite"
 	sqlitelib "modernc.org/sqlite/lib"
 
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/store/pggen"
-	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
+	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
 
 // This file is the store's binding layer: every repository method verifies

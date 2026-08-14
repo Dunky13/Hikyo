@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/crypto"
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // The multi-instance ADR's acceptance criterion 4, second half, in the form

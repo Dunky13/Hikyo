@@ -1,6 +1,6 @@
 # Handoff: #51 revisions & publishing — drafts, snapshots, change token, SSE
 
-Issue: https://github.com/Dunky13/hikyo/issues/51 (parent #41, blocked by #50 — merged).
+Issue: https://github.com/Hikyo-Org/hikyo/issues/51 (parent #41, blocked by #50 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/revision-model.md` (primary, read
 through its two amendment banners), `docs/adr/flat-model.md` (its ripple
 register governs every `layer` the revision ADR names),

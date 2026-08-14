@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 func TestMetadataConfirmationRerunQuotesUntrustedValues(t *testing.T) {

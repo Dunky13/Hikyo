@@ -9,9 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/server"
 )
 
 // Acceptance criterion 6 of the multi-instance ADR (#71), in the form the MVP

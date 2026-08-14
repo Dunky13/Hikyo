@@ -17,10 +17,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/config"
-	"github.com/Dunky13/hikyo/internal/crypto/backup"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/crypto/backup"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
 )
 
 // pendingMigration builds a datastore one migration BEHIND this binary, so the

@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/audit"
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // The §2.4 universal release algorithm (#73, scim-provisioning ADR).

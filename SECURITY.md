@@ -6,7 +6,7 @@ hosted fallback address below.
 
 ## Reporting a vulnerability
 
-1. Report privately through [GitHub Private Vulnerability Reporting](https://github.com/Dunky13/hikyo/security/advisories/new).
+1. Report privately through [GitHub Private Vulnerability Reporting](https://github.com/Hikyo-Org/hikyo/security/advisories/new).
 2. If GitHub is unavailable or you cannot access it, email
    [security@developwent.io](mailto:security@developwent.io). This address is
    fallback-only so reports stay consolidated in the primary channel.

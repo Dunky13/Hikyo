@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/remotefetch"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
 )
 
 // The fan-out bounds the ADR's outbound-client control set names, and the last

@@ -1,6 +1,6 @@
 # Handoff: #54 Human auth, full — OIDC, WebAuthn, TOTP, recovery, sessions, assurance
 
-Issue: https://github.com/Dunky13/hikyo/issues/54 (parent #41). Governing spec:
+Issue: https://github.com/Hikyo-Org/hikyo/issues/54 (parent #41). Governing spec:
 `docs/adr/human-auth.md` (on `wayfinder-docs`:
 `git show wayfinder-docs:docs/adr/human-auth.md`), acceptance row A1 in
 `docs/adr/mvp-boundary.md`. Extends the #47 first slice

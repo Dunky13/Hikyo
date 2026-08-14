@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // The four phase-1 artifacts (import-paths ADR § The two-phase invariant;

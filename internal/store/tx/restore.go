@@ -22,9 +22,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 )
 
 // RestoreFn runs inside the restore's own transaction, against the restored

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // The connector fixture contracts (api-cli-spellings.md § 3): per connector,

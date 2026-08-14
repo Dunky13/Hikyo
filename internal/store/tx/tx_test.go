@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 func TestRetryablePostgres(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/config"
-	"github.com/Dunky13/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
 )
 
 func prodConfig(t *testing.T, extraEnv map[string]string) *config.Config {

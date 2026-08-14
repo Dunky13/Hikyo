@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/schema"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 // Probe axes (invariant 2): removing either fixture axis fails the

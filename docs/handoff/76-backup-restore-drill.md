@@ -1,6 +1,6 @@
 # Handoff: #76 backup / restore drill + headline guarantee (K2, K3)
 
-Issue: https://github.com/Dunky13/hikyo/issues/76 (parent #41). ADRs on the
+Issue: https://github.com/Hikyo-Org/hikyo/issues/76 (parent #41). ADRs on the
 `wayfinder-docs` branch: `docs/adr/encryption-model.md` § Backups and exports,
 `docs/adr/threat-model.md` § Compromise assumptions / trust boundary 5,
 `docs/adr/ops-spec.md` §§ 9, 11, `docs/adr/mvp-boundary.md` rows K2, K3, O1.

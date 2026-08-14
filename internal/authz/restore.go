@@ -16,8 +16,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 )
 
 // RestoreState is the instance's restore posture.

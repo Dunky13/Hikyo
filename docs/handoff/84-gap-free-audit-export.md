@@ -1,6 +1,6 @@
 # Handoff: #84 gap-free postgres audit export ordering
 
-Issue: https://github.com/Dunky13/hikyo/issues/84 (parent #41; required by #25
+Issue: https://github.com/Hikyo-Org/hikyo/issues/84 (parent #41; required by #25
 before an export route ships).
 
 ## Decision

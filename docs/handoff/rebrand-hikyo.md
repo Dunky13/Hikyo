@@ -22,10 +22,10 @@ Branch: `t3code/rebrand-wenv-to-hikyo`
 
 ## External cutover
 
-The GitHub repository is `Dunky13/hikyo`; existing checkouts must update their
-`origin` URL. Move the Pages deployment to `dunky13.github.io/hikyo` before the
-first rebranded release. Tracked links and release coordinates already target
-the renamed repository, Pages path, and `ghcr.io/dunky13/hikyo`.
+The GitHub repository was transferred to `Hikyo-Org/hikyo` on 2026-08-14;
+existing checkouts must update their `origin` URL. GitHub Pages serves the
+verified canonical `https://hikyo.app/` domain. Tracked links and release
+coordinates target the organization repository and `ghcr.io/hikyo-org/hikyo`.
 
 ## Compatibility
 

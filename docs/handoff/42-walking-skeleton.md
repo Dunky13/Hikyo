@@ -1,13 +1,13 @@
 # Handoff: #42 walking skeleton
 
-Issue: https://github.com/Dunky13/hikyo/issues/42 (parent #41). Spec:
+Issue: https://github.com/Hikyo-Org/hikyo/issues/42 (parent #41). Spec:
 `docs/adr/system-architecture.md` on `wayfinder-docs` (incl. the 2026-08-07
 amendment banner: Go 1.26 toolchain, OpenAPI 3.1 — the latter is out of this
 ticket's scope).
 
 ## What exists
 
-One Go module (`github.com/Dunky13/hikyo`, toolchain go1.26.2), one multicall
+One Go module (`github.com/Hikyo-Org/hikyo`, toolchain go1.26.2), one multicall
 binary:
 
 - `hikyo server [--dev] [--listen] [--auto-migrate=BOOL]` — chi router with

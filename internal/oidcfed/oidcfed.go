@@ -36,7 +36,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	jose "github.com/go-jose/go-jose/v4"
 
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // The operations-spec fog values this ticket chose, every one recorded for

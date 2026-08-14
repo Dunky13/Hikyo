@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/Dunky13/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/server"
 )
 
 // Embedded-serving rules (#56, system-architecture ADR § Frontend).

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 type doctorFinding struct {

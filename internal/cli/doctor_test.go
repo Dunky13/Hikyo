@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
 )
 
 func TestDoctorGrammar(t *testing.T) {

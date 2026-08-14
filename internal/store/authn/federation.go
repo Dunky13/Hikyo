@@ -11,9 +11,9 @@ import (
 	"modernc.org/sqlite"
 	sqlitelib "modernc.org/sqlite/lib"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store/pggen"
-	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
+	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
 
 // OIDC federation on the resolution surface (#62, machine-identities ADR §

@@ -17,17 +17,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/server"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/authn"
-	"github.com/Dunky13/hikyo/internal/store/pggen"
-	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
-	"github.com/Dunky13/hikyo/internal/store/tx"
-	"github.com/Dunky13/hikyo/internal/webauthntest"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
+	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
+	"github.com/Hikyo-Org/hikyo/internal/webauthntest"
 )
 
 // mvp-boundary A2's uniformity arm through the REAL STACK, both engines.

@@ -1,6 +1,6 @@
 # Handoff: #43 crypto core
 
-Issue: https://github.com/Dunky13/hikyo/issues/43 (parent #41). Specs:
+Issue: https://github.com/Hikyo-Org/hikyo/issues/43 (parent #41). Specs:
 `docs/adr/encryption-model.md` (incl. secret-scanning + flat-model amendment
 banners) and `docs/adr/system-architecture.md` § Encryption boundary, both on
 `wayfinder-docs`.

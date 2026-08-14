@@ -5,7 +5,7 @@
 This branch implements the repository-side work for MVP acceptance criteria
 O4–O6:
 
-- Starlight generates a GitHub Pages site at `https://dunky13.github.io/hikyo/`.
+- Starlight generates the canonical GitHub Pages site at `https://hikyo.app/`.
 - Root policy files remain canonical; `docs/site/scripts/prepare-content.mjs`
   derives site pages at build time.
 - Release CI fails when locked security, governance, licensing, or support text is
@@ -33,15 +33,14 @@ The GitHub repository settings were applied while implementing this ticket:
 
 - Private Vulnerability Reporting: enabled.
 - GitHub Pages: enabled with `build_type=workflow`, HTTPS enforced, URL
-  `https://dunky13.github.io/hikyo/`.
+  `https://hikyo.app/`.
 
 The first live deployment starts only after this branch reaches `main`; the
 release live gate intentionally remains red until that deployment exists.
 
-The repository is still owned by the personal `Dunky13` account. Branch and tag
-protections are active, but organization-wide 2FA cannot be enforced until the
-repository is transferred to a dedicated organization. `GOVERNANCE.md` states
-that limitation instead of claiming a control that does not exist.
+The repository was transferred to `Hikyo-Org` on 2026-08-14. Organization-wide
+2FA is enforced, the `hikyo.app` Pages domain is verified, and the repository's
+branch and tag rulesets remained active across the transfer.
 
 GitHub models “only repository admins may create `v*`” as an admin-role bypass
 on a creation-block rule. A separate tag-immutability ruleset has no bypass
@@ -54,10 +53,8 @@ verifies both live shapes.
   send/receipt timestamps and Message-ID hash in
   `release/repository/fallback-channel-test.json`. The release and scheduled
   gates remain red while that evidence is pending or older than 93 days.
-- Choose a dedicated GitHub organization and transfer the repository before
-  claiming organization-wide 2FA enforcement.
-- Merge this branch and verify the first Pages deployment; the public URL is
-  currently HTTP 404.
+- Keep the organization-wide 2FA policy and verified Pages domain enabled.
+- Verify each Pages deployment through the canonical `https://hikyo.app/` URL.
 
 ## Validation
 
@@ -74,6 +71,6 @@ verifies both live shapes.
 ## Deployment verification after merge
 
 1. Confirm the `docs` workflow succeeds at the merge commit.
-2. Run `./scripts/ci/check-docs-live.sh https://dunky13.github.io/hikyo security@developwent.io`.
-3. Confirm `https://dunky13.github.io/hikyo/.well-known/security.txt` serves the
+2. Run `./scripts/ci/check-docs-live.sh https://hikyo.app security@developwent.io`.
+3. Confirm `https://hikyo.app/.well-known/security.txt` serves the
    two locked contacts.

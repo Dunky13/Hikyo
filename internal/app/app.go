@@ -14,17 +14,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/admission"
-	"github.com/Dunky13/hikyo/internal/config"
-	"github.com/Dunky13/hikyo/internal/crypto"
-	"github.com/Dunky13/hikyo/internal/oidcfed"
-	"github.com/Dunky13/hikyo/internal/remotefetch"
-	"github.com/Dunky13/hikyo/internal/server"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/keyring"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
-	"github.com/Dunky13/hikyo/internal/webui"
+	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
+	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
+	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/keyring"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/webui"
 )
 
 // ClientVerbs are the fixed not-yet-implemented client-side subcommands from

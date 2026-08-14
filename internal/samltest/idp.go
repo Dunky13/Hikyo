@@ -18,7 +18,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/samlsp"
+	"github.com/Hikyo-Org/hikyo/internal/samlsp"
 	"github.com/beevik/etree"
 	dsig "github.com/russellhaering/goxmldsig"
 )

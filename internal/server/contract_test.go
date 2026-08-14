@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/admission"
-	"github.com/Dunky13/hikyo/internal/crypto"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/server"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // HTTP contract tests (mvp-boundary S1): the wire response is validated

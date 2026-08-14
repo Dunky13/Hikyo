@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
 )
 
 // The machine-identity CLI surface (#61): the delivery matrix, its refusals,

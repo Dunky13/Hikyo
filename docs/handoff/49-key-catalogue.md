@@ -1,6 +1,6 @@
 # Handoff: #49 key catalogue & schema validation engine
 
-Issue: https://github.com/Dunky13/hikyo/issues/49 (parent #41, blocked by #48 — merged).
+Issue: https://github.com/Hikyo-Org/hikyo/issues/49 (parent #41, blocked by #48 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/schema-model.md` **as amended by**
 `docs/adr/flat-model.md` (ripple-register entry (a)–(h): no layers, no
 project defaults, no `masked`, presence `set | absent`, values attach to

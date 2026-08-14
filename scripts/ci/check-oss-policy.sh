@@ -41,7 +41,7 @@ done
 
 issue_chooser="$repo_root/.github/ISSUE_TEMPLATE/config.yml"
 require_file "$issue_chooser"
-require_text "$issue_chooser" 'https://github.com/Dunky13/hikyo/security/advisories/new'
+require_text "$issue_chooser" 'https://github.com/Hikyo-Org/hikyo/security/advisories/new'
 require_text "$issue_chooser" 'Do not report vulnerabilities in public issues.'
 
 security_channel_workflow="$repo_root/.github/workflows/security-channel.yml"
@@ -93,7 +93,7 @@ reject_text "$repo_root/GOVERNANCE.md" 'organization 2FA are enforced'
 
 security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
-require_text "$security_txt" 'Contact: https://github.com/Dunky13/hikyo/security/advisories/new'
+require_text "$security_txt" 'Contact: https://github.com/Hikyo-Org/hikyo/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
 require_text "$security_txt" 'Expires:'
 require_text "$security_txt" 'Canonical: https://hikyo.app/.well-known/security.txt'

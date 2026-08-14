@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/crypto/backup"
+	"github.com/Hikyo-Org/hikyo/internal/crypto/backup"
 )
 
 func mustIdentity(t *testing.T) (identity, recipient string) {

@@ -1,6 +1,6 @@
 # Handoff: #45 audit core
 
-Issue: https://github.com/Dunky13/hikyo/issues/45 (parent #41). Spec:
+Issue: https://github.com/Hikyo-Org/hikyo/issues/45 (parent #41). Spec:
 `docs/adr/audit-model.md` on `wayfinder-docs` (incl. the scim/scanning/
 multi-instance amendment banners — all out of this ticket's scope), plus
 mvp-boundary rows A4 and A6.

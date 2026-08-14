@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/dunky13/hikyo
+  repository: ghcr.io/hikyo-org/hikyo
   # Release packaging replaces this value with the signed image index digest.
   digest: sha256:RELEASE_IMAGE_DIGEST
 

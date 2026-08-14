@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 func runSAMLAuditLifecycle(t *testing.T, auth *service.Auth, principal domain.PrincipalID, password string) {

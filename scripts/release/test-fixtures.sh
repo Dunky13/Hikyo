@@ -172,7 +172,7 @@ printf 'sha256:%064d\n' 2 >"$bundle_dir/chart-index.digest"
 printf '#!/bin/sh\nprintf "fixture installer\\n"\n' >"$bundle_dir/install.sh"
 mkdir -p "$fixture_dir/chart/hikyo"
 printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
-printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 1 \
+printf 'image:\n  repository: ghcr.io/hikyo-org/hikyo\n  digest: sha256:%064d\n' 1 \
 	>"$fixture_dir/chart/hikyo/values.yaml"
 tar -czf "$bundle_dir/hikyo-0.1.0.tgz" -C "$fixture_dir/chart" hikyo
 
@@ -184,9 +184,9 @@ chart_file_sha=$(sha256_file "$bundle_dir/hikyo-0.1.0.tgz")
 chart_digest_file_sha=$(sha256_file "$bundle_dir/chart-index.digest")
 chart_digest=$(tr -d '\n' <"$bundle_dir/chart-index.digest")
 installer_sha=$(sha256_file "$bundle_dir/install.sh")
-jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
+jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
 	>"$bundle_dir/image-index.oci-payload.json"
-jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/charts/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
+jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/charts/hikyo"},image:{"docker-manifest-digest":$digest},type:"cosign container image signature"},optional:null}' \
 	>"$bundle_dir/chart-index.oci-payload.json"
 image_payload_sha=$(sha256_file "$bundle_dir/image-index.oci-payload.json")
 chart_payload_sha=$(sha256_file "$bundle_dir/chart-index.oci-payload.json")
@@ -212,12 +212,12 @@ jq -n \
 		artifacts: [
 			{name: "hikyo_Linux_arm64.tar.gz", kind: "binary", sha256: $binary_sha},
 			{name: "hikyo-source.spdx.json", kind: "sbom", sha256: $sbom_sha},
-			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/dunky13/hikyo", tag: "0.1.0"},
-			{name: "hikyo-0.1.0.tgz", kind: "chart", sha256: $chart_file_sha, chart_version: "0.1.0", app_version: "0.1.0", image_repository: "ghcr.io/dunky13/hikyo", image_digest: $image_digest},
-			{name: "chart-index.digest", kind: "chart-digest", sha256: $chart_digest_file_sha, digest: $chart_digest, chart: "ghcr.io/dunky13/charts/hikyo"},
+			{name: "image-index.digest", kind: "image", sha256: $image_file_sha, digest: $image_digest, image: "ghcr.io/hikyo-org/hikyo", tag: "0.1.0"},
+			{name: "hikyo-0.1.0.tgz", kind: "chart", sha256: $chart_file_sha, chart_version: "0.1.0", app_version: "0.1.0", image_repository: "ghcr.io/hikyo-org/hikyo", image_digest: $image_digest},
+			{name: "chart-index.digest", kind: "chart-digest", sha256: $chart_digest_file_sha, digest: $chart_digest, chart: "ghcr.io/hikyo-org/charts/hikyo"},
 			{name: "install.sh", kind: "installer", sha256: $installer_sha},
-			{name: "image-index.oci-payload.json", kind: "oci-payload", sha256: $image_payload_sha, subject_kind: "image", subject: ("ghcr.io/dunky13/hikyo@" + $image_digest), digest: $image_digest},
-			{name: "chart-index.oci-payload.json", kind: "oci-payload", sha256: $chart_payload_sha, subject_kind: "chart", subject: ("ghcr.io/dunky13/charts/hikyo@" + $chart_digest), digest: $chart_digest}
+			{name: "image-index.oci-payload.json", kind: "oci-payload", sha256: $image_payload_sha, subject_kind: "image", subject: ("ghcr.io/hikyo-org/hikyo@" + $image_digest), digest: $image_digest},
+			{name: "chart-index.oci-payload.json", kind: "oci-payload", sha256: $chart_payload_sha, subject_kind: "chart", subject: ("ghcr.io/hikyo-org/charts/hikyo@" + $chart_digest), digest: $chart_digest}
 		]
 	}' >"$bundle_dir/release-manifest.json"
 
@@ -261,8 +261,8 @@ COSIGN_BIN="$fixture_dir/cosign-published" "$(dirname "$0")/verify-bundle.sh" \
 	--root "$trust_dir/root.json" --metadata "$trust_dir/metadata.json" \
 	--metadata-signature "$trust_dir/metadata.sigstore.json" --bundle "$bundle_dir" \
 	--state "$state" --published --latest >/dev/null
-grep -Fx "ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/published.log" >/dev/null
-grep -Fx "ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/published.log" >/dev/null
+grep -Fx "ghcr.io/hikyo-org/hikyo@$image_digest" "$fixture_dir/published.log" >/dev/null
+grep -Fx "ghcr.io/hikyo-org/charts/hikyo@$chart_digest" "$fixture_dir/published.log" >/dev/null
 [ "$(wc -l <"$fixture_dir/published.log" | tr -d ' ')" -eq 2 ]
 printf 'release fixture: published image and chart subjects verified individually\n'
 
@@ -276,10 +276,10 @@ chmod +x "$fixture_dir/cosign-publish"
 export COSIGN_PUBLISH_LOG="$fixture_dir/publish.log"
 COSIGN_BIN="$fixture_dir/cosign-publish" "$(dirname "$0")/publish-oci-signatures.sh" \
 	"$bundle_dir" "$trust_dir/primary-1.pub" >/dev/null
-grep -Fx "attach ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "verify ghcr.io/dunky13/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "attach ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
-grep -Fx "verify ghcr.io/dunky13/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "attach ghcr.io/hikyo-org/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "verify ghcr.io/hikyo-org/hikyo@$image_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "attach ghcr.io/hikyo-org/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
+grep -Fx "verify ghcr.io/hikyo-org/charts/hikyo@$chart_digest" "$fixture_dir/publish.log" >/dev/null
 [ "$(wc -l <"$fixture_dir/publish.log" | tr -d ' ')" -eq 4 ]
 printf 'release fixture: OCI signatures attached and verified for exact subjects\n'
 
@@ -322,7 +322,7 @@ jq --arg digest "$wrong_payload_digest" \
 	--arg sha "$(sha256_file "$bundle_dir/image-index.oci-payload.json")" '
 	(.artifacts[] | select(.name == "image-index.oci-payload.json")) |= (
 		.sha256 = $sha | .digest = $digest |
-		.subject = ("ghcr.io/dunky13/hikyo@" + $digest)
+		.subject = ("ghcr.io/hikyo-org/hikyo@" + $digest)
 	)' "$bundle_dir/release-manifest.json" >"$fixture_dir/manifest-cross-digest.json"
 mv "$fixture_dir/manifest-cross-digest.json" "$bundle_dir/release-manifest.json"
 sign_blob "$trust_dir/primary-1.key" "$bundle_dir/release-manifest.json" \
@@ -346,7 +346,7 @@ expect_chart_archive_reject 'chart version contradictory to signed release versi
 	'chart version mismatch: hikyo-0.1.0.tgz' wrong-chart
 
 printf 'name: hikyo\nversion: 0.1.0\nappVersion: 0.1.0\n' >"$fixture_dir/chart/hikyo/Chart.yaml"
-printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 3 \
+printf 'image:\n  repository: ghcr.io/hikyo-org/hikyo\n  digest: sha256:%064d\n' 3 \
 	>"$fixture_dir/chart/hikyo/values.yaml"
 expect_chart_archive_reject 'chart pins image digest outside signed manifest' \
 	'chart image digest mismatch: hikyo-0.1.0.tgz' wrong-chart-image
@@ -381,7 +381,7 @@ restore_bundle_file chart-index.oci-payload.json
 restore_bundle_file chart-index.oci-payload.json.sigstore.json
 restore_bundle_file release-manifest.json
 restore_bundle_file release-manifest.sigstore.json
-printf 'image:\n  repository: ghcr.io/dunky13/hikyo\n  digest: sha256:%064d\n' 1 \
+printf 'image:\n  repository: ghcr.io/hikyo-org/hikyo\n  digest: sha256:%064d\n' 1 \
 	>"$fixture_dir/chart/hikyo/values.yaml"
 
 COSIGN_PASSWORD=fixture-pass "$COSIGN_BIN" generate-key-pair --output-key-prefix "$trust_dir/primary-2" >/dev/null

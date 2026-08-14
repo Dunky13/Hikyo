@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/audit"
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // An authorization denial from an authenticated principal is an operation
