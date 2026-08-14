@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { matchPath, NavLink, Outlet, useLocation } from 'react-router';
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
@@ -10,7 +10,7 @@ import {
   themeLabel,
   type ThemeChoice,
 } from '../app/theme.ts';
-import { SECTIONS } from '../app/navigation.ts';
+import { SECTIONS, SURFACES } from '../app/navigation.ts';
 
 /**
  * The application chrome skeleton (prototype/app-chrome iteration 15, sidebar
@@ -214,11 +214,9 @@ function ThemeToggle() {
 }
 
 function currentLabel(pathname: string): string {
-  for (const section of SECTIONS) {
-    for (const item of section.items) {
-      if (item.path === pathname) {
-        return item.label;
-      }
+  for (const surface of SURFACES) {
+    if (matchPath({ path: surface.path, end: true }, pathname) !== null) {
+      return surface.label;
     }
   }
   return 'Not found';

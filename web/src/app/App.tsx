@@ -4,7 +4,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { useSession } from '../api/session.ts';
 import { Login } from '../routes/Login.tsx';
 import { MachineAccess } from '../routes/MachineAccess.tsx';
-import { NotFound, Overview, Projects } from '../routes/Placeholder.tsx';
+import { Matrix } from '../routes/Matrix.tsx';
+import { NotFound, Overview } from '../routes/Placeholder.tsx';
+import { Projects } from '../routes/Projects.tsx';
 import { Remotes } from '../routes/Remotes.tsx';
 import { Sessions } from '../routes/Sessions.tsx';
 import { Shell } from '../routes/Shell.tsx';
@@ -29,6 +31,7 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   projects: <Projects />,
   remotes: <Remotes />,
   settings: <Sessions />,
+  matrix: <Matrix />,
   values: <Values />,
   'machine-access': <MachineAccess />,
   'workspace-approve': <WorkspaceApprove />,

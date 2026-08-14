@@ -759,6 +759,7 @@ const zSeeded = z.object({
   secrets: z.array(z.string()),
   rotatable: z.string(),
   config: z.string(),
+  matrixRequired: z.string(),
   token: z.string(),
   principal: z.string(),
   otpauth: z.string(),
@@ -935,6 +936,35 @@ export function readPasskey(): VirtualCredential {
 /** parseCredential checks a CDP credential rather than asserting its shape. */
 export function parseCredential(value: unknown): VirtualCredential {
   return zVirtualCredential.parse(value);
+}
+
+/** Attach the shared real passkey to one Chromium page and persist its advanced counter. */
+export async function installPasskeyAuthenticator(page: Page): Promise<() => Promise<void>> {
+  const session = await page.context().newCDPSession(page);
+  await session.send('WebAuthn.enable');
+  const { authenticatorId } = await session.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  // Load the already-enrolled credential instead of enrolling again: enrolment
+  // advances the session generation and invalidates the suite's shared session.
+  await session.send('WebAuthn.addCredential', { authenticatorId, credential: readPasskey() });
+  return async () => {
+    const { credentials } = await session.send('WebAuthn.getCredentials', { authenticatorId });
+    const advanced = credentials[0];
+    if (advanced === undefined) {
+      throw new Error('the shared virtual authenticator lost its passkey credential');
+    }
+    // Persist the authenticator's advanced signature counter: replaying a seen
+    // counter looks like a cloned authenticator and disables the credential.
+    writePasskey(parseCredential(advanced));
+  };
 }
 
 export async function establishSession(page: Page, stepUp = true): Promise<void> {
