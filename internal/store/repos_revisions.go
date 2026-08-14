@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/store/pggen"
 	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
@@ -257,7 +258,11 @@ func (r sqliteSnapshots) Latest(ctx context.Context, p authz.Proof) (Snapshot, e
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return revisionSnapshotFromSQLite(row)
+	snapshot, err := revisionSnapshotFromSQLite(row)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int64) (Snapshot, error) {
@@ -269,11 +274,12 @@ func (r sqliteSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision
 	if err != nil {
 		return Snapshot{}, err
 	}
+	return r.atRevision(ctx, string(chain.Org), string(chain.Project), env, revision)
+}
+
+func (r sqliteSnapshots) atRevision(ctx context.Context, orgID, projectID, envID string, revision int64) (Snapshot, error) {
 	row, err := r.q.GetSnapshotByRevision(ctx, sqlitegen.GetSnapshotByRevisionParams{
-		OrgID:         string(chain.Org),
-		ProjectID:     string(chain.Project),
-		EnvironmentID: env,
-		Revision:      revision,
+		OrgID: orgID, ProjectID: projectID, EnvironmentID: envID, Revision: revision,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Snapshot{}, ErrNotFound
@@ -312,7 +318,7 @@ func (r sqliteSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, e
 	return out, nil
 }
 
-func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error) {
+func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshot Snapshot) ([]SnapshotEntry, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsEntries, r.tok)
 	if err != nil {
 		return nil, err
@@ -321,11 +327,14 @@ func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID 
 	if err != nil {
 		return nil, err
 	}
+	if _, err := liveSnapshot(snapshot); err != nil {
+		return nil, err
+	}
 	rows, err := r.q.ListSnapshotEntries(ctx, sqlitegen.ListSnapshotEntriesParams{
 		OrgID:         string(chain.Org),
 		ProjectID:     string(chain.Project),
 		EnvironmentID: env,
-		SnapshotID:    snapshotID,
+		SnapshotID:    snapshot.ID,
 	})
 	if err != nil {
 		return nil, err
@@ -338,6 +347,17 @@ func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID 
 			KeyID: row.KeyID, KeyName: row.KeyName, Classification: row.Classification,
 			Ciphertext: row.Ciphertext, ValueEntryID: row.ValueEntryID,
 		})
+	}
+	// Recheck after reading entries. Under Postgres READ COMMITTED the GC may
+	// commit between the first state read and the payload query; without this
+	// second observation that race would turn collection into a silent empty
+	// result. A collection after this check linearizes after this read.
+	fresh, err := r.atRevision(ctx, string(chain.Org), string(chain.Project), env, snapshot.Revision)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := liveSnapshot(fresh); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -508,13 +528,30 @@ func revisionSnapshotFromSQLite(row sqlitegen.Snapshot) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{
+	snapshot := Snapshot{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
 		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
-		PublishedAt:    published,
+		PublishedAt: published, CollectedPolicy: row.CollectedPolicy,
 		PayloadPresent: row.PayloadPresent == 1,
-	}, nil
+	}
+	if row.CollectedAt.Valid {
+		collected, err := parseTime("snapshot collection", row.ID, row.CollectedAt.String)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		snapshot.CollectedAt = &collected
+	}
+	return snapshot, nil
+}
+
+func liveSnapshot(snapshot Snapshot) (Snapshot, error) {
+	if !snapshot.PayloadPresent {
+		return Snapshot{}, &domain.CollectedRevisionError{
+			Revision: snapshot.Revision, Policy: snapshot.CollectedPolicy,
+		}
+	}
+	return snapshot, nil
 }
 
 type sqlitePins struct {
@@ -855,11 +892,12 @@ func (r pgSnapshots) AtRevision(ctx context.Context, p authz.Proof, revision int
 	if err != nil {
 		return Snapshot{}, err
 	}
+	return r.atRevision(ctx, string(chain.Org), string(chain.Project), env, revision)
+}
+
+func (r pgSnapshots) atRevision(ctx context.Context, orgID, projectID, envID string, revision int64) (Snapshot, error) {
 	row, err := r.q.GetSnapshotByRevision(ctx, pggen.GetSnapshotByRevisionParams{
-		ChainOrgID:     string(chain.Org),
-		ChainProjectID: string(chain.Project),
-		ChainEnvID:     env,
-		Revision:       revision,
+		ChainOrgID: orgID, ChainProjectID: projectID, ChainEnvID: envID, Revision: revision,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Snapshot{}, ErrNotFound
@@ -894,7 +932,7 @@ func (r pgSnapshots) List(ctx context.Context, p authz.Proof) ([]Snapshot, error
 	return out, nil
 }
 
-func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error) {
+func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshot Snapshot) ([]SnapshotEntry, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsEntries, r.tok)
 	if err != nil {
 		return nil, err
@@ -903,11 +941,14 @@ func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID stri
 	if err != nil {
 		return nil, err
 	}
+	if _, err := liveSnapshot(snapshot); err != nil {
+		return nil, err
+	}
 	rows, err := r.q.ListSnapshotEntries(ctx, pggen.ListSnapshotEntriesParams{
 		ChainOrgID:     string(chain.Org),
 		ChainProjectID: string(chain.Project),
 		ChainEnvID:     env,
-		SnapshotID:     snapshotID,
+		SnapshotID:     snapshot.ID,
 	})
 	if err != nil {
 		return nil, err
@@ -920,6 +961,13 @@ func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID stri
 			KeyID: row.KeyID, KeyName: row.KeyName, Classification: row.Classification,
 			Ciphertext: row.Ciphertext, ValueEntryID: row.ValueEntryID,
 		})
+	}
+	fresh, err := r.atRevision(ctx, string(chain.Org), string(chain.Project), env, snapshot.Revision)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := liveSnapshot(fresh); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -1085,13 +1133,18 @@ func (r pgSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error
 }
 
 func revisionSnapshotFromPG(row pggen.Snapshot) Snapshot {
-	return Snapshot{
+	snapshot := Snapshot{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
 		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
-		PublishedAt:    row.PublishedAt.Time.UTC(),
+		PublishedAt: row.PublishedAt.Time.UTC(), CollectedPolicy: row.CollectedPolicy,
 		PayloadPresent: row.PayloadPresent,
 	}
+	if row.CollectedAt.Valid {
+		collected := row.CollectedAt.Time.UTC()
+		snapshot.CollectedAt = &collected
+	}
+	return snapshot
 }
 
 type pgPins struct {

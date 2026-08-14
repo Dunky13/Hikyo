@@ -50,15 +50,25 @@ type Org struct {
 	Active    bool
 	Metadata  json.RawMessage
 	CreatedAt time.Time
+	Retention RetentionPolicy
 }
 
 // Project is a tenant-owned aggregate (chain: org). OrgID appears on reads
 // only; writes bind it from the proof.
 type Project struct {
-	ID        string
-	OrgID     string
-	Name      string
-	CreatedAt time.Time
+	ID                string
+	OrgID             string
+	Name              string
+	CreatedAt         time.Time
+	RetentionOverride *RetentionPolicy
+}
+
+// RetentionPolicy is the stored keep-if-either payload policy. Unlimited is
+// valid only on an organization row; project overrides are always bounded.
+type RetentionPolicy struct {
+	Unlimited     bool
+	MaxAge        time.Duration
+	LastRevisions int64
 }
 
 // NewProject carries the caller-suppliable fields of a project insert. It
@@ -142,6 +152,8 @@ type OrgRepo interface {
 	// touches the mutable name only — identity is the immutable id, so a
 	// rename never breaks a reference.
 	Rename(ctx context.Context, p authz.Proof, name string) error
+	Lock(ctx context.Context, p authz.Proof) error
+	SetRetention(ctx context.Context, p authz.Proof, policy RetentionPolicy) error
 	Delete(ctx context.Context, p authz.Proof) error
 }
 
@@ -173,6 +185,7 @@ type ProjectRepo interface {
 	ProjectReader
 	Create(ctx context.Context, p authz.Proof, proj NewProject) error
 	Rename(ctx context.Context, p authz.Proof, name string) error
+	SetRetention(ctx context.Context, p authz.Proof, policy *RetentionPolicy) error
 	Delete(ctx context.Context, p authz.Proof) error
 	// Lock takes the project row for the rest of the transaction, so every
 	// mutation of that project's environment SET serializes: the cap check and
@@ -364,6 +377,7 @@ type Repos interface {
 	Pending() PendingRepo
 	Snapshots() SnapshotRepo
 	Pins() RevisionPinRepo
+	Retention() RetentionRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -389,6 +403,7 @@ type ReadRepos interface {
 	Pending() PendingReader
 	Snapshots() SnapshotReader
 	Pins() RevisionPinReader
+	Retention() RetentionReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader

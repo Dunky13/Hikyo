@@ -228,7 +228,7 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 				}
 			}
 			if !snapshot.PayloadPresent {
-				return invalidDetail("pinned delivery revision %d payload was collected", pin.Revision)
+				return collectedRevisionError(snapshot)
 			}
 			selected = &snapshot
 			out.PinnedRevision = pin.Revision
@@ -407,7 +407,7 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 	} else {
 		snapshot = *selected
 	}
-	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+	entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 	if err != nil {
 		return nil, nil, 0, err
 	}

@@ -442,6 +442,24 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		if _, err := envs.Create(tctx(t), service.LocalPrincipal(alice), domain.Scope{Org: orgA, Project: prjA1}, "audited-env"); err != nil {
 			t.Fatal(err)
 		}
+		retentionNow := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+		retention := &service.Retention{DB: db, Now: func() time.Time { return retentionNow }}
+		if _, err := retention.SetOrg(tctx(t), service.LocalPrincipal(orgAdmin), orgA, service.RetentionPolicy{
+			MaxAge: 60 * 24 * time.Hour, LastRevisions: 5,
+		}); err != nil {
+			t.Fatalf("emit org retention event: %v", err)
+		}
+		projectRetention := service.RetentionPolicy{MaxAge: 30 * 24 * time.Hour, LastRevisions: 3}
+		if _, err := retention.SetProject(tctx(t), service.LocalPrincipal(orgAdmin), scopeProject(orgA, prjA1), &projectRetention); err != nil {
+			t.Fatalf("emit project retention event: %v", err)
+		}
+		seedRetentionCorpus(t, db)
+		if _, err := retention.Sweep(tctx(t)); err != nil {
+			t.Fatalf("emit retention GC events: %v", err)
+		}
+		if _, err := retention.GetHealth(tctx(t), service.LocalPrincipal(root)); err != nil {
+			t.Fatalf("emit retention health-read event: %v", err)
+		}
 		org, err := orgsSvc.Create(tctx(t), service.LocalPrincipal(root), "audited-org", true, []byte(`{}`))
 		if err != nil {
 			t.Fatal(err)

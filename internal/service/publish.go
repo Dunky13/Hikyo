@@ -1133,7 +1133,7 @@ func lineage(ctx context.Context, r store.Repos, p authz.Proof,
 		return 0, nil, err
 	default:
 		previousRevision = latest.Revision
-		entries, err := r.Snapshots().Entries(ctx, p, latest.ID)
+		entries, err := r.Snapshots().Entries(ctx, p, latest)
 		if err != nil {
 			return 0, nil, err
 		}

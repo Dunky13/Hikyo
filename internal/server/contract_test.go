@@ -272,6 +272,67 @@ type stubReady struct{ err error }
 
 func (s stubReady) Ready(context.Context) error { return s.err }
 
+type stubRetentionHealth struct {
+	health service.PruneHealth
+	err    error
+}
+
+func (s stubRetentionHealth) OperationalHealth(context.Context) (service.PruneHealth, error) {
+	return s.health, s.err
+}
+
+func TestMetricsExposeRetentionPrunerHealthWithoutLabels(t *testing.T) {
+	last := time.Unix(1_800_000_000, 0).UTC()
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		RetentionHealth: stubRetentionHealth{health: service.PruneHealth{LastSuccess: last, Recorded: true, Stale: true}},
+	}, nil))
+	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/plain; version=0.0.4" {
+		t.Fatalf("content type = %q", got)
+	}
+	want := "# TYPE hikyo_last_prune_success_timestamp_seconds gauge\n" +
+		"hikyo_last_prune_success_timestamp_seconds 1800000000\n" +
+		"# TYPE hikyo_prune_stale gauge\n" +
+		"hikyo_prune_stale 1\n"
+	if string(body) != want {
+		t.Fatalf("metrics = %q, want %q", body, want)
+	}
+	if strings.Contains(string(body), "{") {
+		t.Fatal("retention metrics carry labels")
+	}
+}
+
+func TestMetricsUseZeroWhenPruneNeverSucceeded(t *testing.T) {
+	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
+		RetentionHealth: stubRetentionHealth{health: service.PruneHealth{Stale: true}},
+	}, nil))
+	t.Cleanup(srv.Close)
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "hikyo_last_prune_success_timestamp_seconds 0\n") || !strings.Contains(string(body), "hikyo_prune_stale 1\n") {
+		t.Fatalf("never-recorded metrics = %q", body)
+	}
+}
+
 const testOrgID = "org_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f11"
 
 var liveIdentity = service.Identity{

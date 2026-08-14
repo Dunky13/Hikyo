@@ -317,6 +317,17 @@ select {
   flex: 1;
 }
 
+.retention-warning {
+  display: flex;
+  gap: 8px;
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-container);
+  color: var(--tx);
+  background: color-mix(in oklch, var(--bg), var(--danger) 8%);
+}
+
 .content {
   flex: 1;
   padding: 24px 16px;

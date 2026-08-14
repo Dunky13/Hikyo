@@ -72,7 +72,9 @@ func (q *Queries) DeleteOrg(ctx context.Context, chainOrgID string) (int64, erro
 }
 
 const getOrg = `-- name: GetOrg :one
-SELECT id, name, active, metadata, created_at FROM orgs WHERE id = $1
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs WHERE id = $1
 `
 
 func (q *Queries) GetOrg(ctx context.Context, chainOrgID string) (Org, error) {
@@ -84,12 +86,17 @@ func (q *Queries) GetOrg(ctx context.Context, chainOrgID string) (Org, error) {
 		&i.Active,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.RetentionMode,
+		&i.RetentionAgeSeconds,
+		&i.RetentionRevisionCount,
 	)
 	return i, err
 }
 
 const listOrgs = `-- name: ListOrgs :many
-SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs ORDER BY name
 `
 
 // hikyo:instance-scoped
@@ -108,6 +115,9 @@ func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 			&i.Active,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.RetentionMode,
+			&i.RetentionAgeSeconds,
+			&i.RetentionRevisionCount,
 		); err != nil {
 			return nil, err
 		}
@@ -117,6 +127,19 @@ func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockOrg = `-- name: LockOrg :one
+SELECT id FROM orgs WHERE id = $1 FOR UPDATE
+`
+
+// LockOrg serializes retention-cap changes with project override changes, so
+// a concurrent pair cannot validate against two different effective caps.
+func (q *Queries) LockOrg(ctx context.Context, chainOrgID string) (string, error) {
+	row := q.db.QueryRow(ctx, lockOrg, chainOrgID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const renameOrg = `-- name: RenameOrg :execrows
@@ -130,6 +153,34 @@ type RenameOrgParams struct {
 
 func (q *Queries) RenameOrg(ctx context.Context, arg RenameOrgParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renameOrg, arg.Name, arg.ChainOrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setOrgRetention = `-- name: SetOrgRetention :execrows
+UPDATE orgs
+SET retention_mode = $1,
+    retention_age_seconds = $2,
+    retention_revision_count = $3
+WHERE id = $4
+`
+
+type SetOrgRetentionParams struct {
+	RetentionMode          string
+	RetentionAgeSeconds    int64
+	RetentionRevisionCount int64
+	ChainOrgID             string
+}
+
+func (q *Queries) SetOrgRetention(ctx context.Context, arg SetOrgRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOrgRetention,
+		arg.RetentionMode,
+		arg.RetentionAgeSeconds,
+		arg.RetentionRevisionCount,
+		arg.ChainOrgID,
+	)
 	if err != nil {
 		return 0, err
 	}

@@ -2,11 +2,16 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
@@ -40,5 +45,26 @@ func TestImpactPreviewWirePreservesProtectedState(t *testing.T) {
 	}}})
 	if len(wired.Environments) != 1 || !wired.Environments[0].Protected {
 		t.Fatalf("wired preview lost protected state: %+v", wired)
+	}
+}
+
+func TestCollectedRevisionRefusalNamesRevisionAndPolicyOnWire(t *testing.T) {
+	refusal := &domain.CollectedRevisionError{
+		Revision: 7,
+		Policy:   "keep-if-either(max_age=2160h0m0s,last_revisions=10)",
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/orgs/org_a/projects/prj_a/environments/env_a/revisions/7", nil)
+	(&API{}).writeHandlerError(recorder, req, refusal)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", recorder.Code)
+	}
+	var body apigen.Error
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Detail == nil || !strings.Contains(*body.Error.Detail, "revision 7") ||
+		!strings.Contains(*body.Error.Detail, "last_revisions=10") {
+		t.Fatalf("collected detail = %v, want named revision and policy", body.Error.Detail)
 	}
 }

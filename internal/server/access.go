@@ -36,6 +36,15 @@ type SettingsService interface {
 	SetEnvironment(ctx context.Context, actor service.Actor, scope domain.Scope, want service.EnvironmentSettings) (service.EnvironmentSettings, error)
 }
 
+// RetentionSettingsService is the org cap and project override surface.
+type RetentionSettingsService interface {
+	GetOrg(ctx context.Context, actor service.Actor, orgID domain.OrgID) (service.RetentionPolicy, error)
+	SetOrg(ctx context.Context, actor service.Actor, orgID domain.OrgID, want service.RetentionPolicy) (service.RetentionPolicy, error)
+	GetProject(ctx context.Context, actor service.Actor, scope domain.Scope) (service.ProjectRetention, error)
+	SetProject(ctx context.Context, actor service.Actor, scope domain.Scope, want *service.RetentionPolicy) (service.ProjectRetention, error)
+	GetHealth(ctx context.Context, actor service.Actor) (service.PruneHealth, error)
+}
+
 // grantSpec builds the service request from a path scope and a body. There is
 // one of these rather than four inlined literals so the "scope comes from the
 // path" rule has a single site to be reviewed at.
@@ -299,4 +308,119 @@ func (a *API) SetEnvironmentSettings(ctx context.Context, req apigen.SetEnvironm
 		return nil, err
 	}
 	return apigen.SetEnvironmentSettings200JSONResponse(wireSettings(got)), nil
+}
+
+func wireOrgRetention(policy service.RetentionPolicy) apigen.RetentionPolicy {
+	out := apigen.RetentionPolicy{Mode: apigen.RetentionPolicyModeKeepIfEither}
+	if policy.Unlimited {
+		out.Mode = apigen.RetentionPolicyModeUnlimited
+		return out
+	}
+	age, count := int(policy.MaxAge/time.Second), int(policy.LastRevisions)
+	out.MaxAgeSeconds, out.LastRevisions = &age, &count
+	return out
+}
+
+func wireProjectRetention(retention service.ProjectRetention) apigen.ProjectRetentionPolicy {
+	org := wireOrgRetention(retention.Policy)
+	out := apigen.ProjectRetentionPolicy{
+		Inherited: retention.Inherited,
+		Mode:      apigen.ProjectRetentionPolicyMode(org.Mode),
+	}
+	out.MaxAgeSeconds, out.LastRevisions = org.MaxAgeSeconds, org.LastRevisions
+	return out
+}
+
+func parseOrgRetention(in apigen.RetentionPolicy) (service.RetentionPolicy, error) {
+	if in.Mode == apigen.RetentionPolicyModeUnlimited {
+		if in.MaxAgeSeconds != nil || in.LastRevisions != nil {
+			return service.RetentionPolicy{}, domain.ErrInvalid
+		}
+		return service.RetentionPolicy{Unlimited: true}, nil
+	}
+	if in.Mode != apigen.RetentionPolicyModeKeepIfEither || in.MaxAgeSeconds == nil || in.LastRevisions == nil {
+		return service.RetentionPolicy{}, domain.ErrInvalid
+	}
+	const maxDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
+	if int64(*in.MaxAgeSeconds) > maxDurationSeconds {
+		return service.RetentionPolicy{}, domain.ErrInvalid
+	}
+	return service.RetentionPolicy{
+		MaxAge:        time.Duration(*in.MaxAgeSeconds) * time.Second,
+		LastRevisions: int64(*in.LastRevisions),
+	}, nil
+}
+
+func parseProjectRetention(in apigen.SetProjectRetentionRequest) (*service.RetentionPolicy, error) {
+	if in.Inherited {
+		if in.MaxAgeSeconds != nil || in.LastRevisions != nil {
+			return nil, domain.ErrInvalid
+		}
+		return nil, nil
+	}
+	policy, err := parseOrgRetention(apigen.RetentionPolicy{
+		Mode:          apigen.RetentionPolicyModeKeepIfEither,
+		MaxAgeSeconds: in.MaxAgeSeconds, LastRevisions: in.LastRevisions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &policy, nil
+}
+
+func (a *API) GetOrgRetention(ctx context.Context, req apigen.GetOrgRetentionRequestObject) (apigen.GetOrgRetentionResponseObject, error) {
+	got, err := a.Retention.GetOrg(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org))
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetOrgRetention200JSONResponse(wireOrgRetention(got)), nil
+}
+
+func (a *API) SetOrgRetention(ctx context.Context, req apigen.SetOrgRetentionRequestObject) (apigen.SetOrgRetentionResponseObject, error) {
+	want, err := parseOrgRetention(*req.Body)
+	if err != nil {
+		return nil, err
+	}
+	got, err := a.Retention.SetOrg(ctx, service.Bearer(bearer(ctx)), domain.OrgID(req.Org), want)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetOrgRetention200JSONResponse(wireOrgRetention(got)), nil
+}
+
+func (a *API) GetProjectRetention(ctx context.Context, req apigen.GetProjectRetentionRequestObject) (apigen.GetProjectRetentionResponseObject, error) {
+	got, err := a.Retention.GetProject(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project))
+	if err != nil {
+		return nil, err
+	}
+	return apigen.GetProjectRetention200JSONResponse(wireProjectRetention(got)), nil
+}
+
+func (a *API) SetProjectRetention(ctx context.Context, req apigen.SetProjectRetentionRequestObject) (apigen.SetProjectRetentionResponseObject, error) {
+	want, err := parseProjectRetention(*req.Body)
+	if err != nil {
+		return nil, err
+	}
+	got, err := a.Retention.SetProject(ctx, service.Bearer(bearer(ctx)), projectScope(req.Org, req.Project), want)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.SetProjectRetention200JSONResponse(wireProjectRetention(got)), nil
+}
+
+func (a *API) GetRetentionHealth(ctx context.Context, _ apigen.GetRetentionHealthRequestObject) (apigen.GetRetentionHealthResponseObject, error) {
+	health, err := a.Retention.GetHealth(ctx, service.Bearer(bearer(ctx)))
+	if err != nil {
+		return nil, err
+	}
+	var last *time.Time
+	if health.Recorded {
+		at := health.LastSuccess
+		last = &at
+	}
+	return apigen.GetRetentionHealth200JSONResponse{
+		LastPruneSuccess:  last,
+		Stale:             health.Stale,
+		StaleAfterSeconds: apigen.RetentionHealthStaleAfterSeconds(service.PruneStaleAfter / time.Second),
+	}, nil
 }

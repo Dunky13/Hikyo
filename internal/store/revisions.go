@@ -92,15 +92,17 @@ type NewPendingChange struct {
 // header. It carries the pinned schema revision; it deliberately carries no
 // change token, which is derived from the current root token key at read.
 type Snapshot struct {
-	ID             string
-	OrgID          string
-	ProjectID      string
-	EnvironmentID  string
-	Revision       int64
-	SchemaRevision int64
-	PublishedBy    string
-	PublishedAt    time.Time
-	PayloadPresent bool
+	ID              string
+	OrgID           string
+	ProjectID       string
+	EnvironmentID   string
+	Revision        int64
+	SchemaRevision  int64
+	PublishedBy     string
+	PublishedAt     time.Time
+	PayloadPresent  bool
+	CollectedAt     *time.Time
+	CollectedPolicy string
 }
 
 // NewSnapshot carries the caller-suppliable fields of a snapshot insert.
@@ -200,7 +202,7 @@ type SnapshotReader interface {
 	// List returns the environment's revision history, newest first.
 	List(ctx context.Context, p authz.Proof) ([]Snapshot, error)
 	// Entries returns one snapshot's resolved map, ordered by key name.
-	Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error)
+	Entries(ctx context.Context, p authz.Proof, snapshot Snapshot) ([]SnapshotEntry, error)
 	// SecretValueOccurrenceIDs returns the payload-free sticky sensitivity
 	// lineage for this environment.
 	SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error)

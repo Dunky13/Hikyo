@@ -195,11 +195,15 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		// value_entries references BOTH keys and environments (#50), so it
 		// drops before either.
 		"value_entries",
-		// Revisions and drafts (#51). snapshot_entries references snapshots,
-		// so it goes first of that pair; pending_changes references keys,
+		// Revisions, drafts and retention (#51-#53). snapshot_entries and
+		// revision_pins reference snapshots; secret_value_occurrences references
+		// environments. All drop before their parents; retention_runtime has no FKs.
+		// pending_changes references keys,
 		// environments and principals; revision_key_changes references
-		// environments. All four drop before the hierarchy they hang from.
-		"snapshot_entries", "snapshots", "revision_key_changes", "pending_changes",
+		// environments. The FK-bearing tables drop before their hierarchy.
+		"retention_runtime", "snapshot_entries", "revision_pins", "snapshots",
+		"secret_value_occurrences",
+		"revision_key_changes", "pending_changes",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
 		// OIDC federation (#62, migration 00018): machine_credentials gained a
 		// foreign key to federation_issuers, so the issuers drop AFTER it;

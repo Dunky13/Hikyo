@@ -286,11 +286,14 @@ type OidcTransaction struct {
 }
 
 type Org struct {
-	ID        string
-	Name      string
-	Active    int64
-	Metadata  string
-	CreatedAt string
+	ID                     string
+	Name                   string
+	Active                 int64
+	Metadata               string
+	CreatedAt              string
+	RetentionMode          string
+	RetentionAgeSeconds    int64
+	RetentionRevisionCount int64
 }
 
 type PasswordCredential struct {
@@ -338,10 +341,12 @@ type Principal struct {
 }
 
 type Project struct {
-	ID        string
-	OrgID     string
-	Name      string
-	CreatedAt string
+	ID                     string
+	OrgID                  string
+	Name                   string
+	CreatedAt              string
+	RetentionRevisionCount sql.NullInt64
+	RetentionAgeSeconds    sql.NullInt64
 }
 
 type ProjectSchemaRevision struct {
@@ -396,6 +401,11 @@ type RemoteSnapshot struct {
 	OrgCount         sql.NullInt64
 	ProjectCount     sql.NullInt64
 	Listing          sql.NullString
+}
+
+type RetentionRuntime struct {
+	ID               int64
+	LastPruneSuccess sql.NullString
 }
 
 type RevisionKeyChange struct {
@@ -616,15 +626,17 @@ type Session struct {
 }
 
 type Snapshot struct {
-	ID             string
-	OrgID          string
-	ProjectID      string
-	EnvironmentID  string
-	Revision       int64
-	SchemaRevision int64
-	PublishedBy    string
-	PublishedAt    string
-	PayloadPresent int64
+	ID              string
+	OrgID           string
+	ProjectID       string
+	EnvironmentID   string
+	Revision        int64
+	SchemaRevision  int64
+	PublishedBy     string
+	PublishedAt     string
+	PayloadPresent  int64
+	CollectedAt     sql.NullString
+	CollectedPolicy string
 }
 
 type SnapshotEntry struct {

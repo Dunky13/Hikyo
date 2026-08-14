@@ -117,7 +117,7 @@ contexts:
   hikyo context delete --instance <ref>            forget a trust-store entry
 
 diagnostics:
-  hikyo doctor [--instance REF] [-o table|json]     report server-authoritative provider health
+  hikyo doctor [--instance REF] [-o table|json]     report provider and retention health
 
 hierarchy:
   hikyo org list [-o table|json]
@@ -125,10 +125,12 @@ hierarchy:
   hikyo org create --name <name>
   hikyo org rename <org> --name <new-name>
   hikyo org delete <org>
+  hikyo org retention get|set --org <org> [--max-age 2160h --last-revisions 10 | --unlimited]
   hikyo project list|show|create|rename|delete      --org selects the organisation
   hikyo project create --name <name>
   hikyo project rename <project> --name <new-name>
   hikyo project delete <project> --confirm <project-name>   irreversible: shreds the key
+  hikyo project retention get|set --org <org> --project <project> [--max-age 720h --last-revisions 10 | --inherit]
   hikyo env list|show|create|rename|reorder|delete   --org/--project select the project
   hikyo env create --name <name> [--clone-from <env>]   clone copies that env's values
   hikyo env rename <env> --name <new-name>
@@ -1097,6 +1099,9 @@ func runContext(_ context.Context, ios IO, args []string) error {
 // ---------------------------------------------------------------------------
 
 func runOrg(ctx context.Context, ios IO, args []string) error {
+	if len(args) > 0 && args[0] == "retention" {
+		return runOrgRetention(ctx, ios, args[1:])
+	}
 	sub, rest, err := subverb("org", args, "list", "show", "create", "rename", "delete")
 	if err != nil {
 		return err

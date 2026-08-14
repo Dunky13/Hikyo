@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 
@@ -95,6 +96,31 @@ func New(ready ReadyChecker, a *API, ui fs.FS) http.Handler {
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready"))
+	})
+	r.Get("/metrics", func(w http.ResponseWriter, req *http.Request) {
+		if a == nil || a.RetentionHealth == nil {
+			http.Error(w, "retention health unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		health, err := a.RetentionHealth.OperationalHealth(req.Context())
+		if err != nil {
+			http.Error(w, "retention health unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		last := int64(0)
+		if health.Recorded {
+			last = health.LastSuccess.Unix()
+		}
+		stale := 0
+		if health.Stale {
+			stale = 1
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "# TYPE hikyo_last_prune_success_timestamp_seconds gauge\n"+
+			"hikyo_last_prune_success_timestamp_seconds %d\n"+
+			"# TYPE hikyo_prune_stale gauge\n"+
+			"hikyo_prune_stale %d\n", last, stale)
 	})
 
 	if a != nil {

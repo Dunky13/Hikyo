@@ -27,6 +27,7 @@ const ClassStub Class = -1
 
 var wireRegistry = map[string]Class{
 	"http:GET /healthz": ClassUnauthenticated,
+	"http:GET /metrics": ClassUnauthenticated,
 	"http:GET /readyz":  ClassUnauthenticated,
 
 	// The contract surface (#47). Every entry below exists in
@@ -90,6 +91,7 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/saml/{provider}/acs":                        ClassUnauthenticated,
 	"http:GET /api/v1/auth/saml/{provider}/metadata":                    ClassUnauthenticated,
 	"http:GET /api/v1/instance/saml-providers":                          ClassInstance,
+	"http:GET /api/v1/instance/retention-health":                        ClassInstance,
 	"http:GET /api/v1/instance/saml-providers/{slug}":                   ClassInstance,
 	"http:PUT /api/v1/instance/saml-providers/{slug}":                   ClassInstance,
 	"http:PATCH /api/v1/instance/saml-providers/{slug}":                 ClassInstance,
@@ -190,11 +192,15 @@ var wireRegistry = map[string]Class{
 	"http:PATCH /api/v1/orgs/{org}":  ClassTenant,
 	"http:DELETE /api/v1/orgs/{org}": ClassTenant,
 
-	"http:GET /api/v1/orgs/{org}/projects":              ClassTenant,
-	"http:POST /api/v1/orgs/{org}/projects":             ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}":    ClassTenant,
-	"http:PATCH /api/v1/orgs/{org}/projects/{project}":  ClassTenant,
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects":                     ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects":                    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}":           ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}":         ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}":        ClassTenant,
+	"http:GET /api/v1/orgs/{org}/retention":                    ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/retention":                    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/retention": ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/retention": ClassTenant,
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments":                  ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments":                 ClassTenant,
@@ -792,6 +798,10 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template": {OpTemplateApplyEnv},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsRead},
 	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":         {OpEnvSettingsUpdate},
+	"http:GET /api/v1/orgs/{org}/retention":                                                      {OpOrgRetentionRead},
+	"http:PUT /api/v1/orgs/{org}/retention":                                                      {OpOrgRetentionUpdate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/retention":                                   {OpProjectRetentionRead},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/retention":                                   {OpProjectRetentionUpdate},
 	// The key catalogue (#49).
 	"http:GET /api/v1/orgs/{org}/projects/{project}/keys":            {OpKeyList},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/keys":           {OpKeyCreate},
@@ -880,6 +890,7 @@ var wireRoutes = map[string][]Operation{
 
 	// SAML provider administration (#72), under the same instance-config atom.
 	"http:GET /api/v1/instance/saml-providers":                          {OpSAMLProviderList},
+	"http:GET /api/v1/instance/retention-health":                        {OpRetentionHealthRead},
 	"http:GET /api/v1/instance/saml-providers/{slug}":                   {OpSAMLProviderGet},
 	"http:PUT /api/v1/instance/saml-providers/{slug}":                   {OpSAMLProviderPut},
 	"http:PATCH /api/v1/instance/saml-providers/{slug}":                 {OpSAMLProviderPatch},

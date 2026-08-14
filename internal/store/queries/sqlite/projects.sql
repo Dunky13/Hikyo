@@ -7,11 +7,15 @@ INSERT INTO projects (id, org_id, name, created_at)
 VALUES (?, ?, ?, ?);
 
 -- name: GetProject :one
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = ? AND id = ?;
 
 -- name: ListProjects :many
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = ? ORDER BY name;
 
 -- ListAllProjects is the multi-instance directory's cross-org enumeration
@@ -27,6 +31,11 @@ SELECT org_id, name FROM projects ORDER BY org_id, name;
 
 -- name: RenameProject :execrows
 UPDATE projects SET name = ?
+WHERE org_id = ? AND id = ?;
+
+-- name: SetProjectRetention :execrows
+UPDATE projects
+SET retention_age_seconds = ?, retention_revision_count = ?
 WHERE org_id = ? AND id = ?;
 
 -- name: DeleteProject :execrows

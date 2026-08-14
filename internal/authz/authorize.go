@@ -195,7 +195,8 @@ func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, o
 }
 
 // SystemAuthority mints a SystemProof for one of the closed no-principal
-// mint sites (boot, migration, recovery-mode reconciliation, break-glass).
+// mint sites (boot, migration, recovery-mode reconciliation, break-glass,
+// scheduler).
 // It is not generic store authority: the proof is operation- and
 // transaction-bound like every other kind, against the site's closed
 // operation set in the system registry — growth of either set fails the
@@ -208,6 +209,30 @@ func SystemAuthority(site SystemSite, tok *TxToken) (Proof, error) {
 		return nil, errors.New("authz: system authority requires a live transaction")
 	}
 	return &proof{kind: kindSystem, op: Operation("system:" + site), site: site, tok: tok}, nil
+}
+
+// ScopedSystemAuthority mints system authority carrying a database-resolved
+// tenant chain. It exists for system jobs whose durable audit rows belong to
+// the acted-on tenant trail: callers may supply identifiers, but the proof
+// carries only the canonical chain resolved inside this transaction.
+func (a *TxAuthorizer) ScopedSystemAuthority(ctx context.Context, site SystemSite, scope domain.Scope) (Proof, error) {
+	if _, ok := systemSites[site]; !ok {
+		return nil, fmt.Errorf("authz: %q is not a registered system mint site", site)
+	}
+	if a == nil || a.tok == nil {
+		return nil, errors.New("authz: scoped system authority requires a live transaction")
+	}
+	if scope.Org == "" {
+		return nil, errors.New("authz: scoped system authority requires a tenant scope")
+	}
+	chain, err := a.r.ResolveChain(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	return &proof{
+		kind: kindSystem, op: Operation("system:" + site), site: site,
+		chain: chain, tok: a.tok,
+	}, nil
 }
 
 // evaluate answers the formula: every atom must be covered by at least one

@@ -1520,6 +1520,46 @@ export type EnvironmentSettings = {
     reauth_window_seconds?: number | null;
 };
 
+export type RetentionPolicy = {
+    mode: 'keep-if-either' | 'unlimited';
+    /**
+     * Required for keep-if-either; absent for unlimited.
+     */
+    max_age_seconds?: number | null;
+    /**
+     * Required for keep-if-either; absent for unlimited.
+     */
+    last_revisions?: number | null;
+};
+
+export type RetentionHealth = {
+    last_prune_success: string | null;
+    stale: boolean;
+    stale_after_seconds: 86400;
+};
+
+export type ProjectRetentionPolicy = {
+    /**
+     * True clears the project override and follows the org live.
+     */
+    inherited: boolean;
+    /**
+     * Unlimited can appear only when inherited from an unlimited org.
+     */
+    mode: 'keep-if-either' | 'unlimited';
+    max_age_seconds?: number | null;
+    last_revisions?: number | null;
+};
+
+export type SetProjectRetentionRequest = {
+    /**
+     * True clears the override; false requires both bounds.
+     */
+    inherited: boolean;
+    max_age_seconds?: number | null;
+    last_revisions?: number | null;
+};
+
 /**
  * The canonical key grammar: uppercase ASCII, digits and underscore, no
  * leading digit. It is the environment-variable-safe grammar every
@@ -3911,6 +3951,111 @@ export type CreateProjectResponses = {
 
 export type CreateProjectResponse = CreateProjectResponses[keyof CreateProjectResponses];
 
+export type GetOrgRetentionData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/retention';
+};
+
+export type GetOrgRetentionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetOrgRetentionError = GetOrgRetentionErrors[keyof GetOrgRetentionErrors];
+
+export type GetOrgRetentionResponses = {
+    /**
+     * The organisation retention cap.
+     */
+    200: RetentionPolicy;
+};
+
+export type GetOrgRetentionResponse = GetOrgRetentionResponses[keyof GetOrgRetentionResponses];
+
+export type SetOrgRetentionData = {
+    body: RetentionPolicy;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/retention';
+};
+
+export type SetOrgRetentionErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetOrgRetentionError = SetOrgRetentionErrors[keyof SetOrgRetentionErrors];
+
+export type SetOrgRetentionResponses = {
+    /**
+     * The stored organisation retention cap.
+     */
+    200: RetentionPolicy;
+};
+
+export type SetOrgRetentionResponse = SetOrgRetentionResponses[keyof SetOrgRetentionResponses];
+
 export type DeleteProjectData = {
     body?: never;
     path: {
@@ -4541,6 +4686,119 @@ export type RenameEnvironmentResponses = {
 };
 
 export type RenameEnvironmentResponse = RenameEnvironmentResponses[keyof RenameEnvironmentResponses];
+
+export type GetProjectRetentionData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/retention';
+};
+
+export type GetProjectRetentionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetProjectRetentionError = GetProjectRetentionErrors[keyof GetProjectRetentionErrors];
+
+export type GetProjectRetentionResponses = {
+    /**
+     * Effective policy and whether it is inherited.
+     */
+    200: ProjectRetentionPolicy;
+};
+
+export type GetProjectRetentionResponse = GetProjectRetentionResponses[keyof GetProjectRetentionResponses];
+
+export type SetProjectRetentionData = {
+    body: SetProjectRetentionRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/retention';
+};
+
+export type SetProjectRetentionErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetProjectRetentionError = SetProjectRetentionErrors[keyof SetProjectRetentionErrors];
+
+export type SetProjectRetentionResponses = {
+    /**
+     * Effective policy and whether it is inherited.
+     */
+    200: ProjectRetentionPolicy;
+};
+
+export type SetProjectRetentionResponse = SetProjectRetentionResponses[keyof SetProjectRetentionResponses];
 
 export type ListFoldersData = {
     body?: never;
@@ -9184,6 +9442,61 @@ export type PutOidcProviderResponses = {
 
 export type PutOidcProviderResponse = PutOidcProviderResponses[keyof PutOidcProviderResponses];
 
+export type GetRetentionHealthData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/instance/retention-health';
+};
+
+export type GetRetentionHealthErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type GetRetentionHealthError = GetRetentionHealthErrors[keyof GetRetentionHealthErrors];
+
+export type GetRetentionHealthResponses = {
+    /**
+     * Persisted payload-pruner health.
+     */
+    200: RetentionHealth;
+};
+
+export type GetRetentionHealthResponse = GetRetentionHealthResponses[keyof GetRetentionHealthResponses];
+
 export type ListSamlProvidersData = {
     body?: never;
     path?: never;
@@ -10773,6 +11086,15 @@ export type FetchDeliveryErrors = {
      *
      */
     404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -14428,6 +14750,15 @@ export type RollbackRevisionErrors = {
      */
     404: Error;
     /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -14582,6 +14913,15 @@ export type CreateRevisionPinErrors = {
      *
      */
     404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -14776,6 +15116,15 @@ export type GetRevisionErrors = {
      */
     404: Error;
     /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -14856,6 +15205,15 @@ export type ExportValuesErrors = {
      *
      */
     404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.

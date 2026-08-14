@@ -69,7 +69,7 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 			return err
 		}
 		if !target.PayloadPresent {
-			return invalidDetail("revision %d payload was collected and cannot be restored", revision)
+			return collectedRevisionError(target)
 		}
 		keys, err := r.Catalogue().List(ctx, p)
 		if err != nil {
@@ -83,7 +83,7 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 			}
 			keys = []store.CatalogueKey{key}
 		}
-		targetEntries, err := r.Snapshots().Entries(ctx, p, target.ID)
+		targetEntries, err := r.Snapshots().Entries(ctx, p, target)
 		if err != nil {
 			return err
 		}

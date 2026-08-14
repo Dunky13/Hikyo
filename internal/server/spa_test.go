@@ -162,7 +162,6 @@ func TestReservedPrefixesNeverFallBackToTheSPA(t *testing.T) {
 		"/api/v1/does-not-exist",
 		"/api/",
 		"/api/v1/orgs/../../etc/passwd",
-		"/metrics",
 		"/metrics/anything",
 		"/healthz/sub",
 		"/readyz/sub",
@@ -191,6 +190,13 @@ func TestProbesStillAnswer(t *testing.T) {
 		if strings.Contains(body, "<html") {
 			t.Fatalf("%s: served the SPA", path)
 		}
+	}
+	resp, body := get(t, srv, http.MethodGet, "/metrics", htmlAccept)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("/metrics: status = %d, want 503 without a health source", resp.StatusCode)
+	}
+	if strings.Contains(body, "<html") {
+		t.Fatal("/metrics served the SPA")
 	}
 }
 

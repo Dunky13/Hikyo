@@ -115,25 +115,27 @@ type OrgService interface {
 
 // API implements the generated strict server.
 type API struct {
-	Auth          AuthService
-	SAMLAuth      SAMLAuthService
-	Orgs          OrgService
-	Projects      ProjectService
-	Environments  EnvironmentService
-	Folders       FolderService
-	Keys          KeyService
-	Values        ValueService
-	Revisions     RevisionService
-	Pins          PinService
-	Reveal        RevealService
-	KeyGroups     KeyGroupService
-	Grants        GrantService
-	Identities    IdentityService
-	Federation    FederationService
-	Delivery      DeliveryService
-	Settings      SettingsService
-	Providers     ProviderService
-	SAMLProviders SAMLProviderService
+	Auth            AuthService
+	SAMLAuth        SAMLAuthService
+	Orgs            OrgService
+	Projects        ProjectService
+	Environments    EnvironmentService
+	Folders         FolderService
+	Keys            KeyService
+	Values          ValueService
+	Revisions       RevisionService
+	Pins            PinService
+	Reveal          RevealService
+	KeyGroups       KeyGroupService
+	Grants          GrantService
+	Identities      IdentityService
+	Federation      FederationService
+	Delivery        DeliveryService
+	Settings        SettingsService
+	Retention       RetentionSettingsService
+	RetentionHealth OperationalRetentionHealthService
+	Providers       ProviderService
+	SAMLProviders   SAMLProviderService
 	// SCIM is the provisioning ADMINISTRATION surface (human sessions,
 	// `manage-members` at org scope); SCIMWire is the identity provider's own
 	// protocol path (a provisioning credential, `scim-provision`). They are two
@@ -157,6 +159,10 @@ type API struct {
 	// Empty means none: proxy trust is explicit configuration, never
 	// inferred, because an unauthenticated header is not evidence.
 	TrustedProxies []*net.IPNet
+}
+
+type OperationalRetentionHealthService interface {
+	OperationalHealth(ctx context.Context) (service.PruneHealth, error)
 }
 
 var _ apigen.StrictServerInterface = (*API)(nil)

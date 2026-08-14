@@ -163,6 +163,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeleteCollectedSnapshotEntries",
+    "annotation": "instance-scoped",
+    "hash": "5746b73d2e368e4c84a05ccf51f4aec1781cac2b9edb36f8197e1c1c313e549d"
+  },
+  {
+    "engine": "postgres",
     "name": "DeleteExpiredSAMLReplay",
     "annotation": "authn-resolution",
     "hash": "ed638e4662868fd19c7eb790f2ed6cacba3d6665ec8133ce146d5151c0030061"
@@ -466,6 +472,12 @@
     "name": "GetInstanceConnection",
     "annotation": "authn-resolution",
     "hash": "64c720cefb539d91dcda821b7dd5d4f375cf77a369b266bec4bd93b009851c97"
+  },
+  {
+    "engine": "postgres",
+    "name": "GetLastPruneSuccess",
+    "annotation": "instance-scoped",
+    "hash": "c7b306eee3ac685784898bc2e65b0689770d9298de994b4ba77fdeb09ee609d0"
   },
   {
     "engine": "postgres",
@@ -841,6 +853,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ListEligibleSnapshotPayloads",
+    "annotation": "instance-scoped",
+    "hash": "ffe1bb3b997e85603a34f49b2aae9a9d70eeefc917923586349dae67b499d137"
+  },
+  {
+    "engine": "postgres",
     "name": "ListEnvironmentIDsInProject",
     "annotation": "authn-resolution",
     "hash": "267332698d3cdc027762d4297076689031c5dcdebcfe9b6b680b380f15e2dea1"
@@ -957,7 +975,7 @@
     "engine": "postgres",
     "name": "ListOrgs",
     "annotation": "instance-scoped",
-    "hash": "9337bcf28e615461de0c89def036bc4fa7ed06569eea5b7ea6720c117a2c979d"
+    "hash": "91cbdac399e1cb40a41409e8b9e4341ce99d84004a6db7a35f0248bbc8516045"
   },
   {
     "engine": "postgres",
@@ -1075,6 +1093,12 @@
   },
   {
     "engine": "postgres",
+    "name": "MarkSnapshotCollected",
+    "annotation": "instance-scoped",
+    "hash": "7c9adf81e50b93a9195f0c26e073cf926394f24d8b04dafcf41bf3df4f914ab4"
+  },
+  {
+    "engine": "postgres",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "d6a81ebbace5365c7148826efad827daf672e7b66768db14dc5d25b565c4afee"
@@ -1174,6 +1198,12 @@
     "name": "SetCredentialPolicy",
     "annotation": "authn-resolution",
     "hash": "7420406adc49be509d4a3d12cd085944ab81442710c09f59f34da0dbfe841bf4"
+  },
+  {
+    "engine": "postgres",
+    "name": "SetLastPruneSuccess",
+    "annotation": "instance-scoped",
+    "hash": "3b599545e7a9a08201f81a936d4fc5e367e48b10d92af38ffe32771bdcc54829"
   },
   {
     "engine": "postgres",
@@ -1432,6 +1462,12 @@
     "name": "CreateRemote",
     "annotation": "instance-scoped",
     "hash": "b49c203a3c38607420b2ec4dc18592cd9f172ab7863f56c08a6ff6b90d898dae"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeleteCollectedSnapshotEntries",
+    "annotation": "instance-scoped",
+    "hash": "5986565613fe84bc41ca2c824a4949e1e4d58a4d2f948720d7a3387fb90a84e9"
   },
   {
     "engine": "sqlite",
@@ -1738,6 +1774,12 @@
     "name": "GetInstanceConnection",
     "annotation": "authn-resolution",
     "hash": "1bc41570f1b36adf31a9a999c3a45ddefff8e556c6958aa43cc20772f83fec2f"
+  },
+  {
+    "engine": "sqlite",
+    "name": "GetLastPruneSuccess",
+    "annotation": "instance-scoped",
+    "hash": "c7b306eee3ac685784898bc2e65b0689770d9298de994b4ba77fdeb09ee609d0"
   },
   {
     "engine": "sqlite",
@@ -2113,6 +2155,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ListEligibleSnapshotPayloads",
+    "annotation": "instance-scoped",
+    "hash": "3a320b2b268ab11d74877b4c73c5ac2dfba3ecb320c977aff2ab577b42911c66"
+  },
+  {
+    "engine": "sqlite",
     "name": "ListEnvironmentIDsInProject",
     "annotation": "authn-resolution",
     "hash": "284ec155ff5c54444cd832bad142788c4eb9149ac4596cb62fe3335fa8ab6ec5"
@@ -2229,7 +2277,7 @@
     "engine": "sqlite",
     "name": "ListOrgs",
     "annotation": "instance-scoped",
-    "hash": "9337bcf28e615461de0c89def036bc4fa7ed06569eea5b7ea6720c117a2c979d"
+    "hash": "91cbdac399e1cb40a41409e8b9e4341ce99d84004a6db7a35f0248bbc8516045"
   },
   {
     "engine": "sqlite",
@@ -2347,6 +2395,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "MarkSnapshotCollected",
+    "annotation": "instance-scoped",
+    "hash": "9544549f0d10aa85486d69b552911667b6db523d5618fc26b3b510327c690868"
+  },
+  {
+    "engine": "sqlite",
     "name": "MaxKnownCredentialEpoch",
     "annotation": "authn-resolution",
     "hash": "927bb4a7a50553e3118b066cb53bcf1299685743daeaaf6c5768d55c6ee68d8f"
@@ -2446,6 +2500,12 @@
     "name": "SetCredentialPolicy",
     "annotation": "authn-resolution",
     "hash": "21f5004f1fa0e51bebf23dfb17181e81660f31c3133257796b7e8b1e7218ce57"
+  },
+  {
+    "engine": "sqlite",
+    "name": "SetLastPruneSuccess",
+    "annotation": "instance-scoped",
+    "hash": "1b78ff9bee6fb9fbe18c261cf61c3a9feec8a917136a2e3de35e863d404c7432"
   },
   {
     "engine": "sqlite",

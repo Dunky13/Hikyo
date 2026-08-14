@@ -754,6 +754,7 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/Internal"
+
     post:
       operationId: createProject
       tags: [hierarchy]
@@ -789,6 +790,70 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/retention:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+    get:
+      operationId: getOrgRetention
+      tags: [hierarchy]
+      summary: Read the organisation retention cap.
+      description: |
+        The default is keep-if-either: age at most 90 days OR among the last
+        10 revisions of an environment. Unlimited is explicit org state, never
+        a missing-value default.
+      x-hikyo-class: tenant
+      x-hikyo-operation: retention.org-read
+      x-hikyo-formula: [read@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The organisation retention cap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: setOrgRetention
+      tags: [hierarchy]
+      summary: Set the organisation retention cap.
+      x-hikyo-class: tenant
+      x-hikyo-operation: retention.org-update
+      x-hikyo-formula: [project-settings@org]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionPolicy"
+      responses:
+        "200":
+          description: The stored organisation retention cap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -918,6 +983,7 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         "500":
           $ref: "#/components/responses/Internal"
+
     post:
       operationId: createEnvironment
       tags: [hierarchy]
@@ -1155,6 +1221,71 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/retention:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: getProjectRetention
+      tags: [hierarchy]
+      summary: Read the project's effective retention policy.
+      x-hikyo-class: tenant
+      x-hikyo-operation: retention.project-read
+      x-hikyo-formula: [read@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: Effective policy and whether it is inherited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRetentionPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: setProjectRetention
+      tags: [hierarchy]
+      summary: Set or clear the project's bounded retention override.
+      description: |
+        inherited=true clears the override. A stored override must be at or
+        below the organisation cap in both age and revision count; exceeding
+        either is a named bad-request refusal.
+      x-hikyo-class: tenant
+      x-hikyo-operation: retention.project-update
+      x-hikyo-formula: [project-settings@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetProjectRetentionRequest"
+      responses:
+        "200":
+          description: Effective policy and whether it is inherited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRetentionPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -3893,6 +4024,32 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/instance/retention-health:
+    get:
+      operationId: getRetentionHealth
+      tags: [instance]
+      summary: Read payload-pruner health.
+      x-hikyo-class: instance
+      x-hikyo-operation: retention.health-read
+      x-hikyo-formula: [instance-config@instance]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: Persisted payload-pruner health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionHealth"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/instance/saml-providers:
     get:
       operationId: listSamlProviders
@@ -4759,6 +4916,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -7280,6 +7439,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
         "500": {$ref: "#/components/responses/Internal"}
 
@@ -7340,6 +7500,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
         "500": {$ref: "#/components/responses/Internal"}
 
@@ -7447,6 +7608,8 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -7508,6 +7671,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -10105,6 +10270,71 @@ components:
             it inherits the instance default - which is NOT the same statement
             as 0, and 0 is a legal value meaning every disclosure
             reauthenticates.
+
+    RetentionPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [keep-if-either, unlimited]
+        max_age_seconds:
+          type: [integer, "null"]
+          minimum: 1
+          description: Required for keep-if-either; absent for unlimited.
+        last_revisions:
+          type: [integer, "null"]
+          minimum: 1
+          description: Required for keep-if-either; absent for unlimited.
+
+    RetentionHealth:
+      type: object
+      additionalProperties: false
+      required: [last_prune_success, stale, stale_after_seconds]
+      properties:
+        last_prune_success:
+          type: [string, "null"]
+          format: date-time
+        stale:
+          type: boolean
+        stale_after_seconds:
+          type: integer
+          const: 86400
+
+    ProjectRetentionPolicy:
+      type: object
+      additionalProperties: false
+      required: [inherited, mode]
+      properties:
+        inherited:
+          type: boolean
+          description: True clears the project override and follows the org live.
+        mode:
+          type: string
+          enum: [keep-if-either, unlimited]
+          description: Unlimited can appear only when inherited from an unlimited org.
+        max_age_seconds:
+          type: [integer, "null"]
+          minimum: 1
+        last_revisions:
+          type: [integer, "null"]
+          minimum: 1
+
+    SetProjectRetentionRequest:
+      type: object
+      additionalProperties: false
+      required: [inherited]
+      properties:
+        inherited:
+          type: boolean
+          description: True clears the override; false requires both bounds.
+        max_age_seconds:
+          type: [integer, "null"]
+          minimum: 1
+        last_revisions:
+          type: [integer, "null"]
+          minimum: 1
 
     KeyName:
       type: string

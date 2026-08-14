@@ -809,6 +809,46 @@
     ]
   },
   {
+    "operation": "retention.health-read",
+    "class": "instance",
+    "level": "instance",
+    "formula": [
+      "instance-config@instance"
+    ]
+  },
+  {
+    "operation": "retention.org-read",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "read@org"
+    ]
+  },
+  {
+    "operation": "retention.org-update",
+    "class": "tenant",
+    "level": "org",
+    "formula": [
+      "project-settings@org"
+    ]
+  },
+  {
+    "operation": "retention.project-read",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "read@project"
+    ]
+  },
+  {
+    "operation": "retention.project-update",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "project-settings@project"
+    ]
+  },
+  {
     "operation": "reveal.window_read",
     "class": "tenant",
     "level": "environment",

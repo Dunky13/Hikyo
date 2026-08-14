@@ -151,7 +151,7 @@ func (s *Revisions) Show(ctx context.Context, actor Actor, scope domain.Scope, r
 		if err != nil {
 			return err
 		}
-		entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+		entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 		if err != nil {
 			return err
 		}
@@ -200,15 +200,20 @@ func (s *Revisions) Show(ctx context.Context, actor Actor, scope domain.Scope, r
 	return out, nil
 }
 
-// readSnapshot resolves "latest" (revision 0) or one named revision. A
-// revision that never existed, and one whose payload retention collected
-// (#52), both answer ErrNotFound here -- loud at the caller, naming nothing it
-// could not already address.
+// readSnapshot resolves "latest" (revision 0) or one named revision. Payload
+// consumers turn its durable presence fields into the named refusal below.
 func readSnapshot(ctx context.Context, snapshots store.SnapshotReader, p authz.Proof, revision int64) (store.Snapshot, error) {
 	if revision <= 0 {
 		return snapshots.Latest(ctx, p)
 	}
 	return snapshots.AtRevision(ctx, p, revision)
+}
+
+func collectedRevisionError(snapshot store.Snapshot) error {
+	return &domain.CollectedRevisionError{
+		Revision: snapshot.Revision,
+		Policy:   snapshot.CollectedPolicy,
+	}
 }
 
 func changedKeys(rows []store.RevisionKeyChange) []ChangedKey {
@@ -374,7 +379,7 @@ func (s *Revisions) Export(ctx context.Context, actor Actor, scope domain.Scope,
 				return err
 			}
 		}
-		entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+		entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 		if err != nil {
 			return err
 		}

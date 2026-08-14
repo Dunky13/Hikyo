@@ -15,11 +15,21 @@ INSERT INTO orgs (id, name, active, metadata, created_at)
 VALUES (?, ?, ?, ?, ?);
 
 -- name: GetOrg :one
-SELECT id, name, active, metadata, created_at FROM orgs WHERE id = ?;
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs WHERE id = ?;
+
+-- LockOrg serializes retention-cap changes with project override changes.
+-- SQLite write transactions are already instance-serialized by
+-- _txlock=immediate; this matching read keeps the cross-engine store seam.
+-- name: LockOrg :one
+SELECT id FROM orgs WHERE id = ?;
 
 -- hikyo:instance-scoped
 -- name: ListOrgs :many
-SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name;
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs ORDER BY name;
 
 -- hikyo:instance-scoped
 -- name: CountOrgs :one
@@ -27,6 +37,11 @@ SELECT COUNT(*) FROM orgs;
 
 -- name: RenameOrg :execrows
 UPDATE orgs SET name = ? WHERE id = ?;
+
+-- name: SetOrgRetention :execrows
+UPDATE orgs
+SET retention_mode = ?, retention_age_seconds = ?, retention_revision_count = ?
+WHERE id = ?;
 
 -- name: DeleteOrg :execrows
 DELETE FROM orgs WHERE id = ?;

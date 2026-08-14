@@ -7,11 +7,15 @@ INSERT INTO projects (id, org_id, name, created_at)
 VALUES (sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(name), sqlc.arg(created_at));
 
 -- name: GetProject :one
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 
 -- name: ListProjects :many
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = sqlc.arg(chain_org_id) ORDER BY name;
 
 -- ListAllProjects is the multi-instance directory's cross-org enumeration
@@ -27,6 +31,12 @@ SELECT org_id, name FROM projects ORDER BY org_id, name;
 
 -- name: RenameProject :execrows
 UPDATE projects SET name = sqlc.arg(name)
+WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
+
+-- name: SetProjectRetention :execrows
+UPDATE projects
+SET retention_age_seconds = sqlc.narg(retention_age_seconds),
+    retention_revision_count = sqlc.narg(retention_revision_count)
 WHERE org_id = sqlc.arg(chain_org_id) AND id = sqlc.arg(chain_project_id);
 
 -- name: DeleteProject :execrows

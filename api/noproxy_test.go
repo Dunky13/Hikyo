@@ -238,6 +238,7 @@ var pinnedContractSurface = map[string]bool{
 	"GET /api/v1/instance/remotes":                                                                            true,
 	"GET /api/v1/instance/remotes/{remote}":                                                                   true,
 	"GET /api/v1/instance/saml-providers":                                                                     true,
+	"GET /api/v1/instance/retention-health":                                                                   true,
 	"GET /api/v1/instance/saml-providers/{slug}":                                                              true,
 	"GET /api/v1/instance/saml-sp-keys":                                                                       true,
 	"GET /api/v1/instance/workspace-origins":                                                                  true,
@@ -249,6 +250,7 @@ var pinnedContractSurface = map[string]bool{
 	"GET /api/v1/orgs/{org}/grants":                                                                           true,
 	"GET /api/v1/orgs/{org}/projects":                                                                         true,
 	"GET /api/v1/orgs/{org}/projects/{project}":                                                               true,
+	"GET /api/v1/orgs/{org}/projects/{project}/retention":                                                     true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments":                                                  true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}":                                    true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings":                           true,
@@ -261,6 +263,7 @@ var pinnedContractSurface = map[string]bool{
 	"GET /api/v1/orgs/{org}/projects/{project}/keys/{key}":                                                    true,
 	"GET /api/v1/orgs/{org}/projects/{project}/service-accounts":                                              true,
 	"GET /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/credentials":                 true,
+	"GET /api/v1/orgs/{org}/retention":                                                                        true,
 	"PATCH /api/v1/instance/remotes/{remote}":                                                                 true,
 	"PATCH /api/v1/instance/saml-providers/{slug}":                                                            true,
 	"PATCH /api/v1/orgs/{org}":                                                                                true,
@@ -269,6 +272,8 @@ var pinnedContractSurface = map[string]bool{
 	"PATCH /api/v1/orgs/{org}/projects/{project}/folders/{folder}":                                            true,
 	"PATCH /api/v1/orgs/{org}/projects/{project}/key-groups/{group}":                                          true,
 	"PATCH /api/v1/orgs/{org}/projects/{project}/keys/{key}":                                                  true,
+	"PUT /api/v1/orgs/{org}/projects/{project}/retention":                                                     true,
+	"PUT /api/v1/orgs/{org}/retention":                                                                        true,
 	"POST /api/v1/accounts/{principal}/credential-reset":                                                      true,
 	"POST /api/v1/auth/credential/establish":                                                                  true,
 	"POST /api/v1/auth/identities/link":                                                                       true,
@@ -478,6 +483,7 @@ func TestContractRouteSurfaceIsExhaustivelyPinned(t *testing.T) {
 var pinnedNonContractRoutes = map[string]string{
 	"GET /healthz": "liveness probe: no principal, no contract entry, and " +
 		"deliberately outside the API middleware so a login flood cannot restart-loop the process",
+	"GET /metrics": "Prometheus operational metrics: no principal, no contract entry, and no identity labels",
 	"GET /readyz": "readiness probe: same partition as /healthz; answers only whether " +
 		"this instance's own dependencies respond",
 }
