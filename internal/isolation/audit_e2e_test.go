@@ -889,7 +889,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	// is `edit ∧ publish` on the environment it delivers into, and copy adds
 	// `reveal ∧ publish` on the destination — without all four, value.set,
 	// value.cleared and the two disclosure.* types would have no emitter.
-	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "reveal", "edit", "publish"} {
+	for i, capability := range []string{"manage-projects", "definitions-edit", "read", "reveal", "edit", "publish", "pin", "reveal-history"} {
 		stmts = append(stmts, fmt.Sprintf(
 			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
 			 VALUES ('grt_ha_%d', 'usr_hierarchy_audit', '%s', '%s', NULL, NULL, %s)`,
@@ -930,7 +930,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 	if err := folders.Delete(ctx, actor, scope, folder.ID); err != nil {
 		t.Fatal(err)
 	}
-	runValueLifecycle(t, db, actor, scope)
+	runValueLifecycle(t, db, actor, who, scope)
 	runCatalogueLifecycle(t, db, actor, scope)
 	if _, err := projects.Rename(ctx, actor, scope, "audited-project-renamed"); err != nil {
 		t.Fatal(err)
@@ -958,7 +958,7 @@ func runHierarchyLifecycle(t *testing.T, db *store.DB, org domain.OrgID) {
 // after itself — the keys and both environments go — because the catalogue
 // lifecycle that follows ends with an empty project, and a key holding values
 // refuses to be deleted at all.
-func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope domain.Scope) {
+func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, who domain.PrincipalID, scope domain.Scope) {
 	t.Helper()
 	ctx := tctx(t)
 	kr := probeKeyring(t, db)
@@ -999,6 +999,45 @@ func runValueLifecycle(t *testing.T, db *store.DB, actor service.Actor, scope do
 	if _, err := revisions.Publish(ctx, actor, sourceScope, []string{staged.VersionID}); err != nil {
 		t.Fatal(err)
 	}
+	// Rollback and pin lifecycle (#52): restore stages ordinary drafts; pin
+	// create, renew, reassign and release each carry their own durable event.
+	if _, err := revisions.Restore(ctx, actor, sourceScope, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	const workload = domain.PrincipalID("mch_audit_pin")
+	execRaw(t, db, `INSERT INTO principals (id, kind, class, created_at) VALUES ('mch_audit_pin', 'machine', 'workload', `+ts+`)`)
+	execRaw(t, db, fmt.Sprintf(`INSERT INTO service_accounts
+		(id, principal_id, org_id, project_id, name, kind, created_at, created_by)
+		VALUES ('sa_audit_pin', 'mch_audit_pin', '%s', '%s', 'audit-pin', 'workload', %s, '%s')`,
+		scope.Org, scope.Project, ts, who))
+	execRaw(t, db, fmt.Sprintf(`INSERT INTO grants
+		(id, principal_id, capability, org_id, project_id, env_id, created_at)
+		VALUES ('grt_audit_pin_read', 'mch_audit_pin', 'read', '%s', '%s', NULL, %s)`,
+		scope.Org, scope.Project, ts))
+	pins := &service.Pins{DB: db, Keyring: kr}
+	latest := queryInt(t, db, fmt.Sprintf("SELECT MAX(revision) FROM snapshots WHERE environment_id = '%s'", source.ID))
+	if _, err := pins.Set(ctx, actor, sourceScope, service.SetPinRequest{
+		WorkloadPrincipalID: workload, Revision: latest,
+		ExpiresAt: time.Now().UTC().Add(service.MaxPinLifetime + time.Hour),
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("pin expiry refusal = %v, want invalid", err)
+	}
+	if _, err := pins.Set(ctx, actor, sourceScope, service.SetPinRequest{WorkloadPrincipalID: workload, Revision: latest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pins.Set(ctx, actor, sourceScope, service.SetPinRequest{WorkloadPrincipalID: workload, Revision: latest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pins.Set(ctx, actor, sourceScope, service.SetPinRequest{WorkloadPrincipalID: workload, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pins.Release(ctx, actor, sourceScope, workload); err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, "DELETE FROM pin_generations WHERE principal_id = 'mch_audit_pin'")
+	execRaw(t, db, "DELETE FROM grants WHERE principal_id = 'mch_audit_pin'")
+	execRaw(t, db, "DELETE FROM service_accounts WHERE principal_id = 'mch_audit_pin'")
+	execRaw(t, db, "DELETE FROM principals WHERE id = 'mch_audit_pin'")
 	// A revealing read: one disclosure event for the one `secret` key.
 	if _, err := values.Get(ctx, actor, sourceScope, key.Name, true); err != nil {
 		t.Fatal(err)

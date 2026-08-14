@@ -38,12 +38,19 @@ const (
 // RevisionService is the domain surface this transport exposes.
 type RevisionService interface {
 	Publish(ctx context.Context, actor service.Actor, scope domain.Scope, versionIDs []string) (service.PublishResult, error)
+	Restore(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64, keyName string) (service.RestoreResult, error)
 	History(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.RevisionView, error)
 	Show(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64) (service.RevisionDetail, error)
 	Signals(ctx context.Context, actor service.Actor, scope domain.Scope) (service.EnvironmentSignals, error)
 	Export(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64, reveal bool) ([]service.ExportedValue, int64, error)
 	Watch(ctx context.Context, actor service.Actor, scope domain.Scope) (<-chan service.AdvisoryEvent, error)
 	RotateTokenKey(ctx context.Context, actor service.Actor) (service.TokenKeyRotation, error)
+}
+
+type PinService interface {
+	Set(ctx context.Context, actor service.Actor, scope domain.Scope, request service.SetPinRequest) (service.SetPinResult, error)
+	List(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.PinView, error)
+	Release(ctx context.Context, actor service.Actor, scope domain.Scope, workloadPrincipalID domain.PrincipalID) error
 }
 
 func (a *API) PublishPendingChanges(ctx context.Context, req apigen.PublishPendingChangesRequestObject) (apigen.PublishPendingChangesResponseObject, error) {
@@ -79,6 +86,82 @@ func emptyIfNil(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+func wirePending(changes []service.StagedChange) []apigen.PendingChange {
+	out := make([]apigen.PendingChange, 0, len(changes))
+	for _, change := range changes {
+		out = append(out, apigen.PendingChange{
+			VersionId: change.VersionID, KeyId: change.KeyID, Name: change.Name,
+			Classification:     apigen.KeyClassification(change.Classification),
+			Operation:          apigen.PendingChangeOperation(change.Operation),
+			StagedFromRevision: change.StagedFromRevision, CreatedAt: change.CreatedAt,
+		})
+	}
+	return out
+}
+
+func (a *API) RollbackRevision(ctx context.Context, req apigen.RollbackRevisionRequestObject) (apigen.RollbackRevisionResponseObject, error) {
+	key := ""
+	if req.Body != nil && req.Body.Key != nil {
+		key = string(*req.Body.Key)
+	}
+	result, err := a.Revisions.Restore(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), req.Revision, key)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.RollbackRevision200JSONResponse(apigen.RollbackResult{
+		Revision: result.Revision, Changes: wirePending(result.Changes),
+	}), nil
+}
+
+func wirePin(pin service.PinView) apigen.RevisionPin {
+	return apigen.RevisionPin{
+		Id: pin.ID, WorkloadPrincipalId: pin.WorkloadPrincipalID,
+		Revision: pin.Revision, AuthorityPrincipalId: pin.AuthorityPrincipalID,
+		ExpiresAt: pin.ExpiresAt, CreatedAt: pin.CreatedAt, AuthorizedAt: pin.AuthorizedAt,
+		HistoryAuthorized: pin.HistoryAuthorized,
+		SchemaOverride:    pin.SchemaOverride, Expired: pin.Expired,
+	}
+}
+
+func (a *API) CreateRevisionPin(ctx context.Context, req apigen.CreateRevisionPinRequestObject) (apigen.CreateRevisionPinResponseObject, error) {
+	request := service.SetPinRequest{
+		WorkloadPrincipalID: domain.PrincipalID(req.Body.WorkloadPrincipalId), Revision: req.Body.Revision,
+		OverrideSchema: derefBool(req.Body.OverrideSchema),
+	}
+	if req.Body.ExpiresAt != nil {
+		request.ExpiresAt = *req.Body.ExpiresAt
+	}
+	result, err := a.Pins.Set(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), request)
+	if err != nil {
+		return nil, err
+	}
+	return apigen.CreateRevisionPin200JSONResponse(apigen.RevisionPinResult{
+		Action: apigen.RevisionPinResultAction(result.Action), Pin: wirePin(result.Pin),
+	}), nil
+}
+
+func (a *API) ListRevisionPins(ctx context.Context, req apigen.ListRevisionPinsRequestObject) (apigen.ListRevisionPinsResponseObject, error) {
+	pins, err := a.Pins.List(ctx, service.Bearer(bearer(ctx)), envScope(req.Org, req.Project, req.Environment))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]apigen.RevisionPin, 0, len(pins))
+	for _, pin := range pins {
+		items = append(items, wirePin(pin))
+	}
+	return apigen.ListRevisionPins200JSONResponse(apigen.RevisionPinList{Items: items, Count: len(items)}), nil
+}
+
+func (a *API) ReleaseRevisionPin(ctx context.Context, req apigen.ReleaseRevisionPinRequestObject) (apigen.ReleaseRevisionPinResponseObject, error) {
+	if err := a.Pins.Release(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), domain.PrincipalID(req.WorkloadPrincipal)); err != nil {
+		return nil, err
+	}
+	return apigen.ReleaseRevisionPin204Response{}, nil
 }
 
 func wireChangedKeys(changes []service.ChangedKey) []apigen.ChangedKey {

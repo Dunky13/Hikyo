@@ -319,6 +319,7 @@ type PendingChange struct {
 	StagedFromRevision int64
 	StagedFromEntry    string
 	CreatedAt          pgtype.Timestamptz
+	Source             string
 }
 
 type PinGeneration struct {
@@ -405,6 +406,22 @@ type RevisionKeyChange struct {
 	KeyID         string
 	KeyName       string
 	Change        string
+}
+
+type RevisionPin struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	WorkloadPrincipalID  string
+	SnapshotID           string
+	Revision             int64
+	AuthorityPrincipalID string
+	ExpiresAt            pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	AuthorizedAt         pgtype.Timestamptz
+	HistoryAuthorized    bool
+	SchemaOverride       bool
 }
 
 type SamlProvider struct {
@@ -600,6 +617,7 @@ type Snapshot struct {
 	SchemaRevision int64
 	PublishedBy    string
 	PublishedAt    pgtype.Timestamptz
+	PayloadPresent bool
 }
 
 type SnapshotEntry struct {

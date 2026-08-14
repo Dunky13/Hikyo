@@ -426,6 +426,45 @@ export type PendingChange = {
     created_at: string;
 };
 
+export type RollbackRequest = {
+    key?: KeyName;
+};
+
+export type RollbackResult = {
+    revision: number;
+    changes: Array<PendingChange>;
+};
+
+export type RevisionPinRequest = {
+    workload_principal_id: Id;
+    revision: number;
+    expires_at?: Timestamp;
+    override_schema?: boolean;
+};
+
+export type RevisionPin = {
+    id: Id;
+    workload_principal_id: Id;
+    revision: number;
+    authority_principal_id: Id;
+    expires_at: Timestamp;
+    created_at: Timestamp;
+    authorized_at: Timestamp;
+    history_authorized: boolean;
+    schema_override: boolean;
+    expired: boolean;
+};
+
+export type RevisionPinResult = {
+    action: 'created' | 'reassigned' | 'renewed';
+    pin: RevisionPin;
+};
+
+export type RevisionPinList = {
+    items: Array<RevisionPin>;
+    count: number;
+};
+
 export type PublishRequest = {
     /**
      * The pending-change version ids to commit. Naming an id the caller
@@ -1274,6 +1313,14 @@ export type DeliveryResponse = {
      * The project's monotonic key-catalogue revision.
      */
     schema_revision: number;
+    /**
+     * Present when a durable workload pin selected the snapshot.
+     */
+    pinned_revision?: number;
+    /**
+     * Loud status; expiry never silently changes delivery.
+     */
+    pin_expired: boolean;
     /**
      * Empty when `current` is true.
      */
@@ -14275,6 +14322,318 @@ export type GetEnvironmentSignalsResponses = {
 };
 
 export type GetEnvironmentSignalsResponse = GetEnvironmentSignalsResponses[keyof GetEnvironmentSignalsResponses];
+
+export type RollbackRevisionData = {
+    body?: RollbackRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        revision: number;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback';
+};
+
+export type RollbackRevisionErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RollbackRevisionError = RollbackRevisionErrors[keyof RollbackRevisionErrors];
+
+export type RollbackRevisionResponses = {
+    /**
+     * Ordinary pending changes staged by the restore.
+     */
+    200: RollbackResult;
+};
+
+export type RollbackRevisionResponse = RollbackRevisionResponses[keyof RollbackRevisionResponses];
+
+export type ListRevisionPinsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins';
+};
+
+export type ListRevisionPinsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListRevisionPinsError = ListRevisionPinsErrors[keyof ListRevisionPinsErrors];
+
+export type ListRevisionPinsResponses = {
+    /**
+     * Pins, including loud expired status.
+     */
+    200: RevisionPinList;
+};
+
+export type ListRevisionPinsResponse = ListRevisionPinsResponses[keyof ListRevisionPinsResponses];
+
+export type CreateRevisionPinData = {
+    body: RevisionPinRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins';
+};
+
+export type CreateRevisionPinErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateRevisionPinError = CreateRevisionPinErrors[keyof CreateRevisionPinErrors];
+
+export type CreateRevisionPinResponses = {
+    /**
+     * The created, reassigned, or renewed pin.
+     */
+    200: RevisionPinResult;
+};
+
+export type CreateRevisionPinResponse = CreateRevisionPinResponses[keyof CreateRevisionPinResponses];
+
+export type ReleaseRevisionPinData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+        workloadPrincipal: string;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}';
+};
+
+export type ReleaseRevisionPinErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ReleaseRevisionPinError = ReleaseRevisionPinErrors[keyof ReleaseRevisionPinErrors];
+
+export type ReleaseRevisionPinResponses = {
+    /**
+     * Released.
+     */
+    204: void;
+};
+
+export type ReleaseRevisionPinResponse = ReleaseRevisionPinResponses[keyof ReleaseRevisionPinResponses];
 
 export type ListRevisionsData = {
     body?: never;

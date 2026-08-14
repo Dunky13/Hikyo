@@ -13,6 +13,7 @@
     "cli:login": "client transport for POST /api/v1/auth/local/login: the server audits the login it performs (auth.login, auth.session_created); the verb itself adds transport, not an auditable act",
     "cli:logout": "client transport for POST /api/v1/auth/logout, audited server-side as auth.logout",
     "cli:org": "client transport for the /api/v1/orgs routes, whose operations carry the audit mapping",
+    "cli:pin": "client transport for the tenant-scoped pin routes, whose mutations and expiry refusals are audited server-side as pin.created, pin.reassigned, pin.renewed, pin.released, and pin.expiry_refused; the verb itself adds transport, not an auditable act",
     "cli:project": "client transport for the tenant-scoped project routes, whose operations carry the audit mapping",
     "cli:project-settings": "client transport for the environment settings routes, whose operations carry the audit mapping (settings.protected_flag_changed / settings.reauthentication_window_changed / auth.effective_window_lowered)",
     "cli:remote": "client transport for the /api/v1/instance/remotes routes, whose operations carry the audit mapping (remote.added / remote.renamed / remote.removed / remote.directory_viewed / remote.fetch_failed). The fingerprint confirmation and the credential paste are LOCAL acts on the operator's terminal, reaching no server and holding no server-side record to write",

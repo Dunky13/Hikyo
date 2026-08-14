@@ -495,6 +495,27 @@ func (e RemoteState) Valid() bool {
 	}
 }
 
+// Defines values for RevisionPinResultAction.
+const (
+	Created    RevisionPinResultAction = "created"
+	Reassigned RevisionPinResultAction = "reassigned"
+	Renewed    RevisionPinResultAction = "renewed"
+)
+
+// Valid indicates whether the value is a known member of the RevisionPinResultAction enum.
+func (e RevisionPinResultAction) Valid() bool {
+	switch e {
+	case Created:
+		return true
+	case Reassigned:
+		return true
+	case Renewed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoleTemplate.
 const (
 	Admin      RoleTemplate = "admin"
@@ -1397,6 +1418,12 @@ type DeliveryResponse struct {
 
 	// Keys Empty when `current` is true.
 	Keys []DeliveredKey `json:"keys"`
+
+	// PinExpired Loud status; expiry never silently changes delivery.
+	PinExpired bool `json:"pin_expired"`
+
+	// PinnedRevision Present when a durable workload pin selected the snapshot.
+	PinnedRevision *int64 `json:"pinned_revision,omitempty"`
 
 	// SchemaRevision The project's monotonic key-catalogue revision.
 	SchemaRevision int `json:"schema_revision"`
@@ -2894,8 +2921,76 @@ type RevisionList struct {
 	Items []Revision `json:"items"`
 }
 
+// RevisionPin defines model for RevisionPin.
+type RevisionPin struct {
+	// AuthorityPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	AuthorityPrincipalId ID `json:"authority_principal_id"`
+
+	// AuthorizedAt RFC 3339 UTC, microsecond precision.
+	AuthorizedAt Timestamp `json:"authorized_at"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+	Expired   bool      `json:"expired"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt         Timestamp `json:"expires_at"`
+	HistoryAuthorized bool      `json:"history_authorized"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id             ID    `json:"id"`
+	Revision       int64 `json:"revision"`
+	SchemaOverride bool  `json:"schema_override"`
+
+	// WorkloadPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	WorkloadPrincipalId ID `json:"workload_principal_id"`
+}
+
+// RevisionPinList defines model for RevisionPinList.
+type RevisionPinList struct {
+	Count int           `json:"count"`
+	Items []RevisionPin `json:"items"`
+}
+
+// RevisionPinRequest defines model for RevisionPinRequest.
+type RevisionPinRequest struct {
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt      *Timestamp `json:"expires_at,omitempty"`
+	OverrideSchema *bool      `json:"override_schema,omitempty"`
+	Revision       int64      `json:"revision"`
+
+	// WorkloadPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	WorkloadPrincipalId ID `json:"workload_principal_id"`
+}
+
+// RevisionPinResult defines model for RevisionPinResult.
+type RevisionPinResult struct {
+	Action RevisionPinResultAction `json:"action"`
+	Pin    RevisionPin             `json:"pin"`
+}
+
+// RevisionPinResultAction defines model for RevisionPinResult.Action.
+type RevisionPinResultAction string
+
 // RoleTemplate The closed v1 role template set.
 type RoleTemplate string
+
+// RollbackRequest defines model for RollbackRequest.
+type RollbackRequest struct {
+	// Key The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Key *KeyName `json:"key,omitempty"`
+}
+
+// RollbackResult defines model for RollbackResult.
+type RollbackResult struct {
+	Changes  []PendingChange `json:"changes"`
+	Revision int64           `json:"revision"`
+}
 
 // SamlACSRequest defines model for SamlACSRequest.
 type SamlACSRequest struct {
@@ -4328,8 +4423,14 @@ type CreateEnvGrantJSONRequestBody = CreateGrantRequest
 // ApplyEnvTemplateJSONRequestBody defines body for ApplyEnvTemplate for application/json ContentType.
 type ApplyEnvTemplateJSONRequestBody = ApplyTemplateRequest
 
+// CreateRevisionPinJSONRequestBody defines body for CreateRevisionPin for application/json ContentType.
+type CreateRevisionPinJSONRequestBody = RevisionPinRequest
+
 // PublishPendingChangesJSONRequestBody defines body for PublishPendingChanges for application/json ContentType.
 type PublishPendingChangesJSONRequestBody = PublishRequest
+
+// RollbackRevisionJSONRequestBody defines body for RollbackRevision for application/json ContentType.
+type RollbackRevisionJSONRequestBody = RollbackRequest
 
 // SetEnvironmentSettingsJSONRequestBody defines body for SetEnvironmentSettings for application/json ContentType.
 type SetEnvironmentSettingsJSONRequestBody = EnvironmentSettings
@@ -4753,6 +4854,15 @@ type ServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ListRevisionPins List durable workload revision pins.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+	ListRevisionPins(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// CreateRevisionPin Create, reassign, or renew a workload revision pin.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+	CreateRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ReleaseRevisionPin Release a workload revision pin.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal})
+	ReleaseRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, workloadPrincipal string)
 	// PublishPendingChanges Publish a selection of your own pending changes.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
 	PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
@@ -4765,6 +4875,9 @@ type ServerInterface interface {
 	// GetRevision One revision, with its change token.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
 	GetRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision string)
+	// RollbackRevision Stage an environment or key restore from one revision.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback)
+	RollbackRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision int64)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
@@ -5617,6 +5730,24 @@ func (_ Unimplemented) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListRevisionPins List durable workload revision pins.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+func (_ Unimplemented) ListRevisionPins(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateRevisionPin Create, reassign, or renew a workload revision pin.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+func (_ Unimplemented) CreateRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleaseRevisionPin Release a workload revision pin.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal})
+func (_ Unimplemented) ReleaseRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, workloadPrincipal string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // PublishPendingChanges Publish a selection of your own pending changes.
 // (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
 func (_ Unimplemented) PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
@@ -5638,6 +5769,12 @@ func (_ Unimplemented) ListRevisions(w http.ResponseWriter, r *http.Request, org
 // GetRevision One revision, with its change token.
 // (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
 func (_ Unimplemented) GetRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RollbackRevision Stage an environment or key restore from one revision.
+// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback)
+func (_ Unimplemented) RollbackRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision int64) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8482,6 +8619,147 @@ func (siw *ServerInterfaceWrapper) ApplyEnvTemplate(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListRevisionPins operation middleware
+func (siw *ServerInterfaceWrapper) ListRevisionPins(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRevisionPins(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRevisionPin operation middleware
+func (siw *ServerInterfaceWrapper) CreateRevisionPin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRevisionPin(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleaseRevisionPin operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseRevisionPin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "workloadPrincipal" -------------
+	var workloadPrincipal string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "workloadPrincipal", chi.URLParam(r, "workloadPrincipal"), &workloadPrincipal, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "workloadPrincipal", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseRevisionPin(w, r, org, project, environment, workloadPrincipal)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PublishPendingChanges operation middleware
 func (siw *ServerInterfaceWrapper) PublishPendingChanges(w http.ResponseWriter, r *http.Request) {
 
@@ -8658,6 +8936,59 @@ func (siw *ServerInterfaceWrapper) GetRevision(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRevision(w, r, org, project, environment, revision)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackRevision operation middleware
+func (siw *ServerInterfaceWrapper) RollbackRevision(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "revision" -------------
+	var revision int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "revision", chi.URLParam(r, "revision"), &revision, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revision", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackRevision(w, r, org, project, environment, revision)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12742,6 +13073,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals", wrapper.GetEnvironmentSignals)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback", wrapper.RollbackRevision)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins", wrapper.ListRevisionPins)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins", wrapper.CreateRevisionPin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}", wrapper.ReleaseRevisionPin)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions", wrapper.ListRevisions)
@@ -21668,6 +22011,301 @@ func (response ApplyEnvTemplate500JSONResponse) VisitApplyEnvTemplateResponse(w 
 	return err
 }
 
+type ListRevisionPinsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type ListRevisionPinsResponseObject interface {
+	VisitListRevisionPinsResponse(w http.ResponseWriter) error
+}
+
+type ListRevisionPins200JSONResponse RevisionPinList
+
+func (response ListRevisionPins200JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionPins401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListRevisionPins401JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionPins403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListRevisionPins403JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionPins404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListRevisionPins404JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionPins429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListRevisionPins429JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRevisionPins500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListRevisionPins500JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPinRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Body        *CreateRevisionPinJSONRequestBody
+}
+
+type CreateRevisionPinResponseObject interface {
+	VisitCreateRevisionPinResponse(w http.ResponseWriter) error
+}
+
+type CreateRevisionPin200JSONResponse RevisionPinResult
+
+func (response CreateRevisionPin200JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateRevisionPin400JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateRevisionPin401JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateRevisionPin403JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateRevisionPin404JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response CreateRevisionPin429JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRevisionPin500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateRevisionPin500JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseRevisionPinRequestObject struct {
+	Org               OrgID         `json:"org"`
+	Project           ProjectID     `json:"project"`
+	Environment       EnvironmentID `json:"environment"`
+	WorkloadPrincipal string        `json:"workloadPrincipal"`
+}
+
+type ReleaseRevisionPinResponseObject interface {
+	VisitReleaseRevisionPinResponse(w http.ResponseWriter) error
+}
+
+type ReleaseRevisionPin204Response struct {
+}
+
+func (response ReleaseRevisionPin204Response) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type ReleaseRevisionPin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ReleaseRevisionPin401JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseRevisionPin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReleaseRevisionPin403JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseRevisionPin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReleaseRevisionPin404JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseRevisionPin429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ReleaseRevisionPin429JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseRevisionPin500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReleaseRevisionPin500JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PublishPendingChangesRequestObject struct {
 	Org         OrgID         `json:"org"`
 	Project     ProjectID     `json:"project"`
@@ -22011,6 +22649,117 @@ func (response GetRevision429JSONResponse) VisitGetRevisionResponse(w http.Respo
 type GetRevision500JSONResponse struct{ InternalJSONResponse }
 
 func (response GetRevision500JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevisionRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+	Revision    int64         `json:"revision"`
+	Body        *RollbackRevisionJSONRequestBody
+}
+
+type RollbackRevisionResponseObject interface {
+	VisitRollbackRevisionResponse(w http.ResponseWriter) error
+}
+
+type RollbackRevision200JSONResponse RollbackResult
+
+func (response RollbackRevision200JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RollbackRevision400JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RollbackRevision401JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RollbackRevision403JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RollbackRevision404JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response RollbackRevision429JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision500JSONResponse struct{ InternalJSONResponse }
+
+func (response RollbackRevision500JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -30225,6 +30974,15 @@ type StrictServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(ctx context.Context, request ApplyEnvTemplateRequestObject) (ApplyEnvTemplateResponseObject, error)
+	// ListRevisionPins List durable workload revision pins.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+	ListRevisionPins(ctx context.Context, request ListRevisionPinsRequestObject) (ListRevisionPinsResponseObject, error)
+	// CreateRevisionPin Create, reassign, or renew a workload revision pin.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
+	CreateRevisionPin(ctx context.Context, request CreateRevisionPinRequestObject) (CreateRevisionPinResponseObject, error)
+	// ReleaseRevisionPin Release a workload revision pin.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal})
+	ReleaseRevisionPin(ctx context.Context, request ReleaseRevisionPinRequestObject) (ReleaseRevisionPinResponseObject, error)
 	// PublishPendingChanges Publish a selection of your own pending changes.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish)
 	PublishPendingChanges(ctx context.Context, request PublishPendingChangesRequestObject) (PublishPendingChangesResponseObject, error)
@@ -30237,6 +30995,9 @@ type StrictServerInterface interface {
 	// GetRevision One revision, with its change token.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision})
 	GetRevision(ctx context.Context, request GetRevisionRequestObject) (GetRevisionResponseObject, error)
+	// RollbackRevision Stage an environment or key restore from one revision.
+	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback)
+	RollbackRevision(ctx context.Context, request RollbackRevisionRequestObject) (RollbackRevisionResponseObject, error)
 	// GetEnvironmentSettings Read an environment's protection state and reauthentication window.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/settings)
 	GetEnvironmentSettings(ctx context.Context, request GetEnvironmentSettingsRequestObject) (GetEnvironmentSettingsResponseObject, error)
@@ -33421,6 +34182,98 @@ func (sh *strictHandler) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListRevisionPins operation middleware
+func (sh *strictHandler) ListRevisionPins(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ListRevisionPinsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRevisionPins(ctx, request.(ListRevisionPinsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRevisionPins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRevisionPinsResponseObject); ok {
+		if err := validResponse.VisitListRevisionPinsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateRevisionPin operation middleware
+func (sh *strictHandler) CreateRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request CreateRevisionPinRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	var body CreateRevisionPinJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateRevisionPin(ctx, request.(CreateRevisionPinRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateRevisionPin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateRevisionPinResponseObject); ok {
+		if err := validResponse.VisitCreateRevisionPinResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReleaseRevisionPin operation middleware
+func (sh *strictHandler) ReleaseRevisionPin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, workloadPrincipal string) {
+	var request ReleaseRevisionPinRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+	request.WorkloadPrincipal = workloadPrincipal
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReleaseRevisionPin(ctx, request.(ReleaseRevisionPinRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReleaseRevisionPin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReleaseRevisionPinResponseObject); ok {
+		if err := validResponse.VisitReleaseRevisionPinResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // PublishPendingChanges operation middleware
 func (sh *strictHandler) PublishPendingChanges(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	var request PublishPendingChangesRequestObject
@@ -33534,6 +34387,45 @@ func (sh *strictHandler) GetRevision(w http.ResponseWriter, r *http.Request, org
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetRevisionResponseObject); ok {
 		if err := validResponse.VisitGetRevisionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackRevision operation middleware
+func (sh *strictHandler) RollbackRevision(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID, revision int64) {
+	var request RollbackRevisionRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+	request.Revision = revision
+
+	var body RollbackRevisionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackRevision(ctx, request.(RollbackRevisionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackRevision")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RollbackRevisionResponseObject); ok {
+		if err := validResponse.VisitRollbackRevisionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

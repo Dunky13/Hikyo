@@ -321,7 +321,13 @@ const (
 	// fan-out -- with `trigger` saying which act produced it. It records
 	// numbers, never keys' values: `changed_keys` is a COUNT, because the names
 	// live in the revision lineage, which has its own permanent retention.
-	EventRevisionPublished EventType = "revision.published"
+	EventRevisionPublished     EventType = "revision.published"
+	EventRevisionRestoreStaged EventType = "revision.restore_staged"
+	EventPinCreated            EventType = "pin.created"
+	EventPinReassigned         EventType = "pin.reassigned"
+	EventPinRenewed            EventType = "pin.renewed"
+	EventPinReleased           EventType = "pin.released"
+	EventPinExpiryRefused      EventType = "pin.expiry_refused"
 	// crypto.token_key_rotated records `rotate-token-key`. Instance trail,
 	// because the root token key is instance-scoped crypto material; the
 	// payload is the new version and nothing else, since a token key is never
@@ -656,6 +662,14 @@ func merged(a, b Schema) Schema {
 		out[k] = v
 	}
 	return out
+}
+
+var pinMutationSchema = Schema{
+	"workload_principal_id": {Kind: KindString, Required: true},
+	"revision":              {Kind: KindInt, Required: true},
+	"expires_at":            {Kind: KindString, Required: true},
+	"schema_override":       {Kind: KindBool, Required: true},
+	"history_authorized":    {Kind: KindBool, Required: true},
 }
 
 // registry is the closed catalogue, unexported so closure holds
@@ -1223,6 +1237,24 @@ var registry = map[EventType]TypeSpec{
 		"changed_keys":    {Kind: KindInt, Required: true},
 		"pending_count":   {Kind: KindInt, Required: true},
 		"trigger":         {Kind: KindString, Required: true},
+	}),
+	EventRevisionRestoreStaged: hierarchyEvent(Schema{
+		"revision":  {Kind: KindInt, Required: true},
+		"key_count": {Kind: KindInt, Required: true},
+		"key":       {Kind: KindString},
+	}),
+	EventPinCreated:    hierarchyEvent(pinMutationSchema),
+	EventPinReassigned: hierarchyEvent(pinMutationSchema),
+	EventPinRenewed:    hierarchyEvent(pinMutationSchema),
+	EventPinReleased: hierarchyEvent(Schema{
+		"workload_principal_id": {Kind: KindString, Required: true},
+		"revision":              {Kind: KindInt, Required: true},
+	}),
+	EventPinExpiryRefused: hierarchyFailureEvent(Schema{
+		"workload_principal_id": {Kind: KindString, Required: true},
+		"requested_expires_at":  {Kind: KindString, Required: true},
+		"max_days":              {Kind: KindInt, Required: true},
+		"cause":                 {Kind: KindString, Required: true},
 	}),
 	EventTokenKeyRotated: {
 		SchemaVersion: 1,
@@ -2265,6 +2297,16 @@ func hierarchyEvent(schema Schema) TypeSpec {
 		SchemaVersion: 1,
 		Retention:     RetentionSecurity,
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema:        schema,
+	}
+}
+
+func hierarchyFailureEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
 		Trails:        map[Trail]bool{TrailTenant: true},
 		Schema:        schema,
 	}

@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,7 +44,249 @@ func init() {
 		scenario{"revision_ciphertext_is_owner_bound", scenarioRevisionCiphertextBinding},
 		scenario{"advisory_projects_authorization_per_event", scenarioAdvisoryAuthorization},
 		scenario{"historical_export_takes_reveal_history_not_reveal", scenarioHistoricalExportFormula},
+		scenario{"restore_of_superseded_secret_takes_reveal_history", scenarioRestoreSupersededSecret},
+		scenario{"restore_gate_uses_written_time_classification", scenarioRestoreWrittenTimeClassification},
+		scenario{"schema_failing_restore_blocks_loud", scenarioSchemaFailingRestore},
+		scenario{"pin_lifecycle_quota_and_expiry_refusals_by_name", scenarioPinLifecycle},
 	)
+}
+
+func scenarioSchemaFailingRestore(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "restoreschema")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	key := mustKey(t, keys, actor, scope, "WORKERS", string(schema.Config), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, dev, "WORKERS", "not-an-integer")
+	target := latestRevisionOf(t, db, string(dev.Env))
+	publishValue(t, db, values, actor, dev, "WORKERS", "12")
+	if _, err := keys.UpdateDeclaration(t.Context(), actor, scope, key.ID, service.KeyDeclarationUpdate{
+		Declaration: decl(schema.Rule{Type: schema.TypeInteger}),
+		Presence:    schema.DefaultPresenceRules(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := revisionSvc(t, db).Restore(t.Context(), actor, dev, target, "WORKERS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Changes) != 1 {
+		t.Fatalf("restore changes = %+v, want one staged value", restored.Changes)
+	}
+	_, err = revisionSvc(t, db).Publish(t.Context(), actor, dev, []string{restored.Changes[0].VersionID})
+	if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "WORKERS") {
+		t.Fatalf("schema-failing restore publish = %v, want loud refusal naming WORKERS", err)
+	}
+	grantOrg(t, db, who, scope.Org, "restoreschema", "pin", "reveal-history")
+	workload := seedWorkload(t, db, scope, who, "schema_override")
+	pins := &service.Pins{DB: db, Keyring: sharedKeyring(t, db)}
+	request := service.SetPinRequest{WorkloadPrincipalID: workload, Revision: target}
+	if _, err := pins.Set(t.Context(), actor, dev, request); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "WORKERS") {
+		t.Fatalf("schema-invalid pin = %v, want refusal naming WORKERS", err)
+	}
+	request.OverrideSchema = true
+	created, err := pins.Set(t.Context(), actor, dev, request)
+	if err != nil {
+		t.Fatalf("explicit schema override was refused: %v", err)
+	}
+	request.OverrideSchema = false
+	renewed, err := pins.Set(t.Context(), actor, dev, request)
+	if err != nil || renewed.Action != service.PinRenewed || !renewed.Pin.SchemaOverride || renewed.Pin.ID != created.Pin.ID {
+		t.Fatalf("grandfathered schema-invalid pin renewal = %+v, %v", renewed, err)
+	}
+}
+
+func scenarioPinLifecycle(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "pinlifecycle")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	mustKey(t, keys, actor, scope, "VERSION", string(schema.Config), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, dev, "VERSION", "one")
+	oldRevision := latestRevisionOf(t, db, string(dev.Env))
+	publishValue(t, db, values, actor, dev, "VERSION", "two")
+	latestRevision := latestRevisionOf(t, db, string(dev.Env))
+	grantOrg(t, db, who, scope.Org, "pinlifecycle", "pin")
+
+	workload := seedWorkload(t, db, scope, who, "pin_primary")
+	clock := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	pins := &service.Pins{DB: db, Keyring: sharedKeyring(t, db), Now: func() time.Time { return clock }}
+	if _, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+		WorkloadPrincipalID: workload, Revision: latestRevision,
+		ExpiresAt: clock.Add(service.MaxPinLifetime + time.Hour),
+	}); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "365") {
+		t.Fatalf("expiry refusal = %v, want named 365-day maximum", err)
+	}
+	created, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+		WorkloadPrincipalID: workload, Revision: latestRevision, OverrideSchema: true,
+	})
+	if err != nil || created.Action != service.PinCreated || created.Pin.HistoryAuthorized || created.Pin.SchemaOverride {
+		t.Fatalf("pin create = %+v, %v", created, err)
+	}
+	listed, err := pins.List(t.Context(), actor, dev)
+	if err != nil || len(listed) != 1 || listed[0].SchemaOverride {
+		t.Fatalf("valid pin with unused schema override listed as %+v, %v; want override false", listed, err)
+	}
+	publishValue(t, db, values, actor, dev, "VERSION", "three")
+	deliverySvc := &service.Delivery{DB: db, Keyring: sharedKeyring(t, db), Now: func() time.Time { return clock }}
+	fetched, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	if err != nil || fetched.PinnedRevision != latestRevision {
+		t.Fatalf("current-at-creation pin after later publish = %+v, %v", fetched, err)
+	}
+	renewed, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+		WorkloadPrincipalID: workload, Revision: latestRevision,
+		ExpiresAt: clock.Add(200 * 24 * time.Hour),
+	})
+	if err != nil || renewed.Action != service.PinRenewed || renewed.Pin.ID != created.Pin.ID {
+		t.Fatalf("pin renewal = %+v, %v", renewed, err)
+	}
+	grantOrg(t, db, who, scope.Org, "pinlifecycle_history", "reveal-history")
+	reassigned, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+		WorkloadPrincipalID: workload, Revision: oldRevision,
+		ExpiresAt: clock.Add(time.Hour),
+	})
+	if err != nil || reassigned.Action != service.PinReassigned || !reassigned.Pin.HistoryAuthorized {
+		t.Fatalf("pin reassignment = %+v, %v", reassigned, err)
+	}
+	listed, err = pins.List(t.Context(), actor, dev)
+	if err != nil || len(listed) != 1 || listed[0].Revision != oldRevision {
+		t.Fatalf("pin list = %+v, %v", listed, err)
+	}
+	deliverySvc.Now = func() time.Time { return clock.Add(2 * time.Hour) }
+	fetched, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	if err != nil || fetched.PinnedRevision != oldRevision || !fetched.PinExpired {
+		t.Fatalf("pinned delivery = %+v, %v", fetched, err)
+	}
+	seed(t, db, []string{`DELETE FROM grants WHERE id = 'grt_pinlifecycle_pin_0'`})
+	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, ""); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("pinned delivery after authority grant removal = %v, want loud refusal", err)
+	}
+	grantOrg(t, db, who, scope.Org, "pinlifecycle_regrant", "pin")
+	seed(t, db, []string{fmt.Sprintf(
+		"UPDATE snapshots SET payload_present = FALSE WHERE environment_id = '%s' AND revision = %d",
+		dev.Env, oldRevision)})
+	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, ""); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), strconv.FormatInt(oldRevision, 10)) {
+		t.Fatalf("collected pinned payload = %v, want loud refusal naming revision %d", err, oldRevision)
+	}
+	if _, err := revisionSvc(t, db).Restore(t.Context(), actor, dev, oldRevision, ""); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), strconv.FormatInt(oldRevision, 10)) {
+		t.Fatalf("collected restore payload = %v, want loud refusal naming revision %d", err, oldRevision)
+	}
+	seed(t, db, []string{fmt.Sprintf(
+		"UPDATE snapshots SET payload_present = TRUE WHERE environment_id = '%s' AND revision = %d",
+		dev.Env, oldRevision)})
+	if err := pins.Release(t.Context(), actor, dev, workload); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := pins.List(t.Context(), actor, dev); err != nil || len(listed) != 0 {
+		t.Fatalf("pin release left %+v, %v", listed, err)
+	}
+
+	for i := 0; i < service.PinQuotaPerProject; i++ {
+		principal := seedWorkload(t, db, scope, who, fmt.Sprintf("pin_quota_%03d", i))
+		if _, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+			WorkloadPrincipalID: principal, Revision: latestRevision,
+		}); err != nil {
+			t.Fatalf("quota seed pin %d: %v", i, err)
+		}
+	}
+	over := seedWorkload(t, db, scope, who, "pin_quota_over")
+	if _, err := pins.Set(t.Context(), actor, dev, service.SetPinRequest{
+		WorkloadPrincipalID: over, Revision: latestRevision,
+	}); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "quota 100") {
+		t.Fatalf("quota refusal = %v, want named quota 100", err)
+	}
+}
+
+func seedWorkload(t *testing.T, db *store.DB, scope domain.Scope, creator domain.PrincipalID, label string) domain.PrincipalID {
+	t.Helper()
+	principal := domain.PrincipalID("wld_" + label + "_" + string(scope.Project))
+	seed(t, db, []string{
+		fmt.Sprintf(`INSERT INTO principals (id, kind, created_at) VALUES ('%s', 'machine', '2026-01-01T00:00:00Z')`, principal),
+		fmt.Sprintf(`INSERT INTO service_accounts (id, principal_id, org_id, project_id, name, kind, created_at, created_by)
+			VALUES ('sa_%s_%s', '%s', '%s', '%s', '%s', 'workload', '2026-01-01T00:00:00.000000Z', '%s')`,
+			label, scope.Project, principal, scope.Org, scope.Project, label, creator),
+		fmt.Sprintf(`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+			VALUES ('grt_%s_read', '%s', 'read', '%s', NULL, NULL, '2026-01-01T00:00:00Z')`,
+			label, principal, scope.Org),
+	})
+	return principal
+}
+
+func scenarioRestoreSupersededSecret(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "restorehistory")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	mustKey(t, keys, actor, scope, "API_TOKEN", string(schema.Secret), schema.DefaultPresenceRules())
+	mustKey(t, keys, actor, scope, "CURRENT_ONLY", string(schema.Config), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, dev, "API_TOKEN", "old-token")
+	target := latestRevisionOf(t, db, string(dev.Env))
+	publishValue(t, db, values, actor, dev, "API_TOKEN", "new-token")
+	publishValue(t, db, values, actor, dev, "CURRENT_ONLY", "clear-me")
+
+	revisions := revisionSvc(t, db)
+	if _, err := revisions.Restore(t.Context(), actor, dev, target, ""); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("restore without reveal-history = %v, want uniform refusal", err)
+	}
+	grantOrg(t, db, who, scope.Org, "restorehistory", "reveal-history")
+	restored, err := revisions.Restore(t.Context(), actor, dev, target, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Changes) != 2 {
+		t.Fatalf("restore staged %d changes, want old secret set plus current-only clear: %+v", len(restored.Changes), restored)
+	}
+	versions := make([]string, 0, len(restored.Changes))
+	for _, change := range restored.Changes {
+		versions = append(versions, change.VersionID)
+	}
+	if _, err := revisions.Publish(t.Context(), actor, dev, versions); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := revisions.Export(t.Context(), actor, dev, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "API_TOKEN" || got[0].Value != "old-token" {
+		t.Fatalf("restored snapshot = %+v, want only API_TOKEN=old-token", got)
+	}
+	if second, err := revisions.Restore(t.Context(), actor, dev, target, "API_TOKEN"); err != nil {
+		t.Fatal(err)
+	} else if len(second.Changes) != 0 {
+		t.Fatalf("matching per-key restore churned: %+v", second)
+	}
+}
+
+func scenarioRestoreWrittenTimeClassification(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "restorewrittenclass")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	key := mustKey(t, keys, actor, scope, "PAYMENT_PIN", string(schema.Secret), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, dev, "PAYMENT_PIN", "old-pin")
+	target := latestRevisionOf(t, db, string(dev.Env))
+	publishValue(t, db, values, actor, dev, "PAYMENT_PIN", "new-pin")
+	if _, err := keys.Reclassify(t.Context(), actor, scope, key.ID, string(schema.Config)); err != nil {
+		t.Fatal(err)
+	}
+
+	restorer := newPrincipal(t, db, "usr_restore_written_class_"+string(scope.Project), []grantSpec{
+		{capability: "read", scope: scope},
+		{capability: "edit", scope: scope},
+		{capability: "publish", scope: scope},
+	})
+	restoreActor := service.LocalPrincipal(restorer)
+	revisions := revisionSvc(t, db)
+	if _, err := revisions.Restore(t.Context(), restoreActor, dev, target, "PAYMENT_PIN"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("restore of written-time secret without reveal-history = %v, want uniform refusal", err)
+	}
+	grantOrg(t, db, restorer, scope.Org, "restorewrittenclass", "reveal-history")
+	restored, err := revisions.Restore(t.Context(), restoreActor, dev, target, "PAYMENT_PIN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Changes) != 1 {
+		t.Fatalf("restore changes = %+v, want one historical secret value", restored.Changes)
+	}
+	if _, err := revisions.Publish(t.Context(), restoreActor, dev, []string{restored.Changes[0].VersionID}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // scenarioHistoricalExportFormula pins the export half of the revision ADR's

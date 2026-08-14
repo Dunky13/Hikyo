@@ -9,6 +9,22 @@ import (
 	"context"
 )
 
+const countRevisionPinsForProject = `-- name: CountRevisionPinsForProject :one
+SELECT COUNT(*) FROM revision_pins WHERE org_id = ? AND project_id = ?
+`
+
+type CountRevisionPinsForProjectParams struct {
+	OrgID     string
+	ProjectID string
+}
+
+func (q *Queries) CountRevisionPinsForProject(ctx context.Context, arg CountRevisionPinsForProjectParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRevisionPinsForProject, arg.OrgID, arg.ProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deletePendingChangeByID = `-- name: DeletePendingChangeByID :execrows
 DELETE FROM pending_changes
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND id = ?
@@ -127,6 +143,50 @@ func (q *Queries) DeleteRevisionKeyChangesForEnvironment(ctx context.Context, ar
 	return result.RowsAffected()
 }
 
+const deleteRevisionPin = `-- name: DeleteRevisionPin :execrows
+DELETE FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND workload_principal_id = ?
+`
+
+type DeleteRevisionPinParams struct {
+	OrgID               string
+	ProjectID           string
+	EnvironmentID       string
+	WorkloadPrincipalID string
+}
+
+func (q *Queries) DeleteRevisionPin(ctx context.Context, arg DeleteRevisionPinParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRevisionPin,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.WorkloadPrincipalID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteRevisionPinsForEnvironment = `-- name: DeleteRevisionPinsForEnvironment :execrows
+DELETE FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ?
+`
+
+type DeleteRevisionPinsForEnvironmentParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+}
+
+func (q *Queries) DeleteRevisionPinsForEnvironment(ctx context.Context, arg DeleteRevisionPinsForEnvironmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteRevisionPinsForEnvironment, arg.OrgID, arg.ProjectID, arg.EnvironmentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSnapshotEntriesForEnvironment = `-- name: DeleteSnapshotEntriesForEnvironment :execrows
 DELETE FROM snapshot_entries
 WHERE org_id = ? AND project_id = ? AND environment_id = ?
@@ -166,7 +226,7 @@ func (q *Queries) DeleteSnapshotsForEnvironment(ctx context.Context, arg DeleteS
 }
 
 const getLatestSnapshot = `-- name: GetLatestSnapshot :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ?
 ORDER BY revision DESC
@@ -193,12 +253,54 @@ func (q *Queries) GetLatestSnapshot(ctx context.Context, arg GetLatestSnapshotPa
 		&i.SchemaRevision,
 		&i.PublishedBy,
 		&i.PublishedAt,
+		&i.PayloadPresent,
+	)
+	return i, err
+}
+
+const getRevisionPinForWorkload = `-- name: GetRevisionPinForWorkload :one
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND workload_principal_id = ?
+`
+
+type GetRevisionPinForWorkloadParams struct {
+	OrgID               string
+	ProjectID           string
+	EnvironmentID       string
+	WorkloadPrincipalID string
+}
+
+func (q *Queries) GetRevisionPinForWorkload(ctx context.Context, arg GetRevisionPinForWorkloadParams) (RevisionPin, error) {
+	row := q.db.QueryRowContext(ctx, getRevisionPinForWorkload,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.WorkloadPrincipalID,
+	)
+	var i RevisionPin
+	err := row.Scan(
+		&i.ID,
+		&i.OrgID,
+		&i.ProjectID,
+		&i.EnvironmentID,
+		&i.WorkloadPrincipalID,
+		&i.SnapshotID,
+		&i.Revision,
+		&i.AuthorityPrincipalID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.AuthorizedAt,
+		&i.HistoryAuthorized,
+		&i.SchemaOverride,
 	)
 	return i, err
 }
 
 const getSnapshotByRevision = `-- name: GetSnapshotByRevision :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND revision = ?
 `
@@ -227,6 +329,7 @@ func (q *Queries) GetSnapshotByRevision(ctx context.Context, arg GetSnapshotByRe
 		&i.SchemaRevision,
 		&i.PublishedBy,
 		&i.PublishedAt,
+		&i.PayloadPresent,
 	)
 	return i, err
 }
@@ -235,8 +338,8 @@ const insertPendingChange = `-- name: InsertPendingChange :exec
 
 INSERT INTO pending_changes (
     id, org_id, project_id, environment_id, key_id, owner_id,
-    operation, ciphertext, staged_from_revision, staged_from_entry, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertPendingChangeParams struct {
@@ -251,6 +354,7 @@ type InsertPendingChangeParams struct {
 	StagedFromRevision int64
 	StagedFromEntry    string
 	CreatedAt          string
+	Source             string
 }
 
 // Revisions, drafts and publishing (#51). Tenant-scoped statements: the
@@ -278,6 +382,7 @@ func (q *Queries) InsertPendingChange(ctx context.Context, arg InsertPendingChan
 		arg.StagedFromRevision,
 		arg.StagedFromEntry,
 		arg.CreatedAt,
+		arg.Source,
 	)
 	return err
 }
@@ -307,6 +412,49 @@ func (q *Queries) InsertRevisionKeyChange(ctx context.Context, arg InsertRevisio
 		arg.KeyID,
 		arg.KeyName,
 		arg.Change,
+	)
+	return err
+}
+
+const insertRevisionPin = `-- name: InsertRevisionPin :exec
+INSERT INTO revision_pins (
+    id, org_id, project_id, environment_id, workload_principal_id,
+    snapshot_id, revision, authority_principal_id, expires_at, created_at,
+    authorized_at, history_authorized, schema_override
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertRevisionPinParams struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	WorkloadPrincipalID  string
+	SnapshotID           string
+	Revision             int64
+	AuthorityPrincipalID string
+	ExpiresAt            string
+	CreatedAt            string
+	AuthorizedAt         string
+	HistoryAuthorized    int64
+	SchemaOverride       int64
+}
+
+func (q *Queries) InsertRevisionPin(ctx context.Context, arg InsertRevisionPinParams) error {
+	_, err := q.db.ExecContext(ctx, insertRevisionPin,
+		arg.ID,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.WorkloadPrincipalID,
+		arg.SnapshotID,
+		arg.Revision,
+		arg.AuthorityPrincipalID,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+		arg.AuthorizedAt,
+		arg.HistoryAuthorized,
+		arg.SchemaOverride,
 	)
 	return err
 }
@@ -381,7 +529,7 @@ func (q *Queries) InsertSnapshotEntry(ctx context.Context, arg InsertSnapshotEnt
 
 const listPendingChangesForOwner = `-- name: ListPendingChangesForOwner :many
 SELECT id, org_id, project_id, environment_id, key_id, owner_id,
-       operation, ciphertext, staged_from_revision, staged_from_entry, created_at
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
 FROM pending_changes
 WHERE org_id = ? AND project_id = ? AND owner_id = ?
 ORDER BY environment_id, key_id
@@ -418,6 +566,7 @@ func (q *Queries) ListPendingChangesForOwner(ctx context.Context, arg ListPendin
 			&i.StagedFromRevision,
 			&i.StagedFromEntry,
 			&i.CreatedAt,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -535,6 +684,58 @@ func (q *Queries) ListRevisionKeyChanges(ctx context.Context, arg ListRevisionKe
 	return items, nil
 }
 
+const listRevisionPins = `-- name: ListRevisionPins :many
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ?
+ORDER BY workload_principal_id
+`
+
+type ListRevisionPinsParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+}
+
+func (q *Queries) ListRevisionPins(ctx context.Context, arg ListRevisionPinsParams) ([]RevisionPin, error) {
+	rows, err := q.db.QueryContext(ctx, listRevisionPins, arg.OrgID, arg.ProjectID, arg.EnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RevisionPin
+	for rows.Next() {
+		var i RevisionPin
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvironmentID,
+			&i.WorkloadPrincipalID,
+			&i.SnapshotID,
+			&i.Revision,
+			&i.AuthorityPrincipalID,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.AuthorizedAt,
+			&i.HistoryAuthorized,
+			&i.SchemaOverride,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSnapshotEntries = `-- name: ListSnapshotEntries :many
 SELECT id, org_id, project_id, environment_id, snapshot_id,
        key_id, key_name, classification, ciphertext, value_entry_id
@@ -590,7 +791,7 @@ func (q *Queries) ListSnapshotEntries(ctx context.Context, arg ListSnapshotEntri
 }
 
 const listSnapshots = `-- name: ListSnapshots :many
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ?
 ORDER BY revision DESC
@@ -620,6 +821,7 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 			&i.SchemaRevision,
 			&i.PublishedBy,
 			&i.PublishedAt,
+			&i.PayloadPresent,
 		); err != nil {
 			return nil, err
 		}

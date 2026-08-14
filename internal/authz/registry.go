@@ -185,9 +185,16 @@ const (
 	OpValueExportReveal        Operation = "value.export-reveal"
 	OpValueExportRevealHistory Operation = "value.export-reveal-history"
 
-	OpRevisionList    Operation = "revision.list"
-	OpRevisionShow    Operation = "revision.show"
-	OpRevisionSignals Operation = "revision.signals"
+	OpRevisionList           Operation = "revision.list"
+	OpRevisionShow           Operation = "revision.show"
+	OpRevisionSignals        Operation = "revision.signals"
+	OpRevisionRestore        Operation = "revision.restore"
+	OpRevisionRestoreHistory Operation = "revision.restore-reveal-history"
+
+	OpPinSet        Operation = "pin.set"
+	OpPinSetHistory Operation = "pin.set-reveal-history"
+	OpPinList       Operation = "pin.list"
+	OpPinRelease    Operation = "pin.release"
 
 	// The advisory channel's two checks: one at connect, over the project, and
 	// one PER EVENT over the environment the event names.
@@ -575,6 +582,13 @@ const (
 	StoreSnapshotsInsertChange      StoreOp = "snapshots.InsertChange"
 	StoreSnapshotsDeleteEnvironment StoreOp = "snapshots.DeleteEnvironment"
 
+	StorePinsGetForWorkload    StoreOp = "pins.GetForWorkload"
+	StorePinsList              StoreOp = "pins.List"
+	StorePinsCountProject      StoreOp = "pins.CountProject"
+	StorePinsInsert            StoreOp = "pins.Insert"
+	StorePinsDelete            StoreOp = "pins.Delete"
+	StorePinsDeleteEnvironment StoreOp = "pins.DeleteEnvironment"
+
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
 	// belongs to is part of its AAD, not a tenant predicate.
@@ -737,6 +751,8 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreSnapshotsList:               true,
 	StoreSnapshotsEntries:            true,
 	StoreSnapshotsChanges:            true,
+	StorePinsGetForWorkload:          true,
+	StorePinsList:                    true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -1117,7 +1133,8 @@ var operations = map[Operation]opSpec{
 			// other environment for them to survive in.
 			StoreValuesClearEnvironment:    true,
 			StorePendingDiscardEnvironment: true, StoreSnapshotsDeleteEnvironment: true,
-			StoreEnvironmentsDelete: true, StoreAuditTenantInsert: true,
+			StorePinsDeleteEnvironment: true,
+			StoreEnvironmentsDelete:    true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventEnvDeleted},
 	},
@@ -1663,6 +1680,76 @@ var operations = map[Operation]opSpec{
 		},
 		auditedNone: true,
 	},
+	OpRevisionRestore: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreValuesList: true, StoreSnapshotsLatest: true,
+			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
+			StorePendingStage: true, StoreAuditTenantInsert: true,
+		},
+		humanOnly: true,
+		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+	},
+	OpRevisionRestoreHistory: {
+		class:     ClassTenant,
+		level:     domain.LevelEnv,
+		formula:   Formula{{Cap: domain.CapRevealHistory, At: domain.LevelEnv}},
+		storeOps:  map[StoreOp]bool{},
+		humanOnly: true,
+		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+	},
+	OpPinSet: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapPin, At: domain.LevelEnv},
+			{Cap: domain.CapPublish, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StoreCatalogueList: true,
+			StoreCataloguePresenceList: true, StoreSnapshotsLatest: true,
+			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
+			StorePinsGetForWorkload: true, StorePinsCountProject: true,
+			StorePinsInsert: true, StorePinsDelete: true, StoreAuditTenantInsert: true,
+		},
+		humanOnly: true,
+		events: []audit.EventType{
+			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
+			audit.EventPinExpiryRefused,
+		},
+	},
+	OpPinSetHistory: {
+		class:     ClassTenant,
+		level:     domain.LevelEnv,
+		formula:   Formula{{Cap: domain.CapRevealHistory, At: domain.LevelEnv}},
+		storeOps:  map[StoreOp]bool{},
+		humanOnly: true,
+		events: []audit.EventType{
+			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
+		},
+	},
+	OpPinList: {
+		class:       ClassTenant,
+		level:       domain.LevelEnv,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps:    map[StoreOp]bool{StorePinsList: true},
+		humanOnly:   true,
+		auditedNone: true,
+	},
+	OpPinRelease: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapPin, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreProjectsLock: true, StorePinsGetForWorkload: true, StorePinsDelete: true,
+			StoreAuditTenantInsert: true,
+		},
+		humanOnly: true,
+		events:    []audit.EventType{audit.EventPinReleased},
+	},
 	// The advisory channel touches no store operation at all: the events are
 	// metadata the server already emitted, and every one of them is authorized
 	// here before it is written to a stream.
@@ -2180,6 +2267,7 @@ var operations = map[Operation]opSpec{
 		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{
 			StoreSnapshotsLatest: true, StoreSnapshotsEntries: true,
+			StoreSnapshotsAtRevision: true, StorePinsGetForWorkload: true,
 			StoreCatalogueList:         true,
 			StoreCataloguePresenceList: true,
 			StoreCatalogueRevisionGet:  true,

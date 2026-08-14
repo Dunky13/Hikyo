@@ -307,6 +307,7 @@ var fixtureTables = []string{
 	// Revisions and drafts (#51): a rolled-back mutation must leave no draft,
 	// no snapshot, no payload row and no lineage row behind.
 	"pending_changes", "snapshots", "snapshot_entries", "revision_key_changes",
+	"revision_pins",
 }
 
 // rowCounts is the row-diff half of the no-side-effect assertion.

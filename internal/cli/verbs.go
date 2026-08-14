@@ -75,6 +75,7 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"key":               runKey,
 	"values":            runValues,
 	"revision":          runRevision,
+	"pin":               runPin,
 	"rotate-token-key":  runRotateTokenKey,
 	"instance-config":   runInstanceConfig,
 	"doctor":            runDoctor,
@@ -171,6 +172,10 @@ import:                                            authors artifacts, then stops
 revisions:                                         --env selects the environment
   hikyo revision list                               lineage only, never values
   hikyo revision show [<N>|latest]                  carries the change token
+  hikyo revision rollback <N> [--key KEY]           stage a restore as ordinary drafts
+  hikyo pin create --workload ID --revision N       create, re-pin, or renew
+  hikyo pin list                                    show pins and expired status
+  hikyo pin release <workload-principal>            release a durable pin
   hikyo rotate-token-key --yes                      new token key; one full fetch, no restart wave
 
 instance configuration:

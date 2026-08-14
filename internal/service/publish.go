@@ -130,6 +130,7 @@ type pendingApply struct {
 	// draft was staged, "" for a cell that was absent. The freshness check
 	// compares exactly this.
 	stagedFromEntry string
+	source          store.PendingSource
 }
 
 // resolvedCell is one key's outcome in one environment after the selected
@@ -279,7 +280,14 @@ func (s *Revisions) Publish(ctx context.Context, actor Actor, scope domain.Scope
 				}
 				out.Published = append(out.Published, apply.versionID)
 			}
-			if err := recordPublish(ctx, r, ep, caller.Principal, envID, published, len(applies), "values"); err != nil {
+			trigger := "values"
+			for _, apply := range applies {
+				if apply.source == store.PendingSourceRestore {
+					trigger = "restore"
+					break
+				}
+			}
+			if err := recordPublish(ctx, r, ep, caller.Principal, envID, published, len(applies), trigger); err != nil {
 				return err
 			}
 			out.Environments = append(out.Environments, published)
@@ -510,6 +518,7 @@ func selectVersions(ctx context.Context, r store.Repos, p authz.Proof,
 			sealed:          change.Ciphertext,
 			stagedFrom:      change.StagedFromRevision,
 			stagedFromEntry: change.StagedFromEntry,
+			source:          change.Source,
 		})
 	}
 	slices.Sort(closed)

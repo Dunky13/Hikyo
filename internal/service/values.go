@@ -490,6 +490,7 @@ func (s *Values) stage(ctx context.Context, actor Actor, scope domain.Scope, key
 			ID: versionID, KeyID: key.ID, OwnerID: string(caller.Principal),
 			Operation: operation, Ciphertext: sealed,
 			StagedFromRevision: revision, StagedFromEntry: baseline, CreatedAt: now,
+			Source: store.PendingSourceValues,
 		}); err != nil {
 			return err
 		}

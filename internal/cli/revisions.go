@@ -25,13 +25,16 @@ import (
 // enumerated-key ceremony it needs.
 
 func runRevision(ctx context.Context, ios IO, args []string) error {
-	sub, rest, err := subverb("revision", args, "list", "show")
+	sub, rest, err := subverb("revision", args, "list", "show", "rollback")
 	if err != nil {
 		return err
 	}
-	var format string
+	var format, key string
 	st, flags, err := parseCommon("revision "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&format, "o", "table", "output format: table or json")
+		if sub == "rollback" {
+			fs.StringVar(&key, "key", "", "restore only this key")
+		}
 	})
 	if err != nil {
 		return err
@@ -46,6 +49,9 @@ func runRevision(ctx context.Context, ios IO, args []string) error {
 		if err := flags.checkNoPositionals("revision list"); err != nil {
 			return err
 		}
+	}
+	if sub == "rollback" && flags.positional() == "" {
+		return failf(ExitUsage, "usage: hikyo revision rollback <N> [--key KEY]")
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -108,6 +114,30 @@ func runRevision(ctx context.Context, ios IO, args []string) error {
 			out.Revision, out.SchemaRevision, out.ChangeToken)
 		return Render(ios.Stdout, f, Table{
 			Columns: []string{"KEY", "CHANGE"}, Rows: rows, JSON: out,
+		})
+
+	case "rollback":
+		which := flags.positional()
+		n, err := strconv.ParseInt(which, 10, 64)
+		if err != nil || n < 1 {
+			return failf(ExitUsage, "revision rollback requires a positive numeric revision")
+		}
+		body := apigen.RollbackRequest{}
+		if key != "" {
+			name := apigen.KeyName(key)
+			body.Key = &name
+		}
+		var out apigen.RollbackResult
+		if err := client.Do(ctx, http.MethodPost,
+			base+"/revisions/"+url.PathEscape(which)+"/rollback", body, &out); err != nil {
+			return err
+		}
+		rows := make([][]string, 0, len(out.Changes))
+		for _, change := range out.Changes {
+			rows = append(rows, []string{change.VersionId, change.Name, string(change.Operation)})
+		}
+		return Render(ios.Stdout, f, Table{
+			Columns: []string{"VERSION", "KEY", "OPERATION"}, Rows: rows, JSON: out,
 		})
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.

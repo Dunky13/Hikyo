@@ -24,6 +24,13 @@ const (
 	PendingUnset PendingOperation = "unset"
 )
 
+type PendingSource string
+
+const (
+	PendingSourceValues  PendingSource = "values"
+	PendingSourceRestore PendingSource = "restore"
+)
+
 // PendingChange is one immutable draft version owned by one principal.
 type PendingChange struct {
 	// ID is the immutable version id a publish names. Editing the cell mints a
@@ -45,6 +52,7 @@ type PendingChange struct {
 	// check: the rule is stated per entry, not per environment.
 	StagedFromEntry string
 	CreatedAt       time.Time
+	Source          PendingSource
 }
 
 // PendingMarker is a pending change stripped of its material: what another
@@ -69,6 +77,7 @@ type NewPendingChange struct {
 	StagedFromRevision int64
 	StagedFromEntry    string
 	CreatedAt          time.Time
+	Source             PendingSource
 }
 
 // Snapshot is the immutable per-(project, environment) materialization's
@@ -83,6 +92,7 @@ type Snapshot struct {
 	SchemaRevision int64
 	PublishedBy    string
 	PublishedAt    time.Time
+	PayloadPresent bool
 }
 
 // NewSnapshot carries the caller-suppliable fields of a snapshot insert.
@@ -198,5 +208,48 @@ type SnapshotRepo interface {
 	InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error
 	// DeleteEnvironment removes the environment's snapshots, their entries and
 	// their lineage, in the transaction that deletes the environment.
+	DeleteEnvironment(ctx context.Context, p authz.Proof) error
+}
+
+// RevisionPin is one durable delivery route and retention reference.
+type RevisionPin struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	WorkloadPrincipalID  string
+	SnapshotID           string
+	Revision             int64
+	AuthorityPrincipalID string
+	ExpiresAt            time.Time
+	CreatedAt            time.Time
+	AuthorizedAt         time.Time
+	HistoryAuthorized    bool
+	SchemaOverride       bool
+}
+
+type NewRevisionPin struct {
+	ID                   string
+	WorkloadPrincipalID  string
+	SnapshotID           string
+	Revision             int64
+	AuthorityPrincipalID string
+	ExpiresAt            time.Time
+	CreatedAt            time.Time
+	AuthorizedAt         time.Time
+	HistoryAuthorized    bool
+	SchemaOverride       bool
+}
+
+type RevisionPinReader interface {
+	GetForWorkload(ctx context.Context, p authz.Proof, workloadPrincipalID string) (RevisionPin, error)
+	List(ctx context.Context, p authz.Proof) ([]RevisionPin, error)
+}
+
+type RevisionPinRepo interface {
+	RevisionPinReader
+	CountProject(ctx context.Context, p authz.Proof) (int64, error)
+	Insert(ctx context.Context, p authz.Proof, pin NewRevisionPin) error
+	Delete(ctx context.Context, p authz.Proof, workloadPrincipalID string) (bool, error)
 	DeleteEnvironment(ctx context.Context, p authz.Proof) error
 }

@@ -7228,6 +7228,133 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - name: revision
+        in: path
+        required: true
+        schema: {type: integer, format: int64, minimum: 1}
+    post:
+      operationId: rollbackRevision
+      tags: [revisions]
+      summary: Stage an environment or key restore from one revision.
+      description: |
+        Computes a two-way set/unset diff and writes ordinary caller-owned
+        pending changes. The normal publish verb commits them and validates
+        against the current schema. Reading superseded secret material also
+        requires reveal-history at this staging step.
+      x-hikyo-class: tenant
+      x-hikyo-operation: revision.restore
+      x-hikyo-formula: [edit@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackRequest"
+      responses:
+        "200":
+          description: Ordinary pending changes staged by the restore.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RollbackResult"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: listRevisionPins
+      tags: [revisions]
+      summary: List durable workload revision pins.
+      x-hikyo-class: tenant
+      x-hikyo-operation: pin.list
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: Pins, including loud expired status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisionPinList"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+    post:
+      operationId: createRevisionPin
+      tags: [revisions]
+      summary: Create, reassign, or renew a workload revision pin.
+      description: |
+        One durable pin may exist per workload and environment. Repeating this
+        operation renews the same revision or reassigns a different one, with
+        authorization rechecked. Omitted expiry defaults to 180 days; the
+        maximum is 365 days. A non-current revision requires reveal-history,
+        and a current-schema failure requires override_schema.
+      x-hikyo-class: tenant
+      x-hikyo-operation: pin.set
+      x-hikyo-formula: [pin@environment, publish@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevisionPinRequest"}
+      responses:
+        "200":
+          description: The created, reassigned, or renewed pin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RevisionPinResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+      - name: workloadPrincipal
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+    delete:
+      operationId: releaseRevisionPin
+      tags: [revisions]
+      summary: Release a workload revision pin.
+      x-hikyo-class: tenant
+      x-hikyo-operation: pin.release
+      x-hikyo-formula: [pin@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204": {description: Released.}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
   /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -8397,6 +8524,63 @@ components:
         created_at:
           type: string
           format: date-time
+    RollbackRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        key:
+          $ref: "#/components/schemas/KeyName"
+    RollbackResult:
+      type: object
+      additionalProperties: false
+      required: [revision, changes]
+      properties:
+        revision:
+          type: integer
+          format: int64
+        changes:
+          type: array
+          items: {$ref: "#/components/schemas/PendingChange"}
+    RevisionPinRequest:
+      type: object
+      additionalProperties: false
+      required: [workload_principal_id, revision]
+      properties:
+        workload_principal_id: {$ref: "#/components/schemas/ID"}
+        revision: {type: integer, format: int64, minimum: 1}
+        expires_at: {$ref: "#/components/schemas/Timestamp"}
+        override_schema: {type: boolean, default: false}
+    RevisionPin:
+      type: object
+      additionalProperties: false
+      required: [id, workload_principal_id, revision, authority_principal_id, expires_at, created_at, authorized_at, history_authorized, schema_override, expired]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        workload_principal_id: {$ref: "#/components/schemas/ID"}
+        revision: {type: integer, format: int64}
+        authority_principal_id: {$ref: "#/components/schemas/ID"}
+        expires_at: {$ref: "#/components/schemas/Timestamp"}
+        created_at: {$ref: "#/components/schemas/Timestamp"}
+        authorized_at: {$ref: "#/components/schemas/Timestamp"}
+        history_authorized: {type: boolean}
+        schema_override: {type: boolean}
+        expired: {type: boolean}
+    RevisionPinResult:
+      type: object
+      additionalProperties: false
+      required: [action, pin]
+      properties:
+        action: {type: string, enum: [created, reassigned, renewed]}
+        pin: {$ref: "#/components/schemas/RevisionPin"}
+    RevisionPinList:
+      type: object
+      additionalProperties: false
+      required: [items, count]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/RevisionPin"}
+        count: {type: integer, minimum: 0}
     PublishRequest:
       type: object
       required: [version_ids]
@@ -9576,7 +9760,7 @@ components:
     DeliveryResponse:
       type: object
       additionalProperties: false
-      required: [current, cursor, change_token, schema_revision, keys]
+      required: [current, cursor, change_token, schema_revision, keys, pin_expired]
       description: |
         Either the authorized projection, or the statement that the presented
         cursor is current — in which case `keys` is empty and NOTHING was
@@ -9612,6 +9796,14 @@ components:
           type: integer
           minimum: 0
           description: The project's monotonic key-catalogue revision.
+        pinned_revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Present when a durable workload pin selected the snapshot.
+        pin_expired:
+          type: boolean
+          description: Loud status; expiry never silently changes delivery.
         keys:
           type: array
           items:

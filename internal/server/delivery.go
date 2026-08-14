@@ -52,11 +52,17 @@ func (a *API) FetchDelivery(ctx context.Context, req apigen.FetchDeliveryRequest
 			Presence:       apigen.DeliveredKeyPresence(k.Presence),
 		})
 	}
-	return apigen.FetchDelivery200JSONResponse{
+	out := apigen.FetchDelivery200JSONResponse{
 		Current:        res.Current,
 		Cursor:         res.Cursor,
 		ChangeToken:    res.ChangeToken,
 		SchemaRevision: int(res.SchemaRevision),
 		Keys:           keys,
-	}, nil
+		PinExpired:     res.PinExpired,
+	}
+	if res.PinnedRevision > 0 {
+		revision := res.PinnedRevision
+		out.PinnedRevision = &revision
+	}
+	return out, nil
 }

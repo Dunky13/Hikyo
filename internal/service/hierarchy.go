@@ -972,6 +972,9 @@ func (s *Environments) Delete(ctx context.Context, actor Actor, scope domain.Sco
 		if err := r.Pending().DiscardEnvironment(ctx, p); err != nil {
 			return err
 		}
+		if err := r.Pins().DeleteEnvironment(ctx, p); err != nil {
+			return err
+		}
 		if err := r.Snapshots().DeleteEnvironment(ctx, p); err != nil {
 			return err
 		}

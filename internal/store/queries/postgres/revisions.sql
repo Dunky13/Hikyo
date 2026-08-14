@@ -15,12 +15,12 @@
 -- name: InsertPendingChange :exec
 INSERT INTO pending_changes (
     id, org_id, project_id, environment_id, key_id, owner_id,
-    operation, ciphertext, staged_from_revision, staged_from_entry, created_at
+    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
 ) VALUES (
     sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(chain_project_id),
     sqlc.arg(chain_env_id), sqlc.arg(key_id), sqlc.arg(owner_id),
     sqlc.arg(operation), sqlc.narg(ciphertext), sqlc.arg(staged_from_revision),
-    sqlc.arg(staged_from_entry), sqlc.arg(created_at)
+    sqlc.arg(staged_from_entry), sqlc.arg(created_at), sqlc.arg(source)
 );
 
 -- DeletePendingChangeForCell collects the superseded version. Editing a cell
@@ -59,7 +59,7 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 -- principal another's ciphertext.
 -- name: ListPendingChangesForOwner :many
 SELECT id, org_id, project_id, environment_id, key_id, owner_id,
-       operation, ciphertext, staged_from_revision, staged_from_entry, created_at
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
 FROM pending_changes
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND owner_id = sqlc.arg(owner_id)
@@ -88,7 +88,7 @@ INSERT INTO snapshots (
 -- GetLatestSnapshot is the delivery-shaped read: a workload fetch defaults to
 -- the latest published snapshot for its (project, environment).
 -- name: GetLatestSnapshot :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id)
@@ -96,13 +96,13 @@ ORDER BY revision DESC
 LIMIT 1;
 
 -- name: GetSnapshotByRevision :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id) AND revision = sqlc.arg(revision);
 
 -- name: ListSnapshots :many
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id)
@@ -151,6 +151,52 @@ FROM revision_key_changes
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id) AND revision = sqlc.arg(revision)
 ORDER BY key_name;
+
+-- name: GetRevisionPinForWorkload :one
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id)
+  AND workload_principal_id = sqlc.arg(workload_principal_id);
+
+-- name: ListRevisionPins :many
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id)
+ORDER BY workload_principal_id;
+
+-- name: CountRevisionPinsForProject :one
+SELECT COUNT(*) FROM revision_pins
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
+
+-- name: InsertRevisionPin :exec
+INSERT INTO revision_pins (
+    id, org_id, project_id, environment_id, workload_principal_id,
+    snapshot_id, revision, authority_principal_id, expires_at, created_at,
+    authorized_at, history_authorized, schema_override
+) VALUES (
+    sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(chain_project_id),
+    sqlc.arg(chain_env_id), sqlc.arg(workload_principal_id), sqlc.arg(snapshot_id),
+    sqlc.arg(revision), sqlc.arg(authority_principal_id), sqlc.arg(expires_at),
+    sqlc.arg(created_at), sqlc.arg(authorized_at), sqlc.arg(history_authorized),
+    sqlc.arg(schema_override)
+);
+
+-- name: DeleteRevisionPin :execrows
+DELETE FROM revision_pins
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id)
+  AND workload_principal_id = sqlc.arg(workload_principal_id);
+
+-- name: DeleteRevisionPinsForEnvironment :execrows
+DELETE FROM revision_pins
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id);
 
 -- name: DeleteRevisionKeyChangesForEnvironment :execrows
 DELETE FROM revision_key_changes
