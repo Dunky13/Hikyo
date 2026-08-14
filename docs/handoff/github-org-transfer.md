@@ -13,6 +13,8 @@ Date: 2026-08-14
   Go module path to `github.com/Hikyo-Org/hikyo`.
 - Changed container and Helm coordinates to `ghcr.io/hikyo-org/hikyo` and
   `ghcr.io/hikyo-org/charts/hikyo`.
+- Opened the protected-branch namespace cutover as
+  [Hikyo-Org/Hikyo#127](https://github.com/Hikyo-Org/Hikyo/pull/127).
 
 ## Organization controls
 
