@@ -148,7 +148,14 @@ jobs:
           version: v4.2.3
       - name: Chart renders and carries release substitution anchors
         run: |
-          grep -Fx "  repository: ghcr.io/hikyo-org/hikyo" chart/hikyo/values.yaml
+          module_path="$(awk '$1 == "module" { print $2 }' go.mod)"
+          if [[ "$module_path" =~ ^github\.com/([^/]+)/hikyo$ ]]; then
+            module_owner="${BASH_REMATCH[1],,}"
+          else
+            echo "unexpected Go module path: $module_path" >&2
+            exit 1
+          fi
+          grep -Fx "  repository: ghcr.io/${module_owner}/hikyo" chart/hikyo/values.yaml
           grep -Fx "  digest: sha256:RELEASE_IMAGE_DIGEST" chart/hikyo/values.yaml
           helm lint chart/hikyo --set database.existingSecret=fixture \
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
