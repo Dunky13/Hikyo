@@ -41,10 +41,22 @@ jobs:
         run: ./scripts/ci/verify-docs.sh
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - name: Archive Pages artifact, including security.txt
+        run: |
+          tar --dereference --hard-dereference \
+            --directory docs/site/dist \
+            --exclude=.git \
+            --exclude=.github \
+            -cvf "$RUNNER_TEMP/artifact.tar" .
+          tar -tf "$RUNNER_TEMP/artifact.tar" |
+            grep -Fx './.well-known/security.txt'
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          path: docs/site/dist
+          name: github-pages
+          path: ${{ runner.temp }}/artifact.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     needs: build
