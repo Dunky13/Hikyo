@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/authz"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
 )
 
 func TestReadTransactionDoesNotBlockWriter(t *testing.T) {

@@ -48,9 +48,9 @@ printf '{"spdxVersion":"SPDX-2.3"}\n' >"$dist/hikyo-image.spdx.json"
 printf '#!/bin/sh\nexit 0\n' >"$dist/install.sh"
 image_digest=sha256:1111111111111111111111111111111111111111111111111111111111111111
 chart_digest=sha256:2222222222222222222222222222222222222222222222222222222222222222
-jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
+jq -n --arg digest "$image_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
 	>"$dist/image-index.oci-payload.json"
-jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/dunky13/charts/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
+jq -n --arg digest "$chart_digest" '{critical:{identity:{"docker-reference":"ghcr.io/hikyo-org/charts/hikyo"},image:{"docker-manifest-digest":$digest}}}' \
 	>"$dist/chart-index.oci-payload.json"
 mkdir -p "$fixture_dir/hikyo"
 printf 'name: hikyo\nversion: %s\nappVersion: %s\n' "$version" "$version" >"$fixture_dir/hikyo/Chart.yaml"
@@ -59,7 +59,7 @@ tar -czf "$dist/hikyo-$version.tgz" -C "$fixture_dir" hikyo
 printf '{"releases":[{"version":"%s","sequence":1}]}\n' "$version" >"$fixture_dir/trust-metadata.json"
 
 "$script_dir/create-manifest.sh" "$version" "$commit" primary-1 \
-	ghcr.io/dunky13/hikyo "$image_digest" ghcr.io/dunky13/charts/hikyo "$chart_digest" \
+	ghcr.io/hikyo-org/hikyo "$image_digest" ghcr.io/hikyo-org/charts/hikyo "$chart_digest" \
 	"$dist" "$fixture_dir/trust-metadata.json" >/dev/null
 
 jq -e '

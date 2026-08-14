@@ -4,7 +4,7 @@ Helm processes it, verify the chart digest with the primary key pinned by that
 root:
 
   cosign verify --insecure-ignore-tlog --key release/trust/primary.pub \
-    ghcr.io/dunky13/charts/hikyo@sha256:CHART_DIGEST
+    ghcr.io/hikyo-org/charts/hikyo@sha256:CHART_DIGEST
 
 Then name the database Secret and the reverse proxy's exact trusted CIDRs:
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // The JSON Schema conformance baseline.

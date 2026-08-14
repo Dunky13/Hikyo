@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
 )
 
 // Golden snapshots (api-cli-surface ADR § The CLI is a frozen surface too).

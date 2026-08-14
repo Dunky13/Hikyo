@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
 )
 
 // runRevisionDemo is the #51 demo criterion, executed rather than described:

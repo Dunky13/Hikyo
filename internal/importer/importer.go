@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // The uniform connector bounds (import-paths ADR § Architecture: "Connector

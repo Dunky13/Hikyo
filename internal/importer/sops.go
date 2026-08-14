@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/getsops/sops/v3/cmd/sops/formats"
 	"github.com/getsops/sops/v3/decrypt"
 	"gopkg.in/yaml.v3"

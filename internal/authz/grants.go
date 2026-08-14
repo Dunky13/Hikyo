@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 )
 
 // The grant surface's in-transaction face (#55). Service code never sees the

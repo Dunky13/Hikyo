@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/delivery"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/server"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/delivery"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // The HTTP leg of #62. The isolation suite drives the federation and delivery

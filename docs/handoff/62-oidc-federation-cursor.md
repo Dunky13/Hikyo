@@ -1,6 +1,6 @@
 # Handoff: #62 OIDC federation + conditional fetch cursor
 
-Issue: https://github.com/Dunky13/hikyo/issues/62 (parent #41; the M1 federation
+Issue: https://github.com/Hikyo-Org/hikyo/issues/62 (parent #41; the M1 federation
 portion of the machine-identities ADR, `docs/adr/machine-identities.md` on the
 `wayfinder-docs` branch, plus the revision ADR's change token as amended by the
 schema ADR). Blocked-by #61 is merged; this builds directly on its credential

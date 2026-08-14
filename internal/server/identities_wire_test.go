@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // The credential RENDER function, tested where the bug was.

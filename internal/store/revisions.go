@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 )
 
 // Revisions, drafts and publishing storage shapes (#51, revision-model ADR).

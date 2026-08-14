@@ -20,7 +20,7 @@ import (
 )
 
 // Module is the module path the analyzers reason about.
-const Module = "github.com/Dunky13/hikyo"
+const Module = "github.com/Hikyo-Org/hikyo"
 
 var (
 	loadOnce sync.Once

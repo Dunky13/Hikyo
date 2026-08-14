@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 // runInstanceConfig owns instance-scoped configuration verbs. SAML provider

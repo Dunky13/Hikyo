@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/importer"
+	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
 func TestHostileImportNamesAreEscapedOnSuccess(t *testing.T) {

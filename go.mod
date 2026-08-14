@@ -1,4 +1,4 @@
-module github.com/Dunky13/hikyo
+module github.com/Hikyo-Org/hikyo
 
 go 1.26.2
 

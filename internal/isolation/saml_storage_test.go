@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/authn"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
 )
 
 func TestSAMLArtifactsAreSingleUseAndDurable(t *testing.T) {

@@ -148,7 +148,7 @@ jobs:
           version: v4.2.3
       - name: Chart renders and carries release substitution anchors
         run: |
-          grep -Fx "  repository: ghcr.io/dunky13/hikyo" chart/hikyo/values.yaml
+          grep -Fx "  repository: ghcr.io/hikyo-org/hikyo" chart/hikyo/values.yaml
           grep -Fx "  digest: sha256:RELEASE_IMAGE_DIGEST" chart/hikyo/values.yaml
           helm lint chart/hikyo --set database.existingSecret=fixture \
             --set 'network.trustedProxyCIDRs={10.42.0.0/16}'

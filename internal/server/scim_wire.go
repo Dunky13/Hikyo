@@ -6,10 +6,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/scimproto"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/scimproto"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // The SCIM wire transport (#73 §8). It owns exactly three things — decoding

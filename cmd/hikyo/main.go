@@ -12,9 +12,9 @@ import (
 	"slices"
 	"syscall"
 
-	"github.com/Dunky13/hikyo/internal/app"
-	"github.com/Dunky13/hikyo/internal/cli"
-	"github.com/Dunky13/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/app"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/config"
 )
 
 // Set by GoReleaser. Development builds deliberately identify themselves as

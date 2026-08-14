@@ -31,14 +31,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/config"
-	"github.com/Dunky13/hikyo/internal/crypto/backup"
-	"github.com/Dunky13/hikyo/internal/disclose"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
-	"github.com/Dunky13/hikyo/internal/store/tx"
+	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/crypto/backup"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
 // MinRestoreSchemaVersion is the first schema that carries the restore state

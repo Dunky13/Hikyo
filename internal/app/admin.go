@@ -8,14 +8,14 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/Dunky13/hikyo/internal/config"
-	"github.com/Dunky13/hikyo/internal/crypto"
-	"github.com/Dunky13/hikyo/internal/disclose"
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/keyring"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/keyring"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
 )
 
 // `hikyo admin create` — the first-administrator bootstrap.

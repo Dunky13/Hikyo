@@ -6,9 +6,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/audit"
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 // OIDC and provider-administration handlers (#54). They carry the raw bearer

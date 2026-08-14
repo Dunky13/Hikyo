@@ -24,7 +24,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // Schema URIs, the only ones this server speaks.
@@ -1027,7 +1027,7 @@ func AsError(err error) (*Error, bool) {
 func ServiceProviderConfig(maxResults int) map[string]any {
 	return map[string]any{
 		"schemas":          []string{SchemaSPConfig},
-		"documentationUri": "https://github.com/Dunky13/hikyo",
+		"documentationUri": "https://github.com/Hikyo-Org/hikyo",
 		"patch":            map[string]any{"supported": true},
 		"bulk": map[string]any{
 			"supported": false, "maxOperations": 0, "maxPayloadSize": 0,

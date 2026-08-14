@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // The Infisical connector (import-paths ADR § Per-source structural mapping,

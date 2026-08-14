@@ -45,12 +45,12 @@ for (const page of pages) {
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(
     destination,
-    `---\ntitle: ${page.title}\neditUrl: https://github.com/Dunky13/hikyo/edit/main/${page.source}\n---\n\n${body}`,
+    `---\ntitle: ${page.title}\neditUrl: https://github.com/Hikyo-Org/hikyo/edit/main/${page.source}\n---\n\n${body}`,
   );
 }
 
 const license = await readFile(resolve(repositoryRoot, 'LICENSE'), 'utf8');
 await writeFile(
   resolve(docsRoot, 'license.md'),
-  `---\ntitle: Mozilla Public License 2.0\neditUrl: https://github.com/Dunky13/hikyo/edit/main/LICENSE\n---\n\n\`\`\`text\n${license}\`\`\`\n`,
+  `---\ntitle: Mozilla Public License 2.0\neditUrl: https://github.com/Hikyo-Org/hikyo/edit/main/LICENSE\n---\n\n\`\`\`text\n${license}\`\`\`\n`,
 );

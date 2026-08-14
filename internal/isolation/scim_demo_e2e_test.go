@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/internal/cli"
-	"github.com/Dunky13/hikyo/internal/scimproto"
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/scimproto"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 // runSCIMDemo drives the whole SCIM surface through the REAL CLI over the real

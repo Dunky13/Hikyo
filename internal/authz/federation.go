@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/domain"
-	"github.com/Dunky13/hikyo/internal/store/authn"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/store/authn"
 )
 
 // Federated machine identities at the chokepoint (#62, machine-identities ADR §

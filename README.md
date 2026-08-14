@@ -32,7 +32,7 @@ Requires Go 1.26+, Node.js 24 (see `.nvmrc`), and Corepack/pnpm.
 
 ```bash
 # 1. Build the binary with the embedded UI
-git clone https://github.com/Dunky13/hikyo.git
+git clone https://github.com/Hikyo-Org/hikyo.git
 cd hikyo
 corepack enable
 pnpm --dir clients/ts install --frozen-lockfile

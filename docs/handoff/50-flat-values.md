@@ -1,6 +1,6 @@
 # Handoff: #50 flat encrypted values + copy / clone / bulk-apply
 
-Issue: https://github.com/Dunky13/hikyo/issues/50 (parent #41, blocked by #49 — merged).
+Issue: https://github.com/Hikyo-Org/hikyo/issues/50 (parent #41, blocked by #49 — merged).
 Specs, all on `wayfinder-docs`: `docs/adr/flat-model.md` (the model),
 `docs/adr/encryption-model.md` **as amended by** the flat-model ADR (the value
 AAD binds `env_id`), `docs/adr/permission-model.md` (the locked formula table),

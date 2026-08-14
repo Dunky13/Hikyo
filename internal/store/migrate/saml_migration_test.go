@@ -13,7 +13,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 func runSAMLIdentityBackfill(t *testing.T, cfg store.Config) {

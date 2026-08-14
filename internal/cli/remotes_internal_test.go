@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 // `remote add`'s CEREMONY ORDER (#71, multi-instance ADR § The connection

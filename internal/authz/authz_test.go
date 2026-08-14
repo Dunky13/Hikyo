@@ -9,7 +9,7 @@ package authz
 import (
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 const demoOp = Operation("environment.read")

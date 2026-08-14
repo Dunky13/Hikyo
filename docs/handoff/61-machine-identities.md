@@ -1,6 +1,6 @@
 # Handoff: #61 machine identities — service accounts, tokens, display-once mint
 
-Issue: https://github.com/Dunky13/hikyo/issues/61 (parent #41; M1 token portion
+Issue: https://github.com/Hikyo-Org/hikyo/issues/61 (parent #41; M1 token portion
 of the machine-identities ADR, `docs/adr/machine-identities.md` on the
 `wayfinder-docs` branch). Blocked-by #55 (permission model) is merged.
 

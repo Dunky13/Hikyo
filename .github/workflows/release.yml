@@ -201,7 +201,7 @@ jobs:
           test "$(printf '%s\n' "$active_key" | sed '/^$/d' | wc -l)" -eq 1
           cp release/trust/root.json "$chart_dir/files/release/trust/root.json"
           cp "release/trust/$active_key" "$chart_dir/files/release/trust/primary.pub"
-          sed -i "s|repository: ghcr.io/dunky13/hikyo|repository: $IMAGE|" "$chart_dir/values.yaml"
+          sed -i "s|repository: ghcr.io/hikyo-org/hikyo|repository: $IMAGE|" "$chart_dir/values.yaml"
           sed -i "s|sha256:RELEASE_IMAGE_DIGEST|$IMAGE_DIGEST|" "$chart_dir/values.yaml"
           grep -Fx "  repository: $IMAGE" "$chart_dir/values.yaml"
           grep -Fx "  digest: $IMAGE_DIGEST" "$chart_dir/values.yaml"

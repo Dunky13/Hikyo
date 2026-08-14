@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-const module = "github.com/Dunky13/hikyo"
+const module = "github.com/Hikyo-Org/hikyo"
 
 // storeImporters is the exact allowlist of packages permitted to import
 // internal/store or its subpackages. Additions here are architecture

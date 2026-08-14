@@ -1,6 +1,6 @@
 # Handoff: #71 multi-instance — directory tier + workspace tier
 
-Issue: https://github.com/Dunky13/hikyo/issues/71. ADR: `.xreview/multi-instance-adr.md`
+Issue: https://github.com/Hikyo-Org/hikyo/issues/71. ADR: `.xreview/multi-instance-adr.md`
 (locked 2026-08-06). MVP gate: M6 in `.xreview/mvp-boundary.md`.
 
 Status: **IN PROGRESS.** Foundation, store, service, audit, API, CORS/CSP, CLI,

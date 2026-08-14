@@ -12,7 +12,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/Dunky13/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/config"
 )
 
 func testLogger() *slog.Logger {

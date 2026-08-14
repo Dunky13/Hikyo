@@ -3,7 +3,7 @@ package authz
 import (
 	"maps"
 
-	"github.com/Dunky13/hikyo/internal/audit"
+	"github.com/Hikyo-Org/hikyo/internal/audit"
 )
 
 // The wire registry: the probe classification for every non-operation entry

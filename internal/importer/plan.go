@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Dunky13/hikyo/internal/schema"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 )
 
 // Phase 1's whole decision surface: rename, collide, classify, type, bucket,

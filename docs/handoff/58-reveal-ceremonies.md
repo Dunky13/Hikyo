@@ -1,8 +1,8 @@
 # Handoff: #58 Reveal / copy / publish-into-protected ceremonies
 
-Parent #41. Binds [permission-model.md](https://github.com/Dunky13/hikyo/blob/wayfinder-docs/docs/adr/permission-model.md)
-§ *The reveal guard* and § *Disclosure by proxy*, [audit-model.md](https://github.com/Dunky13/hikyo/blob/wayfinder-docs/docs/adr/audit-model.md)
-(one disclosure event per key), [human-auth.md](https://github.com/Dunky13/hikyo/blob/wayfinder-docs/docs/adr/human-auth.md)
+Parent #41. Binds [permission-model.md](https://github.com/Hikyo-Org/hikyo/blob/wayfinder-docs/docs/adr/permission-model.md)
+§ *The reveal guard* and § *Disclosure by proxy*, [audit-model.md](https://github.com/Hikyo-Org/hikyo/blob/wayfinder-docs/docs/adr/audit-model.md)
+(one disclosure event per key), [human-auth.md](https://github.com/Hikyo-Org/hikyo/blob/wayfinder-docs/docs/adr/human-auth.md)
 (the reauthentication primitive), mvp-boundary rows **A5** and **S3**, and the
 frozen prototype `prototype/reveal-edit/` — **approach a, the ceremony modal**
 (locked 2026-08-02; the inline popover, hold-to-reveal and session drawer were

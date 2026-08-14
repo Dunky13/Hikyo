@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/api"
-	"github.com/Dunky13/hikyo/internal/remotefetch"
-	"github.com/Dunky13/hikyo/internal/server"
-	"github.com/Dunky13/hikyo/internal/service"
-	"github.com/Dunky13/hikyo/internal/store"
-	"github.com/Dunky13/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
+	"github.com/Hikyo-Org/hikyo/internal/server"
+	"github.com/Hikyo-Org/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
 )
 
 // The two-instance harness (#71, M6's recast of acceptance criterion 6).

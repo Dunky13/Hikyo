@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Dunky13/hikyo/api"
+	"github.com/Hikyo-Org/hikyo/api"
 )
 
 // The contract's own well-formedness. Cross-checks against the authorization

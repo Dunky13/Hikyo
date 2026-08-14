@@ -6,7 +6,7 @@ package badauthn
 import (
 	"context"
 
-	"github.com/Dunky13/hikyo/internal/store/sqlitegen"
+	"github.com/Hikyo-Org/hikyo/internal/store/sqlitegen"
 )
 
 // WriteDenial is the one licensed write path.

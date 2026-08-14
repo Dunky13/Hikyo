@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Dunky13/hikyo/internal/service"
+	"github.com/Hikyo-Org/hikyo/internal/service"
 )
 
 func TestEventStreamSuggestsJitteredRetry(t *testing.T) {

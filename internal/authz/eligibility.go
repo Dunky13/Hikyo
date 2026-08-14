@@ -3,8 +3,8 @@ package authz
 import (
 	"sort"
 
-	"github.com/Dunky13/hikyo/internal/crypto"
-	"github.com/Dunky13/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
 
 // Artifact eligibility: the second half of the multi-instance ADR's DOUBLE

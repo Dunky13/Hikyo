@@ -21,7 +21,7 @@ import (
 	"github.com/pressly/goose/v3/database"
 	"github.com/pressly/goose/v3/lock"
 
-	"github.com/Dunky13/hikyo/internal/store"
+	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
 // Run applies all pending migrations, roll-forward only. Any error means the

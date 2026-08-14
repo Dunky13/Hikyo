@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Dunky13/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 // The OIDC federation verbs (#62): instance-scoped issuer configuration and

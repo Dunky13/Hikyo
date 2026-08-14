@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 )
 
 // The flat value model's storage shapes (#50, flat-model ADR).

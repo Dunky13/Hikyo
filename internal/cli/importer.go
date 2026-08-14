@@ -14,9 +14,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Dunky13/hikyo/api/apigen"
-	"github.com/Dunky13/hikyo/internal/disclose"
-	"github.com/Dunky13/hikyo/internal/importer"
+	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/disclose"
+	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
 // `hikyo import` (#68, import-paths ADR § Grammar join).

@@ -5,7 +5,7 @@ package badnil
 import (
 	"reflect"
 
-	"github.com/Dunky13/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 )
 
 func returnsNil() authz.Proof { return nil }
