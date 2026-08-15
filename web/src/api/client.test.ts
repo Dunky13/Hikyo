@@ -34,6 +34,12 @@ describe('readCsrfToken', () => {
 });
 
 describe('parsed', () => {
+  it('fails loudly when the SDK completes without an HTTP response', async () => {
+    await expect(parsed(Promise.resolve({ data: 'untrusted' }), z.string())).rejects.toThrow(
+      'SDK call completed without an HTTP response',
+    );
+  });
+
   it('preserves only contract-validated safe refusal detail', async () => {
     const call = Promise.resolve({
       error: {
