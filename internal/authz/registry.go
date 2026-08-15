@@ -316,8 +316,13 @@ const (
 	// The read is bare `read(E)`: an environment's protection state is part of
 	// its public shape, and hiding it from a reader would make the reveal
 	// ceremony inexplicable.
-	OpEnvSettingsRead   Operation = "environment.settings-read"
-	OpEnvSettingsUpdate Operation = "environment.settings-update"
+	OpEnvSettingsRead        Operation = "environment.settings-read"
+	OpEnvSettingsUpdate      Operation = "environment.settings-update"
+	OpOrgRetentionRead       Operation = "retention.org-read"
+	OpOrgRetentionUpdate     Operation = "retention.org-update"
+	OpProjectRetentionRead   Operation = "retention.project-read"
+	OpProjectRetentionUpdate Operation = "retention.project-update"
+	OpRetentionHealthRead    Operation = "retention.health-read"
 
 	// Machine identities (#61). Every one of these asks
 	// `manage-identities(project)` and nothing more, because that is the
@@ -488,22 +493,25 @@ const (
 type StoreOp string
 
 const (
-	StoreOrgsCreate StoreOp = "orgs.Create"
-	StoreOrgsGet    StoreOp = "orgs.Get"
-	StoreOrgsList   StoreOp = "orgs.List"
-	StoreOrgsCount  StoreOp = "orgs.Count"
-	StoreOrgsRename StoreOp = "orgs.Rename"
-	StoreOrgsDelete StoreOp = "orgs.Delete"
+	StoreOrgsCreate       StoreOp = "orgs.Create"
+	StoreOrgsGet          StoreOp = "orgs.Get"
+	StoreOrgsList         StoreOp = "orgs.List"
+	StoreOrgsCount        StoreOp = "orgs.Count"
+	StoreOrgsRename       StoreOp = "orgs.Rename"
+	StoreOrgsLock         StoreOp = "orgs.Lock"
+	StoreOrgsSetRetention StoreOp = "orgs.SetRetention"
+	StoreOrgsDelete       StoreOp = "orgs.Delete"
 
 	StoreProjectsCreate StoreOp = "projects.Create"
 	StoreProjectsGet    StoreOp = "projects.Get"
 	StoreProjectsList   StoreOp = "projects.List"
 	// StoreProjectsListAll is the cross-org enumeration the multi-instance
 	// directory serves (#71). It belongs to instance-scope operations only.
-	StoreProjectsListAll StoreOp = "projects.ListAll"
-	StoreProjectsLock    StoreOp = "projects.Lock"
-	StoreProjectsRename  StoreOp = "projects.Rename"
-	StoreProjectsDelete  StoreOp = "projects.Delete"
+	StoreProjectsListAll      StoreOp = "projects.ListAll"
+	StoreProjectsLock         StoreOp = "projects.Lock"
+	StoreProjectsRename       StoreOp = "projects.Rename"
+	StoreProjectsSetRetention StoreOp = "projects.SetRetention"
+	StoreProjectsDelete       StoreOp = "projects.Delete"
 
 	StoreEnvironmentsCreate     StoreOp = "environments.Create"
 	StoreEnvironmentsGet        StoreOp = "environments.Get"
@@ -591,6 +599,12 @@ const (
 	StorePinsInsert            StoreOp = "pins.Insert"
 	StorePinsDelete            StoreOp = "pins.Delete"
 	StorePinsDeleteEnvironment StoreOp = "pins.DeleteEnvironment"
+
+	StoreRetentionEligible       StoreOp = "retention.Eligible"
+	StoreRetentionMarkCollected  StoreOp = "retention.MarkCollected"
+	StoreRetentionDeleteEntries  StoreOp = "retention.DeleteCollectedEntries"
+	StoreRetentionLastSuccess    StoreOp = "retention.LastPruneSuccess"
+	StoreRetentionSetLastSuccess StoreOp = "retention.SetLastPruneSuccess"
 
 	// Keyring persistence (#43). These carry no tenant chain: wrapped-key
 	// rows are instance-scoped crypto material, and the scope a tier-3 key
@@ -2150,6 +2164,49 @@ var operations = map[Operation]opSpec{
 			audit.EventAuthEffectiveWindowLowered,
 		},
 	},
+	OpOrgRetentionRead: {
+		class:       ClassTenant,
+		level:       domain.LevelOrg,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelOrg}},
+		storeOps:    map[StoreOp]bool{StoreOrgsGet: true},
+		auditedNone: true,
+	},
+	OpOrgRetentionUpdate: {
+		class:   ClassTenant,
+		level:   domain.LevelOrg,
+		formula: Formula{{Cap: domain.CapProjectSettings, At: domain.LevelOrg}},
+		storeOps: map[StoreOp]bool{
+			StoreOrgsGet: true, StoreOrgsLock: true, StoreOrgsSetRetention: true, StoreProjectsList: true,
+			StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventOrgRetentionChanged},
+	},
+	OpProjectRetentionRead: {
+		class:       ClassTenant,
+		level:       domain.LevelProject,
+		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelProject}},
+		storeOps:    map[StoreOp]bool{StoreOrgsGet: true, StoreProjectsGet: true},
+		auditedNone: true,
+	},
+	OpProjectRetentionUpdate: {
+		class:   ClassTenant,
+		level:   domain.LevelProject,
+		formula: Formula{{Cap: domain.CapProjectSettings, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{
+			StoreOrgsGet: true, StoreOrgsLock: true, StoreProjectsGet: true,
+			StoreProjectsSetRetention: true, StoreAuditTenantInsert: true,
+		},
+		events: []audit.EventType{audit.EventProjectRetentionChanged},
+	},
+	OpRetentionHealthRead: {
+		class:   ClassInstance,
+		formula: Formula{{Cap: domain.CapInstanceConfig, At: domain.LevelNone}},
+		storeOps: map[StoreOp]bool{
+			StoreRetentionLastSuccess: true,
+			StoreAuditInstanceInsert:  true,
+		},
+		events: []audit.EventType{audit.EventRetentionHealthRead},
+	},
 
 	// Machine identities (#61). The service-account and credential tables are
 	// class=authn, so their reads and writes ride the resolution surface for
@@ -2807,6 +2864,7 @@ const (
 	SiteMigration         SystemSite = "migration"
 	SiteRecoveryReconcile SystemSite = "recovery-mode-reconciliation"
 	SiteBreakGlass        SystemSite = "break-glass"
+	SiteScheduler         SystemSite = "scheduler"
 )
 
 // systemSites maps each mint site to the store operations it may invoke. A
@@ -2821,6 +2879,19 @@ var systemSites = map[SystemSite]map[StoreOp]bool{
 	SiteMigration:         {},
 	SiteRecoveryReconcile: {},
 	SiteBreakGlass:        {},
+	SiteScheduler: {
+		StoreRetentionEligible: true, StoreRetentionMarkCollected: true,
+		StoreRetentionDeleteEntries: true, StoreRetentionLastSuccess: true,
+		StoreRetentionSetLastSuccess: true, StoreAuditTenantInsert: true,
+		StoreAuditInstanceInsert: true,
+	},
+}
+
+var systemSiteEvents = map[SystemSite][]audit.EventType{
+	SiteScheduler: {
+		audit.EventRetentionPayloadGC,
+		audit.EventRetentionPruneRun,
+	},
 }
 
 // Registry exposes read-only registry facts to the invariant tests (registry
@@ -2881,6 +2952,17 @@ func (RegistryFacts) SystemSites() map[SystemSite][]StoreOp {
 			list = append(list, op)
 		}
 		out[site] = list
+	}
+	return out
+}
+
+// SystemSiteEvents returns the event types each no-principal mint site may
+// emit. Keeping this visible to the audit closure invariant prevents a system
+// event from becoming dead catalogue merely because it has no human operation.
+func (RegistryFacts) SystemSiteEvents() map[SystemSite][]audit.EventType {
+	out := make(map[SystemSite][]audit.EventType, len(systemSiteEvents))
+	for site, events := range systemSiteEvents {
+		out[site] = append([]audit.EventType(nil), events...)
 	}
 	return out
 }

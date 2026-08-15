@@ -148,7 +148,7 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 			return err
 		}
 		if !target.PayloadPresent {
-			return invalidDetail("pin revision %d payload was collected", request.Revision)
+			return collectedRevisionError(target)
 		}
 		renewing := existingErr == nil && existing.Revision == target.Revision
 		historyGated := target.Revision != latest.Revision
@@ -290,7 +290,7 @@ func validatePinnedSnapshot(ctx context.Context, r store.Repos, p authz.Proof, s
 	if err != nil {
 		return err
 	}
-	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+	entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 	if err != nil {
 		return err
 	}
@@ -327,7 +327,7 @@ func pinnedHistoricalSecrets(ctx context.Context, r store.Repos, p authz.Proof,
 	for _, key := range keys {
 		classification[key.ID] = key.Classification
 	}
-	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+	entries, err := r.Snapshots().Entries(ctx, p, snapshot)
 	if err != nil {
 		return nil, err
 	}

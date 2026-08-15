@@ -7,6 +7,7 @@ package sqlitegen
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createProject = `-- name: CreateProject :exec
@@ -53,7 +54,9 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = ? AND id = ?
 `
 
@@ -70,6 +73,8 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.OrgID,
 		&i.Name,
 		&i.CreatedAt,
+		&i.RetentionRevisionCount,
+		&i.RetentionAgeSeconds,
 	)
 	return i, err
 }
@@ -115,7 +120,9 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = ? ORDER BY name
 `
 
@@ -133,6 +140,8 @@ func (q *Queries) ListProjects(ctx context.Context, orgID string) ([]Project, er
 			&i.OrgID,
 			&i.Name,
 			&i.CreatedAt,
+			&i.RetentionRevisionCount,
+			&i.RetentionAgeSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -186,6 +195,32 @@ type RenameProjectParams struct {
 
 func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, renameProject, arg.Name, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setProjectRetention = `-- name: SetProjectRetention :execrows
+UPDATE projects
+SET retention_age_seconds = ?, retention_revision_count = ?
+WHERE org_id = ? AND id = ?
+`
+
+type SetProjectRetentionParams struct {
+	RetentionAgeSeconds    sql.NullInt64
+	RetentionRevisionCount sql.NullInt64
+	OrgID                  string
+	ID                     string
+}
+
+func (q *Queries) SetProjectRetention(ctx context.Context, arg SetProjectRetentionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setProjectRetention,
+		arg.RetentionAgeSeconds,
+		arg.RetentionRevisionCount,
+		arg.OrgID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

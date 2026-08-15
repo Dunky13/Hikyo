@@ -180,6 +180,14 @@ func TestInvariantAuditRegistryClosure(t *testing.T) {
 			emitted[et] = true
 		}
 	}
+	for site, events := range facts.SystemSiteEvents() {
+		for _, et := range events {
+			if _, ok := audit.Spec(et); !ok {
+				t.Errorf("system site %s claims event type %q which is not in the closed registry", site, et)
+			}
+			emitted[et] = true
+		}
+	}
 	for _, et := range audit.Types() {
 		if !emitted[et] {
 			t.Errorf("registered event type %q has no emitting operation", et)

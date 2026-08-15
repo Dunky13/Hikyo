@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
+import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
 import {
   applyThemeChoice,
   nextThemeChoice,
@@ -27,6 +28,7 @@ import { SECTIONS } from '../app/navigation.ts';
  */
 export function Shell({ session }: { session: WhoAmI }) {
   const orgs = useOrgs(true);
+  const retentionHealth = useRetentionHealth(true);
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
 
@@ -35,6 +37,7 @@ export function Shell({ session }: { session: WhoAmI }) {
 
   const items = orgs.data?.items ?? [];
   const activeOrg = items[0];
+  const pruneWarning = retentionBanner(retentionHealth.data, retentionHealth.isError);
 
   return (
     <div className="chrome" data-nav={navOpen ? 'open' : 'closed'}>
@@ -118,6 +121,34 @@ export function Shell({ session }: { session: WhoAmI }) {
           <span className="header__spacer" />
           <ThemeToggle />
         </header>
+        {pruneWarning?.kind === 'error' ? (
+          <p className="retention-warning" role="alert">
+            <span className="alert__glyph" aria-hidden="true">
+              !
+            </span>
+            <span>Retention health could not be checked. Reload to try again.</span>
+          </p>
+        ) : null}
+        {pruneWarning?.kind === 'stale' ? (
+          <p className="retention-warning" role="alert">
+            <span className="alert__glyph" aria-hidden="true">
+              !
+            </span>
+            <span>
+              {pruneWarning.lastPruneSuccess === null ? (
+                <>Payload pruning has never succeeded — retention bounds are not being enforced.</>
+              ) : (
+                <>
+                  Payload pruning has not succeeded since{' '}
+                  <time dateTime={pruneWarning.lastPruneSuccess}>
+                    {new Date(pruneWarning.lastPruneSuccess).toLocaleString()}
+                  </time>{' '}
+                  — retention bounds are not being enforced.
+                </>
+              )}
+            </span>
+          </p>
+        ) : null}
         <main className="content" id="content" tabIndex={-1}>
           <Outlet />
         </main>

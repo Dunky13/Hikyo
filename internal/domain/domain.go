@@ -6,6 +6,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -207,6 +208,25 @@ var ErrInvalid = errors.New("invalid request")
 // succeeded, so it discloses nothing a caller could not already read; the
 // fixed message per code means it names no specific row either way.
 var ErrConflict = errors.New("conflict")
+
+// CollectedRevisionError is the loud post-authorization refusal for a lineage
+// row whose value-bearing payload has been collected. The revision and stored
+// policy are safe detail: the caller named the former and is authorized to read
+// the latter's scope.
+type CollectedRevisionError struct {
+	Revision int64
+	Policy   string
+}
+
+func (e *CollectedRevisionError) Error() string {
+	return fmt.Sprintf("%v: revision %d was collected by retention policy %s", ErrConflict, e.Revision, e.Policy)
+}
+
+func (e *CollectedRevisionError) Unwrap() error { return ErrConflict }
+
+func (e *CollectedRevisionError) SafeDetail() string {
+	return fmt.Sprintf("revision %d was collected by retention policy %s", e.Revision, e.Policy)
+}
 
 // ErrLimitExceeded is a structural bound refusing an operation by name — the
 // ops spec's environment-count cap being the first. Distinct from ErrConflict

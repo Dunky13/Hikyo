@@ -81,7 +81,11 @@ func VerifyEvent(p Proof, op StoreOp, tok *TxToken, et audit.EventType) (domain.
 	if !ok || c == nil {
 		return domain.Scope{}, errors.New("authz: non-canonical proof")
 	}
-	if !slices.Contains(operations[c.op].events, et) {
+	licensed := operations[c.op].events
+	if c.kind == kindSystem {
+		licensed = systemSiteEvents[c.site]
+	}
+	if !slices.Contains(licensed, et) {
 		return domain.Scope{}, fmt.Errorf("authz: proof minted for %q may not emit audit event %q", c.op, et)
 	}
 	return chain, nil

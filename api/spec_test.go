@@ -26,6 +26,37 @@ func TestDocumentLoadsAndValidates(t *testing.T) {
 	}
 }
 
+func TestCollectedRevisionOperationsDeclareConflict(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery"},
+		{http.MethodPost, "/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback"},
+		{http.MethodPost, "/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins"},
+		{http.MethodGet, "/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}"},
+		{http.MethodPost, "/api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export"},
+	}
+	for _, tc := range tests {
+		item := doc.Paths.Find(tc.path)
+		if item == nil {
+			t.Errorf("%s %s is missing", tc.method, tc.path)
+			continue
+		}
+		op := item.Get
+		if tc.method == http.MethodPost {
+			op = item.Post
+		}
+		if op == nil || op.Responses.Value("409") == nil || op.Responses.Value("409").Ref != "#/components/responses/Conflict" {
+			t.Errorf("%s %s does not declare the shared Conflict response", tc.method, tc.path)
+		}
+	}
+}
+
 func TestBoundProfile(t *testing.T) {
 	if err := api.CheckProfile(api.SpecYAML); err != nil {
 		t.Fatalf("contract violates the bound 3.1 profile:\n%v", err)

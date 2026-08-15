@@ -204,6 +204,17 @@ const (
 	// a field on the first and the direction is the whole of the second.
 	EventReauthWindowChanged EventType = "settings.reauthentication_window_changed"
 	EventProtectedFlagChange EventType = "settings.protected_flag_changed"
+	// Retention policy changes are distinct at org and project scope. Both are
+	// security-class because widening either bound lengthens value-bearing
+	// history, while tightening makes payload loss imminent and unrestorable.
+	EventOrgRetentionChanged     EventType = "settings.org_retention_changed"
+	EventProjectRetentionChanged EventType = "settings.project_retention_changed"
+	// retention.health_read is the audited instance-level operational read.
+	// retention.payload_gc records each irreversible tenant payload collection;
+	// retention.prune_run records the scheduler sweep outcome.
+	EventRetentionHealthRead EventType = "retention.health_read"
+	EventRetentionPayloadGC  EventType = "retention.payload_gc"
+	EventRetentionPruneRun   EventType = "retention.prune_run"
 
 	// recovery.break_glass_grant records a grant issued under local host
 	// authority — the one authorization path not evaluated against a grant.
@@ -1399,6 +1410,75 @@ var registry = map[EventType]TypeSpec{
 			// Marking an environment protected CAPS its window at the
 			// protected default; the capped value is part of the same fact.
 			"window_seconds": {Kind: KindInt, Required: true},
+		},
+	},
+	EventOrgRetentionChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"previous_policy": {Kind: KindString, Required: true},
+			"policy":          {Kind: KindString, Required: true},
+		},
+	},
+	EventProjectRetentionChanged: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"previous_policy":    {Kind: KindString, Required: true},
+			"policy":             {Kind: KindString, Required: true},
+			"previous_inherited": {Kind: KindBool, Required: true},
+			"inherited":          {Kind: KindBool, Required: true},
+		},
+	},
+	EventRetentionHealthRead: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"recorded":            {Kind: KindBool, Required: true},
+			"stale":               {Kind: KindBool, Required: true},
+			"stale_after_seconds": {Kind: KindInt, Required: true},
+		},
+	},
+	EventRetentionPayloadGC: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"org":          {Kind: KindString, Required: true},
+			"project":      {Kind: KindString, Required: true},
+			"environment":  {Kind: KindString, Required: true},
+			"revision":     {Kind: KindInt, Required: true},
+			"snapshot_id":  {Kind: KindString, Required: true},
+			"policy":       {Kind: KindString, Required: true},
+			"collected_at": {Kind: KindString, Required: true},
+		},
+	},
+	EventRetentionPruneRun: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes: map[Outcome]bool{
+			OutcomeSuccess: true,
+			OutcomeFailure: true,
+		},
+		Trails: map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"started_at":  {Kind: KindString, Required: true},
+			"finished_at": {Kind: KindString, Required: true},
+			"candidates":  {Kind: KindInt, Required: true},
+			"collected": {
+				Kind: KindObject, Required: true,
+				ObjectSchema: Schema{
+					"revision_payloads": {Kind: KindInt, Required: true},
+				},
+			},
+			"error_class": {Kind: KindString},
 		},
 	},
 

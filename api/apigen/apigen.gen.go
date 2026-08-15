@@ -480,6 +480,24 @@ func (e PrincipalKind) Valid() bool {
 	}
 }
 
+// Defines values for ProjectRetentionPolicyMode.
+const (
+	ProjectRetentionPolicyModeKeepIfEither ProjectRetentionPolicyMode = "keep-if-either"
+	ProjectRetentionPolicyModeUnlimited    ProjectRetentionPolicyMode = "unlimited"
+)
+
+// Valid indicates whether the value is a known member of the ProjectRetentionPolicyMode enum.
+func (e ProjectRetentionPolicyMode) Valid() bool {
+	switch e {
+	case ProjectRetentionPolicyModeKeepIfEither:
+		return true
+	case ProjectRetentionPolicyModeUnlimited:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReauthPurpose.
 const (
 	Copy    ReauthPurpose = "copy"
@@ -531,6 +549,39 @@ func (e RemoteState) Valid() bool {
 	case SelfConnected:
 		return true
 	case Unreachable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RetentionHealthStaleAfterSeconds.
+const (
+	N86400 RetentionHealthStaleAfterSeconds = 86400
+)
+
+// Valid indicates whether the value is a known member of the RetentionHealthStaleAfterSeconds enum.
+func (e RetentionHealthStaleAfterSeconds) Valid() bool {
+	switch e {
+	case N86400:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RetentionPolicyMode.
+const (
+	RetentionPolicyModeKeepIfEither RetentionPolicyMode = "keep-if-either"
+	RetentionPolicyModeUnlimited    RetentionPolicyMode = "unlimited"
+)
+
+// Valid indicates whether the value is a known member of the RetentionPolicyMode enum.
+func (e RetentionPolicyMode) Valid() bool {
+	switch e {
+	case RetentionPolicyModeKeepIfEither:
+		return true
+	case RetentionPolicyModeUnlimited:
 		return true
 	default:
 		return false
@@ -2689,6 +2740,20 @@ type ProjectList struct {
 	Items []Project `json:"items"`
 }
 
+// ProjectRetentionPolicy defines model for ProjectRetentionPolicy.
+type ProjectRetentionPolicy struct {
+	// Inherited True clears the project override and follows the org live.
+	Inherited     bool `json:"inherited"`
+	LastRevisions *int `json:"last_revisions,omitempty"`
+	MaxAgeSeconds *int `json:"max_age_seconds,omitempty"`
+
+	// Mode Unlimited can appear only when inherited from an unlimited org.
+	Mode ProjectRetentionPolicyMode `json:"mode"`
+}
+
+// ProjectRetentionPolicyMode Unlimited can appear only when inherited from an unlimited org.
+type ProjectRetentionPolicyMode string
+
 // ProtocolCapability OPEN enum: an instance may advertise a flow this client has never
 // heard of, and every generated consumer must preserve and tolerate the
 // unknown value rather than reject the response.
@@ -2943,6 +3008,29 @@ type RenameRequest struct {
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
 }
+
+// RetentionHealth defines model for RetentionHealth.
+type RetentionHealth struct {
+	LastPruneSuccess  *time.Time                       `json:"last_prune_success"`
+	Stale             bool                             `json:"stale"`
+	StaleAfterSeconds RetentionHealthStaleAfterSeconds `json:"stale_after_seconds"`
+}
+
+// RetentionHealthStaleAfterSeconds defines model for RetentionHealth.StaleAfterSeconds.
+type RetentionHealthStaleAfterSeconds int
+
+// RetentionPolicy defines model for RetentionPolicy.
+type RetentionPolicy struct {
+	// LastRevisions Required for keep-if-either; absent for unlimited.
+	LastRevisions *int `json:"last_revisions,omitempty"`
+
+	// MaxAgeSeconds Required for keep-if-either; absent for unlimited.
+	MaxAgeSeconds *int                `json:"max_age_seconds,omitempty"`
+	Mode          RetentionPolicyMode `json:"mode"`
+}
+
+// RetentionPolicyMode defines model for RetentionPolicy.Mode.
+type RetentionPolicyMode string
 
 // RevealDiffRequest defines model for RevealDiffRequest.
 type RevealDiffRequest struct {
@@ -3618,6 +3706,14 @@ type SetCredentialPolicyRequest struct {
 type SetKeyGroupRequest struct {
 	// GroupId The group to join, or empty to leave every group.
 	GroupId string `json:"group_id"`
+}
+
+// SetProjectRetentionRequest defines model for SetProjectRetentionRequest.
+type SetProjectRetentionRequest struct {
+	// Inherited True clears the override; false requires both bounds.
+	Inherited     bool `json:"inherited"`
+	LastRevisions *int `json:"last_revisions,omitempty"`
+	MaxAgeSeconds *int `json:"max_age_seconds,omitempty"`
 }
 
 // SetValueRequest defines model for SetValueRequest.
@@ -4590,6 +4686,9 @@ type SetKeyGroupJSONRequestBody = SetKeyGroupRequest
 // RenameKeyJSONRequestBody defines body for RenameKey for application/json ContentType.
 type RenameKeyJSONRequestBody = RenameKeyRequest
 
+// SetProjectRetentionJSONRequestBody defines body for SetProjectRetention for application/json ContentType.
+type SetProjectRetentionJSONRequestBody = SetProjectRetentionRequest
+
 // CreateServiceAccountJSONRequestBody defines body for CreateServiceAccount for application/json ContentType.
 type CreateServiceAccountJSONRequestBody = CreateServiceAccountRequest
 
@@ -4607,6 +4706,9 @@ type DeclareValuesJSONRequestBody = DeclareValuesRequest
 
 // RevealValueDiffJSONRequestBody defines body for RevealValueDiff for application/json ContentType.
 type RevealValueDiffJSONRequestBody = RevealDiffRequest
+
+// SetOrgRetentionJSONRequestBody defines body for SetOrgRetention for application/json ContentType.
+type SetOrgRetentionJSONRequestBody = RetentionPolicy
 
 // CreateScimBindingJSONRequestBody defines body for CreateScimBinding for application/json ContentType.
 type CreateScimBindingJSONRequestBody = CreateScimBindingRequest
@@ -4832,6 +4934,9 @@ type ServerInterface interface {
 	// RenameRemote Change an entry's display name.
 	// (PATCH /api/v1/instance/remotes/{remote})
 	RenameRemote(w http.ResponseWriter, r *http.Request, remote RemoteName)
+	// GetRetentionHealth Read payload-pruner health.
+	// (GET /api/v1/instance/retention-health)
+	GetRetentionHealth(w http.ResponseWriter, r *http.Request)
 	// RotateTokenKey Rotate the root change-token key.
 	// (POST /api/v1/instance/rotate-token-key)
 	RotateTokenKey(w http.ResponseWriter, r *http.Request)
@@ -5093,6 +5198,12 @@ type ServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, key KeyID)
+	// GetProjectRetention Read the project's effective retention policy.
+	// (GET /api/v1/orgs/{org}/projects/{project}/retention)
+	GetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// SetProjectRetention Set or clear the project's bounded retention override.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/retention)
+	SetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
 	// ListServiceAccounts List the project's service accounts.
 	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
 	ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -5126,6 +5237,12 @@ type ServerInterface interface {
 	// RevealValueDiff Compare two environments with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 	RevealValueDiff(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// GetOrgRetention Read the organisation retention cap.
+	// (GET /api/v1/orgs/{org}/retention)
+	GetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID)
+	// SetOrgRetention Set the organisation retention cap.
+	// (PUT /api/v1/orgs/{org}/retention)
+	SetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID)
 	// ListScimBindings List this organisation's SCIM bindings.
 	// (GET /api/v1/orgs/{org}/scim-bindings)
 	ListScimBindings(w http.ResponseWriter, r *http.Request, org OrgID)
@@ -5576,6 +5693,12 @@ func (_ Unimplemented) ShowRemote(w http.ResponseWriter, r *http.Request, remote
 // RenameRemote Change an entry's display name.
 // (PATCH /api/v1/instance/remotes/{remote})
 func (_ Unimplemented) RenameRemote(w http.ResponseWriter, r *http.Request, remote RemoteName) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRetentionHealth Read payload-pruner health.
+// (GET /api/v1/instance/retention-health)
+func (_ Unimplemented) GetRetentionHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6101,6 +6224,18 @@ func (_ Unimplemented) RenameKey(w http.ResponseWriter, r *http.Request, org Org
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetProjectRetention Read the project's effective retention policy.
+// (GET /api/v1/orgs/{org}/projects/{project}/retention)
+func (_ Unimplemented) GetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetProjectRetention Set or clear the project's bounded retention override.
+// (PUT /api/v1/orgs/{org}/projects/{project}/retention)
+func (_ Unimplemented) SetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListServiceAccounts List the project's service accounts.
 // (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
 func (_ Unimplemented) ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
@@ -6164,6 +6299,18 @@ func (_ Unimplemented) DiffValues(w http.ResponseWriter, r *http.Request, org Or
 // RevealValueDiff Compare two environments with `secret` plaintext.
 // (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 func (_ Unimplemented) RevealValueDiff(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetOrgRetention Read the organisation retention cap.
+// (GET /api/v1/orgs/{org}/retention)
+func (_ Unimplemented) GetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetOrgRetention Set the organisation retention cap.
+// (PUT /api/v1/orgs/{org}/retention)
+func (_ Unimplemented) SetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7480,6 +7627,20 @@ func (siw *ServerInterfaceWrapper) RenameRemote(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameRemote(w, r, remote)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRetentionHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetRetentionHealth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRetentionHealth(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10655,6 +10816,76 @@ func (siw *ServerInterfaceWrapper) RenameKey(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetProjectRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectRetention(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectRetention(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetProjectRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetProjectRetention(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetProjectRetention(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListServiceAccounts operation middleware
 func (siw *ServerInterfaceWrapper) ListServiceAccounts(w http.ResponseWriter, r *http.Request) {
 
@@ -11114,6 +11345,58 @@ func (siw *ServerInterfaceWrapper) RevealValueDiff(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevealValueDiff(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrgRetention operation middleware
+func (siw *ServerInterfaceWrapper) GetOrgRetention(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrgRetention(w, r, org)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetOrgRetention operation middleware
+func (siw *ServerInterfaceWrapper) SetOrgRetention(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetOrgRetention(w, r, org)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12699,6 +12982,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects", wrapper.CreateProject)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/retention", wrapper.GetOrgRetention)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/retention", wrapper.SetOrgRetention)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}", wrapper.DeleteProject)
 	})
 	r.Group(func(r chi.Router) {
@@ -12727,6 +13016,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}", wrapper.RenameEnvironment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/retention", wrapper.GetProjectRetention)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/retention", wrapper.SetProjectRetention)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/folders", wrapper.ListFolders)
@@ -12949,6 +13244,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/api/v1/instance/oidc-providers/{slug}", wrapper.PutOidcProvider)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/instance/retention-health", wrapper.GetRetentionHealth)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/instance/saml-providers", wrapper.ListSamlProviders)
@@ -18026,6 +18324,84 @@ func (response RenameRemote500JSONResponse) VisitRenameRemoteResponse(w http.Res
 	return err
 }
 
+type GetRetentionHealthRequestObject struct {
+}
+
+type GetRetentionHealthResponseObject interface {
+	VisitGetRetentionHealthResponse(w http.ResponseWriter) error
+}
+
+type GetRetentionHealth200JSONResponse RetentionHealth
+
+func (response GetRetentionHealth200JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionHealth401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetRetentionHealth401JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionHealth403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetRetentionHealth403JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionHealth429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetRetentionHealth429JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionHealth500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetRetentionHealth500JSONResponse) VisitGetRetentionHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RotateTokenKeyRequestObject struct {
 }
 
@@ -21751,6 +22127,20 @@ func (response FetchDelivery404JSONResponse) VisitFetchDeliveryResponse(w http.R
 	return err
 }
 
+type FetchDelivery409JSONResponse struct{ ConflictJSONResponse }
+
+func (response FetchDelivery409JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type FetchDelivery429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response FetchDelivery429JSONResponse) VisitFetchDeliveryResponse(w http.ResponseWriter) error {
@@ -22294,6 +22684,20 @@ func (response CreateRevisionPin404JSONResponse) VisitCreateRevisionPinResponse(
 	return err
 }
 
+type CreateRevisionPin409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateRevisionPin409JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreateRevisionPin429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response CreateRevisionPin429JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
@@ -22738,6 +23142,20 @@ func (response GetRevision404JSONResponse) VisitGetRevisionResponse(w http.Respo
 	return err
 }
 
+type GetRevision409JSONResponse struct{ ConflictJSONResponse }
+
+func (response GetRevision409JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetRevision429JSONResponse struct{ TooManyRequestsJSONResponse }
 
 func (response GetRevision429JSONResponse) VisitGetRevisionResponse(w http.ResponseWriter) error {
@@ -22845,6 +23263,20 @@ func (response RollbackRevision404JSONResponse) VisitRollbackRevisionResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackRevision409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RollbackRevision409JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -23294,6 +23726,20 @@ func (response ExportValues404JSONResponse) VisitExportValuesResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportValues409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ExportValues409JSONResponse) VisitExportValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -26412,6 +26858,181 @@ func (response RenameKey500JSONResponse) VisitRenameKeyResponse(w http.ResponseW
 	return err
 }
 
+type GetProjectRetentionRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type GetProjectRetentionResponseObject interface {
+	VisitGetProjectRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetProjectRetention200JSONResponse ProjectRetentionPolicy
+
+func (response GetProjectRetention200JSONResponse) VisitGetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProjectRetention401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetProjectRetention401JSONResponse) VisitGetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProjectRetention404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetProjectRetention404JSONResponse) VisitGetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProjectRetention429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetProjectRetention429JSONResponse) VisitGetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetProjectRetention500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetProjectRetention500JSONResponse) VisitGetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetentionRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *SetProjectRetentionJSONRequestBody
+}
+
+type SetProjectRetentionResponseObject interface {
+	VisitSetProjectRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetProjectRetention200JSONResponse ProjectRetentionPolicy
+
+func (response SetProjectRetention200JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetention400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetProjectRetention400JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetention401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetProjectRetention401JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetention404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetProjectRetention404JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetention429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetProjectRetention429JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetProjectRetention500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetProjectRetention500JSONResponse) VisitSetProjectRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListServiceAccountsRequestObject struct {
 	Org     OrgID     `json:"org"`
 	Project ProjectID `json:"project"`
@@ -27478,6 +28099,179 @@ func (response RevealValueDiff429JSONResponse) VisitRevealValueDiffResponse(w ht
 type RevealValueDiff500JSONResponse struct{ InternalJSONResponse }
 
 func (response RevealValueDiff500JSONResponse) VisitRevealValueDiffResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRetentionRequestObject struct {
+	Org OrgID `json:"org"`
+}
+
+type GetOrgRetentionResponseObject interface {
+	VisitGetOrgRetentionResponse(w http.ResponseWriter) error
+}
+
+type GetOrgRetention200JSONResponse RetentionPolicy
+
+func (response GetOrgRetention200JSONResponse) VisitGetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRetention401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response GetOrgRetention401JSONResponse) VisitGetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRetention404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetOrgRetention404JSONResponse) VisitGetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRetention429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response GetOrgRetention429JSONResponse) VisitGetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrgRetention500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetOrgRetention500JSONResponse) VisitGetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetentionRequestObject struct {
+	Org  OrgID `json:"org"`
+	Body *SetOrgRetentionJSONRequestBody
+}
+
+type SetOrgRetentionResponseObject interface {
+	VisitSetOrgRetentionResponse(w http.ResponseWriter) error
+}
+
+type SetOrgRetention200JSONResponse RetentionPolicy
+
+func (response SetOrgRetention200JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetention400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetOrgRetention400JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetention401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetOrgRetention401JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetention404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetOrgRetention404JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetention429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response SetOrgRetention429JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetOrgRetention500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetOrgRetention500JSONResponse) VisitSetOrgRetentionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -30952,6 +31746,9 @@ type StrictServerInterface interface {
 	// RenameRemote Change an entry's display name.
 	// (PATCH /api/v1/instance/remotes/{remote})
 	RenameRemote(ctx context.Context, request RenameRemoteRequestObject) (RenameRemoteResponseObject, error)
+	// GetRetentionHealth Read payload-pruner health.
+	// (GET /api/v1/instance/retention-health)
+	GetRetentionHealth(ctx context.Context, request GetRetentionHealthRequestObject) (GetRetentionHealthResponseObject, error)
 	// RotateTokenKey Rotate the root change-token key.
 	// (POST /api/v1/instance/rotate-token-key)
 	RotateTokenKey(ctx context.Context, request RotateTokenKeyRequestObject) (RotateTokenKeyResponseObject, error)
@@ -31213,6 +32010,12 @@ type StrictServerInterface interface {
 	// RenameKey Rename a key.
 	// (PUT /api/v1/orgs/{org}/projects/{project}/keys/{key}/name)
 	RenameKey(ctx context.Context, request RenameKeyRequestObject) (RenameKeyResponseObject, error)
+	// GetProjectRetention Read the project's effective retention policy.
+	// (GET /api/v1/orgs/{org}/projects/{project}/retention)
+	GetProjectRetention(ctx context.Context, request GetProjectRetentionRequestObject) (GetProjectRetentionResponseObject, error)
+	// SetProjectRetention Set or clear the project's bounded retention override.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/retention)
+	SetProjectRetention(ctx context.Context, request SetProjectRetentionRequestObject) (SetProjectRetentionResponseObject, error)
 	// ListServiceAccounts List the project's service accounts.
 	// (GET /api/v1/orgs/{org}/projects/{project}/service-accounts)
 	ListServiceAccounts(ctx context.Context, request ListServiceAccountsRequestObject) (ListServiceAccountsResponseObject, error)
@@ -31246,6 +32049,12 @@ type StrictServerInterface interface {
 	// RevealValueDiff Compare two environments with `secret` plaintext.
 	// (POST /api/v1/orgs/{org}/projects/{project}/values/diff/reveal)
 	RevealValueDiff(ctx context.Context, request RevealValueDiffRequestObject) (RevealValueDiffResponseObject, error)
+	// GetOrgRetention Read the organisation retention cap.
+	// (GET /api/v1/orgs/{org}/retention)
+	GetOrgRetention(ctx context.Context, request GetOrgRetentionRequestObject) (GetOrgRetentionResponseObject, error)
+	// SetOrgRetention Set the organisation retention cap.
+	// (PUT /api/v1/orgs/{org}/retention)
+	SetOrgRetention(ctx context.Context, request SetOrgRetentionRequestObject) (SetOrgRetentionResponseObject, error)
 	// ListScimBindings List this organisation's SCIM bindings.
 	// (GET /api/v1/orgs/{org}/scim-bindings)
 	ListScimBindings(ctx context.Context, request ListScimBindingsRequestObject) (ListScimBindingsResponseObject, error)
@@ -33045,6 +33854,30 @@ func (sh *strictHandler) RenameRemote(w http.ResponseWriter, r *http.Request, re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameRemoteResponseObject); ok {
 		if err := validResponse.VisitRenameRemoteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRetentionHealth operation middleware
+func (sh *strictHandler) GetRetentionHealth(w http.ResponseWriter, r *http.Request) {
+	var request GetRetentionHealthRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRetentionHealth(ctx, request.(GetRetentionHealthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRetentionHealth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRetentionHealthResponseObject); ok {
+		if err := validResponse.VisitGetRetentionHealthResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -35661,6 +36494,67 @@ func (sh *strictHandler) RenameKey(w http.ResponseWriter, r *http.Request, org O
 	}
 }
 
+// GetProjectRetention operation middleware
+func (sh *strictHandler) GetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request GetProjectRetentionRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetProjectRetention(ctx, request.(GetProjectRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetProjectRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetProjectRetentionResponseObject); ok {
+		if err := validResponse.VisitGetProjectRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetProjectRetention operation middleware
+func (sh *strictHandler) SetProjectRetention(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request SetProjectRetentionRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body SetProjectRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetProjectRetention(ctx, request.(SetProjectRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetProjectRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetProjectRetentionResponseObject); ok {
+		if err := validResponse.VisitSetProjectRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListServiceAccounts operation middleware
 func (sh *strictHandler) ListServiceAccounts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
 	var request ListServiceAccountsRequestObject
@@ -36000,6 +36894,65 @@ func (sh *strictHandler) RevealValueDiff(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevealValueDiffResponseObject); ok {
 		if err := validResponse.VisitRevealValueDiffResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrgRetention operation middleware
+func (sh *strictHandler) GetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request GetOrgRetentionRequestObject
+
+	request.Org = org
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrgRetention(ctx, request.(GetOrgRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrgRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrgRetentionResponseObject); ok {
+		if err := validResponse.VisitGetOrgRetentionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetOrgRetention operation middleware
+func (sh *strictHandler) SetOrgRetention(w http.ResponseWriter, r *http.Request, org OrgID) {
+	var request SetOrgRetentionRequestObject
+
+	request.Org = org
+
+	var body SetOrgRetentionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetOrgRetention(ctx, request.(SetOrgRetentionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetOrgRetention")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetOrgRetentionResponseObject); ok {
+		if err := validResponse.VisitSetOrgRetentionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

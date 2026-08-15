@@ -733,6 +733,52 @@ export const zEnvironmentSettings = z.object({
     ]))
 });
 
+export const zRetentionPolicy = z.object({
+    mode: z.enum(['keep-if-either', 'unlimited']),
+    max_age_seconds: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ])),
+    last_revisions: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ]))
+});
+
+export const zRetentionHealth = z.object({
+    last_prune_success: z.union([
+        z.iso.datetime(),
+        z.null()
+    ]),
+    stale: z.boolean(),
+    stale_after_seconds: z.literal(86400)
+});
+
+export const zProjectRetentionPolicy = z.object({
+    inherited: z.boolean(),
+    mode: z.enum(['keep-if-either', 'unlimited']),
+    max_age_seconds: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ])),
+    last_revisions: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ]))
+});
+
+export const zSetProjectRetentionRequest = z.object({
+    inherited: z.boolean(),
+    max_age_seconds: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ])),
+    last_revisions: z.optional(z.union([
+        z.int().gte(1),
+        z.null()
+    ]))
+});
+
 /**
  * The canonical key grammar: uppercase ASCII, digits and underscore, no
  * leading digit. It is the environment-variable-safe grammar every
@@ -2343,6 +2389,32 @@ export const zCreateProjectData = z.object({
  */
 export const zCreateProjectResponse = zProject;
 
+export const zGetOrgRetentionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The organisation retention cap.
+ */
+export const zGetOrgRetentionResponse = zRetentionPolicy;
+
+export const zSetOrgRetentionData = z.object({
+    body: zRetentionPolicy,
+    path: z.object({
+        org: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The stored organisation retention cap.
+ */
+export const zSetOrgRetentionResponse = zRetentionPolicy;
+
 export const zDeleteProjectData = z.object({
     body: z.optional(z.never()),
     path: z.object({
@@ -2485,6 +2557,34 @@ export const zRenameEnvironmentData = z.object({
  * The renamed environment.
  */
 export const zRenameEnvironmentResponse = zEnvironment;
+
+export const zGetProjectRetentionData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Effective policy and whether it is inherited.
+ */
+export const zGetProjectRetentionResponse = zProjectRetentionPolicy;
+
+export const zSetProjectRetentionData = z.object({
+    body: zSetProjectRetentionRequest,
+    path: z.object({
+        org: zId,
+        project: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Effective policy and whether it is inherited.
+ */
+export const zSetProjectRetentionResponse = zProjectRetentionPolicy;
 
 export const zListFoldersData = z.object({
     body: z.optional(z.never()),
@@ -3503,6 +3603,17 @@ export const zPutOidcProviderData = z.object({
  * The created or reconfigured provider.
  */
 export const zPutOidcProviderResponse = zOidcProvider;
+
+export const zGetRetentionHealthData = z.object({
+    body: z.optional(z.never()),
+    path: z.optional(z.never()),
+    query: z.optional(z.never())
+});
+
+/**
+ * Persisted payload-pruner health.
+ */
+export const zGetRetentionHealthResponse = zRetentionHealth;
 
 export const zListSamlProvidersData = z.object({
     body: z.optional(z.never()),

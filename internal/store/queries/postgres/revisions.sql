@@ -88,7 +88,8 @@ INSERT INTO snapshots (
 -- GetLatestSnapshot is the delivery-shaped read: a workload fetch defaults to
 -- the latest published snapshot for its (project, environment).
 -- name: GetLatestSnapshot :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id)
@@ -96,13 +97,15 @@ ORDER BY revision DESC
 LIMIT 1;
 
 -- name: GetSnapshotByRevision :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id) AND revision = sqlc.arg(revision);
 
 -- name: ListSnapshots :many
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id)
@@ -151,7 +154,6 @@ ORDER BY value_entry_id;
 DELETE FROM secret_value_occurrences
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id);
-
 -- name: DeleteSnapshotEntriesForEnvironment :execrows
 DELETE FROM snapshot_entries
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)

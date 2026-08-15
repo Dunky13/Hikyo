@@ -172,6 +172,7 @@ func TestEveryRouteIsConfinedByAnOperationOrPinnedAsSelfScoped(t *testing.T) {
 	pinned := map[string]bool{
 		// 1. pre-authentication.
 		"http:GET /healthz":                              true,
+		"http:GET /metrics":                              true,
 		"http:GET /readyz":                               true,
 		"http:GET /api/v1/meta":                          true,
 		"http:POST /api/v1/auth/credential/establish":    true,

@@ -92,6 +92,48 @@ test.describe('app chrome', () => {
     await expect(page.getByText(/second factor/i)).toHaveCount(0);
   });
 
+  test('shows stale pruning health in the persistent app chrome', async ({ page }) => {
+    const lastSuccess = '2026-08-14T10:00:00Z';
+    await page.route('**/api/v1/instance/retention-health', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          last_prune_success: lastSuccess,
+          stale: true,
+          stale_after_seconds: 86400,
+        }),
+      }),
+    );
+    await page.reload();
+
+    const warning = page.locator('.retention-warning');
+    await expect(warning).toHaveAttribute('role', 'alert');
+    await expect(warning).toContainText('Payload pruning has not succeeded since');
+    await expect(warning).toContainText('retention bounds are not being enforced.');
+    await expect(warning.locator('time')).toHaveAttribute('datetime', lastSuccess);
+  });
+
+  for (const status of [403, 404]) {
+    test(`silently hides pruning health when the endpoint returns ${status}`, async ({ page }) => {
+      await page.route('**/api/v1/instance/retention-health', (route) =>
+        route.fulfill({ status, contentType: 'application/json', body: '{}' }),
+      );
+      await page.reload();
+      await expect(page.locator('.retention-warning')).toHaveCount(0);
+    });
+  }
+
+  test('fails loud when pruning health cannot be checked', async ({ page }) => {
+    await page.route('**/api/v1/instance/retention-health', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    );
+    await page.reload();
+    await expect(page.locator('.retention-warning')).toContainText(
+      'Retention health could not be checked. Reload to try again.',
+    );
+  });
+
   // The matrix is DERIVED from the registry, not re-listed beside it: this
   // flow asserts exactly the surfaces it claims, so claiming a fourth is the
   // same act as asserting it. Both themes, because the palette is a dual-theme

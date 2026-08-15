@@ -260,7 +260,8 @@ func (q *Queries) DeleteSnapshotsForEnvironment(ctx context.Context, arg DeleteS
 }
 
 const getLatestSnapshot = `-- name: GetLatestSnapshot :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = $1 AND project_id = $2
   AND environment_id = $3
@@ -289,6 +290,8 @@ func (q *Queries) GetLatestSnapshot(ctx context.Context, arg GetLatestSnapshotPa
 		&i.PublishedBy,
 		&i.PublishedAt,
 		&i.PayloadPresent,
+		&i.CollectedAt,
+		&i.CollectedPolicy,
 	)
 	return i, err
 }
@@ -337,7 +340,8 @@ func (q *Queries) GetRevisionPinForWorkload(ctx context.Context, arg GetRevision
 }
 
 const getSnapshotByRevision = `-- name: GetSnapshotByRevision :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = $1 AND project_id = $2
   AND environment_id = $3 AND revision = $4
@@ -368,6 +372,8 @@ func (q *Queries) GetSnapshotByRevision(ctx context.Context, arg GetSnapshotByRe
 		&i.PublishedBy,
 		&i.PublishedAt,
 		&i.PayloadPresent,
+		&i.CollectedAt,
+		&i.CollectedPolicy,
 	)
 	return i, err
 }
@@ -882,7 +888,8 @@ func (q *Queries) ListSnapshotEntries(ctx context.Context, arg ListSnapshotEntri
 }
 
 const listSnapshots = `-- name: ListSnapshots :many
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
+SELECT id, org_id, project_id, environment_id, revision, schema_revision,
+       published_by, published_at, payload_present, collected_at, collected_policy
 FROM snapshots
 WHERE org_id = $1 AND project_id = $2
   AND environment_id = $3
@@ -914,6 +921,8 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 			&i.PublishedBy,
 			&i.PublishedAt,
 			&i.PayloadPresent,
+			&i.CollectedAt,
+			&i.CollectedPolicy,
 		); err != nil {
 			return nil, err
 		}

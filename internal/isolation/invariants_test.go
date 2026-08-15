@@ -168,6 +168,15 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 			systemRegistered[op] = site
 		}
 	}
+	// Scheduler audit writes and its health read are intentionally dual-use:
+	// authenticated operations reach the same store doors through ordinary
+	// proofs, while the no-principal sweep reaches only this exact reviewed set.
+	sharedSchedulerOps := map[authz.StoreOp]bool{
+		authz.StoreAuditTenantInsert:    true,
+		authz.StoreAuditInstanceInsert:  true,
+		authz.StoreRetentionLastSuccess: true,
+	}
+	seenShared := map[authz.StoreOp]bool{}
 	for method := range expected {
 		op := authz.StoreOp(method)
 		_, viaOperation := registered[op]
@@ -176,7 +185,16 @@ func TestInvariant06OperationRegistryCompleteness(t *testing.T) {
 			t.Errorf("store method %q has no registered operation and no system mint site — it is unreachable and unauthorized by construction, register or remove it", method)
 		}
 		if viaOperation && viaSite {
-			t.Errorf("store method %q is registered both to an operation and to system site %q — a method is grant-evaluated or site-bound, never both", method, systemRegistered[op])
+			if systemRegistered[op] != authz.SiteScheduler || !sharedSchedulerOps[op] {
+				t.Errorf("store method %q is registered both to an operation and to system site %q without a reviewed shared-door pin", method, systemRegistered[op])
+			} else {
+				seenShared[op] = true
+			}
+		}
+	}
+	for op := range sharedSchedulerOps {
+		if !seenShared[op] {
+			t.Errorf("reviewed scheduler shared-door pin %q is stale", op)
 		}
 	}
 	for op := range registered {
@@ -263,9 +281,9 @@ func TestInvariant09ForgeryGuard(t *testing.T) {
 }
 
 // TestInvariant11SystemProofEnumeration: the mint-site set is exactly
-// {boot, migration, recovery-mode reconciliation, break-glass}, and every
-// site's operation set is empty today — growth of either fails this test
-// until the ADR is amended. Boundary rejection of a SystemProof outside its
+// {boot, migration, recovery-mode reconciliation, break-glass, scheduler}.
+// Boot and scheduler carry exactly their reviewed store surfaces; growth of
+// either fails this test. Boundary rejection of a SystemProof outside its
 // site's set is asserted in internal/authz's unit tests.
 func TestInvariant11SystemProofEnumeration(t *testing.T) {
 	sites := facts.SystemSites()
@@ -274,6 +292,7 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 		authz.SiteMigration:         true,
 		authz.SiteRecoveryReconcile: true,
 		authz.SiteBreakGlass:        true,
+		authz.SiteScheduler:         true,
 	}
 	if len(sites) != len(want) {
 		t.Errorf("system mint sites = %d entries, want exactly %d — amending the set reopens the tenant-isolation ADR", len(sites), len(want))
@@ -290,6 +309,15 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 		authz.StoreKeysInsertTier3:                true,
 		authz.StoreKeysInsertScopeGeneration:      true,
 	}
+	wantScheduler := map[authz.StoreOp]bool{
+		authz.StoreRetentionEligible:       true,
+		authz.StoreRetentionMarkCollected:  true,
+		authz.StoreRetentionDeleteEntries:  true,
+		authz.StoreRetentionLastSuccess:    true,
+		authz.StoreRetentionSetLastSuccess: true,
+		authz.StoreAuditTenantInsert:       true,
+		authz.StoreAuditInstanceInsert:     true,
+	}
 	for site, ops := range sites {
 		if !want[site] {
 			t.Errorf("unregistered system mint site %q", site)
@@ -301,6 +329,17 @@ func TestInvariant11SystemProofEnumeration(t *testing.T) {
 			for _, op := range ops {
 				if !wantBoot[op] {
 					t.Errorf("boot's set gained %q — widening a site's set reopens the tenant-isolation ADR", op)
+				}
+			}
+			continue
+		}
+		if site == authz.SiteScheduler {
+			if len(ops) != len(wantScheduler) {
+				t.Errorf("scheduler's operation set = %v, want exactly the retention GC surface", ops)
+			}
+			for _, op := range ops {
+				if !wantScheduler[op] {
+					t.Errorf("scheduler's set gained %q — widening a site's set reopens the tenant-isolation ADR", op)
 				}
 			}
 			continue

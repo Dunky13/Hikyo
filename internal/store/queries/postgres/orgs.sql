@@ -15,11 +15,20 @@ INSERT INTO orgs (id, name, active, metadata, created_at)
 VALUES ($1, $2, $3, $4, $5);
 
 -- name: GetOrg :one
-SELECT id, name, active, metadata, created_at FROM orgs WHERE id = sqlc.arg(chain_org_id);
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs WHERE id = sqlc.arg(chain_org_id);
+
+-- LockOrg serializes retention-cap changes with project override changes, so
+-- a concurrent pair cannot validate against two different effective caps.
+-- name: LockOrg :one
+SELECT id FROM orgs WHERE id = sqlc.arg(chain_org_id) FOR UPDATE;
 
 -- hikyo:instance-scoped
 -- name: ListOrgs :many
-SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name;
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs ORDER BY name;
 
 -- hikyo:instance-scoped
 -- name: CountOrgs :one
@@ -27,6 +36,13 @@ SELECT COUNT(*) FROM orgs;
 
 -- name: RenameOrg :execrows
 UPDATE orgs SET name = sqlc.arg(name) WHERE id = sqlc.arg(chain_org_id);
+
+-- name: SetOrgRetention :execrows
+UPDATE orgs
+SET retention_mode = sqlc.arg(retention_mode),
+    retention_age_seconds = sqlc.arg(retention_age_seconds),
+    retention_revision_count = sqlc.arg(retention_revision_count)
+WHERE id = sqlc.arg(chain_org_id);
 
 -- name: DeleteOrg :execrows
 DELETE FROM orgs WHERE id = sqlc.arg(chain_org_id);

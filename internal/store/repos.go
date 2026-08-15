@@ -53,6 +53,7 @@ func (s sqliteReadRepos) Values() ValueReader             { return s.r.Values() 
 func (s sqliteReadRepos) Pending() PendingReader          { return s.r.Pending() }
 func (s sqliteReadRepos) Snapshots() SnapshotReader       { return s.r.Snapshots() }
 func (s sqliteReadRepos) Pins() RevisionPinReader         { return s.r.Pins() }
+func (s sqliteReadRepos) Retention() RetentionReader      { return s.r.Retention() }
 func (s sqliteReadRepos) Projects() ProjectReader         { return s.r.Projects() }
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
 func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
@@ -68,6 +69,7 @@ func (p pgReadRepos) Values() ValueReader             { return p.r.Values() }
 func (p pgReadRepos) Pending() PendingReader          { return p.r.Pending() }
 func (p pgReadRepos) Snapshots() SnapshotReader       { return p.r.Snapshots() }
 func (p pgReadRepos) Pins() RevisionPinReader         { return p.r.Pins() }
+func (p pgReadRepos) Retention() RetentionReader      { return p.r.Retention() }
 func (p pgReadRepos) Projects() ProjectReader         { return p.r.Projects() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
 func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
@@ -95,6 +97,24 @@ func parseTime(kind, id, raw string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("store: %s %s created_at %q: %w", kind, id, raw, err)
 	}
 	return t.UTC(), nil
+}
+
+func retentionPolicy(kind, id, mode string, ageSeconds, revisions int64) (RetentionPolicy, error) {
+	if ageSeconds <= 0 || revisions <= 0 {
+		return RetentionPolicy{}, fmt.Errorf("store: %s %s: invalid retention bounds", kind, id)
+	}
+	policy := RetentionPolicy{
+		MaxAge: time.Duration(ageSeconds) * time.Second, LastRevisions: revisions,
+	}
+	switch mode {
+	case "keep-if-either":
+		return policy, nil
+	case "unlimited":
+		policy.Unlimited = true
+		return policy, nil
+	default:
+		return RetentionPolicy{}, fmt.Errorf("store: %s %s: unknown retention mode %q", kind, id, mode)
+	}
 }
 
 // constraint maps an engine's integrity-constraint failure onto ErrConflict,
@@ -190,6 +210,10 @@ func (r sqliteRepos) Pins() RevisionPinRepo {
 	return sqlitePins{q: sqlitegen.New(r.db), tok: r.tok}
 }
 
+func (r sqliteRepos) Retention() RetentionRepo {
+	return sqliteRetention{q: sqlitegen.New(r.db), tok: r.tok}
+}
+
 type sqliteOrgs struct {
 	q   *sqlitegen.Queries
 	tok *authz.TxToken
@@ -230,6 +254,18 @@ func (o sqliteOrgs) Get(ctx context.Context, p authz.Proof) (Org, error) {
 	return orgFromSQLite(row)
 }
 
+func (o sqliteOrgs) Lock(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsLock, o.tok)
+	if err != nil {
+		return err
+	}
+	_, err = o.q.LockOrg(ctx, string(chain.Org))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 func (o sqliteOrgs) List(ctx context.Context, p authz.Proof) ([]Org, error) {
 	if _, err := authz.Verify(p, authz.StoreOrgsList, o.tok); err != nil {
 		return nil, err
@@ -267,6 +303,21 @@ func (o sqliteOrgs) Rename(ctx context.Context, p authz.Proof, name string) erro
 	}))
 }
 
+func (o sqliteOrgs) SetRetention(ctx context.Context, p authz.Proof, policy RetentionPolicy) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsSetRetention, o.tok)
+	if err != nil {
+		return err
+	}
+	mode := "keep-if-either"
+	if policy.Unlimited {
+		mode = "unlimited"
+	}
+	return affected(o.q.SetOrgRetention(ctx, sqlitegen.SetOrgRetentionParams{
+		RetentionMode: mode, RetentionAgeSeconds: int64(policy.MaxAge / time.Second),
+		RetentionRevisionCount: policy.LastRevisions, ID: string(chain.Org),
+	}))
+}
+
 func (o sqliteOrgs) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreOrgsDelete, o.tok)
 	if err != nil {
@@ -289,12 +340,17 @@ func orgFromSQLite(row sqlitegen.Org) (Org, error) {
 	if err := validMetadata(metadata); err != nil {
 		return Org{}, fmt.Errorf("store: org %s: %w", row.ID, err)
 	}
+	retention, err := retentionPolicy("org", row.ID, row.RetentionMode, row.RetentionAgeSeconds, row.RetentionRevisionCount)
+	if err != nil {
+		return Org{}, err
+	}
 	return Org{
 		ID:        row.ID,
 		Name:      row.Name,
 		Active:    row.Active == 1,
 		Metadata:  metadata,
 		CreatedAt: created,
+		Retention: retention,
 	}, nil
 }
 
@@ -409,6 +465,21 @@ func (r sqliteProjects) Rename(ctx context.Context, p authz.Proof, name string) 
 	}))
 }
 
+func (r sqliteProjects) SetRetention(ctx context.Context, p authz.Proof, policy *RetentionPolicy) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetRetention, r.tok)
+	if err != nil {
+		return err
+	}
+	params := sqlitegen.SetProjectRetentionParams{
+		OrgID: string(chain.Org), ID: string(chain.Project),
+	}
+	if policy != nil {
+		params.RetentionAgeSeconds = sql.NullInt64{Int64: int64(policy.MaxAge / time.Second), Valid: true}
+		params.RetentionRevisionCount = sql.NullInt64{Int64: policy.LastRevisions, Valid: true}
+	}
+	return affected(r.q.SetProjectRetention(ctx, params))
+}
+
 func (r sqliteProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
@@ -436,7 +507,20 @@ func projectFromSQLite(row sqlitegen.Project) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	return Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created}, nil
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: created}
+	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
+		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
+	}
+	if row.RetentionAgeSeconds.Valid {
+		if row.RetentionAgeSeconds.Int64 <= 0 || row.RetentionRevisionCount.Int64 <= 0 {
+			return Project{}, fmt.Errorf("store: project %s: invalid retention bounds", row.ID)
+		}
+		project.RetentionOverride = &RetentionPolicy{
+			MaxAge:        time.Duration(row.RetentionAgeSeconds.Int64) * time.Second,
+			LastRevisions: row.RetentionRevisionCount.Int64,
+		}
+	}
+	return project, nil
 }
 
 type sqliteEnvs struct {
@@ -749,6 +833,7 @@ func (r pgRepos) Values() ValueRepo             { return pgValues{q: pggen.New(r
 func (r pgRepos) Pending() PendingRepo          { return pgPending{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Snapshots() SnapshotRepo       { return pgSnapshots{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Pins() RevisionPinRepo         { return pgPins{q: pggen.New(r.db), tok: r.tok} }
+func (r pgRepos) Retention() RetentionRepo      { return pgRetention{q: pggen.New(r.db), tok: r.tok} }
 
 type pgOrgs struct {
 	q   *pggen.Queries
@@ -784,6 +869,18 @@ func (o pgOrgs) Get(ctx context.Context, p authz.Proof) (Org, error) {
 		return Org{}, err
 	}
 	return orgFromPG(row)
+}
+
+func (o pgOrgs) Lock(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsLock, o.tok)
+	if err != nil {
+		return err
+	}
+	_, err = o.q.LockOrg(ctx, string(chain.Org))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 func (o pgOrgs) List(ctx context.Context, p authz.Proof) ([]Org, error) {
@@ -823,6 +920,21 @@ func (o pgOrgs) Rename(ctx context.Context, p authz.Proof, name string) error {
 	}))
 }
 
+func (o pgOrgs) SetRetention(ctx context.Context, p authz.Proof, policy RetentionPolicy) error {
+	chain, err := authz.Verify(p, authz.StoreOrgsSetRetention, o.tok)
+	if err != nil {
+		return err
+	}
+	mode := "keep-if-either"
+	if policy.Unlimited {
+		mode = "unlimited"
+	}
+	return affected(o.q.SetOrgRetention(ctx, pggen.SetOrgRetentionParams{
+		RetentionMode: mode, RetentionAgeSeconds: int64(policy.MaxAge / time.Second),
+		RetentionRevisionCount: policy.LastRevisions, ChainOrgID: string(chain.Org),
+	}))
+}
+
 func (o pgOrgs) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreOrgsDelete, o.tok)
 	if err != nil {
@@ -839,12 +951,17 @@ func orgFromPG(row pggen.Org) (Org, error) {
 	if err := validMetadata(metadata); err != nil {
 		return Org{}, fmt.Errorf("store: org %s: %w", row.ID, err)
 	}
+	retention, err := retentionPolicy("org", row.ID, row.RetentionMode, row.RetentionAgeSeconds, row.RetentionRevisionCount)
+	if err != nil {
+		return Org{}, err
+	}
 	return Org{
 		ID:        row.ID,
 		Name:      row.Name,
 		Active:    row.Active,
 		Metadata:  metadata,
 		CreatedAt: row.CreatedAt.Time.UTC(),
+		Retention: retention,
 	}, nil
 }
 
@@ -956,6 +1073,21 @@ func (r pgProjects) Rename(ctx context.Context, p authz.Proof, name string) erro
 	}))
 }
 
+func (r pgProjects) SetRetention(ctx context.Context, p authz.Proof, policy *RetentionPolicy) error {
+	chain, err := authz.Verify(p, authz.StoreProjectsSetRetention, r.tok)
+	if err != nil {
+		return err
+	}
+	params := pggen.SetProjectRetentionParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+	}
+	if policy != nil {
+		params.RetentionAgeSeconds = pgtype.Int8{Int64: int64(policy.MaxAge / time.Second), Valid: true}
+		params.RetentionRevisionCount = pgtype.Int8{Int64: policy.LastRevisions, Valid: true}
+	}
+	return affected(r.q.SetProjectRetention(ctx, params))
+}
+
 func (r pgProjects) Delete(ctx context.Context, p authz.Proof) error {
 	chain, err := authz.Verify(p, authz.StoreProjectsDelete, r.tok)
 	if err != nil {
@@ -978,7 +1110,20 @@ func projectFromPG(row pggen.Project) (Project, error) {
 	if !row.CreatedAt.Valid {
 		return Project{}, fmt.Errorf("store: project %s: null created_at", row.ID)
 	}
-	return Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC()}, nil
+	project := Project{ID: row.ID, OrgID: row.OrgID, Name: row.Name, CreatedAt: row.CreatedAt.Time.UTC()}
+	if row.RetentionAgeSeconds.Valid != row.RetentionRevisionCount.Valid {
+		return Project{}, fmt.Errorf("store: project %s: partial retention override", row.ID)
+	}
+	if row.RetentionAgeSeconds.Valid {
+		if row.RetentionAgeSeconds.Int64 <= 0 || row.RetentionRevisionCount.Int64 <= 0 {
+			return Project{}, fmt.Errorf("store: project %s: invalid retention bounds", row.ID)
+		}
+		project.RetentionOverride = &RetentionPolicy{
+			MaxAge:        time.Duration(row.RetentionAgeSeconds.Int64) * time.Second,
+			LastRevisions: row.RetentionRevisionCount.Int64,
+		}
+	}
+	return project, nil
 }
 
 type pgEnvs struct {

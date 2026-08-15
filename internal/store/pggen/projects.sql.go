@@ -55,7 +55,9 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (i
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = $1 AND id = $2
 `
 
@@ -72,6 +74,8 @@ func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (Project
 		&i.OrgID,
 		&i.Name,
 		&i.CreatedAt,
+		&i.RetentionRevisionCount,
+		&i.RetentionAgeSeconds,
 	)
 	return i, err
 }
@@ -114,7 +118,9 @@ func (q *Queries) ListAllProjects(ctx context.Context) ([]ListAllProjectsRow, er
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, org_id, name, created_at FROM projects
+SELECT id, org_id, name, created_at,
+       retention_revision_count, retention_age_seconds
+FROM projects
 WHERE org_id = $1 ORDER BY name
 `
 
@@ -132,6 +138,8 @@ func (q *Queries) ListProjects(ctx context.Context, chainOrgID string) ([]Projec
 			&i.OrgID,
 			&i.Name,
 			&i.CreatedAt,
+			&i.RetentionRevisionCount,
+			&i.RetentionAgeSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -177,6 +185,33 @@ type RenameProjectParams struct {
 
 func (q *Queries) RenameProject(ctx context.Context, arg RenameProjectParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renameProject, arg.Name, arg.ChainOrgID, arg.ChainProjectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setProjectRetention = `-- name: SetProjectRetention :execrows
+UPDATE projects
+SET retention_age_seconds = $1,
+    retention_revision_count = $2
+WHERE org_id = $3 AND id = $4
+`
+
+type SetProjectRetentionParams struct {
+	RetentionAgeSeconds    pgtype.Int8
+	RetentionRevisionCount pgtype.Int8
+	ChainOrgID             string
+	ChainProjectID         string
+}
+
+func (q *Queries) SetProjectRetention(ctx context.Context, arg SetProjectRetentionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProjectRetention,
+		arg.RetentionAgeSeconds,
+		arg.RetentionRevisionCount,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+	)
 	if err != nil {
 		return 0, err
 	}

@@ -92,12 +92,13 @@ func beforeMigration(ctx context.Context, cfg *config.Config, log *slog.Logger, 
 
 // Server is a booted, listening server that has not started serving yet.
 type Server struct {
-	Addr    string
-	db      *store.DB
-	keyring *crypto.Keyring // held for the process lifetime
-	ln      net.Listener
-	handler http.Handler
-	log     *slog.Logger
+	Addr      string
+	db        *store.DB
+	keyring   *crypto.Keyring // held for the process lifetime
+	ln        net.Listener
+	handler   http.Handler
+	log       *slog.Logger
+	scheduler *Scheduler
 }
 
 // devRootKeyName sits beside the dev sqlite database (cwd when no sqlite
@@ -257,6 +258,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	if err != nil {
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
+	retentionSvc := &service.Retention{DB: db}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -301,9 +303,11 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// The settings knob calls LowerEffectiveWindow, which is the Auth
 		// service's library — one Auth, so the window the knob writes and the
 		// window the reveal guard reads cannot come from two configurations.
-		Settings:      &service.ProjectSettings{DB: db, Auth: authSvc},
-		Providers:     &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
-		SAMLProviders: samlProviders,
+		Settings:        &service.ProjectSettings{DB: db, Auth: authSvc},
+		Retention:       retentionSvc,
+		RetentionHealth: retentionSvc,
+		Providers:       &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
+		SAMLProviders:   samlProviders,
 		// ONE SCIM service behind both surfaces: the administration verbs and
 		// the identity provider's wire read the same bindings, the same mapping
 		// table and the same bounds. Two instances would let the wire clamp a
@@ -332,6 +336,14 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		ln:      ln,
 		handler: server.New(&service.System{DB: db, Store: sc}, api, webui.Assets()),
 		log:     log,
+		scheduler: &Scheduler{Log: log, Jobs: []ScheduledJob{{
+			Name: "payload_gc",
+			Run: func(ctx context.Context) error {
+				_, err := retentionSvc.Sweep(ctx)
+				return err
+			},
+			LastSuccess: retentionSvc.LastPruneSuccess,
+		}}},
 	}, nil
 }
 
@@ -397,6 +409,21 @@ func newHTTPServer(h http.Handler) *http.Server {
 // Serve blocks until ctx is cancelled, then shuts down gracefully.
 func (s *Server) Serve(ctx context.Context) error {
 	defer s.db.Close()
+	schedulerCtx, stopScheduler := context.WithCancel(ctx)
+	var schedulerDone chan struct{}
+	if s.scheduler != nil {
+		schedulerDone = make(chan struct{})
+		go func() {
+			defer close(schedulerDone)
+			s.scheduler.Run(schedulerCtx)
+		}()
+	}
+	defer func() {
+		stopScheduler()
+		if schedulerDone != nil {
+			<-schedulerDone
+		}
+	}()
 	srv := newHTTPServer(s.handler)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(s.ln) }()

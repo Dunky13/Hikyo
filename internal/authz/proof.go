@@ -44,7 +44,7 @@ type proof struct {
 	kind  proofKind
 	op    Operation
 	site  SystemSite   // kindSystem only
-	chain domain.Scope // kindTenant only: the resolved chain, never caller input
+	chain domain.Scope // tenant proofs and scoped system proofs: resolved chain, never caller input
 	tok   *TxToken
 }
 

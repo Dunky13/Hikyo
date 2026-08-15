@@ -123,7 +123,7 @@ func scenarioSecretClassificationSurvivesCollection(t *testing.T, db *store.DB) 
 	target := latestRevisionOf(t, db, string(dev.Env))
 	publishValue(t, db, values, actor, dev, "STICKY_SECRET", "new-config-occurrence")
 	seed(t, db, []string{
-		fmt.Sprintf("UPDATE snapshots SET payload_present = FALSE WHERE id IN (SELECT snapshot_id FROM snapshot_entries WHERE environment_id = '%s' AND classification = 'secret')", dev.Env),
+		fmt.Sprintf("UPDATE snapshots SET payload_present = FALSE, collected_at = '2026-08-15T12:00:00.000000Z', collected_policy = 'classification-retention-test' WHERE id IN (SELECT snapshot_id FROM snapshot_entries WHERE environment_id = '%s' AND classification = 'secret')", dev.Env),
 		fmt.Sprintf("DELETE FROM snapshot_entries WHERE environment_id = '%s' AND classification = 'secret'", dev.Env),
 	})
 	restorer := newPrincipal(t, db, "usr_restore_collected_class_"+string(scope.Project), []grantSpec{
@@ -357,17 +357,24 @@ func scenarioPinLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("recorded-authority denial attribution count advanced by %d, want 1", got-attributedBeforeFetch)
 	}
 	grantOrg(t, db, who, scope.Org, "pinlifecycle_regrant", "pin")
+	const collectedPolicy = "keep-if-either(max_age=720h0m0s,last_revisions=2)"
 	seed(t, db, []string{fmt.Sprintf(
-		"UPDATE snapshots SET payload_present = FALSE WHERE environment_id = '%s' AND revision = %d",
-		dev.Env, oldRevision)})
-	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, ""); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), strconv.FormatInt(oldRevision, 10)) {
-		t.Fatalf("collected pinned payload = %v, want loud refusal naming revision %d", err, oldRevision)
+		"UPDATE snapshots SET payload_present = FALSE, collected_at = '2026-08-15T12:00:00.000000Z', collected_policy = '%s' WHERE environment_id = '%s' AND revision = %d",
+		collectedPolicy, dev.Env, oldRevision)})
+	_, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	var collected *domain.CollectedRevisionError
+	if !errors.As(err, &collected) || !errors.Is(err, domain.ErrConflict) ||
+		collected.Revision != oldRevision || collected.Policy != collectedPolicy {
+		t.Fatalf("collected pinned payload = %v (%+v), want conflict naming revision %d and policy %q", err, collected, oldRevision, collectedPolicy)
 	}
-	if _, err := revisionSvc(t, db).Restore(t.Context(), actor, dev, oldRevision, ""); !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), strconv.FormatInt(oldRevision, 10)) {
-		t.Fatalf("collected restore payload = %v, want loud refusal naming revision %d", err, oldRevision)
+	_, err = revisionSvc(t, db).Restore(t.Context(), actor, dev, oldRevision, "")
+	collected = nil
+	if !errors.As(err, &collected) || !errors.Is(err, domain.ErrConflict) ||
+		collected.Revision != oldRevision || collected.Policy != collectedPolicy {
+		t.Fatalf("collected restore payload = %v (%+v), want conflict naming revision %d and policy %q", err, collected, oldRevision, collectedPolicy)
 	}
 	seed(t, db, []string{fmt.Sprintf(
-		"UPDATE snapshots SET payload_present = TRUE WHERE environment_id = '%s' AND revision = %d",
+		"UPDATE snapshots SET payload_present = TRUE, collected_at = NULL, collected_policy = '' WHERE environment_id = '%s' AND revision = %d",
 		dev.Env, oldRevision)})
 	if err := pins.Release(t.Context(), actor, dev, workload); err != nil {
 		t.Fatal(err)

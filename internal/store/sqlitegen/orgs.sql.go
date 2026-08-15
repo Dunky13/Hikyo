@@ -70,7 +70,9 @@ func (q *Queries) DeleteOrg(ctx context.Context, id string) (int64, error) {
 }
 
 const getOrg = `-- name: GetOrg :one
-SELECT id, name, active, metadata, created_at FROM orgs WHERE id = ?
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs WHERE id = ?
 `
 
 func (q *Queries) GetOrg(ctx context.Context, id string) (Org, error) {
@@ -82,12 +84,17 @@ func (q *Queries) GetOrg(ctx context.Context, id string) (Org, error) {
 		&i.Active,
 		&i.Metadata,
 		&i.CreatedAt,
+		&i.RetentionMode,
+		&i.RetentionAgeSeconds,
+		&i.RetentionRevisionCount,
 	)
 	return i, err
 }
 
 const listOrgs = `-- name: ListOrgs :many
-SELECT id, name, active, metadata, created_at FROM orgs ORDER BY name
+SELECT id, name, active, metadata, created_at,
+       retention_mode, retention_age_seconds, retention_revision_count
+FROM orgs ORDER BY name
 `
 
 // hikyo:instance-scoped
@@ -106,6 +113,9 @@ func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 			&i.Active,
 			&i.Metadata,
 			&i.CreatedAt,
+			&i.RetentionMode,
+			&i.RetentionAgeSeconds,
+			&i.RetentionRevisionCount,
 		); err != nil {
 			return nil, err
 		}
@@ -120,6 +130,20 @@ func (q *Queries) ListOrgs(ctx context.Context) ([]Org, error) {
 	return items, nil
 }
 
+const lockOrg = `-- name: LockOrg :one
+SELECT id FROM orgs WHERE id = ?
+`
+
+// LockOrg serializes retention-cap changes with project override changes.
+// SQLite write transactions are already instance-serialized by
+// _txlock=immediate; this matching read keeps the cross-engine store seam.
+func (q *Queries) LockOrg(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, lockOrg, id)
+	var id_2 string
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const renameOrg = `-- name: RenameOrg :execrows
 UPDATE orgs SET name = ? WHERE id = ?
 `
@@ -131,6 +155,32 @@ type RenameOrgParams struct {
 
 func (q *Queries) RenameOrg(ctx context.Context, arg RenameOrgParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, renameOrg, arg.Name, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setOrgRetention = `-- name: SetOrgRetention :execrows
+UPDATE orgs
+SET retention_mode = ?, retention_age_seconds = ?, retention_revision_count = ?
+WHERE id = ?
+`
+
+type SetOrgRetentionParams struct {
+	RetentionMode          string
+	RetentionAgeSeconds    int64
+	RetentionRevisionCount int64
+	ID                     string
+}
+
+func (q *Queries) SetOrgRetention(ctx context.Context, arg SetOrgRetentionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setOrgRetention,
+		arg.RetentionMode,
+		arg.RetentionAgeSeconds,
+		arg.RetentionRevisionCount,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
