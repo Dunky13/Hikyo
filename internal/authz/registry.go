@@ -175,8 +175,9 @@ const (
 	OpValueImport    Operation = "value.import"
 
 	// Drafts, publishing and revisions (#51, revision-model ADR).
-	OpValueStage   Operation = "value.stage"
-	OpValuePublish Operation = "value.publish"
+	OpValueStage       Operation = "value.stage"
+	OpValuePendingList Operation = "value.pending-list"
+	OpValuePublish     Operation = "value.publish"
 	// The one bulk-disclosure verb and its two material halves. `values export`
 	// carries `read ∧ reveal` for CURRENT material and `read ∧ reveal-history`
 	// for historical material; a mixed export evaluates each formula over
@@ -574,12 +575,13 @@ const (
 	// working state; `snapshots.*` is the published state, its lineage and
 	// its payload — one aggregate because a revision, its resolved map and
 	// its changed-key rows are written in one act and must never drift.
-	StorePendingListForOwner       StoreOp = "pending.ListForOwner"
-	StorePendingListMarkers        StoreOp = "pending.ListMarkers"
-	StorePendingStage              StoreOp = "pending.Stage"
-	StorePendingDiscard            StoreOp = "pending.Discard"
-	StorePendingDiscardEnvironment StoreOp = "pending.DiscardEnvironment"
-	StorePendingDiscardKey         StoreOp = "pending.DiscardKey"
+	StorePendingListForOwner              StoreOp = "pending.ListForOwner"
+	StorePendingListForOwnerInEnvironment StoreOp = "pending.ListForOwnerInEnvironment"
+	StorePendingListMarkers               StoreOp = "pending.ListMarkers"
+	StorePendingStage                     StoreOp = "pending.Stage"
+	StorePendingDiscard                   StoreOp = "pending.Discard"
+	StorePendingDiscardEnvironment        StoreOp = "pending.DiscardEnvironment"
+	StorePendingDiscardKey                StoreOp = "pending.DiscardKey"
 
 	StoreSnapshotsLatest                      StoreOp = "snapshots.Latest"
 	StoreSnapshotsAtRevision                  StoreOp = "snapshots.AtRevision"
@@ -762,6 +764,7 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreValuesList:                        true,
 	StoreValuesEnvironmentsWithValue:       true,
 	StorePendingListForOwner:               true,
+	StorePendingListForOwnerInEnvironment:  true,
 	StorePendingListMarkers:                true,
 	StoreSnapshotsLatest:                   true,
 	StoreSnapshotsAtRevision:               true,
@@ -1684,6 +1687,18 @@ var operations = map[Operation]opSpec{
 		storeOps: map[StoreOp]bool{
 			StoreSnapshotsLatest: true, StoreSnapshotsAtRevision: true,
 			StoreSnapshotsEntries: true, StoreSnapshotsChanges: true,
+		},
+		auditedNone: true,
+	},
+	// The caller-owned pending-draft preview. Ownership is a SQL filter, not
+	// the authorization gate: config material is read-class exactly like its
+	// published counterpart, while secret material is never opened here.
+	OpValuePendingList: {
+		class:   ClassTenant,
+		level:   domain.LevelEnv,
+		formula: Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{
+			StoreCatalogueList: true, StorePendingListForOwnerInEnvironment: true,
 		},
 		auditedNone: true,
 	},

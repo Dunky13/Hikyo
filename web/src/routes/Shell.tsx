@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { matchPath, NavLink, Outlet, useLocation } from 'react-router';
 
 import { useLogout, useOrgs, type WhoAmI } from '../api/session.ts';
 import { retentionBanner, useRetentionHealth } from '../api/retention.ts';
@@ -10,7 +10,7 @@ import {
   themeLabel,
   type ThemeChoice,
 } from '../app/theme.ts';
-import { SECTIONS } from '../app/navigation.ts';
+import { SECTIONS, SURFACES } from '../app/navigation.ts';
 
 /**
  * The application chrome skeleton (prototype/app-chrome iteration 15, sidebar
@@ -31,13 +31,20 @@ export function Shell({ session }: { session: WhoAmI }) {
   const retentionHealth = useRetentionHealth(true);
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [activeOrgId, setActiveOrgId] = useState('');
 
   // A navigation on a phone must close the sheet it was chosen from.
   useEffect(() => setNavOpen(false), [location.pathname]);
 
   const items = orgs.data?.items ?? [];
-  const activeOrg = items[0];
+  const activeOrg = items.find((org) => org.id === activeOrgId) ?? items[0];
   const pruneWarning = retentionBanner(retentionHealth.data, retentionHealth.isError);
+
+  useEffect(() => {
+    if (activeOrg !== undefined && activeOrg.id !== activeOrgId) {
+      setActiveOrgId(activeOrg.id);
+    }
+  }, [activeOrg, activeOrgId]);
 
   return (
     <div className="chrome" data-nav={navOpen ? 'open' : 'closed'}>
@@ -64,6 +71,7 @@ export function Shell({ session }: { session: WhoAmI }) {
                 aria-current={org.id === activeOrg?.id}
                 aria-label={`Organisation ${org.name}`}
                 title={org.name}
+                onClick={() => setActiveOrgId(org.id)}
               >
                 {monogram(org.name)}
               </button>
@@ -150,7 +158,7 @@ export function Shell({ session }: { session: WhoAmI }) {
           </p>
         ) : null}
         <main className="content" id="content" tabIndex={-1}>
-          <Outlet />
+          <Outlet context={{ activeOrgId: activeOrg?.id ?? '' }} />
         </main>
       </div>
     </div>
@@ -214,11 +222,9 @@ function ThemeToggle() {
 }
 
 function currentLabel(pathname: string): string {
-  for (const section of SECTIONS) {
-    for (const item of section.items) {
-      if (item.path === pathname) {
-        return item.label;
-      }
+  for (const surface of SURFACES) {
+    if (matchPath({ path: surface.path, end: true }, pathname) !== null) {
+      return surface.label;
     }
   }
   return 'Not found';

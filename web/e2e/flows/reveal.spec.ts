@@ -5,12 +5,10 @@ import {
   ADMIN,
   countDisclosureEvents,
   establishSession,
+  installPasskeyAuthenticator,
   nextTotpCode,
-  parseCredential,
-  readPasskey,
   readSeed,
   refreshSharedSession,
-  writePasskey,
 } from '../fixtures/instance.ts';
 
 /**
@@ -40,48 +38,6 @@ import {
 const seed = readSeed();
 const VALUES_PATH = `/orgs/${seed.org}/projects/${seed.project}/environments/${seed.dev}/values`;
 const PROD_PATH = `/orgs/${seed.org}/projects/${seed.project}/environments/${seed.prod}/values`;
-
-/**
- * installAuthenticator attaches a Chromium virtual authenticator preloaded
- * with the passkey global setup enrolled.
- *
- * Loading the shared credential rather than enrolling a new one is the point:
- * enrolment is an account-security mutation that advances the principal's
- * session generation and deletes every other session it holds, so a flow that
- * enrolled would invalidate the shared session the rest of the suite runs on.
- * The ceremony itself is entirely real — a genuine assertion over a genuine
- * challenge — it just does not re-enrol to get one.
- *
- * `isUserVerified` is on because the reveal ceremony asks for user
- * verification, and an authenticator that could not supply it would fail for a
- * reason that has nothing to do with the gate.
- */
-async function installAuthenticator(page: Page): Promise<() => Promise<void>> {
-  const session = await page.context().newCDPSession(page);
-  await session.send('WebAuthn.enable');
-  const { authenticatorId } = await session.send('WebAuthn.addVirtualAuthenticator', {
-    options: {
-      protocol: 'ctap2',
-      transport: 'internal',
-      hasResidentKey: true,
-      hasUserVerification: true,
-      isUserVerified: true,
-      automaticPresenceSimulation: true,
-    },
-  });
-  await session.send('WebAuthn.addCredential', { authenticatorId, credential: readPasskey() });
-  // The returned closure hands the ADVANCED counter back to the store, so the
-  // next Playwright project's authenticator carries on from here instead of
-  // replaying a counter the server has already seen — which it would refuse as
-  // a clone, disabling the credential for the rest of the run.
-  return async () => {
-    const { credentials } = await session.send('WebAuthn.getCredentials', { authenticatorId });
-    const advanced: unknown = credentials[0];
-    if (advanced !== undefined) {
-      writePasskey(parseCredential(advanced));
-    }
-  };
-}
 
 function instanceGrantPath(principal: string, capability: string): string {
   const query = new URLSearchParams({ principal, capability });
@@ -245,7 +201,7 @@ test.describe('reveal ceremonies', () => {
       permissions: ['clipboard-read', 'clipboard-write'],
     });
     page = await context.newPage();
-    persistPasskey = await installAuthenticator(page);
+    persistPasskey = await installPasskeyAuthenticator(page);
   });
 
   test.afterAll(async () => {
@@ -663,7 +619,7 @@ test.describe('write-only editing', () => {
   test.beforeAll(async ({ browser }) => {
     context = await browser.newContext();
     page = await context.newPage();
-    persistPasskey = await installAuthenticator(page);
+    persistPasskey = await installPasskeyAuthenticator(page);
   });
 
   test.afterAll(async () => {

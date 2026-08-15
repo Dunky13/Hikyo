@@ -7395,6 +7395,47 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    get:
+      operationId: listPendingDrafts
+      tags: [revisions]
+      summary: Preview the caller's pending drafts in one environment.
+      description: |
+        Returns only the caller's own drafts. Other principals' drafts are
+        invisible here, including their presence; the matrix signals endpoint
+        carries the permitted write-presence marker instead.
+
+        A config `set` carries its plaintext under read authorization unless
+        its staged material originated as secret. Secret-origin drafts never
+        carry material here and remain hidden: offering a
+        secret preview would require consuming a disclosure ceremony, which is
+        outside this seam's scope. Unset drafts carry no material. `value` is
+        present if and only if `revealed` is true.
+      x-hikyo-class: tenant
+      x-hikyo-operation: value.pending-list
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200":
+          description: The caller's pending drafts in the environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingDraftList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
   /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback:
     parameters:
       - $ref: "#/components/parameters/OrgID"
@@ -8703,6 +8744,47 @@ components:
         created_at:
           type: string
           format: date-time
+    PendingDraft:
+      type: object
+      description: |
+        One caller-owned pending draft. Secret and unset drafts never carry
+        material on this surface; `value` is present if and only if `revealed`
+        is true.
+      required: [version_id, key_id, name, classification, operation, staged_from_revision, created_at, revealed]
+      additionalProperties: false
+      properties:
+        version_id:
+          $ref: "#/components/schemas/ID"
+        key_id:
+          $ref: "#/components/schemas/ID"
+        name:
+          $ref: "#/components/schemas/KeyName"
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        operation:
+          type: string
+          enum: [set, unset]
+        staged_from_revision:
+          type: integer
+          format: int64
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        revealed:
+          type: boolean
+        value:
+          type: string
+    PendingDraftList:
+      type: object
+      required: [items, count]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingDraft"
+        count:
+          type: integer
+          minimum: 0
     RollbackRequest:
       type: object
       additionalProperties: false

@@ -94,6 +94,32 @@ func (r sqlitePending) ListForOwner(ctx context.Context, p authz.Proof, ownerID 
 	return out, nil
 }
 
+func (r sqlitePending) ListForOwnerInEnvironment(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForOwnerInEnvironment, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StorePendingListForOwnerInEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingChangesForOwnerInEnvironment(ctx, sqlitegen.ListPendingChangesForOwnerInEnvironmentParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env, OwnerID: ownerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingChange, 0, len(rows))
+	for _, row := range rows {
+		change, err := pendingFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, change)
+	}
+	return out, nil
+}
+
 func (r sqlitePending) ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMarker, error) {
 	chain, err := authz.Verify(p, authz.StorePendingListMarkers, r.tok)
 	if err != nil {
@@ -719,24 +745,58 @@ func (r pgPending) ListForOwner(ctx context.Context, p authz.Proof, ownerID stri
 	}
 	out := make([]PendingChange, 0, len(rows))
 	for _, row := range rows {
-		op, err := pendingOperation(row.Operation)
+		change, err := pendingFromPostgres(row)
 		if err != nil {
 			return nil, err
 		}
-		source, err := pendingSource(row.Source)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, PendingChange{
-			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
-			EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
-			Operation: op, Ciphertext: row.Ciphertext,
-			StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
-			CreatedAt: row.CreatedAt.Time.UTC(), Source: source, Secret: row.Secret,
-			MaterialSecret: row.MaterialSecret,
-		})
+		out = append(out, change)
 	}
 	return out, nil
+}
+
+func (r pgPending) ListForOwnerInEnvironment(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error) {
+	chain, err := authz.Verify(p, authz.StorePendingListForOwnerInEnvironment, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StorePendingListForOwnerInEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListPendingChangesForOwnerInEnvironment(ctx, pggen.ListPendingChangesForOwnerInEnvironmentParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env, OwnerID: ownerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PendingChange, 0, len(rows))
+	for _, row := range rows {
+		change, err := pendingFromPostgres(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, change)
+	}
+	return out, nil
+}
+
+func pendingFromPostgres(row pggen.PendingChange) (PendingChange, error) {
+	op, err := pendingOperation(row.Operation)
+	if err != nil {
+		return PendingChange{}, err
+	}
+	source, err := pendingSource(row.Source)
+	if err != nil {
+		return PendingChange{}, err
+	}
+	return PendingChange{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
+		EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
+		Operation: op, Ciphertext: row.Ciphertext,
+		StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
+		CreatedAt: row.CreatedAt.Time.UTC(), Source: source, Secret: row.Secret,
+		MaterialSecret: row.MaterialSecret,
+	}, nil
 }
 
 func (r pgPending) ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMarker, error) {

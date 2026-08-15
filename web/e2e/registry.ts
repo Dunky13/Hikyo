@@ -38,6 +38,7 @@ export const FLOWS: readonly Flow[] = [
   { id: 'login', spec: 'flows/login.spec.ts', surfaces: ['login'] },
   { id: 'shell', spec: 'flows/shell.spec.ts', surfaces: ['overview', 'projects', 'settings'] },
   { id: 'reveal', spec: 'flows/reveal.spec.ts', surfaces: ['values'] },
+  { id: 'matrix', spec: 'flows/matrix.spec.ts', surfaces: ['matrix'] },
   {
     id: 'machine-access',
     spec: 'flows/machine-access.spec.ts',

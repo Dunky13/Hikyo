@@ -1,4 +1,5 @@
 import { client } from '@hikyo/runtime';
+import { zError } from '@hikyo/zod';
 import type { ZodType } from 'zod';
 
 /**
@@ -53,18 +54,20 @@ client.interceptors.request.use((request: Request) => {
 });
 
 /**
- * ApiError is every refusal the SPA can render. `status` is the only thing a
- * caller should branch on: the server's error bodies are deliberately uniform
- * (unauthorized ≡ nonexistent), so anything finer would be reading a
- * distinction that is not there.
+ * ApiError is every refusal the SPA can render. Most callers branch only on
+ * `status`. `detail` is present only when the generated error contract parsed
+ * an explicitly caller-safe detail from the server; malformed bodies and
+ * uniform refusals cannot smuggle arbitrary prose through this boundary.
  */
 export class ApiError extends Error {
   readonly status: number;
+  readonly detail: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -86,7 +89,12 @@ export async function parsed<T>(
 ): Promise<T> {
   const result = await call;
   if (!result.response.ok) {
-    throw new ApiError(result.response.status, `request failed with ${result.response.status}`);
+    const refusal = zError.safeParse(result.error);
+    throw new ApiError(
+      result.response.status,
+      `request failed with ${result.response.status}`,
+      refusal.success ? refusal.data.error.detail ?? undefined : undefined,
+    );
   }
   return schema.parse(result.data);
 }

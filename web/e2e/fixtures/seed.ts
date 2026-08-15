@@ -49,6 +49,8 @@ export type Seeded = {
   rotatable: string;
   /** One config key, so "non-secret copy is free" has a subject. */
   config: string;
+  /** Required only in production and intentionally absent: matrix problems fixture. */
+  matrixRequired: string;
   /** The seeding session's bearer token — the flows use cookies, not this. */
   token: string;
   principal: string;
@@ -439,12 +441,24 @@ export async function seedTenant(
   const secrets = ['DB_PASSWORD', 'STRIPE_SECRET_KEY', 'ROTATE_ME'];
   const rotatable = 'ROTATE_ME';
   const config = 'LOG_LEVEL';
-  for (const name of [...secrets, config]) {
-    await call(token, 'POST', `/api/v1/orgs/${org}/projects/${project}/keys`, zCreated, {
+  const matrixRequired = 'MATRIX_REQUIRED';
+  let matrixRequiredID = '';
+  for (const name of [...secrets, config, matrixRequired]) {
+    let folderPath = 'app';
+    if (secrets.includes(name)) {
+      folderPath = 'secrets';
+    } else if (name === matrixRequired) {
+      folderPath = 'ops';
+    }
+    const createdKey = await call(token, 'POST', `/api/v1/orgs/${org}/projects/${project}/keys`, zCreated, {
       name,
       classification: secrets.includes(name) ? 'secret' : 'config',
+      folder_path: folderPath,
       declaration: { rule: { type: 'string' } },
     });
+    if (name === matrixRequired) {
+      matrixRequiredID = createdKey.id;
+    }
   }
   // Since #51 a value PUT only STAGES a pending change; delivery and the
   // matrix's published state come from the selective publish that follows.
@@ -484,6 +498,7 @@ export async function seedTenant(
     ['STRIPE_SECRET_KEY', 'sk_live_production'],
     ['ROTATE_ME', 'rotate-me-production'],
     ['LOG_LEVEL', 'warn'],
+    ['MATRIX_REQUIRED', 'present-before-clear'],
   ] as const) {
     const staged = await call(
       token,
@@ -500,6 +515,33 @@ export async function seedTenant(
     `/api/v1/orgs/${org}/projects/${project}/environments/${prod}/publish`,
     zIgnored,
     { version_ids: prodVersions },
+  );
+
+  // A required-absent state cannot be CREATED — schema publication correctly
+  // vetoes it. The matrix fixture therefore walks the real user path: publish
+  // a valid value, make it required, then STAGE a clear. Saving stays free;
+  // the pending unset is the publish-veto problem the matrix must compute.
+  if (matrixRequiredID === '') {
+    throw new Error('the matrix-required fixture key was not created');
+  }
+  await call(
+    token,
+    'PUT',
+    `/api/v1/orgs/${org}/projects/${project}/keys/${matrixRequiredID}/declaration`,
+    zIgnored,
+    {
+      declaration: { rule: { type: 'string' } },
+      presence: {
+        required_in: { mode: 'explicit', environment_ids: [prod] },
+        forbidden_in: { mode: 'none' },
+      },
+    },
+  );
+  await call(
+    token,
+    'DELETE',
+    `/api/v1/orgs/${org}/projects/${project}/environments/${prod}/values/${matrixRequired}`,
+    zStaged,
   );
 
   // Development gets an explicit sliding window. The INSTANCE default is 0 —
@@ -532,6 +574,7 @@ export async function seedTenant(
     secrets,
     rotatable,
     config,
+    matrixRequired,
     token,
     principal,
     otpauth: uri,

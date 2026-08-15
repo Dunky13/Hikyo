@@ -18,17 +18,8 @@ export function Placeholder({ title, children }: { title: string; children: stri
 export function Overview() {
   return (
     <Placeholder title="Overview">
-      The environment matrix lands here — the signature surface, with its
-      virtualised grid and cell-state vocabulary.
-    </Placeholder>
-  );
-}
-
-export function Projects() {
-  return (
-    <Placeholder title="Projects">
-      Projects of the active organisation, with their environments and
-      definition source.
+      Choose a project to open its environment matrix, values, and access
+      surfaces.
     </Placeholder>
   );
 }

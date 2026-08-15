@@ -40,6 +40,7 @@ func init() {
 		scenario{"selective_publish_closes_over_key_groups", scenarioSelectivePublish},
 		scenario{"rotate_token_key_moves_only_the_token", scenarioRotateTokenKey},
 		scenario{"publish_recomputes_signals_for_touched_environments", scenarioPublishSignals},
+		scenario{"pending_draft_preview_is_owner_filtered_and_classification_safe", scenarioPendingDraftPreview},
 		scenario{"required_in_absent_vetoes_publish", scenarioRequiredInVeto},
 		scenario{"revision_ciphertext_is_owner_bound", scenarioRevisionCiphertextBinding},
 		scenario{"advisory_projects_authorization_per_event", scenarioAdvisoryAuthorization},
@@ -53,6 +54,112 @@ func init() {
 		scenario{"pin_lifecycle_quota_and_expiry_refusals_by_name", scenarioPinLifecycle},
 		scenario{"delivery_retry_clears_rolled_back_pin_metadata", scenarioDeliveryRetryClearsPinMetadata},
 	)
+}
+
+func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "pendingpreview")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	configSetKey := mustKey(t, keys, actor, scope, "CONFIG_SET", string(schema.Config), schema.DefaultPresenceRules())
+	mustKey(t, keys, actor, scope, "SECRET_SET", string(schema.Secret), schema.DefaultPresenceRules())
+	mustKey(t, keys, actor, scope, "CONFIG_CLEAR", string(schema.Config), schema.DefaultPresenceRules())
+	mustKey(t, keys, actor, scope, "OTHER_CONFIG", string(schema.Config), schema.DefaultPresenceRules())
+	restoredKey := mustKey(t, keys, actor, scope, "RESTORED_SECRET", string(schema.Secret), schema.DefaultPresenceRules())
+	publishValue(t, db, values, actor, dev, "CONFIG_CLEAR", "published")
+	publishValue(t, db, values, actor, dev, "RESTORED_SECRET", "historical secret")
+	historicalSecretRevision := latestRevisionOf(t, db, string(dev.Env))
+	grantOrg(t, db, who, scope.Org, "pendingpreviewhistory", "reveal-history")
+	if _, err := keys.Reclassify(t.Context(), actor, scope, restoredKey.ID, string(schema.Config)); err != nil {
+		t.Fatal(err)
+	}
+	publishValue(t, db, values, actor, dev, "RESTORED_SECRET", "current config")
+	restored, err := revisionSvc(t, db).Restore(t.Context(), actor, dev, historicalSecretRevision, "RESTORED_SECRET")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored.Changes) != 1 {
+		t.Fatalf("historical secret restore staged %d changes, want 1: %+v", len(restored.Changes), restored)
+	}
+
+	config, err := values.Set(t.Context(), actor, dev, "CONFIG_SET", "draft config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := values.Set(t.Context(), actor, dev, "SECRET_SET", "draft secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := values.Unset(t.Context(), actor, dev, "CONFIG_CLEAR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := newPrincipal(t, db, "usr_pending_preview_other_"+string(scope.Project), []grantSpec{
+		{capability: "read", scope: scope}, {capability: "edit", scope: scope},
+	})
+	if _, err := values.Set(t.Context(), service.LocalPrincipal(other), dev, "OTHER_CONFIG", "not yours"); err != nil {
+		t.Fatal(err)
+	}
+
+	drafts, err := revisionSvc(t, db).PendingDrafts(t.Context(), actor, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drafts) != 4 {
+		t.Fatalf("pending draft count = %d, want 4 caller-owned drafts: %+v", len(drafts), drafts)
+	}
+	byID := make(map[string]service.PendingDraft, len(drafts))
+	for _, draft := range drafts {
+		byID[draft.VersionID] = draft
+		if draft.Name == "OTHER_CONFIG" {
+			t.Fatalf("another principal's draft appeared in preview: %+v", draft)
+		}
+	}
+	if got := byID[config.VersionID]; got.Name != "CONFIG_SET" || got.Classification != string(schema.Config) ||
+		got.Operation != string(store.PendingSet) || !got.Revealed || got.Value != "draft config" {
+		t.Fatalf("config draft = %+v, want revealed plaintext", got)
+	}
+	if got := byID[secret.VersionID]; got.Name != "SECRET_SET" || got.Classification != string(schema.Secret) ||
+		got.Operation != string(store.PendingSet) || got.Revealed || got.Value != "" {
+		t.Fatalf("secret draft = %+v, want masked without material", got)
+	}
+	if got := byID[cleared.VersionID]; got.Name != "CONFIG_CLEAR" || got.Operation != string(store.PendingUnset) ||
+		got.Revealed || got.Value != "" {
+		t.Fatalf("unset draft = %+v, want no material", got)
+	}
+	if got := byID[restored.Changes[0].VersionID]; got.Name != "RESTORED_SECRET" ||
+		got.Classification != string(schema.Config) || got.Operation != string(store.PendingSet) || got.Revealed || got.Value != "" {
+		t.Fatalf("secret-origin config draft = %+v, want hidden material", got)
+	}
+
+	// The gate reads the key's CURRENT classification, not the one at staging
+	// time: a config draft staged before a config->secret reclassification is
+	// secret material from the moment the key is, and the preview must stop
+	// showing it without anybody re-staging.
+	if _, err := keys.Reclassify(t.Context(), actor, scope, configSetKey.ID, string(schema.Secret)); err != nil {
+		t.Fatal(err)
+	}
+	drafts, err = revisionSvc(t, db).PendingDrafts(t.Context(), actor, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reclassified := false
+	for _, draft := range drafts {
+		if draft.VersionID != config.VersionID {
+			continue
+		}
+		reclassified = true
+		if draft.Classification != string(schema.Secret) || draft.Revealed || draft.Value != "" {
+			t.Fatalf("config draft after config->secret reclassification = %+v, want hidden material", draft)
+		}
+	}
+	if !reclassified {
+		t.Fatalf("config draft %s vanished after reclassification: %+v", config.VersionID, drafts)
+	}
+
+	noRead := newPrincipal(t, db, "usr_pending_preview_no_read_"+string(scope.Project), nil)
+	if _, err := revisionSvc(t, db).PendingDrafts(t.Context(), service.LocalPrincipal(noRead), dev); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("pending drafts without read = %v, want uniform not found", err)
+	}
 }
 
 func scenarioRestoreSideSpecificSecretFormula(t *testing.T, db *store.DB) {

@@ -426,6 +426,29 @@ export type PendingChange = {
     created_at: string;
 };
 
+/**
+ * One caller-owned pending draft. Secret and unset drafts never carry
+ * material on this surface; `value` is present if and only if `revealed`
+ * is true.
+ *
+ */
+export type PendingDraft = {
+    version_id: Id;
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    operation: 'set' | 'unset';
+    staged_from_revision: number;
+    created_at: Timestamp;
+    revealed: boolean;
+    value?: string;
+};
+
+export type PendingDraftList = {
+    items: Array<PendingDraft>;
+    count: number;
+};
+
 export type RollbackRequest = {
     key?: KeyName;
 };
@@ -14689,6 +14712,63 @@ export type GetEnvironmentSignalsResponses = {
 };
 
 export type GetEnvironmentSignalsResponse = GetEnvironmentSignalsResponses[keyof GetEnvironmentSignalsResponses];
+
+export type ListPendingDraftsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        /**
+         * Environment identifier.
+         */
+        environment: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending';
+};
+
+export type ListPendingDraftsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListPendingDraftsError = ListPendingDraftsErrors[keyof ListPendingDraftsErrors];
+
+export type ListPendingDraftsResponses = {
+    /**
+     * The caller's pending drafts in the environment.
+     */
+    200: PendingDraftList;
+};
+
+export type ListPendingDraftsResponse = ListPendingDraftsResponses[keyof ListPendingDraftsResponses];
 
 export type RollbackRevisionData = {
     body?: RollbackRequest;

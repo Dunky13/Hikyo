@@ -17,6 +17,7 @@ export type SurfaceId =
   | 'overview'
   | 'projects'
   | 'settings'
+  | 'matrix'
   | 'values'
   | 'machine-access'
   | 'remotes'
@@ -36,6 +37,15 @@ export const SURFACES: readonly Surface[] = [
   { id: 'projects', path: '/projects', label: 'Projects', section: 'Organisation' },
   { id: 'remotes', path: '/remotes', label: 'Remotes', section: 'Organisation' },
   { id: 'settings', path: '/settings', label: 'Settings', section: 'Account' },
+  // The environment matrix addresses one whole project. Like the
+  // environment-scoped value surface, its org and project are route data, so
+  // no static sidebar destination can point at it honestly.
+  {
+    id: 'matrix',
+    path: '/orgs/:org/projects/:project/matrix',
+    label: 'Environment matrix',
+    section: null,
+  },
   // The reveal / copy / write-only-edit surface (#58). `section: null` because
   // it is not a navigation destination: it addresses one environment of one
   // project, so it is reached from the matrix and by deep link, never from a

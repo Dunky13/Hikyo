@@ -1289,6 +1289,14 @@
     ]
   },
   {
+    "operation": "value.pending-list",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment"
+    ]
+  },
+  {
     "operation": "value.publish",
     "class": "tenant",
     "level": "environment",
