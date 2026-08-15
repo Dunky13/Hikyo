@@ -1109,6 +1109,7 @@ select {
 
 .matrix-row-editor__fill input {
   min-width: 0;
+  min-height: var(--touch);
   flex: 1;
   padding: 8px 10px;
   border: 1px solid var(--line);

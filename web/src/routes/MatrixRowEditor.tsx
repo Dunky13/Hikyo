@@ -110,7 +110,7 @@ export function MatrixRowEditor({
     )
     .map((candidate) => candidate.name);
 
-  const validationByEnvironment = new Map<string, string>();
+  const validationByEnvironment = new Map<string, ReturnType<typeof validateMatrixDraft>>();
   for (const row of rows) {
     if (!dirty.has(row.environment.id) || clears.has(row.environment.id)) {
       continue;
@@ -155,7 +155,7 @@ export function MatrixRowEditor({
           method="dialog"
           onSubmit={(event) => {
             event.preventDefault();
-            if (changes.length === 0 || validationByEnvironment.size > 0) return;
+            if (changes.length === 0) return;
             setApplying(true);
             setApplyError(null);
             void onApply(changes)
@@ -215,7 +215,7 @@ export function MatrixRowEditor({
               const environmentId = row.environment.id;
               const publishedSet = row.cell?.set === true;
               const clearing = clears.has(environmentId);
-              const liveError = validationByEnvironment.get(environmentId);
+              const liveValidation = validationByEnvironment.get(environmentId) ?? null;
               return (
                 <section
                   className={`matrix-row-editor__row${row.protected ? ' matrix-row-editor__row--protected' : ''}`}
@@ -254,8 +254,8 @@ export function MatrixRowEditor({
                           ? 'Edit the explicit value'
                           : 'Empty = unchanged'
                     }
-                    aria-invalid={liveError === undefined ? undefined : true}
-                    aria-describedby={liveError === undefined ? undefined : `matrix-error-${environmentId}`}
+                    aria-invalid={liveValidation?.level === 'error' ? true : undefined}
+                    aria-describedby={liveValidation === null ? undefined : `matrix-error-${environmentId}`}
                     onChange={(event) => {
                       const next = new Map(drafts);
                       next.set(environmentId, event.target.value);
@@ -268,9 +268,12 @@ export function MatrixRowEditor({
                       });
                     }}
                   />
-                  {liveError === undefined ? null : (
-                    <p className="matrix-cell__error" id={`matrix-error-${environmentId}`}>
-                      {liveError}
+                  {liveValidation === null ? null : (
+                    <p
+                      className={liveValidation.level === 'error' ? 'matrix-cell__error' : 'matrix-editor__hint'}
+                      id={`matrix-error-${environmentId}`}
+                    >
+                      {liveValidation.message}
                     </p>
                   )}
                   <dl className="matrix-editor__provenance">
@@ -315,7 +318,7 @@ export function MatrixRowEditor({
             <button
               type="submit"
               className="btn btn--primary"
-              disabled={changes.length === 0 || validationByEnvironment.size > 0 || busy || applying}
+              disabled={changes.length === 0 || busy || applying}
             >
               {busy || applying ? 'Saving drafts…' : `Save ${String(changes.length)} draft${changes.length === 1 ? '' : 's'}`}
             </button>
@@ -400,15 +403,20 @@ export function MatrixRowEditor({
   );
 }
 
-function validateDeclaration(keyRecord: MatrixKey, value: string): string | null {
+function validateDeclaration(
+  keyRecord: MatrixKey,
+  value: string,
+): ReturnType<typeof validateMatrixDraft> {
   if (value === '') return null;
   const rules = keyRecord.declaration.rule === undefined
     ? keyRecord.declaration.any_of ?? []
     : [keyRecord.declaration.rule];
   const errors = rules.map((rule) => validateMatrixDraft(rule, value));
-  return errors.some((error) => error === null)
-    ? null
-    : errors[0] ?? 'Value does not satisfy the declaration.';
+  if (errors.some((error) => error === null)) return null;
+  return errors.find((error) => error?.level === 'notice') ?? errors[0] ?? {
+    level: 'notice',
+    message: 'Full declaration validation runs when publishing.',
+  };
 }
 
 function formatTimestamp(value: string): string {

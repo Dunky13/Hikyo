@@ -165,15 +165,20 @@ describe('row editor state', () => {
   });
 
   it('validates common declared types while typing', () => {
-    expect(validateMatrixDraft({ type: 'boolean' }, 'truthy')).toMatch(/true or false/);
-    expect(validateMatrixDraft({ type: 'integer', min: 2n }, '1')).toMatch(/at least 2/);
-    expect(validateMatrixDraft({ type: 'enum', members: ['debug', 'info'] }, 'warn')).toMatch(
-      /debug, info/,
-    );
-    expect(validateMatrixDraft({ type: 'json' }, '{')).toMatch(/valid JSON/);
-    expect(validateMatrixDraft({ type: 'url', schemes: ['https'] }, 'http://example.test')).toMatch(
-      /https/,
-    );
+    expect(validateMatrixDraft({ type: 'boolean' }, 'truthy')?.message).toMatch(/true or false/);
+    expect(validateMatrixDraft({ type: 'integer', min: 2n }, '1')?.message).toMatch(/at least 2/);
+    expect(validateMatrixDraft({ type: 'integer' }, '01')).toBeNull();
+    expect(validateMatrixDraft({ type: 'enum', members: ['debug', 'info'] }, 'warn')?.message).toMatch(/debug, info/);
+    expect(validateMatrixDraft({ type: 'json' }, '{')?.message).toMatch(/valid JSON/);
+    expect(validateMatrixDraft({ type: 'json', json_schema: '{}' }, '{}')).toEqual({
+      level: 'notice',
+      message: 'JSON syntax looks valid. Full JSON Schema and duplicate-key validation run when publishing.',
+    });
+    expect(validateMatrixDraft({ type: 'url', schemes: ['https'] }, 'http://example.test')?.message).toMatch(/https/);
+    expect(validateMatrixDraft({ type: 'string', pattern: '(?i)ok' }, 'ok')).toEqual({
+      level: 'notice',
+      message: 'Pattern uses server-side RE2 syntax and is checked when publishing.',
+    });
     expect(validateMatrixDraft({ type: 'string', min_length: 2 }, 'ok')).toBeNull();
   });
 });

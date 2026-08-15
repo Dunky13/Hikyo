@@ -197,70 +197,105 @@ export type MatrixDraftRule = {
   readonly max?: bigint;
   readonly members?: readonly string[];
   readonly schemes?: readonly string[];
+  readonly json_schema?: string;
 };
 
+export type MatrixDraftValidation = {
+  readonly level: 'error' | 'notice';
+  readonly message: string;
+};
+
+const zJSONText = z.string().transform((text, context): unknown => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Enter valid JSON.' });
+    return z.NEVER;
+  }
+});
+
+const validation = (
+  level: MatrixDraftValidation['level'],
+  message: string,
+): MatrixDraftValidation => ({ level, message });
+
 /** Advisory live validation; publish remains authoritative for every declaration. */
-export function validateMatrixDraft(rule: MatrixDraftRule, value: string): string | null {
+export function validateMatrixDraft(
+  rule: MatrixDraftRule,
+  rawValue: string,
+): MatrixDraftValidation | null {
+  const value = rawValue.trim();
   if (value === '') {
     return null;
   }
   switch (rule.type) {
     case 'boolean':
-      return value === 'true' || value === 'false' ? null : 'Enter true or false.';
+      return value === 'true' || value === 'false'
+        ? null
+        : validation('error', 'Enter true or false.');
     case 'integer': {
-      if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) {
-        return 'Enter a base-10 integer.';
+      if (!/^-?[0-9]+$/.test(value)) {
+        return validation('error', 'Enter a base-10 integer.');
       }
       const integer = BigInt(value);
+      if (integer < -(2n ** 63n) || integer > 2n ** 63n - 1n) {
+        return validation('error', 'Integer must fit in signed 64-bit range.');
+      }
       if (rule.min !== undefined && integer < rule.min) {
-        return `Enter an integer at least ${String(rule.min)}.`;
+        return validation('error', `Enter an integer at least ${String(rule.min)}.`);
       }
       if (rule.max !== undefined && integer > rule.max) {
-        return `Enter an integer at most ${String(rule.max)}.`;
+        return validation('error', `Enter an integer at most ${String(rule.max)}.`);
       }
       return null;
     }
     case 'enum':
       return rule.members?.includes(value) === true
         ? null
-        : `Choose one of: ${(rule.members ?? []).join(', ')}.`;
+        : validation('error', `Choose one of: ${(rule.members ?? []).join(', ')}.`);
     case 'url': {
       try {
         const url = new URL(value);
         const scheme = url.protocol.replace(/:$/, '').toLowerCase();
         return rule.schemes?.includes(scheme) === true
           ? null
-          : `Use an allowed URL scheme: ${(rule.schemes ?? []).join(', ')}.`;
+          : validation(
+              'error',
+              `Use an allowed URL scheme: ${(rule.schemes ?? []).join(', ')}.`,
+            );
       } catch {
-        return 'Enter a valid URL.';
+        return validation('error', 'Enter a valid URL.');
       }
     }
-    case 'json':
-      try {
-        JSON.parse(value);
-        return null;
-      } catch {
-        return 'Enter valid JSON.';
+    case 'json': {
+      const parsed = zJSONText.safeParse(value);
+      if (!parsed.success) {
+        return validation('error', parsed.error.issues[0]?.message ?? 'Enter valid JSON.');
       }
+      return validation(
+        'notice',
+        rule.json_schema === undefined
+          ? 'JSON syntax looks valid. Strict duplicate-key validation runs when publishing.'
+          : 'JSON syntax looks valid. Full JSON Schema and duplicate-key validation run when publishing.',
+      );
+    }
     case 'string': {
       const length = [...value].length;
       if (rule.min_length !== undefined && length < rule.min_length) {
-        return `Enter at least ${String(rule.min_length)} characters.`;
+        return validation('error', `Enter at least ${String(rule.min_length)} characters.`);
       }
       if (rule.max_length !== undefined && length > rule.max_length) {
-        return `Enter at most ${String(rule.max_length)} characters.`;
+        return validation('error', `Enter at most ${String(rule.max_length)} characters.`);
       }
       if (rule.pattern !== undefined) {
-        try {
-          if (!new RegExp(`^(?:${rule.pattern})$`, 'u').test(value)) {
-            return 'Value does not match the declared pattern.';
-          }
-        } catch {
-          // RE2 accepts a slightly different language than JavaScript. The
-          // server remains authoritative when this runtime cannot compile it.
-        }
+        return validation(
+          'notice',
+          'Pattern uses server-side RE2 syntax and is checked when publishing.',
+        );
       }
       return null;
     }
   }
 }
+import { z } from 'zod';

@@ -190,6 +190,28 @@ test.describe('environment matrix', () => {
       await expect(editor).toContainText('Updated by');
       await expect(editor).toContainText('Revision');
       await expect(editor.getByText('PROTECTED', { exact: true })).toBeVisible();
+      const firstEditorRow = editor.locator('.matrix-row-editor__row').first();
+      await expectPinnedAssertionSet(page, {
+        flow: 'matrix',
+        surface: 'matrix',
+        theme: `${testInfo.project.name}-row-editor`,
+        text: [editor.getByRole('heading', { name: 'LOG_LEVEL' }), firstEditorRow],
+        radii: [
+          [editor, 'container'],
+          [firstEditorRow, 'control'],
+          [editor.getByLabel('development value'), 'control'],
+        ],
+        fonts: [
+          [editor.getByRole('heading', { name: 'LOG_LEVEL' }), 'mono'],
+          [editor.getByLabel('development value'), 'mono'],
+        ],
+        colours: [
+          [editor.getByRole('heading', { name: 'LOG_LEVEL' }), 'color', '--tx'],
+          [firstEditorRow, 'borderTopColor', '--line'],
+        ],
+        hairlines: [firstEditorRow],
+        density: [[editor.getByRole('button', { name: 'Close row editor' }), '--touch']],
+      });
 
       const value = `matrix-${testInfo.project.name}`;
       await editor.getByLabel('Fill all environments').fill(value);
