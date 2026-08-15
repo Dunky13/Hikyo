@@ -35,7 +35,7 @@
   --radius-pill: 999px;
 
   /* Type */
-  --font-ui: 'Archivo Variable', 'Archivo', system-ui, sans-serif;
+  --font-ui: 'Instrument Sans Variable', 'Instrument Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
   /* Density — matrix rows ~36px desktop, ~44px touch targets on mobile. */

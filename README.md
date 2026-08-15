@@ -1,130 +1,163 @@
-# Hikyo
+<div align="center">
+  <a href="https://hikyo.app/">
+    <img src="./docs/site/public/favicon.svg" alt="Hikyo" width="128" />
+  </a>
 
-Fully open-source secrets and configuration across environments, with
-validation, explicit per-environment values, and no enterprise tier.
+  <h1>Hikyo</h1>
 
-Hikyo is a self-hosted control plane for developers and platform engineers. It
-ships as one Go binary, embeds its own web UI, supports SQLite and PostgreSQL,
-and treats every value as explicitly `set` or `absent` in each environment.
+  <p><strong>Secrets and configuration you can reason about.</strong></p>
 
-> **Status:** active `0.x` development. Interfaces are not frozen until the
-> `1.0.0` release gate passes, and there are no published binaries, images, or
-> Helm charts yet — the supported install today is a source build.
+  <p>
+    A fully open-source, self-hosted control plane for explicit values across
+    development, staging, and production.
+  </p>
 
-## Why Hikyo
+  <p>
+    <a href="https://hikyo.app/docs/"><strong>Documentation</strong></a> ·
+    <a href="https://hikyo.app/docs/getting-started/">Getting started</a> ·
+    <a href="https://hikyo.app/docs/self-hosting/">Self-hosting</a> ·
+    <a href="./CONTRIBUTING.md">Contributing</a>
+  </p>
 
-- **Explicit state.** Each key's value in each environment is `set` or `absent`.
-  Values never inherit between environments, so development cannot silently
-  supply a default to production and an empty cell is never ambiguous.
-- **Declare before you write.** A key is declared (config vs. secret, validation
-  and presence rules) before any value exists. Writes are validated at write
-  time and rejected if the resulting environment state is invalid.
-- **Secrets are a separate disclosure path.** Ordinary reads return presence and
-  metadata, not plaintext. Revealing or copying a secret is a deliberate,
-  reauthenticated action with its own audit event.
-- **One authorization chokepoint.** Human sessions, machine identities, and
-  local break-glass all evaluate against the same capability-and-scope model.
-- **Fully open, no enterprise tier.** See below.
+  <p>
+    <a href="https://github.com/Hikyo-Org/Hikyo/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/Hikyo-Org/Hikyo/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
+    <a href="./LICENSE"><img alt="Mozilla Public License 2.0" src="https://img.shields.io/badge/license-MPL--2.0-3b82f6" /></a>
+    <img alt="Active 0.x development" src="https://img.shields.io/badge/status-active%200.x-f97316" />
+  </p>
+</div>
 
-## Quickstart (local evaluation)
+> [!IMPORTANT]
+> Hikyo is in active `0.x` development. Interfaces are not frozen, and there
+> are no published binaries, images, or Helm charts yet. Build from source to
+> evaluate it today.
 
-Requires Go 1.26+, Node.js 24 (see `.nvmrc`), and Corepack/pnpm.
+## One matrix. No hidden inheritance.
+
+Hikyo makes every environment answer for itself. A value is explicitly `set`
+or `absent`; production never silently borrows a development default.
+
+| Key | development | staging | production |
+| --- | :---: | :---: | :---: |
+| `DATABASE_URL` | ● secret set | ● secret set | ● secret set |
+| `LOG_LEVEL` | `debug` | `info` | `info` |
+| `SENTRY_DSN` | ○ absent | ● secret set | ● secret set |
+
+The same model is available through the embedded web UI, CLI, and API. Hikyo
+ships as one Go binary and supports both SQLite and PostgreSQL.
+
+## What makes Hikyo different
+
+- **Explicit state.** Empty never means “inherited,” “unknown,” or “use a
+  default.” Each environment records `set` or `absent`.
+- **Declarations before values.** Define config vs. secret, validation, and
+  presence rules first. Invalid writes are refused before state changes.
+- **Deliberate secret disclosure.** Normal reads return metadata and presence.
+  Reveal and copy require reauthentication and create dedicated audit events.
+- **One authorization chokepoint.** Humans, machine identities, and local
+  break-glass use the same capability-and-scope decision model.
+- **Self-hosting is the product.** One binary, an embedded UI, your database,
+  your root key, and no enterprise-only implementation.
+
+## Quick start
+
+Requires Go 1.26+, Node.js 24 (see [`.nvmrc`](./.nvmrc)), and Corepack/pnpm.
 
 ```bash
-# 1. Build the binary with the embedded UI
-git clone https://github.com/Hikyo-Org/hikyo.git
-cd hikyo
+git clone https://github.com/Hikyo-Org/Hikyo.git
+cd Hikyo
+
 corepack enable
 pnpm --dir clients/ts install --frozen-lockfile
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 go build -tags ui -o ./bin/hikyo ./cmd/hikyo
 
-# 2. Run a zero-config, loopback-only dev instance
-#    Creates hikyo-dev.db + a 0600 root key in the current directory.
-./bin/hikyo server --dev              # serves API + UI on http://127.0.0.1:8080
+./bin/hikyo server --dev
 ```
 
-Open <http://127.0.0.1:8080> for the web UI, or check `curl --fail
-http://127.0.0.1:8080/healthz`. The `-tags ui` build embeds the browser app; a
-plain `go build` produces an API-only binary.
+Open <http://127.0.0.1:8080>. The command creates `hikyo-dev.db` and a
+permission-`0600` root key in the current directory.
 
-`--dev` is for evaluation only. From there,
-[Getting started](https://hikyo.app/docs/getting-started/) walks through
-creating the first administrator and
-[Your first project](https://hikyo.app/docs/first-project/) through your first
-key and value.
+`--dev` is loopback-only and intended for evaluation. A `-tags ui` build embeds
+the browser app; a plain `go build` produces an API-only binary.
+
+Next, follow [Getting started](https://hikyo.app/docs/getting-started/) to create
+the first administrator, then [Your first project](https://hikyo.app/docs/first-project/)
+to declare a key and set its first value.
 
 ## CLI at a glance
 
-One binary handles both server and client roles.
+One binary handles both operator and day-to-day client workflows.
 
 ```bash
-# Server / operator
+# Operate the instance
 hikyo server [--dev] [--listen ADDR] [--root-key-file PATH]
-hikyo migrate                         # apply DB migrations
-hikyo admin create --username admin   # host-only: bootstrap first authority
-hikyo backup export | restore run     # host-only backup/restore
+hikyo migrate
+hikyo admin create --username admin
+hikyo backup export
+hikyo restore run --from <archive> --identity-file <path>
 
-# Client (day to day)
+# Create a scoped environment
 hikyo login <instance-url> --local --as <user>
 hikyo org create --name <name>
 hikyo project create --name <name> --org <org-id>
 hikyo env create --name <name> --org <org-id> --project <project-id>
 hikyo context create <name> --instance <url> --org <id> --project <id> --env <id>
+
+# Declare and manage values
 hikyo key create --context <ctx> --name NAME --classification config|secret \
   --declaration '{"rule":{"type":"string"}}'
-hikyo values set NAME --context <ctx> --value-file PATH   # or --stdin / --clear
-hikyo values get NAME --context <ctx>                     # presence + metadata
-hikyo values get NAME --context <ctx> --reveal --output-file PATH   # plaintext
-hikyo values list | diff | copy --context <ctx>
+hikyo values set NAME --context <ctx> --value-file PATH
+hikyo values get NAME --context <ctx>
+hikyo values get NAME --context <ctx> --reveal --output-file PATH
+hikyo values list --context <ctx>
+hikyo values diff --context <ctx> --left development --right production
+hikyo values copy --context <ctx> --from staging --to production --keys NAME
 ```
 
-Secret values are never passed on the command line — use `--value-file` or
-`--stdin`. Full command list:
-[CLI reference](https://hikyo.app/docs/cli-reference/).
+Secret values never belong in command-line arguments. Use `--value-file` or
+`--stdin`. See the complete [CLI reference](https://hikyo.app/docs/cli-reference/).
 
-## Running in production
+## Run in production
 
-Outside `--dev` you must supply a datastore and a root key:
+Outside `--dev`, provide a datastore, external origin, trusted proxy boundary,
+and root key:
 
 ```bash
 HIKYO_DB=sqlite:/var/lib/hikyo/hikyo.db \
 HIKYO_EXTERNAL_ORIGIN=https://hikyo.example.com \
 HIKYO_TRUSTED_PROXY_CIDRS=127.0.0.1/32 \
-./hikyo server --listen 127.0.0.1:8080 --root-key-file /etc/hikyo/root.key
+./hikyo server --listen 127.0.0.1:8080 \
+  --root-key-file /etc/hikyo/root.key
 ```
 
 `HIKYO_DB` accepts `sqlite:PATH` or a PostgreSQL DSN. Terminate TLS at a reverse
-proxy and keep the listener private. See
-[Self-hosting](https://hikyo.app/docs/self-hosting/) and
+proxy and keep the Hikyo listener private.
+
+Read [Self-hosting](https://hikyo.app/docs/self-hosting/) before deployment and
 [Configuration](https://hikyo.app/docs/configuration/) for every flag and
 environment variable.
 
-## Fully open, no enterprise tier
+## Fully open. One product.
 
 Every capability required to run Hikyo in production is and will remain open
 source; there is no `/ee` directory and there will never be one.
 
-The full commitment, including how it may be amended, is in
+The enforceable commitment and amendment process live in
 [GOVERNANCE.md](./GOVERNANCE.md#fully-open-pledge).
 
-## Documentation
+## Explore the project
 
-Full docs live at **<https://hikyo.app/docs/>**.
+| Goal | Start here |
+| --- | --- |
+| Learn the model | [Core concepts](https://hikyo.app/docs/core-concepts/) |
+| Build from source | [Installation](https://hikyo.app/docs/installation/) |
+| Operate an instance | [Self-hosting](https://hikyo.app/docs/self-hosting/) |
+| Use the terminal | [CLI reference](https://hikyo.app/docs/cli-reference/) |
+| Contribute code | [Contributing guide](./CONTRIBUTING.md) |
 
-- [Getting started](https://hikyo.app/docs/getting-started/)
-- [Core concepts](https://hikyo.app/docs/core-concepts/)
-- [Self-hosting](https://hikyo.app/docs/self-hosting/)
-- [CLI reference](https://hikyo.app/docs/cli-reference/)
-
-Project policies:
-
-- [Security policy](./SECURITY.md)
-- [Support policy](./SUPPORT.md)
-- [Governance](./GOVERNANCE.md)
-- [Trademark policy](./TRADEMARK.md)
-- [Contributing](./CONTRIBUTING.md)
+[Security](./SECURITY.md) · [Support](./SUPPORT.md) ·
+[Governance](./GOVERNANCE.md) · [Trademark](./TRADEMARK.md)
 
 ## License
 

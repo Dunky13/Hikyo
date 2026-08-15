@@ -458,7 +458,7 @@ export async function expectRadiusRole(
   expect(got, `radius role "${role}" (DESIGN.md says ${want})`).toBe(want);
 }
 
-/** expectFontRole checks a component uses Archivo (UI) or IBM Plex Mono (keys/values). */
+/** Checks that UI uses Instrument Sans and keys/values use IBM Plex Mono. */
 export async function expectFontRole(page: Page, target: Locator, role: FontRole): Promise<void> {
   const want = await tokenValue(page, FONT_TOKEN[role]);
   const got = await target.evaluate((el) => getComputedStyle(el).fontFamily);
