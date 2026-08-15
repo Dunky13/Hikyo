@@ -24,11 +24,11 @@ drift signal anywhere in this surface).
   refusals), filter bar "⚠ filter active: problems — showing n of m keys" +
   "✕ show all keys", filter survives group jumps, filtered-out groups render dimmed
   and inert (title "hidden by the problems filter"), group badges carry counts.
-- `web/src/routes/MatrixRowEditor.tsx` — dialog row editor: state explanation, draft
-  set/clear (staged via #51 pending changes), provenance one gesture away
-  (updated_by / updated_at / revision), config copy-to with protected confirmation +
-  ceremony; secret editing/copy routes to the Values surface (#58) via deep link —
-  the disclosure ceremonies stay on the surface that owns them.
+- `web/src/routes/MatrixRowEditor.tsx` — centered row editor opened from the key name
+  or a cell: one field per readable environment, protected markers, fill-all,
+  write-only secret placeholders, live per-field declaration checks, per-cell clear,
+  and provenance per environment. Config copy-to keeps its protected confirmation +
+  ceremony; secret reveal/copy stays on Values (#58).
 - `web/src/routes/MatrixPublishSheet.tsx` — selective publish per the frozen
   `renderPublishSheet`: one section per environment holding drafts (checkbox default
   checked, `rN → rN+1`, draft preview with secrets masked and clears labelled),
@@ -42,8 +42,14 @@ drift signal anywhere in this surface).
   visibility toggling), vitest-covered in `matrix-state.test.ts`.
 - `web/src/api/matrix.ts` — API boundary: catalogue + per-env values/settings/signals
   fan-out (tanstack-query `useQueries`), signals polled at 2s (the documented SSE
-  polling fallback), mutations invalidate values+signals. Everything crosses
-  `parsed()` + generated Zod.
+  polling fallback). A revision advance refreshes its matching values query; the
+  boundary refuses half-present pending signals. Config previews persist in
+  session storage under the immutable pending version id, so reload keeps publish
+  review exact. Everything crosses `parsed()` + generated Zod.
+- `web/src/api/client.ts` parses the generated error contract before retaining a
+  caller-safe detail. Publish adds a matrix validation problem only when that detail
+  names one known key/environment; authorization, stale conflicts, network failures,
+  and unparsed refusals remain retryable mutation errors.
 - `web/src/routes/Projects.tsx` — the projects list became a real surface (links each
   project to its matrix); extracted out of `Placeholder.tsx`, which is a chrome
   skeleton again.
@@ -58,7 +64,8 @@ green). Serial flow, desktop + mobile projects, dark + light pinned-assertion pa
 computed styles vs tokens). Covers: problems filter persistence + veto naming
 key/environment, selective publish holding back the blocked env while publishing the
 clean one, protected publish confirmation + passkey ceremony, density valves, protected
-config copy + secret routing to Values, and the acceptance demo — edit at 375px,
+config copy + secret routing to Values, and the acceptance demo — multi-environment
+fill/edit, staged-preview reopen, reload-bound publish preview, centered 375px modal,
 publish, signals update.
 
 Fixtures: `seed.ts` adds `MATRIX_REQUIRED` (required only in production, staged-clear
@@ -81,7 +88,7 @@ shared with `reveal.spec.ts`; its counter-persistence contract is documented the
 
 ## Verification record (2026-08-15)
 
-`pnpm typecheck` clean · `pnpm test` 64/64 · full Playwright suite 116/116 (~3 min,
-both viewport projects) on the session's claimed port block 45820–22. Review:
-standards + spec sub-agents, R1 findings (protected-publish ceremony gap, selective
-publish, 8 standards items) all fixed in R2, re-verified CLEAN.
+`pnpm typecheck` clean · `pnpm test` 75/75 · full Playwright suite 116/116 (3.1 min,
+both viewport projects). PR review fixes cover all nine threads; protected publish is
+enforced and regression-tested by rebased `main`'s transactional service path, while
+the remaining eight fixes live in this PR.

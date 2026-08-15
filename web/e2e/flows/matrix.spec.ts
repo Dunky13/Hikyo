@@ -39,12 +39,13 @@ test.describe('environment matrix', () => {
     const persistPasskey = await installPasskeyAuthenticator(page);
     try {
       await page.getByRole('button', { name: /LOG_LEVEL in development:/ }).click();
-      await page.getByRole('dialog').getByLabel('New value').fill(`selective-${testInfo.project.name}`);
-      await page.getByRole('dialog').getByRole('button', { name: 'Save draft' }).click();
+      await page.getByRole('dialog').getByLabel('development value').fill(`selective-${testInfo.project.name}`);
+      await page.getByRole('dialog').getByRole('button', { name: 'Save 1 draft' }).click();
 
       await page.getByRole('button', { name: new RegExp(`${seed.matrixRequired} in production:`) }).click();
-      await page.getByRole('dialog').getByRole('button', { name: 'Clear to absent' }).click();
-      await expect(page.locator('.notice')).toContainText(`Clear staged for ${seed.matrixRequired}`);
+      await page.getByRole('dialog').getByRole('button', { name: 'Clear production to absent' }).click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Save 1 draft' }).click();
+      await expect(page.locator('.notice')).toContainText(`1 draft updated for ${seed.matrixRequired}`);
 
       await page.getByRole('button', { name: /Review & publish/ }).click();
       const publishSheet = page.getByRole('region', { name: 'Publish drafts' });
@@ -87,8 +88,8 @@ test.describe('environment matrix', () => {
 
       await page.getByRole('button', { name: new RegExp(`${seed.matrixRequired} in production:`) }).click();
       const editor = page.getByRole('dialog');
-      await editor.getByLabel('New value').fill(`required-${testInfo.project.name}`);
-      await editor.getByRole('button', { name: 'Save draft' }).click();
+      await editor.getByLabel('production value').fill(`required-${testInfo.project.name}`);
+      await editor.getByRole('button', { name: 'Save 1 draft' }).click();
 
       await page.getByRole('button', { name: /Review & publish/ }).click();
       const repairedSheet = page.getByRole('region', { name: 'Publish drafts' });
@@ -139,7 +140,7 @@ test.describe('environment matrix', () => {
         .getByRole('button', { name: new RegExp(`${seed.config} in development:`) })
         .click();
       const editor = page.getByRole('dialog');
-      await editor.getByRole('button', { name: 'Copy to…' }).click();
+      await editor.getByRole('button', { name: 'Copy published development value to…' }).click();
       await editor.getByRole('checkbox', { name: 'production · protected' }).check();
 
       const copy = editor.getByRole('button', { name: 'Copy to 1 environment' });
@@ -183,27 +184,45 @@ test.describe('environment matrix', () => {
         await page.setViewportSize({ width: 375, height: 812 });
       }
 
-      await page.getByRole('button', { name: /LOG_LEVEL in development:/ }).click();
+      await page.getByRole('button', { name: 'Edit LOG_LEVEL across environments' }).click();
       const editor = page.getByRole('dialog');
       await expect(editor).toBeVisible();
       await expect(editor).toContainText('Updated by');
       await expect(editor).toContainText('Revision');
+      await expect(editor.getByText('PROTECTED', { exact: true })).toBeVisible();
 
       const value = `matrix-${testInfo.project.name}`;
-      await editor.getByLabel('New value').fill(value);
-      await editor.getByRole('button', { name: 'Save draft' }).click();
-      await expect(page.locator('.notice')).toContainText('Draft saved for LOG_LEVEL');
+      await editor.getByLabel('Fill all environments').fill(value);
+      await editor.getByRole('button', { name: 'Fill all', exact: true }).click();
+      await expect(editor.getByLabel('development value')).toHaveValue(value);
+      await editor.getByLabel('production value').fill(`${value}-production`);
+      if (testInfo.project.name === 'mobile') {
+        const box = await editor.boundingBox();
+        expect(box).not.toBeNull();
+        expect(Math.abs((box?.y ?? 0) + (box?.height ?? 0) / 2 - 812 / 2)).toBeLessThan(8);
+        expect(
+          await editor.evaluate((element) =>
+            Number.parseFloat(getComputedStyle(element).borderBottomLeftRadius),
+          ),
+        ).toBeGreaterThan(0);
+      }
+      await editor.getByRole('button', { name: 'Save 2 drafts' }).click();
+      await expect(page.locator('.notice')).toContainText('2 drafts updated for LOG_LEVEL');
       await expect(page.getByRole('button', { name: /LOG_LEVEL in development:.*draft set/ })).toBeVisible();
 
-      await page.getByRole('button', { name: /LOG_LEVEL in production:/ }).click();
-      const productionEditor = page.getByRole('dialog');
-      await productionEditor.getByLabel('New value').fill(`${value}-production`);
-      await productionEditor.getByRole('button', { name: 'Save draft' }).click();
-      await expect(page.locator('.notice')).toContainText('Draft saved for LOG_LEVEL in production');
+      await page.getByRole('button', { name: 'Edit LOG_LEVEL across environments' }).click();
+      const reopened = page.getByRole('dialog');
+      await expect(reopened.getByLabel('development value')).toHaveValue(value);
+      await expect(reopened.getByLabel('production value')).toHaveValue(`${value}-production`);
+      await reopened.getByRole('button', { name: 'Close row editor' }).click();
+
+      await page.reload();
 
       const review = page.getByRole('button', { name: /Review & publish/ });
       await review.click();
       const publishSheet = page.getByRole('region', { name: 'Publish drafts' });
+      await expect(publishSheet).toContainText(value);
+      await expect(publishSheet).toContainText(`${value}-production`);
       const atomicPublish = publishSheet.getByRole('button', { name: /Publish selected/ });
       await expect(atomicPublish).toBeDisabled();
       await publishSheet.getByRole('checkbox', {

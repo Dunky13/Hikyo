@@ -22,7 +22,7 @@ import {
   zValueList,
 } from '@hikyo/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
 import { useEnvironments, valuesKey, type EnvRef } from './values.ts';
@@ -39,7 +39,81 @@ import { useEnvironments, valuesKey, type EnvRef } from './values.ts';
 
 export type MatrixRef = { readonly org: string; readonly project: string };
 export type MatrixKeyList = z.infer<typeof zKeyList>;
-export type MatrixSignalCell = z.infer<typeof zEnvironmentSignals>['cells'][number];
+export type MatrixEnvironmentSignals = z.infer<typeof zEnvironmentSignals>;
+export type MatrixSignalCell = MatrixEnvironmentSignals['cells'][number];
+
+const zMatrixEnvironmentSignals = zEnvironmentSignals.superRefine((signals, context) => {
+  signals.cells.forEach((cell, index) => {
+    if ((cell.pending_version_id === undefined) !== (cell.pending_operation === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'pending_version_id and pending_operation must be present together',
+        path: ['cells', index],
+      });
+    }
+  });
+});
+
+export function parseMatrixEnvironmentSignals(input: unknown): MatrixEnvironmentSignals {
+  return zMatrixEnvironmentSignals.parse(input);
+}
+
+export function revisionAdvanced(previous: bigint | undefined, next: bigint): boolean {
+  return previous !== undefined && next > previous;
+}
+
+type PreviewStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+function matrixDraftPreviewKey(ref: MatrixRef, versionId: string): string {
+  return `hikyo:matrix-draft:${ref.org}:${ref.project}:${versionId}`;
+}
+
+export function writeMatrixDraftPreview(
+  storage: PreviewStorage,
+  ref: MatrixRef,
+  versionId: string,
+  value: string,
+): void {
+  storage.setItem(matrixDraftPreviewKey(ref, versionId), value);
+}
+
+export function readMatrixDraftPreview(
+  storage: PreviewStorage,
+  ref: MatrixRef,
+  versionId: string,
+): string | undefined {
+  return storage.getItem(matrixDraftPreviewKey(ref, versionId)) ?? undefined;
+}
+
+export function removeMatrixDraftPreview(
+  storage: PreviewStorage,
+  ref: MatrixRef,
+  versionId: string,
+): void {
+  storage.removeItem(matrixDraftPreviewKey(ref, versionId));
+}
+
+export function matrixPublishValidation(
+  error: Error,
+  keys: readonly { readonly id: string; readonly name: string }[],
+  environmentIds: readonly string[],
+): { readonly keyId: string; readonly environmentId: string; readonly message: string } | null {
+  if (!(error instanceof ApiError) || error.status !== 400 || error.detail === undefined) {
+    return null;
+  }
+  const match = /^key "([^"]+)" is `(?:required_in|forbidden_in)` environment ([^ ]+) /.exec(
+    error.detail,
+  );
+  if (match === null) {
+    return null;
+  }
+  const [, keyName, environmentId] = match;
+  const key = keys.find((candidate) => candidate.name === keyName);
+  if (key === undefined || environmentId === undefined || !environmentIds.includes(environmentId)) {
+    return null;
+  }
+  return { keyId: key.id, environmentId, message: error.detail };
+}
 
 const matrixKeysKey = (ref: MatrixRef): readonly [string, string, string] =>
   ['matrix-keys', ref.org, ref.project];
@@ -66,6 +140,7 @@ export function useProjects(org: string) {
 }
 
 export function useMatrixProject(ref: MatrixRef) {
+  const queries = useQueryClient();
   const environmentRef: EnvRef = { ...ref, environment: '' };
   const environments = useEnvironments(environmentRef);
   const keys = useQuery({
@@ -108,13 +183,22 @@ export function useMatrixProject(ref: MatrixRef) {
   const signals = useQueries({
     queries: environmentItems.map((environment) => ({
       queryKey: signalsKey(ref, environment.id),
-      queryFn: () =>
-        parsed(
+      queryFn: async () => {
+        const key = signalsKey(ref, environment.id);
+        const previous = queries.getQueryData<MatrixEnvironmentSignals>(key);
+        const next = await parsed(
           getEnvironmentSignals({
             path: { ...ref, environment: environment.id },
           }),
-          zEnvironmentSignals,
-        ),
+          zMatrixEnvironmentSignals,
+        );
+        if (revisionAdvanced(previous?.revision, next.revision)) {
+          await queries.invalidateQueries({
+            queryKey: valuesKey({ ...ref, environment: environment.id }),
+          });
+        }
+        return next;
+      },
       refetchInterval: 2_000,
       retry: false,
     })),

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { readCsrfToken } from './client.ts';
+import { z } from 'zod';
+
+import { ApiError, parsed, readCsrfToken } from './client.ts';
 
 // The synchronizer token is read out of a cookie string by hand, which is one
 // of the few pieces of parsing the SPA does itself. A cookie header is a
@@ -28,5 +30,39 @@ describe('readCsrfToken', () => {
     // into the header as the word "undefined".
     expect(readCsrfToken('')).toBe('');
     expect(readCsrfToken('other=1')).toBe('');
+  });
+});
+
+describe('parsed', () => {
+  it('preserves only contract-validated safe refusal detail', async () => {
+    const call = Promise.resolve({
+      error: {
+        error: {
+          code: 'bad_request',
+          message: 'The request was invalid.',
+          detail: 'key "LOG_LEVEL" is invalid in environment env_prod',
+        },
+      },
+      response: new Response(null, { status: 400 }),
+    });
+
+    await expect(parsed(call, z.string())).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 400,
+      detail: 'key "LOG_LEVEL" is invalid in environment env_prod',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('drops malformed error bodies instead of treating prose as safe detail', async () => {
+    const call = Promise.resolve({
+      error: { detail: 'not the contract error shape' },
+      response: new Response(null, { status: 400 }),
+    });
+
+    await expect(parsed(call, z.string())).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 400,
+      detail: undefined,
+    } satisfies Partial<ApiError>);
   });
 });

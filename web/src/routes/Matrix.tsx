@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 
 import {
+  matrixPublishValidation,
   matrixMutationError,
+  readMatrixDraftPreview,
+  removeMatrixDraftPreview,
   useClearMatrixValue,
   useCopyMatrixConfig,
   useMatrixProject,
   usePublishMatrix,
   useStageMatrixValue,
+  writeMatrixDraftPreview,
   type MatrixKeyList,
   type MatrixRef,
   type MatrixSignalCell,
@@ -35,7 +39,7 @@ import {
 
 type MatrixKey = MatrixKeyList['items'][number];
 type Environment = EnvironmentList['items'][number];
-type Selection = { readonly keyId: string; readonly environmentId: string };
+type Selection = { readonly keyId: string; readonly environmentId?: string };
 
 type DisplayGroup = {
   readonly id: string;
@@ -70,9 +74,6 @@ export function Matrix() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [validationErrors, setValidationErrors] = useState<readonly MatrixValidationError[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
-  const [configDraftPreviews, setConfigDraftPreviews] = useState<ReadonlyMap<string, string>>(
-    () => new Map(),
-  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const environmentSignature = environments.map((environment) => environment.id).join('/');
@@ -152,20 +153,28 @@ export function Matrix() {
       const rows: MatrixPendingEntry[] = [];
       for (const signal of matrix.signals[index]?.data?.cells ?? []) {
         if (signal.pending_version_id !== undefined) {
+          if (signal.pending_operation === undefined) {
+            throw new Error(
+              `matrix signal ${signal.pending_version_id} has no pending_operation`,
+            );
+          }
           rows.push({
             versionId: signal.pending_version_id,
             keyId: signal.key_id,
             name: signal.name,
             classification: signal.classification,
-            operation: signal.pending_operation ?? 'set',
-            configPreview: configDraftPreviews.get(cellID(signal.key_id, environment.id)),
+            operation: signal.pending_operation,
+            configPreview:
+              signal.classification === 'config'
+                ? readMatrixDraftPreview(sessionStorage, ref, signal.pending_version_id)
+                : undefined,
           });
         }
       }
       pending.set(environment.id, rows);
     });
     return pending;
-  }, [configDraftPreviews, environments, matrix.signals]);
+  }, [environments, matrix.signals, ref]);
   const pendingCount = [...pendingByEnvironment.values()].reduce(
     (total, entries) => total + entries.length,
     0,
@@ -237,15 +246,11 @@ export function Matrix() {
               (error) => !selectedEnvironmentIds.includes(error.environmentId),
             ),
           );
-          setConfigDraftPreviews((current) => {
-            const next = new Map(current);
-            for (const environmentId of selectedEnvironmentIds) {
-              for (const entry of pendingByEnvironment.get(environmentId) ?? []) {
-                next.delete(cellID(entry.keyId, environmentId));
-              }
+          for (const environmentId of selectedEnvironmentIds) {
+            for (const entry of pendingByEnvironment.get(environmentId) ?? []) {
+              removeMatrixDraftPreview(sessionStorage, ref, entry.versionId);
             }
-            return next;
-          });
+          }
           const revisions = result.environments.map((published) => {
             const environment = environments.find(
               (candidate) => candidate.id === published.environment_id,
@@ -256,17 +261,13 @@ export function Matrix() {
           setNotice(`Published atomically: ${revisions.join(', ')}. Signals updated.`);
         },
         onError: (error) => {
-          const message = matrixMutationError(error, 'publish');
-          const keyIDs = new Set(keys.map((key) => key.id));
-          for (const environmentId of selectedEnvironmentIds) {
-            for (const entry of pendingByEnvironment.get(environmentId) ?? []) {
-              if (!keyIDs.has(entry.keyId)) {
-                throw new Error(
-                  `pending publish key ${entry.keyId} is absent from the matrix catalogue`,
-                );
-              }
-              recordValidation(entry.keyId, environmentId, message);
-            }
+          const validation = matrixPublishValidation(error, keys, selectedEnvironmentIds);
+          if (validation !== null) {
+            recordValidation(
+              validation.keyId,
+              validation.environmentId,
+              validation.message,
+            );
           }
         },
       },
@@ -289,7 +290,9 @@ export function Matrix() {
   const selectedEnvironment =
     selection === null
       ? undefined
-      : environments.find((environment) => environment.id === selection.environmentId);
+      : selection.environmentId === undefined
+        ? environments[0]
+        : environments.find((environment) => environment.id === selection.environmentId);
 
   return (
     <section className="matrix" aria-labelledby="matrix-title">
@@ -473,10 +476,15 @@ export function Matrix() {
                         : group.keys.map((key) => (
                             <tr key={key.id}>
                               <th scope="row" title={key.name}>
-                                <span className="matrix__key mono">
+                                <button
+                                  type="button"
+                                  className="matrix__key mono"
+                                  aria-label={`Edit ${key.name} across environments`}
+                                  onClick={() => setSelection({ keyId: key.id })}
+                                >
                                   {key.classification === 'secret' ? <span aria-hidden="true">🔒 </span> : null}
                                   {key.name}
-                                </span>
+                                </button>
                                 <span className="matrix__required">
                                   {requiredLabel(key, environments)}
                                 </span>
@@ -520,63 +528,73 @@ export function Matrix() {
           environment={selectedEnvironment}
           environments={environments}
           protectedEnvironmentIds={protectedEnvironmentIds}
-          cell={valuesByCell.get(cellID(selectedKey.id, selectedEnvironment.id))}
-          signal={signalsByCell.get(cellID(selectedKey.id, selectedEnvironment.id))}
-          problems={problems.filter(
-            (problem) =>
-              problem.keyId === selectedKey.id &&
-              problem.environmentId === selectedEnvironment.id,
-          )}
+          rows={environments.map((environment) => {
+            const signal = signalsByCell.get(cellID(selectedKey.id, environment.id));
+            return {
+              environment,
+              protected: protectedEnvironmentIds.includes(environment.id),
+              cell: valuesByCell.get(cellID(selectedKey.id, environment.id)),
+              signal,
+              draftPreview:
+                signal?.pending_version_id === undefined
+                  ? undefined
+                  : readMatrixDraftPreview(sessionStorage, ref, signal.pending_version_id),
+              problems: problems.filter(
+                (problem) =>
+                  problem.keyId === selectedKey.id &&
+                  problem.environmentId === environment.id,
+              ),
+            };
+          })}
           busy={stage.isPending || clear.isPending || copy.isPending}
           onClose={() => setSelection(null)}
-          onSave={(value) =>
-            stage.mutate(
-              { environment: selectedEnvironment.id, key: selectedKey.name, value },
-              {
-                onSuccess: () => {
-                  clearValidation(selectedKey.id, selectedEnvironment.id);
-                  if (selectedKey.classification === 'config') {
-                    setConfigDraftPreviews((current) => {
-                      const next = new Map(current);
-                      next.set(cellID(selectedKey.id, selectedEnvironment.id), value);
-                      return next;
-                    });
-                  }
-                  setNotice(`Draft saved for ${selectedKey.name} in ${selectedEnvironment.name}.`);
-                  setSelection(null);
-                },
-                onError: (error) =>
-                  recordValidation(
-                    selectedKey.id,
-                    selectedEnvironment.id,
-                    matrixMutationError(error, 'stage'),
-                  ),
-              },
-            )
-          }
-          onClear={() =>
-            clear.mutate(
-              { environment: selectedEnvironment.id, key: selectedKey.name },
-              {
-                onSuccess: () => {
-                  clearValidation(selectedKey.id, selectedEnvironment.id);
-                  setConfigDraftPreviews((current) => {
-                    const next = new Map(current);
-                    next.delete(cellID(selectedKey.id, selectedEnvironment.id));
-                    return next;
+          onApply={async (changes) => {
+            for (const change of changes) {
+              try {
+                if (change.operation === 'set') {
+                  const staged = await stage.mutateAsync({
+                    environment: change.environmentId,
+                    key: selectedKey.name,
+                    value: change.value,
                   });
-                  setNotice(`Clear staged for ${selectedKey.name} in ${selectedEnvironment.name}.`);
-                  setSelection(null);
-                },
-                onError: (error) =>
-                  recordValidation(
-                    selectedKey.id,
-                    selectedEnvironment.id,
-                    matrixMutationError(error, 'clear'),
+                  if (selectedKey.classification === 'config') {
+                    writeMatrixDraftPreview(
+                      sessionStorage,
+                      ref,
+                      staged.version_id,
+                      change.value,
+                    );
+                  }
+                } else {
+                  const prior = signalsByCell.get(
+                    cellID(selectedKey.id, change.environmentId),
+                  )?.pending_version_id;
+                  await clear.mutateAsync({
+                    environment: change.environmentId,
+                    key: selectedKey.name,
+                  });
+                  if (prior !== undefined) {
+                    removeMatrixDraftPreview(sessionStorage, ref, prior);
+                  }
+                }
+                clearValidation(selectedKey.id, change.environmentId);
+              } catch (error) {
+                recordValidation(
+                  selectedKey.id,
+                  change.environmentId,
+                  matrixMutationError(
+                    error instanceof Error ? error : new Error('matrix mutation failed'),
+                    change.operation === 'set' ? 'stage' : 'clear',
                   ),
-              },
-            )
-          }
+                );
+                throw error;
+              }
+            }
+            setNotice(
+              `${String(changes.length)} draft${changes.length === 1 ? '' : 's'} updated for ${selectedKey.name}.`,
+            );
+            setSelection(null);
+          }}
           onCopy={(destinations, confirmProtected) =>
             copy.mutate(
               {
@@ -587,18 +605,6 @@ export function Matrix() {
               },
               {
                 onSuccess: () => {
-                  const sourcePreview =
-                    configDraftPreviews.get(cellID(selectedKey.id, selectedEnvironment.id)) ??
-                    valuesByCell.get(cellID(selectedKey.id, selectedEnvironment.id))?.value;
-                  if (selectedKey.classification === 'config' && sourcePreview !== undefined) {
-                    setConfigDraftPreviews((current) => {
-                      const next = new Map(current);
-                      for (const destination of destinations) {
-                        next.set(cellID(selectedKey.id, destination), sourcePreview);
-                      }
-                      return next;
-                    });
-                  }
                   setNotice(
                     `${selectedKey.name} copied to ${String(destinations.length)} environment${destinations.length === 1 ? '' : 's'}.`,
                   );

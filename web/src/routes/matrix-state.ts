@@ -165,3 +165,102 @@ export function toggleVisibleEnvironment(
   }
   return allEnvironmentIds.filter((id) => visible.has(id));
 }
+
+export function draftValueForMatrixCell(
+  classification: 'secret' | 'config',
+  publishedValue: string | undefined,
+  pendingOperation: 'set' | 'unset' | undefined,
+  pendingPreview: string | undefined,
+): string {
+  if (classification === 'secret') {
+    return '';
+  }
+  if (pendingOperation === 'set' && pendingPreview !== undefined) {
+    return pendingPreview;
+  }
+  return publishedValue ?? '';
+}
+
+export function canClearMatrixCell(
+  publishedSet: boolean,
+  pendingOperation: 'set' | 'unset' | undefined,
+): boolean {
+  return publishedSet || pendingOperation === 'set';
+}
+
+export type MatrixDraftRule = {
+  readonly type: 'string' | 'integer' | 'boolean' | 'enum' | 'url' | 'json';
+  readonly min_length?: number;
+  readonly max_length?: number;
+  readonly pattern?: string;
+  readonly min?: bigint;
+  readonly max?: bigint;
+  readonly members?: readonly string[];
+  readonly schemes?: readonly string[];
+};
+
+/** Advisory live validation; publish remains authoritative for every declaration. */
+export function validateMatrixDraft(rule: MatrixDraftRule, value: string): string | null {
+  if (value === '') {
+    return null;
+  }
+  switch (rule.type) {
+    case 'boolean':
+      return value === 'true' || value === 'false' ? null : 'Enter true or false.';
+    case 'integer': {
+      if (!/^-?(?:0|[1-9][0-9]*)$/.test(value)) {
+        return 'Enter a base-10 integer.';
+      }
+      const integer = BigInt(value);
+      if (rule.min !== undefined && integer < rule.min) {
+        return `Enter an integer at least ${String(rule.min)}.`;
+      }
+      if (rule.max !== undefined && integer > rule.max) {
+        return `Enter an integer at most ${String(rule.max)}.`;
+      }
+      return null;
+    }
+    case 'enum':
+      return rule.members?.includes(value) === true
+        ? null
+        : `Choose one of: ${(rule.members ?? []).join(', ')}.`;
+    case 'url': {
+      try {
+        const url = new URL(value);
+        const scheme = url.protocol.replace(/:$/, '').toLowerCase();
+        return rule.schemes?.includes(scheme) === true
+          ? null
+          : `Use an allowed URL scheme: ${(rule.schemes ?? []).join(', ')}.`;
+      } catch {
+        return 'Enter a valid URL.';
+      }
+    }
+    case 'json':
+      try {
+        JSON.parse(value);
+        return null;
+      } catch {
+        return 'Enter valid JSON.';
+      }
+    case 'string': {
+      const length = [...value].length;
+      if (rule.min_length !== undefined && length < rule.min_length) {
+        return `Enter at least ${String(rule.min_length)} characters.`;
+      }
+      if (rule.max_length !== undefined && length > rule.max_length) {
+        return `Enter at most ${String(rule.max_length)} characters.`;
+      }
+      if (rule.pattern !== undefined) {
+        try {
+          if (!new RegExp(`^(?:${rule.pattern})$`, 'u').test(value)) {
+            return 'Value does not match the declared pattern.';
+          }
+        } catch {
+          // RE2 accepts a slightly different language than JavaScript. The
+          // server remains authoritative when this runtime cannot compile it.
+        }
+      }
+      return null;
+    }
+  }
+}

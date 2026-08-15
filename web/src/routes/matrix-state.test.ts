@@ -6,8 +6,11 @@ import {
   groupProblemCounts,
   keysForMatrixFilter,
   blockedPublishEnvironmentIds,
+  canClearMatrixCell,
+  draftValueForMatrixCell,
   requiredInEnvironment,
   toggleVisibleEnvironment,
+  validateMatrixDraft,
   type MatrixStateKey,
   type MatrixStateValue,
 } from './matrix-state.ts';
@@ -145,5 +148,32 @@ describe('publish and copy guards', () => {
   it('requires an explicit confirmation only when a protected destination is selected', () => {
     expect(copyRequiresProtectedConfirmation(['env_dev'], ['env_prod'])).toBe(false);
     expect(copyRequiresProtectedConfirmation(['env_dev', 'env_prod'], ['env_prod'])).toBe(true);
+  });
+});
+
+describe('row editor state', () => {
+  it('reopens config from its exact staged preview and keeps secrets write-only', () => {
+    expect(draftValueForMatrixCell('config', 'published', 'set', 'staged')).toBe('staged');
+    expect(draftValueForMatrixCell('config', 'published', undefined, undefined)).toBe('published');
+    expect(draftValueForMatrixCell('secret', 'never expose', 'set', 'also hidden')).toBe('');
+  });
+
+  it('allows a pending set over an absent cell to return to absent', () => {
+    expect(canClearMatrixCell(false, 'set')).toBe(true);
+    expect(canClearMatrixCell(false, undefined)).toBe(false);
+    expect(canClearMatrixCell(true, undefined)).toBe(true);
+  });
+
+  it('validates common declared types while typing', () => {
+    expect(validateMatrixDraft({ type: 'boolean' }, 'truthy')).toMatch(/true or false/);
+    expect(validateMatrixDraft({ type: 'integer', min: 2n }, '1')).toMatch(/at least 2/);
+    expect(validateMatrixDraft({ type: 'enum', members: ['debug', 'info'] }, 'warn')).toMatch(
+      /debug, info/,
+    );
+    expect(validateMatrixDraft({ type: 'json' }, '{')).toMatch(/valid JSON/);
+    expect(validateMatrixDraft({ type: 'url', schemes: ['https'] }, 'http://example.test')).toMatch(
+      /https/,
+    );
+    expect(validateMatrixDraft({ type: 'string', min_length: 2 }, 'ok')).toBeNull();
   });
 });
