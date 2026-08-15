@@ -1,6 +1,6 @@
-@import '@fontsource/archivo/400.css';
-@import '@fontsource/archivo/500.css';
-@import '@fontsource/archivo/700.css';
+@import '@fontsource/instrument-sans/400.css';
+@import '@fontsource/instrument-sans/500.css';
+@import '@fontsource/instrument-sans/700.css';
 @import '@fontsource/ibm-plex-mono/400.css';
 @import '@fontsource/ibm-plex-mono/500.css';
 
@@ -20,7 +20,7 @@
   --danger-quiet: oklch(0.72 0.13 25 / 0.14);
   --warning: oklch(0.82 0.1 85);
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
-  --sans: 'Archivo', sans-serif;
+  --sans: 'Instrument Sans', sans-serif;
   --max-width: 70rem;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: dark;
