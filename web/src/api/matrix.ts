@@ -5,6 +5,7 @@ import {
   getEnvironmentSignals,
   listKeyGroups,
   listKeys,
+  listPendingDrafts,
   listProjects,
   listValues,
   publishPendingChanges,
@@ -17,6 +18,7 @@ import {
   zKeyGroupList,
   zKeyList,
   zPendingChange,
+  zPendingDraftList,
   zProjectList,
   zPublishResult,
   zValueList,
@@ -71,35 +73,67 @@ export function signalsRequireValuesRefresh(
   return previous === undefined || revisionAdvanced(previous, next);
 }
 
-type PreviewStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+/**
+ * The caller's own drafts, as the publish sheet previews them.
+ *
+ * Previews come from the server (`listPendingDrafts`), bound to the immutable
+ * pending version id, so they survive a reload and a second browser alike and
+ * are never cached in client storage. The refinement pins the contract the
+ * endpoint promises: `value` iff `revealed`, and secret or unset drafts never
+ * carry material on this surface.
+ */
+export const zMatrixPendingDraftList = zPendingDraftList.superRefine((drafts, context) => {
+  drafts.items.forEach((draft, index) => {
+    const hasValue = draft.value !== undefined;
+    if (draft.revealed !== hasValue) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'value'],
+        message: 'pending draft value must appear if and only if revealed is true',
+      });
+    }
+    if (draft.classification === 'secret' && draft.revealed) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'revealed'],
+        message: 'secret pending drafts must remain unrevealed',
+      });
+    }
+    if (draft.operation === 'unset' && draft.revealed) {
+      context.addIssue({
+        code: 'custom',
+        path: ['items', index, 'revealed'],
+        message: 'unset pending drafts must remain unrevealed',
+      });
+    }
+  });
+});
 
-function matrixDraftPreviewKey(ref: MatrixRef, versionId: string): string {
-  return `hikyo:matrix-draft:${ref.org}:${ref.project}:${versionId}`;
+export type MatrixPendingDraft = z.infer<typeof zMatrixPendingDraftList>['items'][number];
+
+export function parseMatrixPendingDrafts(input: unknown): z.infer<typeof zMatrixPendingDraftList> {
+  return zMatrixPendingDraftList.parse(input);
 }
 
-export function writeMatrixDraftPreview(
-  storage: PreviewStorage,
-  ref: MatrixRef,
-  versionId: string,
-  value: string,
-): void {
-  storage.setItem(matrixDraftPreviewKey(ref, versionId), value);
-}
-
-export function readMatrixDraftPreview(
-  storage: PreviewStorage,
-  ref: MatrixRef,
-  versionId: string,
+/** The config material a signal's own pending set previews, if the server revealed it. */
+export function pendingConfigPreview(
+  signal: MatrixSignalCell | undefined,
+  draftsByVersion: ReadonlyMap<string, MatrixPendingDraft>,
 ): string | undefined {
-  return storage.getItem(matrixDraftPreviewKey(ref, versionId)) ?? undefined;
-}
-
-export function removeMatrixDraftPreview(
-  storage: PreviewStorage,
-  ref: MatrixRef,
-  versionId: string,
-): void {
-  storage.removeItem(matrixDraftPreviewKey(ref, versionId));
+  if (signal?.pending_version_id === undefined) {
+    return undefined;
+  }
+  const draft = draftsByVersion.get(signal.pending_version_id);
+  if (draft === undefined) {
+    return undefined;
+  }
+  if (draft.key_id !== signal.key_id) {
+    throw new Error(`pending draft ${draft.version_id} is bound to the wrong key`);
+  }
+  if (draft.classification !== 'config' || draft.operation !== 'set' || !draft.revealed) {
+    return undefined;
+  }
+  return draft.value;
 }
 
 export function matrixPublishValidation(
@@ -138,6 +172,11 @@ const settingsKey = (
   environment: string,
 ): readonly [string, string, string, string] =>
   ['matrix-settings', ref.org, ref.project, environment];
+const pendingDraftsKey = (
+  ref: MatrixRef,
+  environment: string,
+): readonly [string, string, string, string] =>
+  ['matrix-pending', ref.org, ref.project, environment];
 
 export function useProjects(org: string) {
   return useQuery({
@@ -212,8 +251,19 @@ export function useMatrixProject(ref: MatrixRef) {
       retry: false,
     })),
   });
+  const pendingDrafts = useQueries({
+    queries: environmentItems.map((environment) => ({
+      queryKey: pendingDraftsKey(ref, environment.id),
+      queryFn: () =>
+        parsed(
+          listPendingDrafts({ path: { ...ref, environment: environment.id } }),
+          zMatrixPendingDraftList,
+        ),
+      retry: false,
+    })),
+  });
 
-  return { environments, keys, groups, values, signals, settings };
+  return { environments, keys, groups, values, signals, settings, pendingDrafts };
 }
 
 export function useStageMatrixValue(ref: MatrixRef) {
@@ -231,6 +281,7 @@ export function useStageMatrixValue(ref: MatrixRef) {
       Promise.all([
         queries.invalidateQueries({ queryKey: valuesKey({ ...ref, environment: input.environment }) }),
         queries.invalidateQueries({ queryKey: signalsKey(ref, input.environment) }),
+        queries.invalidateQueries({ queryKey: pendingDraftsKey(ref, input.environment) }),
       ]),
   });
 }
@@ -247,6 +298,7 @@ export function useClearMatrixValue(ref: MatrixRef) {
       Promise.all([
         queries.invalidateQueries({ queryKey: valuesKey({ ...ref, environment: input.environment }) }),
         queries.invalidateQueries({ queryKey: signalsKey(ref, input.environment) }),
+        queries.invalidateQueries({ queryKey: pendingDraftsKey(ref, input.environment) }),
       ]),
   });
 }
@@ -283,6 +335,7 @@ export function usePublishMatrix(ref: MatrixRef) {
       Promise.all([
         queries.invalidateQueries({ queryKey: ['values', ref.org, ref.project] }),
         queries.invalidateQueries({ queryKey: ['matrix-signals', ref.org, ref.project] }),
+        queries.invalidateQueries({ queryKey: ['matrix-pending', ref.org, ref.project] }),
       ]),
   });
 }
@@ -313,6 +366,7 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
       Promise.all([
         queries.invalidateQueries({ queryKey: ['values', ref.org, ref.project] }),
         queries.invalidateQueries({ queryKey: ['matrix-signals', ref.org, ref.project] }),
+        queries.invalidateQueries({ queryKey: ['matrix-pending', ref.org, ref.project] }),
       ]),
   });
 }

@@ -1021,6 +1021,44 @@ func (s stubSettings) SetEnvironment(context.Context, service.Actor, domain.Scop
 	return service.EnvironmentSettings{}, s.outcome()
 }
 
+type stubRevisions struct{ stubHierarchy }
+
+func (s stubRevisions) PublishPlanned(context.Context, service.Actor, domain.Scope, service.PublishRequest) (service.PublishResult, error) {
+	return service.PublishResult{}, s.outcome()
+}
+
+func (s stubRevisions) Restore(context.Context, service.Actor, domain.Scope, int64, string) (service.RestoreResult, error) {
+	return service.RestoreResult{}, s.outcome()
+}
+
+func (s stubRevisions) History(context.Context, service.Actor, domain.Scope) ([]service.RevisionView, error) {
+	return nil, s.outcome()
+}
+
+func (s stubRevisions) Show(context.Context, service.Actor, domain.Scope, int64) (service.RevisionDetail, error) {
+	return service.RevisionDetail{}, s.outcome()
+}
+
+func (s stubRevisions) Signals(context.Context, service.Actor, domain.Scope) (service.EnvironmentSignals, error) {
+	return service.EnvironmentSignals{}, s.outcome()
+}
+
+func (s stubRevisions) PendingDrafts(context.Context, service.Actor, domain.Scope) ([]service.PendingDraft, error) {
+	return nil, s.outcome()
+}
+
+func (s stubRevisions) Export(context.Context, service.Actor, domain.Scope, int64, bool) ([]service.ExportedValue, int64, error) {
+	return nil, 0, s.outcome()
+}
+
+func (s stubRevisions) Watch(context.Context, service.Actor, domain.Scope) (<-chan service.AdvisoryEvent, error) {
+	return nil, s.outcome()
+}
+
+func (s stubRevisions) RotateTokenKey(context.Context, service.Actor) (service.TokenKeyRotation, error) {
+	return service.TokenKeyRotation{}, s.outcome()
+}
+
 func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(server.New(stubReady{}, &server.API{
@@ -1033,6 +1071,7 @@ func hierarchyServer(t *testing.T, outcome error) *httptest.Server {
 		Grants:    stubGrants{stubHierarchy{err: outcome}},
 		Settings:  stubSettings{stubHierarchy{err: outcome}},
 		SCIM:      stubSCIM{stubHierarchy{err: outcome}},
+		Revisions: stubRevisions{stubHierarchy{err: outcome}},
 		Version:   "test",
 	}, nil))
 	t.Cleanup(srv.Close)
@@ -1073,6 +1112,7 @@ func hierarchyRoutes() []struct {
 		{http.MethodGet, project + "/environments/" + testEnvID, nil},
 		{http.MethodPatch, project + "/environments/" + testEnvID, rename},
 		{http.MethodDelete, project + "/environments/" + testEnvID, nil},
+		{http.MethodGet, project + "/environments/" + testEnvID + "/pending", nil},
 		{http.MethodGet, project + "/folders", nil},
 		{http.MethodPost, project + "/folders", apigen.CreateFolderRequest{Path: "f"}},
 		{http.MethodGet, project + "/folders/" + testFolderID, nil},

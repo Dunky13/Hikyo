@@ -5,15 +5,14 @@ import { useParams } from 'react-router';
 import {
   matrixPublishValidation,
   matrixMutationError,
-  readMatrixDraftPreview,
-  removeMatrixDraftPreview,
+  pendingConfigPreview,
   useClearMatrixValue,
   useCopyMatrixConfig,
   useMatrixProject,
   usePublishMatrix,
   useStageMatrixValue,
-  writeMatrixDraftPreview,
   type MatrixKeyList,
+  type MatrixPendingDraft,
   type MatrixRef,
   type MatrixSignalCell,
 } from '../api/matrix.ts';
@@ -113,6 +112,19 @@ export function Matrix() {
     return cells;
   }, [environments, matrix.signals]);
 
+  // The caller's own drafts, keyed by immutable version id. Server truth: the
+  // publish sheet and the editors preview from this map, never from anything
+  // cached client-side, so a reload or a second browser shows the same review.
+  const draftsByVersion = useMemo(() => {
+    const drafts = new Map<string, MatrixPendingDraft>();
+    for (const query of matrix.pendingDrafts) {
+      for (const draft of query.data?.items ?? []) {
+        drafts.set(draft.version_id, draft);
+      }
+    }
+    return drafts;
+  }, [matrix.pendingDrafts]);
+
   const stateKeys = useMemo<readonly MatrixStateKey[]>(
     () =>
       keys.map((key) => ({
@@ -203,17 +215,14 @@ export function Matrix() {
             name: signal.name,
             classification: signal.classification,
             operation: signal.pending_operation,
-            configPreview:
-              signal.classification === 'config'
-                ? readMatrixDraftPreview(sessionStorage, ref, signal.pending_version_id)
-                : undefined,
+            configPreview: pendingConfigPreview(signal, draftsByVersion),
           });
         }
       }
       pending.set(environment.id, rows);
     });
     return pending;
-  }, [environments, matrix.signals, ref]);
+  }, [environments, matrix.signals, draftsByVersion]);
   const pendingCount = [...pendingByEnvironment.values()].reduce(
     (total, entries) => total + entries.length,
     0,
@@ -238,14 +247,16 @@ export function Matrix() {
     matrix.groups.isPending ||
     matrix.values.some((query) => query.isPending) ||
     matrix.signals.some((query) => query.isPending) ||
-    matrix.settings.some((query) => query.isPending);
+    matrix.settings.some((query) => query.isPending) ||
+    matrix.pendingDrafts.some((query) => query.isPending);
   const loadError =
     (matrix.environments.isError && matrix.environments.data === undefined) ||
     (matrix.keys.isError && matrix.keys.data === undefined) ||
     (matrix.groups.isError && matrix.groups.data === undefined) ||
     matrix.values.some((query) => query.isError && query.data === undefined) ||
     matrix.signals.some((query) => query.isError && query.data === undefined) ||
-    matrix.settings.some((query) => query.isError && query.data === undefined);
+    matrix.settings.some((query) => query.isError && query.data === undefined) ||
+    matrix.pendingDrafts.some((query) => query.isError && query.data === undefined);
   const backgroundRefreshError =
     (matrix.environments.isError && matrix.environments.data !== undefined) ||
     (matrix.keys.isError && matrix.keys.data !== undefined) ||
@@ -296,11 +307,6 @@ export function Matrix() {
               (error) => !selectedEnvironmentIds.includes(error.environmentId),
             ),
           );
-          for (const environmentId of selectedEnvironmentIds) {
-            for (const entry of pendingByEnvironment.get(environmentId) ?? []) {
-              removeMatrixDraftPreview(sessionStorage, ref, entry.versionId);
-            }
-          }
           const revisions = result.environments.map((published) => {
             const environment = environments.find(
               (candidate) => candidate.id === published.environment_id,
@@ -623,10 +629,7 @@ export function Matrix() {
               protected: protectedEnvironmentIds.includes(environment.id),
               cell: valuesByCell.get(cellID(selectedKey.id, environment.id)),
               signal,
-              draftPreview:
-                signal?.pending_version_id === undefined
-                  ? undefined
-                  : readMatrixDraftPreview(sessionStorage, ref, signal.pending_version_id),
+              draftPreview: pendingConfigPreview(signal, draftsByVersion),
               problems:
                 problemsByCell.get(cellID(selectedKey.id, environment.id)) ?? [],
             };
@@ -639,46 +642,19 @@ export function Matrix() {
             let normalizedCount = 0;
             for (const change of changes) {
               try {
-                const prior = signalsByCell.get(
-                  cellID(selectedKey.id, change.environmentId),
-                )?.pending_version_id;
                 if (change.operation === 'set') {
                   const normalizedValue = normalizeMatrixDraftValue(change.value);
                   if (normalizedValue !== change.value) normalizedCount += 1;
-                  const staged = await stage.mutateAsync({
+                  await stage.mutateAsync({
                     environment: change.environmentId,
                     key: selectedKey.name,
                     value: normalizedValue,
                   });
-                  if (selectedKey.classification === 'config') {
-                    try {
-                      if (prior !== undefined) {
-                        removeMatrixDraftPreview(sessionStorage, ref, prior);
-                      }
-                      writeMatrixDraftPreview(
-                        sessionStorage,
-                        ref,
-                        staged.version_id,
-                        normalizedValue,
-                      );
-                    } catch {
-                      setMutationError(
-                        'Draft saved, but its local publish preview could not be stored. Reopen and save it again after clearing browser storage.',
-                      );
-                    }
-                  }
                 } else {
                   await clear.mutateAsync({
                     environment: change.environmentId,
                     key: selectedKey.name,
                   });
-                  if (prior !== undefined) {
-                    try {
-                      removeMatrixDraftPreview(sessionStorage, ref, prior);
-                    } catch {
-                      // The server-side clear succeeded; stale local preview cleanup is best effort.
-                    }
-                  }
                 }
                 clearValidation(selectedKey.id, change.environmentId);
               } catch (error) {

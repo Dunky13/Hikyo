@@ -612,6 +612,67 @@ func (q *Queries) ListPendingChangesForOwner(ctx context.Context, arg ListPendin
 	return items, nil
 }
 
+const listPendingChangesForOwnerInEnvironment = `-- name: ListPendingChangesForOwnerInEnvironment :many
+SELECT id, org_id, project_id, environment_id, key_id, owner_id,
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
+FROM pending_changes
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND owner_id = ?
+ORDER BY key_id
+`
+
+type ListPendingChangesForOwnerInEnvironmentParams struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	OwnerID       string
+}
+
+// ListPendingChangesForOwnerInEnvironment is the preview read. Owner and
+// environment are both predicates in SQL, so the preview cannot hand one
+// principal another's ciphertext or material from another environment.
+func (q *Queries) ListPendingChangesForOwnerInEnvironment(ctx context.Context, arg ListPendingChangesForOwnerInEnvironmentParams) ([]PendingChange, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingChangesForOwnerInEnvironment,
+		arg.OrgID,
+		arg.ProjectID,
+		arg.EnvironmentID,
+		arg.OwnerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PendingChange
+	for rows.Next() {
+		var i PendingChange
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrgID,
+			&i.ProjectID,
+			&i.EnvironmentID,
+			&i.KeyID,
+			&i.OwnerID,
+			&i.Operation,
+			&i.Ciphertext,
+			&i.StagedFromRevision,
+			&i.StagedFromEntry,
+			&i.CreatedAt,
+			&i.Source,
+			&i.Secret,
+			&i.MaterialSecret,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingMarkers = `-- name: ListPendingMarkers :many
 SELECT id, environment_id, key_id, owner_id, operation
 FROM pending_changes

@@ -462,6 +462,24 @@ func (e PendingChangeOperation) Valid() bool {
 	}
 }
 
+// Defines values for PendingDraftOperation.
+const (
+	PendingDraftOperationSet   PendingDraftOperation = "set"
+	PendingDraftOperationUnset PendingDraftOperation = "unset"
+)
+
+// Valid indicates whether the value is a known member of the PendingDraftOperation enum.
+func (e PendingDraftOperation) Valid() bool {
+	switch e {
+	case PendingDraftOperationSet:
+		return true
+	case PendingDraftOperationUnset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PrincipalKind.
 const (
 	Human   PrincipalKind = "human"
@@ -2704,6 +2722,47 @@ type PendingChange struct {
 
 // PendingChangeOperation What publishing this draft does to the cell.
 type PendingChangeOperation string
+
+// PendingDraft One caller-owned pending draft. Secret and unset drafts never carry
+// material on this surface; `value` is present if and only if `revealed`
+// is true.
+type PendingDraft struct {
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name               KeyName               `json:"name"`
+	Operation          PendingDraftOperation `json:"operation"`
+	Revealed           bool                  `json:"revealed"`
+	StagedFromRevision int64                 `json:"staged_from_revision"`
+	Value              *string               `json:"value,omitempty"`
+
+	// VersionId A prefixed UUIDv7, e.g. `org_0198…`.
+	VersionId ID `json:"version_id"`
+}
+
+// PendingDraftOperation defines model for PendingDraft.Operation.
+type PendingDraftOperation string
+
+// PendingDraftList defines model for PendingDraftList.
+type PendingDraftList struct {
+	Count int            `json:"count"`
+	Items []PendingDraft `json:"items"`
+}
 
 // Principal defines model for Principal.
 type Principal struct {
@@ -5066,6 +5125,9 @@ type ServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
+	// ListPendingDrafts Preview the caller's pending drafts in one environment.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending)
+	ListPendingDrafts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
 	// ListRevisionPins List durable workload revision pins.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
 	ListRevisionPins(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID)
@@ -5957,6 +6019,12 @@ func (_ Unimplemented) CreateEnvGrant(w http.ResponseWriter, r *http.Request, or
 // ApplyEnvTemplate Apply a role template on one environment.
 // (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 func (_ Unimplemented) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListPendingDrafts Preview the caller's pending drafts in one environment.
+// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending)
+func (_ Unimplemented) ListPendingDrafts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8878,6 +8946,50 @@ func (siw *ServerInterfaceWrapper) ApplyEnvTemplate(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ApplyEnvTemplate(w, r, org, project, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPendingDrafts operation middleware
+func (siw *ServerInterfaceWrapper) ListPendingDrafts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "environment" -------------
+	var environment EnvironmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPendingDrafts(w, r, org, project, environment)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13478,6 +13590,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals", wrapper.GetEnvironmentSignals)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending", wrapper.ListPendingDrafts)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback", wrapper.RollbackRevision)
@@ -22497,6 +22612,87 @@ func (response ApplyEnvTemplate429JSONResponse) VisitApplyEnvTemplateResponse(w 
 type ApplyEnvTemplate500JSONResponse struct{ InternalJSONResponse }
 
 func (response ApplyEnvTemplate500JSONResponse) VisitApplyEnvTemplateResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPendingDraftsRequestObject struct {
+	Org         OrgID         `json:"org"`
+	Project     ProjectID     `json:"project"`
+	Environment EnvironmentID `json:"environment"`
+}
+
+type ListPendingDraftsResponseObject interface {
+	VisitListPendingDraftsResponse(w http.ResponseWriter) error
+}
+
+type ListPendingDrafts200JSONResponse PendingDraftList
+
+func (response ListPendingDrafts200JSONResponse) VisitListPendingDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPendingDrafts401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListPendingDrafts401JSONResponse) VisitListPendingDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPendingDrafts404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListPendingDrafts404JSONResponse) VisitListPendingDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPendingDrafts429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response ListPendingDrafts429JSONResponse) VisitListPendingDraftsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPendingDrafts500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListPendingDrafts500JSONResponse) VisitListPendingDraftsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -31878,6 +32074,9 @@ type StrictServerInterface interface {
 	// ApplyEnvTemplate Apply a role template on one environment.
 	// (POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/grants/template)
 	ApplyEnvTemplate(ctx context.Context, request ApplyEnvTemplateRequestObject) (ApplyEnvTemplateResponseObject, error)
+	// ListPendingDrafts Preview the caller's pending drafts in one environment.
+	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending)
+	ListPendingDrafts(ctx context.Context, request ListPendingDraftsRequestObject) (ListPendingDraftsResponseObject, error)
 	// ListRevisionPins List durable workload revision pins.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins)
 	ListRevisionPins(ctx context.Context, request ListRevisionPinsRequestObject) (ListRevisionPinsResponseObject, error)
@@ -35115,6 +35314,34 @@ func (sh *strictHandler) ApplyEnvTemplate(w http.ResponseWriter, r *http.Request
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ApplyEnvTemplateResponseObject); ok {
 		if err := validResponse.VisitApplyEnvTemplateResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPendingDrafts operation middleware
+func (sh *strictHandler) ListPendingDrafts(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, environment EnvironmentID) {
+	var request ListPendingDraftsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Environment = environment
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPendingDrafts(ctx, request.(ListPendingDraftsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPendingDrafts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPendingDraftsResponseObject); ok {
+		if err := validResponse.VisitListPendingDraftsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

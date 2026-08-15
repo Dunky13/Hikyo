@@ -921,6 +921,29 @@ export const zPendingChange = z.object({
     created_at: z.iso.datetime()
 });
 
+/**
+ * One caller-owned pending draft. Secret and unset drafts never carry
+ * material on this surface; `value` is present if and only if `revealed`
+ * is true.
+ *
+ */
+export const zPendingDraft = z.object({
+    version_id: zId,
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    operation: z.enum(['set', 'unset']),
+    staged_from_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    created_at: zTimestamp,
+    revealed: z.boolean(),
+    value: z.optional(z.string())
+});
+
+export const zPendingDraftList = z.object({
+    items: z.array(zPendingDraft),
+    count: z.int().gte(0)
+});
+
 export const zImpactChange = z.object({
     version_id: zId,
     key_id: zId,
@@ -4637,6 +4660,21 @@ export const zGetEnvironmentSignalsData = z.object({
  * The environment's signals.
  */
 export const zGetEnvironmentSignalsResponse = zEnvironmentSignals;
+
+export const zListPendingDraftsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The caller's pending drafts in the environment.
+ */
+export const zListPendingDraftsResponse = zPendingDraftList;
 
 export const zRollbackRevisionData = z.object({
     body: z.optional(zRollbackRequest),

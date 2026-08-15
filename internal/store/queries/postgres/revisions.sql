@@ -65,6 +65,17 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
   AND owner_id = sqlc.arg(owner_id)
 ORDER BY environment_id, key_id;
 
+-- ListPendingChangesForOwnerInEnvironment is the preview read. Owner and
+-- environment are both predicates in SQL, so the preview cannot hand one
+-- principal another's ciphertext or material from another environment.
+-- name: ListPendingChangesForOwnerInEnvironment :many
+SELECT id, org_id, project_id, environment_id, key_id, owner_id,
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
+FROM pending_changes
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id) AND owner_id = sqlc.arg(owner_id)
+ORDER BY key_id;
+
 -- ListPendingMarkers is the matrix signal's read and the group-closure
 -- collision check's read. It returns NO ciphertext: what another principal's
 -- draft may disclose is write-presence and nothing else, and the cheapest way

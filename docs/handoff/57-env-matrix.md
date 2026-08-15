@@ -49,9 +49,10 @@ drift signal anywhere in this surface).
   polling fallback). A revision advance refreshes its matching values query; the
   boundary refuses half-present pending signals. The first signal snapshot refreshes
   values once to establish ordering; later refreshes happen only on revision advance.
-  Config previews persist in session storage under the immutable pending version id,
-  so reload keeps publish review exact. The UI applies the service's Unicode trim
-  before staging and previewing, and tells the user when normalization occurred.
+  Config previews come from the server (`listPendingDrafts`, below), bound to the
+  immutable pending version id, so reload — or a second browser — keeps publish review
+  exact without any client-side material cache. The UI applies the service's Unicode
+  trim before staging and previewing, and tells the user when normalization occurred.
   Everything crosses `parsed()` + generated Zod.
 - `web/src/api/client.ts` parses the generated error contract before retaining a
   caller-safe detail. Publish adds a matrix validation problem only when that detail
@@ -80,6 +81,27 @@ to create the veto — a required-absent state cannot be *created*, schema publi
 correctly refuses it, so the fixture walks the real user path). The Chromium virtual
 passkey installer moved to `fixtures/instance.ts` (`installPasskeyAuthenticator`),
 shared with `reveal.spec.ts`; its counter-persistence contract is documented there.
+
+## Pending-draft preview seam (server + API)
+
+`GET /orgs/{org}/projects/{project}/environments/{environment}/pending`
+(`listPendingDrafts`, op `value.pending-list`, formula `read@environment`, audited-none
+like every read of the same shape) returns the CALLER'S OWN drafts in one environment.
+Owner and environment are SQL predicates (`ListPendingChangesForOwnerInEnvironment`,
+both engines) — the store's rule that no statement hands one principal another's
+ciphertext holds. A `config` `set` draft opens its material (`revealed: true`, `value`)
+through the same sealer + `pendingAAD` path publish uses; `secret` drafts, `unset`
+drafts and secret-origin material (`material_secret`, the sticky bit #52 restores set)
+never carry a value; the gate reads the key's CURRENT classification, so a config
+draft staged before a config→secret reclassification stops previewing without anyone
+re-staging. Other principals' drafts are invisible here (signals carries presence). No
+migration. Registry (`OpValuePendingList`), classify, contract `hierarchyRoutes`,
+noproxy and formula pins updated; conformance scenario
+`pending_draft_preview_is_owner_filtered_and_classification_safe` (both engines).
+Web: `zMatrixPendingDraftList` refines the contract at the boundary (`value` iff
+`revealed`; secret/unset never revealed); `pendingConfigPreview` binds a signal's
+pending version to its draft and fails loud on a key mismatch. `PendingChange` itself
+still never carries the staged value.
 
 ## Decisions
 

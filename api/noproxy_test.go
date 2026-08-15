@@ -371,6 +371,7 @@ var pinnedContractSurface = map[string]bool{
 	// stream. Export discloses a local committed snapshot; none names or dials a
 	// remote origin. Token-key rotation changes only this instance's root key.
 	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending":                        true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":                        true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":                      true,
 	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}":           true,

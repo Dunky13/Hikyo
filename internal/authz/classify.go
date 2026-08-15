@@ -335,6 +335,7 @@ var wireRegistry = map[string]Class{
 	// environment the caller may not reach answers byte-identically to one that
 	// is not there, history included.
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending":                        ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":                        ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":                      ClassTenant,
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}":           ClassTenant,
@@ -859,6 +860,7 @@ var wireRoutes = map[string][]Operation{
 	// plus any other environment the selected versions -- or key-group closure
 	// -- reach.
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             {OpValuePublish},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pending":              {OpValuePendingList},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              {OpRevisionSignals},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            {OpRevisionList},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": {OpRevisionShow},

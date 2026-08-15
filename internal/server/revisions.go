@@ -42,6 +42,7 @@ type RevisionService interface {
 	History(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.RevisionView, error)
 	Show(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64) (service.RevisionDetail, error)
 	Signals(ctx context.Context, actor service.Actor, scope domain.Scope) (service.EnvironmentSignals, error)
+	PendingDrafts(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.PendingDraft, error)
 	Export(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64, reveal bool) ([]service.ExportedValue, int64, error)
 	Watch(ctx context.Context, actor service.Actor, scope domain.Scope) (<-chan service.AdvisoryEvent, error)
 	RotateTokenKey(ctx context.Context, actor service.Actor) (service.TokenKeyRotation, error)
@@ -295,6 +296,32 @@ func (a *API) GetEnvironmentSignals(ctx context.Context, req apigen.GetEnvironme
 	}
 	return apigen.GetEnvironmentSignals200JSONResponse(apigen.EnvironmentSignals{
 		EnvironmentId: signals.EnvironmentID, Revision: signals.Revision, Cells: cells,
+	}), nil
+}
+
+func (a *API) ListPendingDrafts(ctx context.Context, req apigen.ListPendingDraftsRequestObject) (apigen.ListPendingDraftsResponseObject, error) {
+	drafts, err := a.Revisions.PendingDrafts(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]apigen.PendingDraft, 0, len(drafts))
+	for _, draft := range drafts {
+		item := apigen.PendingDraft{
+			VersionId: draft.VersionID, KeyId: draft.KeyID, Name: draft.Name,
+			Classification:     apigen.KeyClassification(draft.Classification),
+			Operation:          apigen.PendingDraftOperation(draft.Operation),
+			StagedFromRevision: draft.StagedFromRevision, CreatedAt: draft.CreatedAt,
+			Revealed: draft.Revealed,
+		}
+		if draft.Revealed {
+			value := draft.Value
+			item.Value = &value
+		}
+		items = append(items, item)
+	}
+	return apigen.ListPendingDrafts200JSONResponse(apigen.PendingDraftList{
+		Items: items, Count: len(items),
 	}), nil
 }
 

@@ -86,6 +86,21 @@ type EnvironmentSignals struct {
 	Cells         []CellSignal
 }
 
+// PendingDraft is one caller-owned draft in an environment. Value carries
+// plaintext only for a revealed config set; secret and unset drafts never
+// carry material on this surface.
+type PendingDraft struct {
+	VersionID          string
+	KeyID              string
+	Name               string
+	Classification     string
+	Operation          string
+	StagedFromRevision int64
+	CreatedAt          time.Time
+	Revealed           bool
+	Value              string
+}
+
 // History lists one environment's revisions, newest first.
 func (s *Revisions) History(ctx context.Context, actor Actor, scope domain.Scope) ([]RevisionView, error) {
 	var out []RevisionView
@@ -297,6 +312,71 @@ func (s *Revisions) Signals(ctx context.Context, actor Actor, scope domain.Scope
 	})
 	if err != nil {
 		return EnvironmentSignals{}, err
+	}
+	return out, nil
+}
+
+// PendingDrafts lists only the caller's own drafts in one environment. The
+// owner and environment predicates live in SQL; this layer joins catalogue
+// names/classifications and opens config sets under the ordinary read gate.
+// Secrets are never opened here because previewing them would require
+// consuming a disclosure ceremony, outside this endpoint's scope.
+func (s *Revisions) PendingDrafts(ctx context.Context, actor Actor, scope domain.Scope) ([]PendingDraft, error) {
+	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpValuePendingList, scope)
+	if err != nil {
+		return nil, err
+	}
+	var out []PendingDraft
+	err = tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		out = nil
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		p, err := az.Authorize(ctx, caller, authz.OpValuePendingList, scope)
+		if err != nil {
+			return err
+		}
+		changes, err := r.Pending().ListForOwnerInEnvironment(ctx, p, string(caller.Principal))
+		if err != nil {
+			return err
+		}
+		keys, err := r.Catalogue().List(ctx, p)
+		if err != nil {
+			return err
+		}
+		byID := make(map[string]store.CatalogueKey, len(keys))
+		for _, key := range keys {
+			byID[key.ID] = key
+		}
+		out = make([]PendingDraft, 0, len(changes))
+		for _, change := range changes {
+			key, ok := byID[change.KeyID]
+			if !ok {
+				return fmt.Errorf("service: pending change %s references missing key %s", change.ID, change.KeyID)
+			}
+			draft := PendingDraft{
+				VersionID: change.ID, KeyID: change.KeyID, Name: key.Name,
+				Classification: key.Classification, Operation: string(change.Operation),
+				StagedFromRevision: change.StagedFromRevision, CreatedAt: change.CreatedAt,
+			}
+			// MaterialSecret is sticky across restores. A historically secret value
+			// must never become readable merely because the key is now config.
+			if change.Operation == store.PendingSet && key.Classification == string(schema.Config) && !change.MaterialSecret {
+				plain, err := sealer.OpenField(pendingAAD(
+					change.OrgID, change.ProjectID, change.EnvironmentID, change.KeyID, change.ID), change.Ciphertext)
+				if err != nil {
+					return fmt.Errorf("service: pending change %s: %w", change.ID, err)
+				}
+				draft.Revealed = true
+				draft.Value = string(plain)
+			}
+			out = append(out, draft)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

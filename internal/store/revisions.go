@@ -169,6 +169,10 @@ type PendingReader interface {
 	// project, material included. There is deliberately no statement that
 	// returns another principal's material.
 	ListForOwner(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error)
+	// ListForOwnerInEnvironment is the pending-draft preview read. Owner and
+	// environment are both bound into its SQL predicate; no post-query filter
+	// is trusted with another principal's ciphertext.
+	ListForOwnerInEnvironment(ctx context.Context, p authz.Proof, ownerID string) ([]PendingChange, error)
 	// ListMarkers returns every principal's drafts in the proof's project,
 	// without material.
 	ListMarkers(ctx context.Context, p authz.Proof) ([]PendingMarker, error)
