@@ -40,6 +40,16 @@ func pendingOperation(raw string) (PendingOperation, error) {
 	return "", fmt.Errorf("store: pending change carries unknown operation %q", raw)
 }
 
+func pendingSource(raw string) (PendingSource, error) {
+	switch PendingSource(raw) {
+	case PendingSourceValues:
+		return PendingSourceValues, nil
+	case PendingSourceRestore:
+		return PendingSourceRestore, nil
+	}
+	return "", fmt.Errorf("store: pending change carries unknown source %q", raw)
+}
+
 func revisionChange(raw string) (RevisionChange, error) {
 	switch RevisionChange(raw) {
 	case RevisionChangeAdded:
@@ -139,6 +149,9 @@ func (r sqlitePending) Stage(ctx context.Context, p authz.Proof, change NewPendi
 		StagedFromRevision: change.StagedFromRevision,
 		StagedFromEntry:    change.StagedFromEntry,
 		CreatedAt:          CanonTime(change.CreatedAt).Format(timeFormat),
+		Source:             string(change.Source),
+		Secret:             boolInt(change.Secret),
+		MaterialSecret:     boolInt(change.MaterialSecret),
 	}))
 }
 
@@ -205,12 +218,17 @@ func pendingFromSQLite(row sqlitegen.PendingChange) (PendingChange, error) {
 	if err != nil {
 		return PendingChange{}, err
 	}
+	source, err := pendingSource(row.Source)
+	if err != nil {
+		return PendingChange{}, err
+	}
 	return PendingChange{
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
 		Operation: op, Ciphertext: row.Ciphertext,
 		StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
-		CreatedAt: created,
+		CreatedAt: created, Source: source, Secret: row.Secret == 1,
+		MaterialSecret: row.MaterialSecret == 1,
 	}, nil
 }
 
@@ -324,6 +342,20 @@ func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID 
 	return out, nil
 }
 
+func (r sqliteSnapshots) SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsSecretValueOccurrenceIDs, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsSecretValueOccurrenceIDs)
+	if err != nil {
+		return nil, err
+	}
+	return r.q.ListSecretValueOccurrenceIDs(ctx, sqlitegen.ListSecretValueOccurrenceIDsParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	})
+}
+
 func (r sqliteSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
 	if err != nil {
@@ -400,6 +432,20 @@ func (r sqliteSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry N
 	}))
 }
 
+func (r sqliteSnapshots) RecordSecretValueOccurrence(ctx context.Context, p authz.Proof, valueEntryID string) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsRecordSecretValueOccurrence, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsRecordSecretValueOccurrence)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.RecordSecretValueOccurrence(ctx, sqlitegen.RecordSecretValueOccurrenceParams{
+		ValueEntryID: valueEntryID, OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	}))
+}
+
 func (r sqliteSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
 	if err != nil {
@@ -430,6 +476,11 @@ func (r sqliteSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) e
 		return err
 	}
 	// Entries first: they reference the snapshot rows.
+	if _, err := r.q.DeleteSecretValueOccurrencesForEnvironment(ctx, sqlitegen.DeleteSecretValueOccurrencesForEnvironmentParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	}); err != nil {
+		return constraint(err)
+	}
 	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, sqlitegen.DeleteSnapshotEntriesForEnvironmentParams{
 		OrgID:         string(chain.Org),
 		ProjectID:     string(chain.Project),
@@ -461,7 +512,151 @@ func revisionSnapshotFromSQLite(row sqlitegen.Snapshot) (Snapshot, error) {
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
 		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
-		PublishedAt: published,
+		PublishedAt:    published,
+		PayloadPresent: row.PayloadPresent == 1,
+	}, nil
+}
+
+type sqlitePins struct {
+	q   *sqlitegen.Queries
+	tok *authz.TxToken
+}
+
+func (r sqlitePins) GetForWorkload(ctx context.Context, p authz.Proof, workloadPrincipalID string) (RevisionPin, error) {
+	chain, err := authz.Verify(p, authz.StorePinsGetForWorkload, r.tok)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	env, err := envOf(chain, authz.StorePinsGetForWorkload)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	row, err := r.q.GetRevisionPinForWorkload(ctx, sqlitegen.GetRevisionPinForWorkloadParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+		WorkloadPrincipalID: workloadPrincipalID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return RevisionPin{}, ErrNotFound
+	}
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	return revisionPinFromSQLite(row)
+}
+
+func (r sqlitePins) List(ctx context.Context, p authz.Proof) ([]RevisionPin, error) {
+	chain, err := authz.Verify(p, authz.StorePinsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StorePinsList)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListRevisionPins(ctx, sqlitegen.ListRevisionPinsParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RevisionPin, 0, len(rows))
+	for _, row := range rows {
+		pin, err := revisionPinFromSQLite(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pin)
+	}
+	return out, nil
+}
+
+func (r sqlitePins) CountProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StorePinsCountProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountRevisionPinsForProject(ctx, sqlitegen.CountRevisionPinsForProjectParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project),
+	})
+}
+
+func (r sqlitePins) Insert(ctx context.Context, p authz.Proof, pin NewRevisionPin) error {
+	chain, err := authz.Verify(p, authz.StorePinsInsert, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePinsInsert)
+	if err != nil {
+		return err
+	}
+	override := int64(0)
+	if pin.SchemaOverride {
+		override = 1
+	}
+	historyAuthorized := int64(0)
+	if pin.HistoryAuthorized {
+		historyAuthorized = 1
+	}
+	return constraint(r.q.InsertRevisionPin(ctx, sqlitegen.InsertRevisionPinParams{
+		ID: pin.ID, OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+		WorkloadPrincipalID: pin.WorkloadPrincipalID, SnapshotID: pin.SnapshotID,
+		Revision: pin.Revision, AuthorityPrincipalID: pin.AuthorityPrincipalID,
+		ExpiresAt: CanonTime(pin.ExpiresAt).Format(timeFormat), CreatedAt: CanonTime(pin.CreatedAt).Format(timeFormat),
+		AuthorizedAt:      CanonTime(pin.AuthorizedAt).Format(timeFormat),
+		HistoryAuthorized: historyAuthorized, SchemaOverride: override,
+	}))
+}
+
+func (r sqlitePins) Delete(ctx context.Context, p authz.Proof, workloadPrincipalID string) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePinsDelete, r.tok)
+	if err != nil {
+		return false, err
+	}
+	env, err := envOf(chain, authz.StorePinsDelete)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.DeleteRevisionPin(ctx, sqlitegen.DeleteRevisionPinParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+		WorkloadPrincipalID: workloadPrincipalID,
+	})
+	return n > 0, constraint(err)
+}
+
+func (r sqlitePins) DeleteEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StorePinsDeleteEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePinsDeleteEnvironment)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.DeleteRevisionPinsForEnvironment(ctx, sqlitegen.DeleteRevisionPinsForEnvironmentParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	})
+	return constraint(err)
+}
+
+func revisionPinFromSQLite(row sqlitegen.RevisionPin) (RevisionPin, error) {
+	expires, err := parseTime("revision pin", row.ID, row.ExpiresAt)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	created, err := parseTime("revision pin", row.ID, row.CreatedAt)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	authorized, err := parseTime("revision pin", row.ID, row.AuthorizedAt)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	return RevisionPin{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID, EnvironmentID: row.EnvironmentID,
+		WorkloadPrincipalID: row.WorkloadPrincipalID, SnapshotID: row.SnapshotID, Revision: row.Revision,
+		AuthorityPrincipalID: row.AuthorityPrincipalID, ExpiresAt: expires, CreatedAt: created,
+		AuthorizedAt: authorized, HistoryAuthorized: row.HistoryAuthorized == 1,
+		SchemaOverride: row.SchemaOverride == 1,
 	}, nil
 }
 
@@ -491,12 +686,17 @@ func (r pgPending) ListForOwner(ctx context.Context, p authz.Proof, ownerID stri
 		if err != nil {
 			return nil, err
 		}
+		source, err := pendingSource(row.Source)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, PendingChange{
 			ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 			EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
 			Operation: op, Ciphertext: row.Ciphertext,
 			StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
-			CreatedAt: row.CreatedAt.Time.UTC(),
+			CreatedAt: row.CreatedAt.Time.UTC(), Source: source, Secret: row.Secret,
+			MaterialSecret: row.MaterialSecret,
 		})
 	}
 	return out, nil
@@ -558,6 +758,9 @@ func (r pgPending) Stage(ctx context.Context, p authz.Proof, change NewPendingCh
 		StagedFromRevision: change.StagedFromRevision,
 		StagedFromEntry:    change.StagedFromEntry,
 		CreatedAt:          pgtype.Timestamptz{Time: CanonTime(change.CreatedAt), Valid: true},
+		Source:             string(change.Source),
+		Secret:             change.Secret,
+		MaterialSecret:     change.MaterialSecret,
 	}))
 }
 
@@ -721,6 +924,20 @@ func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID stri
 	return out, nil
 }
 
+func (r pgSnapshots) SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsSecretValueOccurrenceIDs, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsSecretValueOccurrenceIDs)
+	if err != nil {
+		return nil, err
+	}
+	return r.q.ListSecretValueOccurrenceIDs(ctx, pggen.ListSecretValueOccurrenceIDsParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	})
+}
+
 func (r pgSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
 	if err != nil {
@@ -797,6 +1014,20 @@ func (r pgSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry NewSn
 	}))
 }
 
+func (r pgSnapshots) RecordSecretValueOccurrence(ctx context.Context, p authz.Proof, valueEntryID string) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsRecordSecretValueOccurrence, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsRecordSecretValueOccurrence)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.RecordSecretValueOccurrence(ctx, pggen.RecordSecretValueOccurrenceParams{
+		ValueEntryID: valueEntryID, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	}))
+}
+
 func (r pgSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
 	if err != nil {
@@ -826,6 +1057,11 @@ func (r pgSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error
 	if err != nil {
 		return err
 	}
+	if _, err := r.q.DeleteSecretValueOccurrencesForEnvironment(ctx, pggen.DeleteSecretValueOccurrencesForEnvironmentParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	}); err != nil {
+		return constraint(err)
+	}
 	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, pggen.DeleteSnapshotEntriesForEnvironmentParams{
 		ChainOrgID:     string(chain.Org),
 		ChainProjectID: string(chain.Project),
@@ -853,6 +1089,128 @@ func revisionSnapshotFromPG(row pggen.Snapshot) Snapshot {
 		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID,
 		EnvironmentID: row.EnvironmentID, Revision: row.Revision,
 		SchemaRevision: row.SchemaRevision, PublishedBy: row.PublishedBy,
-		PublishedAt: row.PublishedAt.Time.UTC(),
+		PublishedAt:    row.PublishedAt.Time.UTC(),
+		PayloadPresent: row.PayloadPresent,
+	}
+}
+
+type pgPins struct {
+	q   *pggen.Queries
+	tok *authz.TxToken
+}
+
+func (r pgPins) GetForWorkload(ctx context.Context, p authz.Proof, workloadPrincipalID string) (RevisionPin, error) {
+	chain, err := authz.Verify(p, authz.StorePinsGetForWorkload, r.tok)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	env, err := envOf(chain, authz.StorePinsGetForWorkload)
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	row, err := r.q.GetRevisionPinForWorkload(ctx, pggen.GetRevisionPinForWorkloadParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+		WorkloadPrincipalID: workloadPrincipalID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RevisionPin{}, ErrNotFound
+	}
+	if err != nil {
+		return RevisionPin{}, err
+	}
+	return revisionPinFromPG(row), nil
+}
+
+func (r pgPins) List(ctx context.Context, p authz.Proof) ([]RevisionPin, error) {
+	chain, err := authz.Verify(p, authz.StorePinsList, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StorePinsList)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListRevisionPins(ctx, pggen.ListRevisionPinsParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RevisionPin, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, revisionPinFromPG(row))
+	}
+	return out, nil
+}
+
+func (r pgPins) CountProject(ctx context.Context, p authz.Proof) (int64, error) {
+	chain, err := authz.Verify(p, authz.StorePinsCountProject, r.tok)
+	if err != nil {
+		return 0, err
+	}
+	return r.q.CountRevisionPinsForProject(ctx, pggen.CountRevisionPinsForProjectParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project),
+	})
+}
+
+func (r pgPins) Insert(ctx context.Context, p authz.Proof, pin NewRevisionPin) error {
+	chain, err := authz.Verify(p, authz.StorePinsInsert, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePinsInsert)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.InsertRevisionPin(ctx, pggen.InsertRevisionPinParams{
+		ID: pin.ID, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+		WorkloadPrincipalID: pin.WorkloadPrincipalID, SnapshotID: pin.SnapshotID,
+		Revision: pin.Revision, AuthorityPrincipalID: pin.AuthorityPrincipalID,
+		ExpiresAt:         pgtype.Timestamptz{Time: CanonTime(pin.ExpiresAt), Valid: true},
+		CreatedAt:         pgtype.Timestamptz{Time: CanonTime(pin.CreatedAt), Valid: true},
+		AuthorizedAt:      pgtype.Timestamptz{Time: CanonTime(pin.AuthorizedAt), Valid: true},
+		HistoryAuthorized: pin.HistoryAuthorized,
+		SchemaOverride:    pin.SchemaOverride,
+	}))
+}
+
+func (r pgPins) Delete(ctx context.Context, p authz.Proof, workloadPrincipalID string) (bool, error) {
+	chain, err := authz.Verify(p, authz.StorePinsDelete, r.tok)
+	if err != nil {
+		return false, err
+	}
+	env, err := envOf(chain, authz.StorePinsDelete)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.DeleteRevisionPin(ctx, pggen.DeleteRevisionPinParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+		WorkloadPrincipalID: workloadPrincipalID,
+	})
+	return n > 0, constraint(err)
+}
+
+func (r pgPins) DeleteEnvironment(ctx context.Context, p authz.Proof) error {
+	chain, err := authz.Verify(p, authz.StorePinsDeleteEnvironment, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StorePinsDeleteEnvironment)
+	if err != nil {
+		return err
+	}
+	_, err = r.q.DeleteRevisionPinsForEnvironment(ctx, pggen.DeleteRevisionPinsForEnvironmentParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	})
+	return constraint(err)
+}
+
+func revisionPinFromPG(row pggen.RevisionPin) RevisionPin {
+	return RevisionPin{
+		ID: row.ID, OrgID: row.OrgID, ProjectID: row.ProjectID, EnvironmentID: row.EnvironmentID,
+		WorkloadPrincipalID: row.WorkloadPrincipalID, SnapshotID: row.SnapshotID, Revision: row.Revision,
+		AuthorityPrincipalID: row.AuthorityPrincipalID, ExpiresAt: row.ExpiresAt.Time.UTC(),
+		CreatedAt: row.CreatedAt.Time.UTC(), AuthorizedAt: row.AuthorizedAt.Time.UTC(),
+		HistoryAuthorized: row.HistoryAuthorized, SchemaOverride: row.SchemaOverride,
 	}
 }

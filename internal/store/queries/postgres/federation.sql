@@ -78,3 +78,7 @@ WHERE principal_id = sqlc.arg(principal_id) AND environment_id = sqlc.arg(enviro
 INSERT INTO pin_generations (principal_id, environment_id, generation)
 VALUES (sqlc.arg(principal_id), sqlc.arg(environment_id), sqlc.arg(generation))
 ON CONFLICT (principal_id, environment_id) DO UPDATE SET generation = excluded.generation;
+
+-- hikyo:authn-resolution
+-- name: DeletePinGenerationsForPrincipal :exec
+DELETE FROM pin_generations WHERE principal_id = sqlc.arg(principal_id);

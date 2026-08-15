@@ -363,6 +363,7 @@ type Repos interface {
 	Values() ValueRepo
 	Pending() PendingRepo
 	Snapshots() SnapshotRepo
+	Pins() RevisionPinRepo
 	Projects() ProjectRepo
 	Environments() EnvironmentRepo
 	Folders() FolderRepo
@@ -387,6 +388,7 @@ type ReadRepos interface {
 	Values() ValueReader
 	Pending() PendingReader
 	Snapshots() SnapshotReader
+	Pins() RevisionPinReader
 	Projects() ProjectReader
 	Environments() EnvironmentReader
 	Folders() FolderReader

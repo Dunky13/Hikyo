@@ -52,6 +52,7 @@ func (s sqliteReadRepos) Catalogue() CatalogueReader      { return s.r.Catalogue
 func (s sqliteReadRepos) Values() ValueReader             { return s.r.Values() }
 func (s sqliteReadRepos) Pending() PendingReader          { return s.r.Pending() }
 func (s sqliteReadRepos) Snapshots() SnapshotReader       { return s.r.Snapshots() }
+func (s sqliteReadRepos) Pins() RevisionPinReader         { return s.r.Pins() }
 func (s sqliteReadRepos) Projects() ProjectReader         { return s.r.Projects() }
 func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environments() }
 func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
@@ -66,6 +67,7 @@ func (p pgReadRepos) Catalogue() CatalogueReader      { return p.r.Catalogue() }
 func (p pgReadRepos) Values() ValueReader             { return p.r.Values() }
 func (p pgReadRepos) Pending() PendingReader          { return p.r.Pending() }
 func (p pgReadRepos) Snapshots() SnapshotReader       { return p.r.Snapshots() }
+func (p pgReadRepos) Pins() RevisionPinReader         { return p.r.Pins() }
 func (p pgReadRepos) Projects() ProjectReader         { return p.r.Projects() }
 func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments() }
 func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
@@ -182,6 +184,10 @@ func (r sqliteRepos) Pending() PendingRepo {
 
 func (r sqliteRepos) Snapshots() SnapshotRepo {
 	return sqliteSnapshots{q: sqlitegen.New(r.db), tok: r.tok}
+}
+
+func (r sqliteRepos) Pins() RevisionPinRepo {
+	return sqlitePins{q: sqlitegen.New(r.db), tok: r.tok}
 }
 
 type sqliteOrgs struct {
@@ -742,6 +748,7 @@ func (r pgRepos) Catalogue() CatalogueRepo      { return pgCatalogue{q: pggen.Ne
 func (r pgRepos) Values() ValueRepo             { return pgValues{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Pending() PendingRepo          { return pgPending{q: pggen.New(r.db), tok: r.tok} }
 func (r pgRepos) Snapshots() SnapshotRepo       { return pgSnapshots{q: pggen.New(r.db), tok: r.tok} }
+func (r pgRepos) Pins() RevisionPinRepo         { return pgPins{q: pggen.New(r.db), tok: r.tok} }
 
 type pgOrgs struct {
 	q   *pggen.Queries

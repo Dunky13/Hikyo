@@ -220,6 +220,8 @@ func runMachineIdentityLifecycle(t *testing.T, db *store.DB) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	execRaw(t, db, "INSERT INTO pin_generations (principal_id, environment_id, generation) VALUES ('"+
+		string(sa.Principal)+"', 'env_a1', 2)")
 
 	// DELETE revokes every credential and releases every grant in one
 	// transaction.
@@ -228,6 +230,9 @@ func runMachineIdentityLifecycle(t *testing.T, db *store.DB) {
 	}
 	if id := authenticate(t, db, second.Value); id.Principal != "" {
 		t.Fatal("a deleted service account's credential still authenticated")
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM pin_generations WHERE principal_id = '"+string(sa.Principal)+"'"); got != 0 {
+		t.Fatalf("workload delete retained %d pin-generation rows", got)
 	}
 }
 

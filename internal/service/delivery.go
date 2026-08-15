@@ -60,6 +60,11 @@ type FetchResult struct {
 	SchemaRevision int64
 	// Keys is the delivered projection, empty when Current.
 	Keys []DeliveredKey
+	// PinnedRevision is non-zero when a durable pin selected the snapshot.
+	PinnedRevision int64
+	// PinExpired is a loud status condition only. Expiry ends retention
+	// protection; it never changes delivery while the payload survives.
+	PinExpired bool
 }
 
 // DeliveredKey is one key as the machine surface delivers it: its name, its
@@ -95,6 +100,13 @@ type Delivery struct {
 	// that did not wire federation should do.
 	Federation *Federation
 	Now        func() time.Time
+	// FetchProbe is a conformance-only retry seam. Production leaves it nil;
+	// it is invoked immediately after attempt-local response state is reset.
+	FetchProbe DeliveryConformanceProbe
+}
+
+type DeliveryConformanceProbe interface {
+	AfterAttemptReset(out *FetchResult) error
 }
 
 func (s *Delivery) now() time.Time {
@@ -159,6 +171,12 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 
 	var out FetchResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		resetDeliveryAttempt(&out)
+		if s.FetchProbe != nil {
+			if err := s.FetchProbe.AfterAttemptReset(&out); err != nil {
+				return err
+			}
+		}
 		// The clock is read INSIDE the transaction: the sealer preflight above
 		// can take real time, and a credential whose idle, absolute or expiry
 		// deadline passes during it must be refused by the authentication this
@@ -177,7 +195,47 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 			return err
 		}
 
-		rows, manifest, revision, err := deliveryRows(ctx, r, p, sealer, scope)
+		var selected *store.Snapshot
+		pin, pinErr := r.Pins().GetForWorkload(ctx, p, string(caller.Principal))
+		switch {
+		case errors.Is(pinErr, store.ErrNotFound):
+		case pinErr != nil:
+			return pinErr
+		default:
+			authority := domain.PrincipalID(pin.AuthorityPrincipalID)
+			holds, err := az.RecordedPrincipalHolds(ctx, caller, authority, authz.OpPinSet, scope)
+			if err != nil {
+				return err
+			}
+			if !holds {
+				return invalidDetail("pinned delivery is refused because the recorded authority no longer holds pin and publish grants")
+			}
+			snapshot, err := r.Snapshots().AtRevision(ctx, p, pin.Revision)
+			if err != nil {
+				return err
+			}
+			latest, err := r.Snapshots().Latest(ctx, p)
+			if err != nil {
+				return err
+			}
+			if snapshot.Revision != latest.Revision {
+				holds, err := az.RecordedPrincipalHolds(ctx, caller, authority, authz.OpPinSetHistory, scope)
+				if err != nil {
+					return err
+				}
+				if !holds {
+					return invalidDetail("pinned delivery of revision %d is refused because the recorded authority no longer holds reveal-history", pin.Revision)
+				}
+			}
+			if !snapshot.PayloadPresent {
+				return invalidDetail("pinned delivery revision %d payload was collected", pin.Revision)
+			}
+			selected = &snapshot
+			out.PinnedRevision = pin.Revision
+			out.PinExpired = !pin.ExpiresAt.After(s.now())
+		}
+
+		rows, manifest, revision, err := deliveryRows(ctx, r, p, sealer, scope, selected)
 		if err != nil {
 			return err
 		}
@@ -220,7 +278,8 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 
 		out = FetchResult{
 			Current: current, Cursor: computed, ChangeToken: changeToken,
-			SchemaRevision: revision,
+			SchemaRevision: revision, PinnedRevision: out.PinnedRevision,
+			PinExpired: out.PinExpired,
 		}
 		if !current {
 			out.Keys = rows
@@ -259,6 +318,11 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 	}
 	return out, nil
 }
+
+// resetDeliveryAttempt keeps response state attempt-local. tx.Write may rerun
+// its closure after a serialization failure; metadata observed by a rolled-back
+// attempt must not survive into the successful attempt.
+func resetDeliveryAttempt(out *FetchResult) { *out = FetchResult{} }
 
 // callerActor picks how the presented artifact resolves.
 //
@@ -329,13 +393,19 @@ func (s *Delivery) recordUnbound(ctx context.Context, actor Actor, cause error) 
 // delivering plaintext to a workload is the Compose/Kubernetes render path's
 // act, with its own formula and its own per-key disclosure records.
 func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
-	scope domain.Scope) ([]DeliveredKey, []delivery.Row, int64, error) {
-	snapshot, err := r.Snapshots().Latest(ctx, p)
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil, 0, ErrNotMaterialized
-	}
-	if err != nil {
-		return nil, nil, 0, err
+	scope domain.Scope, selected *store.Snapshot) ([]DeliveredKey, []delivery.Row, int64, error) {
+	var snapshot store.Snapshot
+	if selected == nil {
+		var err error
+		snapshot, err = r.Snapshots().Latest(ctx, p)
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil, 0, ErrNotMaterialized
+		}
+		if err != nil {
+			return nil, nil, 0, err
+		}
+	} else {
+		snapshot = *selected
 	}
 	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
 	if err != nil {

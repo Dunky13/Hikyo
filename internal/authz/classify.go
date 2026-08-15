@@ -328,12 +328,16 @@ var wireRegistry = map[string]Class{
 	// Drafts, publishing and revisions (#51). Every one is tenant-class: an
 	// environment the caller may not reach answers byte-identically to one that
 	// is not there, history included.
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": ClassTenant,
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":       ClassTenant,
-	"http:GET /api/v1/orgs/{org}/projects/{project}/events":                                          ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":                        ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":                      ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}":           ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                           ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                          ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":                 ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/events":                                                    ClassTenant,
 	// The root token key belongs to the instance, so there is no tenant object
 	// whose nonexistence a refusal could mimic.
 	"http:POST /api/v1/instance/rotate-token-key": ClassInstance,
@@ -407,6 +411,7 @@ var wireRegistry = map[string]Class{
 	// discloses no value: history is lineage, and the one verb that reads a
 	// snapshot's values is `values export`.
 	"cli:revision": ClassTenant,
+	"cli:pin":      ClassTenant,
 	// `rotate-token-key` reaches one instance-scoped route: the root token key
 	// belongs to the instance, so there is no tenant object whose nonexistence
 	// a refusal could mimic.
@@ -493,12 +498,15 @@ var wireEvents = map[string][]audit.EventType{
 	},
 
 	// Drafts, publishing and revisions (#51). Staging rides the value routes'
-	// existing entries; these three are the ones that emit something new.
-	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":    {audit.EventValueStaged},
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}": {audit.EventValueStaged},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":        {audit.EventRevisionPublished},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":  {audit.EventValueRevealed},
-	"http:POST /api/v1/instance/rotate-token-key":                                               {audit.EventTokenKeyRotated},
+	// existing entries; these routes are the ones that emit something new.
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":                   {audit.EventValueStaged},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/{key}":                {audit.EventValueStaged},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       {audit.EventRevisionPublished},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":                 {audit.EventValueRevealed},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": {audit.EventRevisionRestoreStaged, audit.EventValueStaged},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                          {audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed, audit.EventPinExpiryRefused},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    {audit.EventPinReleased},
+	"http:POST /api/v1/instance/rotate-token-key":                                                              {audit.EventTokenKeyRotated},
 
 	"http:POST /api/v1/auth/local/login": {
 		audit.EventAuthLogin,
@@ -844,6 +852,12 @@ var wireRoutes = map[string][]Operation{
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              {OpRevisionSignals},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            {OpRevisionList},
 	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": {OpRevisionShow},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": {
+		OpRevisionRestore, OpRevisionRestoreHistory, OpRevisionRestoreCurrent,
+	},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                        {OpPinList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                       {OpPinSet, OpPinSetHistory},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}": {OpPinRelease},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export": {
 		OpValueExport, OpValueExportReveal, OpValueExportRevealHistory,
 	},

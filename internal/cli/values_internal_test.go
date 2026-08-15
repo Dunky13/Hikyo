@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
 
 // TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink is the CLI half of the
@@ -34,6 +36,35 @@ func TestRevealingDiffIsRefusedBeforeAnyRequestWithoutASink(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nowhere to go") {
 		t.Fatalf("err = %v, want the print-triad refusal (before any request)", err)
+	}
+}
+
+func TestPublishProtectedIDsPreservesExactReviewedSet(t *testing.T) {
+	got := publishProtectedIDs("env_prod,env_closure")
+	if got == nil || len(*got) != 2 || (*got)[0] != "env_prod" || (*got)[1] != "env_closure" {
+		t.Fatalf("confirmed protected set = %+v", got)
+	}
+}
+
+func TestRollbackTableShowsFullImpactPreview(t *testing.T) {
+	before, after := "old", "new"
+	table := rollbackTable(apigen.RollbackResult{
+		Preview: apigen.ImpactPreview{Environments: []apigen.ImpactEnvironment{{
+			EnvironmentId: "env_prod", Protected: true,
+			Changes: []apigen.ImpactChange{{
+				VersionId: "pcv_1", Name: "LOG_LEVEL", Classification: "config",
+				Operation: "set", Status: "edited", Before: &before, After: &after,
+			}},
+		}}},
+	})
+	if len(table.Rows) != 1 {
+		t.Fatalf("rollback preview rows = %+v", table.Rows)
+	}
+	want := []string{"env_prod", "true", "pcv_1", "LOG_LEVEL", "config", "set", "edited", "old", "new"}
+	for i := range want {
+		if table.Rows[0][i] != want[i] {
+			t.Fatalf("rollback preview row[%d] = %q, want %q: %+v", i, table.Rows[0][i], want[i], table.Rows[0])
+		}
 	}
 }
 

@@ -39,6 +39,8 @@ func (k *Keyring) ScopedTokenKey(orgID, projectID, envID string) ([]byte, error)
 // "could a holder of one forge another?" rather than answering it.
 const occurrenceInfoLabel = "hikyo/import-occurrence/v1"
 
+const publishPreviewInfoLabel = "hikyo/publish-preview/v1"
+
 // OccurrenceToken is HMAC-SHA256(scopedOccurrenceKey, encoding), base64url,
 // prefixed — the server-minted opaque token an import's phase 1 records per
 // (key, environment) and phase 2 verifies inside its own authorized
@@ -59,6 +61,22 @@ func (k *Keyring) OccurrenceToken(orgID, projectID, envID string, encoding []byt
 	key, err := k.scopedOccurrenceKey(orgID, projectID, envID)
 	if err != nil {
 		return "", err
+	}
+	defer Zero(key)
+	return tag(key, encoding), nil
+}
+
+// PublishPreviewToken binds a reviewed publish preview to its exact scoped
+// inputs. It has its own derivation label so a preview token is never usable as
+// a delivery cursor, occurrence token, or change token.
+func (k *Keyring) PublishPreviewToken(orgID, projectID, envID string, encoding []byte) (string, error) {
+	info := appendLP(nil, []byte(publishPreviewInfoLabel))
+	info = appendLP(info, []byte(orgID))
+	info = appendLP(info, []byte(projectID))
+	info = appendLP(info, []byte(envID))
+	key, err := hkdf.Key(sha256.New, k.rootTokenKey(), nil, string(info), KeySize)
+	if err != nil {
+		return "", fmt.Errorf("crypto: derive publish-preview key: %w", err)
 	}
 	defer Zero(key)
 	return tag(key, encoding), nil

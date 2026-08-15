@@ -33,3 +33,12 @@ func TestEventStreamSuggestsJitteredRetry(t *testing.T) {
 			advisoryRetryBase.Milliseconds(), (advisoryRetryBase + advisoryRetryRange).Milliseconds())
 	}
 }
+
+func TestImpactPreviewWirePreservesProtectedState(t *testing.T) {
+	wired := wireImpactPreview(service.ImpactPreview{Environments: []service.ImpactEnvironment{{
+		EnvironmentID: "env_prod", Protected: true,
+	}}})
+	if len(wired.Environments) != 1 || !wired.Environments[0].Protected {
+		t.Fatalf("wired preview lost protected state: %+v", wired)
+	}
+}

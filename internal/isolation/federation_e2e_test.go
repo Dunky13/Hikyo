@@ -178,7 +178,14 @@ func publishDeliveryValues(t *testing.T, db *store.DB, env domain.EnvID, values 
 		}
 		versions = append(versions, staged.VersionID)
 	}
-	if _, err := revisionSvc(t, db).Publish(t.Context(), actor, scope, versions); err != nil {
+	revisions := revisionSvc(t, db)
+	_, err := revisions.PublishPlanned(t.Context(), actor, scope, service.PublishRequest{VersionIDs: versions})
+	if errors.Is(err, service.ErrProtectedDestination) {
+		_, err = revisions.PublishPlanned(t.Context(), actor, scope, service.PublishRequest{
+			VersionIDs: versions, ConfirmedProtectedEnvironments: []string{string(scope.Env)},
+		})
+	}
+	if err != nil {
 		t.Fatalf("publish %v in %s: %v", names, env, err)
 	}
 }

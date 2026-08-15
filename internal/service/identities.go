@@ -333,6 +333,9 @@ func (s *Identities) DeleteServiceAccount(ctx context.Context, actor Actor, scop
 		if err := az.DeleteMachineCredentials(ctx, sa.ID); err != nil {
 			return err
 		}
+		if err := az.DeletePinGenerationsForPrincipal(ctx, sa.PrincipalID); err != nil {
+			return err
+		}
 		if _, err := az.DeleteServiceAccount(ctx, scope, sa.ID); err != nil {
 			return err
 		}

@@ -281,8 +281,44 @@ export const zCloneEnvironmentRequest = z.object({
     source_environment_id: zId
 });
 
+export const zRevisionPinRequest = z.object({
+    workload_principal_id: zId,
+    revision: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    expires_at: z.optional(zTimestamp),
+    override_schema: z.optional(z.boolean()).default(false)
+});
+
+export const zRevisionPin = z.object({
+    id: zId,
+    workload_principal_id: zId,
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    authority_principal_id: zId,
+    expires_at: zTimestamp,
+    created_at: zTimestamp,
+    authorized_at: zTimestamp,
+    history_authorized: z.boolean(),
+    schema_override: z.boolean(),
+    expired: z.boolean()
+});
+
+export const zRevisionPinResult = z.object({
+    action: z.enum([
+        'created',
+        'reassigned',
+        'renewed'
+    ]),
+    pin: zRevisionPin
+});
+
+export const zRevisionPinList = z.object({
+    items: z.array(zRevisionPin),
+    count: z.int().gte(0)
+});
+
 export const zPublishRequest = z.object({
-    version_ids: z.array(zId).min(1)
+    version_ids: z.array(zId).min(1),
+    preview_token: z.optional(z.string().min(1)),
+    confirmed_protected_environments: z.optional(z.array(zId))
 });
 
 export const zExportValuesRequest = z.object({
@@ -714,6 +750,10 @@ export const zClonedEnvironment = z.object({
     uncopied_secrets: z.array(zKeyName)
 });
 
+export const zRollbackRequest = z.object({
+    key: z.optional(zKeyName)
+});
+
 /**
  * One lineage row. It carries a key id, the key's name at that revision
  * and the transition - and nothing derived from a value.
@@ -833,6 +873,41 @@ export const zPendingChange = z.object({
     operation: z.enum(['set', 'unset']),
     staged_from_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
     created_at: z.iso.datetime()
+});
+
+export const zImpactChange = z.object({
+    version_id: zId,
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    operation: z.enum(['set', 'unset']),
+    status: z.enum([
+        'added',
+        'edited',
+        'removed',
+        'not-edited'
+    ]),
+    before: z.optional(z.string()),
+    after: z.optional(z.string())
+});
+
+export const zImpactEnvironment = z.object({
+    environment_id: zId,
+    base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    schema_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    protected: z.boolean(),
+    changes: z.array(zImpactChange)
+});
+
+export const zImpactPreview = z.object({
+    token: z.string(),
+    environments: z.array(zImpactEnvironment)
+});
+
+export const zRollbackResult = z.object({
+    revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    changes: z.array(zPendingChange),
+    preview: zImpactPreview
 });
 
 export const zSnapshotKey = z.object({
@@ -983,6 +1058,8 @@ export const zDeliveryResponse = z.object({
     cursor: z.string().max(128),
     change_token: z.string().max(128),
     schema_revision: z.int().gte(0),
+    pinned_revision: z.optional(z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })),
+    pin_expired: z.boolean(),
     keys: z.array(zDeliveredKey)
 });
 
@@ -4449,6 +4526,68 @@ export const zGetEnvironmentSignalsData = z.object({
  * The environment's signals.
  */
 export const zGetEnvironmentSignalsResponse = zEnvironmentSignals;
+
+export const zRollbackRevisionData = z.object({
+    body: z.optional(zRollbackRequest),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        revision: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Ordinary pending changes staged by the restore.
+ */
+export const zRollbackRevisionResponse = zRollbackResult;
+
+export const zListRevisionPinsData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Pins, including loud expired status.
+ */
+export const zListRevisionPinsResponse = zRevisionPinList;
+
+export const zCreateRevisionPinData = z.object({
+    body: zRevisionPinRequest,
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * The created, reassigned, or renewed pin.
+ */
+export const zCreateRevisionPinResponse = zRevisionPinResult;
+
+export const zReleaseRevisionPinData = z.object({
+    body: z.optional(z.never()),
+    path: z.object({
+        org: zId,
+        project: zId,
+        environment: zId,
+        workloadPrincipal: z.string().min(1)
+    }),
+    query: z.optional(z.never())
+});
+
+/**
+ * Released.
+ */
+export const zReleaseRevisionPinResponse = z.void();
 
 export const zListRevisionsData = z.object({
     body: z.optional(z.never()),

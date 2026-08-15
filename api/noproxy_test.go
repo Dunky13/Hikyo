@@ -365,13 +365,17 @@ var pinnedContractSurface = map[string]bool{
 	// instance's own pending changes, immutable snapshots, or advisory event
 	// stream. Export discloses a local committed snapshot; none names or dials a
 	// remote origin. Token-key rotation changes only this instance's root key.
-	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             true,
-	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              true,
-	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            true,
-	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": true,
-	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":       true,
-	"GET /api/v1/orgs/{org}/projects/{project}/events":                                          true,
-	"POST /api/v1/instance/rotate-token-key":                                                    true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":                        true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":                      true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}":           true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": true,
+	"GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                           true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                          true,
+	"DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    true,
+	"POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export":                 true,
+	"GET /api/v1/orgs/{org}/projects/{project}/events":                                                    true,
+	"POST /api/v1/instance/rotate-token-key":                                                              true,
 
 	// SCIM provisioning (#73): the administrative binding surface and the
 	// standards-mandated SCIM 2.0 wire surface. The DIRECTION here is the

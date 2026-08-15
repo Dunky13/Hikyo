@@ -116,3 +116,7 @@ WHERE principal_id = ? AND environment_id = ?;
 INSERT INTO pin_generations (principal_id, environment_id, generation)
 VALUES (?, ?, ?)
 ON CONFLICT (principal_id, environment_id) DO UPDATE SET generation = excluded.generation;
+
+-- hikyo:authn-resolution
+-- name: DeletePinGenerationsForPrincipal :exec
+DELETE FROM pin_generations WHERE principal_id = ?;

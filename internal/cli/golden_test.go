@@ -166,6 +166,9 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"key declare with an empty environment id", []string{"key", "declare", "key_x", "--declaration", "{}", "--required-in", "env_a,,env_b", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"stray positional on key list", []string{"key", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"extra positional on key delete", []string{"key", "delete", "key_x", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"extra positional on revision rollback", []string{"revision", "rollback", "12", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"malformed revision rollback", []string{"revision", "rollback", "twelve", "--instance", "unknown-ref"}, cli.ExitUsage},
+		{"extra positional on pin release", []string{"pin", "release", "wld_x", "typo", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"stray positional on key group list", []string{"key", "group", "list", "stray", "--instance", "unknown-ref"}, cli.ExitUsage},
 		{"key list with no session", []string{"key", "list", "--instance", "unknown-ref", "--org", "org_x", "--project", "prj_x"}, cli.ExitRefused},
 		// The import path (#68). Its usage boundary is pinned like every other

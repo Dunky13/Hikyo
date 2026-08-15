@@ -14,8 +14,8 @@
 -- name: InsertPendingChange :exec
 INSERT INTO pending_changes (
     id, org_id, project_id, environment_id, key_id, owner_id,
-    operation, ciphertext, staged_from_revision, staged_from_entry, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- DeletePendingChangeForCell collects the superseded version. Editing a cell
 -- mints a new version id rather than mutating the old row, and the old row is
@@ -48,7 +48,7 @@ WHERE org_id = ? AND project_id = ? AND key_id = ?;
 -- principal another's ciphertext.
 -- name: ListPendingChangesForOwner :many
 SELECT id, org_id, project_id, environment_id, key_id, owner_id,
-       operation, ciphertext, staged_from_revision, staged_from_entry, created_at
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
 FROM pending_changes
 WHERE org_id = ? AND project_id = ? AND owner_id = ?
 ORDER BY environment_id, key_id;
@@ -72,19 +72,19 @@ INSERT INTO snapshots (
 -- GetLatestSnapshot is the delivery-shaped read: a workload fetch defaults to
 -- the latest published snapshot for its (project, environment).
 -- name: GetLatestSnapshot :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ?
 ORDER BY revision DESC
 LIMIT 1;
 
 -- name: GetSnapshotByRevision :one
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND revision = ?;
 
 -- name: ListSnapshots :many
-SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at
+SELECT id, org_id, project_id, environment_id, revision, schema_revision, published_by, published_at, payload_present
 FROM snapshots
 WHERE org_id = ? AND project_id = ? AND environment_id = ?
 ORDER BY revision DESC;
@@ -106,6 +106,22 @@ FROM snapshot_entries
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND snapshot_id = ?
 ORDER BY key_name;
 
+-- name: RecordSecretValueOccurrence :exec
+INSERT INTO secret_value_occurrences (
+    value_entry_id, org_id, project_id, environment_id
+)
+VALUES (?, ?, ?, ?);
+
+-- name: ListSecretValueOccurrenceIDs :many
+SELECT value_entry_id
+FROM secret_value_occurrences
+WHERE org_id = ? AND project_id = ? AND environment_id = ?
+ORDER BY value_entry_id;
+
+-- name: DeleteSecretValueOccurrencesForEnvironment :execrows
+DELETE FROM secret_value_occurrences
+WHERE org_id = ? AND project_id = ? AND environment_id = ?;
+
 -- name: DeleteSnapshotEntriesForEnvironment :execrows
 DELETE FROM snapshot_entries
 WHERE org_id = ? AND project_id = ? AND environment_id = ?;
@@ -120,6 +136,39 @@ SELECT org_id, project_id, environment_id, revision, key_id, key_name, change
 FROM revision_key_changes
 WHERE org_id = ? AND project_id = ? AND environment_id = ? AND revision = ?
 ORDER BY key_name;
+
+-- name: GetRevisionPinForWorkload :one
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND workload_principal_id = ?;
+
+-- name: ListRevisionPins :many
+SELECT id, org_id, project_id, environment_id, workload_principal_id,
+       snapshot_id, revision, authority_principal_id, expires_at, created_at,
+       authorized_at, history_authorized, schema_override
+FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ?
+ORDER BY workload_principal_id;
+
+-- name: CountRevisionPinsForProject :one
+SELECT COUNT(*) FROM revision_pins WHERE org_id = ? AND project_id = ?;
+
+-- name: InsertRevisionPin :exec
+INSERT INTO revision_pins (
+    id, org_id, project_id, environment_id, workload_principal_id,
+    snapshot_id, revision, authority_principal_id, expires_at, created_at,
+    authorized_at, history_authorized, schema_override
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: DeleteRevisionPin :execrows
+DELETE FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ? AND workload_principal_id = ?;
+
+-- name: DeleteRevisionPinsForEnvironment :execrows
+DELETE FROM revision_pins
+WHERE org_id = ? AND project_id = ? AND environment_id = ?;
 
 -- name: DeleteRevisionKeyChangesForEnvironment :execrows
 DELETE FROM revision_key_changes

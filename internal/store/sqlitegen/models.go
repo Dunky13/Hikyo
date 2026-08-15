@@ -317,6 +317,9 @@ type PendingChange struct {
 	StagedFromRevision int64
 	StagedFromEntry    string
 	CreatedAt          string
+	Source             string
+	Secret             int64
+	MaterialSecret     int64
 }
 
 type PinGeneration struct {
@@ -403,6 +406,22 @@ type RevisionKeyChange struct {
 	KeyID         string
 	KeyName       string
 	Change        string
+}
+
+type RevisionPin struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	WorkloadPrincipalID  string
+	SnapshotID           string
+	Revision             int64
+	AuthorityPrincipalID string
+	ExpiresAt            string
+	CreatedAt            string
+	AuthorizedAt         string
+	HistoryAuthorized    int64
+	SchemaOverride       int64
 }
 
 type SamlProvider struct {
@@ -554,6 +573,13 @@ type ScimUser struct {
 	UpdatedAt     string
 }
 
+type SecretValueOccurrence struct {
+	ValueEntryID  string
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+}
+
 type ServiceAccount struct {
 	ID          string
 	PrincipalID string
@@ -598,6 +624,7 @@ type Snapshot struct {
 	SchemaRevision int64
 	PublishedBy    string
 	PublishedAt    string
+	PayloadPresent int64
 }
 
 type SnapshotEntry struct {

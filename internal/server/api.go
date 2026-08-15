@@ -124,6 +124,7 @@ type API struct {
 	Keys          KeyService
 	Values        ValueService
 	Revisions     RevisionService
+	Pins          PinService
 	Reveal        RevealService
 	KeyGroups     KeyGroupService
 	Grants        GrantService

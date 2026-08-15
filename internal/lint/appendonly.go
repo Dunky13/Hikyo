@@ -295,13 +295,14 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// is the conditional cursor's pin component. Both touch class=authn tables
 	// for the same reason the credential writers do: they change what a machine
 	// caller may present, which is resolution.
-	"CreateFederationIssuer":  true,
-	"UpdateFederationIssuer":  true,
-	"DeleteFederationIssuer":  true,
-	"ReactivateBinding":       true,
-	"SetPinGeneration":        true,
-	"ConsumeWebAuthnCeremony": true,
-	"SetWebAuthnUserHandle":   true,
+	"CreateFederationIssuer":           true,
+	"UpdateFederationIssuer":           true,
+	"DeleteFederationIssuer":           true,
+	"ReactivateBinding":                true,
+	"SetPinGeneration":                 true,
+	"DeletePinGenerationsForPrincipal": true,
+	"ConsumeWebAuthnCeremony":          true,
+	"SetWebAuthnUserHandle":            true,
 	// Reauth-window consumption at disclosure and the effective-window transition
 	// (#54): slide the sliding clock, claim a single-decision window once, and
 	// invalidate every window on an environment when its effective window is
