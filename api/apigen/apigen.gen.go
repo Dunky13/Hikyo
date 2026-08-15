@@ -77,19 +77,19 @@ func (e CellSignalPendingOperation) Valid() bool {
 
 // Defines values for ChangedKeyChange.
 const (
-	Added   ChangedKeyChange = "added"
-	Edited  ChangedKeyChange = "edited"
-	Removed ChangedKeyChange = "removed"
+	ChangedKeyChangeAdded   ChangedKeyChange = "added"
+	ChangedKeyChangeEdited  ChangedKeyChange = "edited"
+	ChangedKeyChangeRemoved ChangedKeyChange = "removed"
 )
 
 // Valid indicates whether the value is a known member of the ChangedKeyChange enum.
 func (e ChangedKeyChange) Valid() bool {
 	switch e {
-	case Added:
+	case ChangedKeyChangeAdded:
 		return true
-	case Edited:
+	case ChangedKeyChangeEdited:
 		return true
-	case Removed:
+	case ChangedKeyChangeRemoved:
 		return true
 	default:
 		return false
@@ -249,6 +249,48 @@ func (e IdentityProviderKind) Valid() bool {
 	case IdentityProviderKindOidc:
 		return true
 	case IdentityProviderKindSaml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ImpactChangeOperation.
+const (
+	ImpactChangeOperationSet   ImpactChangeOperation = "set"
+	ImpactChangeOperationUnset ImpactChangeOperation = "unset"
+)
+
+// Valid indicates whether the value is a known member of the ImpactChangeOperation enum.
+func (e ImpactChangeOperation) Valid() bool {
+	switch e {
+	case ImpactChangeOperationSet:
+		return true
+	case ImpactChangeOperationUnset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ImpactChangeStatus.
+const (
+	ImpactChangeStatusAdded     ImpactChangeStatus = "added"
+	ImpactChangeStatusEdited    ImpactChangeStatus = "edited"
+	ImpactChangeStatusNotEdited ImpactChangeStatus = "not-edited"
+	ImpactChangeStatusRemoved   ImpactChangeStatus = "removed"
+)
+
+// Valid indicates whether the value is a known member of the ImpactChangeStatus enum.
+func (e ImpactChangeStatus) Valid() bool {
+	switch e {
+	case ImpactChangeStatusAdded:
+		return true
+	case ImpactChangeStatusEdited:
+		return true
+	case ImpactChangeStatusNotEdited:
+		return true
+	case ImpactChangeStatusRemoved:
 		return true
 	default:
 		return false
@@ -1874,6 +1916,64 @@ type IdentityUnlinkRequest struct {
 	Proof string `json:"proof"`
 }
 
+// ImpactChange defines model for ImpactChange.
+type ImpactChange struct {
+	// After Config plaintext when the caller also holds read; absent for secrets, clears, or unreadable config.
+	After *string `json:"after,omitempty"`
+
+	// Before Config plaintext when the caller also holds read; absent for secrets or unreadable config.
+	Before *string `json:"before,omitempty"`
+
+	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
+	// secret or config; it changes only through the reclassification
+	// ceremony. Closed, deliberately: a third value would be a third
+	// disclosure regime.
+	Classification KeyClassification `json:"classification"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId ID `json:"key_id"`
+
+	// Name The canonical key grammar: uppercase ASCII, digits and underscore, no
+	// leading digit. It is the environment-variable-safe grammar every
+	// delivery surface assumes - an execve environment block, a Kubernetes
+	// Secret data key, an adapter effective name - so it is a delivery
+	// constraint, not a style preference. `maxLength` counts code points
+	// here and bytes in the service; the grammar is ASCII, so they agree.
+	Name      KeyName               `json:"name"`
+	Operation ImpactChangeOperation `json:"operation"`
+	Status    ImpactChangeStatus    `json:"status"`
+
+	// VersionId A prefixed UUIDv7, e.g. `org_0198…`.
+	VersionId ID `json:"version_id"`
+}
+
+// ImpactChangeOperation defines model for ImpactChange.Operation.
+type ImpactChangeOperation string
+
+// ImpactChangeStatus defines model for ImpactChange.Status.
+type ImpactChangeStatus string
+
+// ImpactEnvironment defines model for ImpactEnvironment.
+type ImpactEnvironment struct {
+	BaseRevision int64          `json:"base_revision"`
+	Changes      []ImpactChange `json:"changes"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID `json:"environment_id"`
+
+	// Protected Protection state bound into the preview token.
+	Protected      bool  `json:"protected"`
+	SchemaRevision int64 `json:"schema_revision"`
+}
+
+// ImpactPreview defines model for ImpactPreview.
+type ImpactPreview struct {
+	Environments []ImpactEnvironment `json:"environments"`
+
+	// Token Opaque exact-input token required when publishing restore-authored drafts.
+	Token string `json:"token"`
+}
+
 // ImportPrecondition The run manifest's expected-state half - the one declared additive
 // input `values import` gained. Verified inside the import's own
 // authorized transaction, after `read@project AND read@environment` is
@@ -2596,6 +2696,12 @@ type ProtocolCapability = string
 
 // PublishRequest defines model for PublishRequest.
 type PublishRequest struct {
+	// ConfirmedProtectedEnvironments Exact protected-environment set reviewed by a machine principal; humans must use the bound ceremony.
+	ConfirmedProtectedEnvironments *[]ID `json:"confirmed_protected_environments,omitempty"`
+
+	// PreviewToken Required when any selected or closure-added draft came from rollback.
+	PreviewToken *string `json:"preview_token,omitempty"`
+
 	// VersionIds The pending-change version ids to commit. Naming an id the caller
 	// does not own, or one that has been superseded or already published,
 	// is refused loud rather than resolved to whatever the owner typed
@@ -2989,6 +3095,7 @@ type RollbackRequest struct {
 // RollbackResult defines model for RollbackResult.
 type RollbackResult struct {
 	Changes  []PendingChange `json:"changes"`
+	Preview  ImpactPreview   `json:"preview"`
 	Revision int64           `json:"revision"`
 }
 

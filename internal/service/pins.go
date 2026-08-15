@@ -10,6 +10,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
@@ -33,6 +34,7 @@ const (
 type Pins struct {
 	DB      *store.DB
 	Keyring *crypto.Keyring
+	Auth    *Auth
 	Now     func() time.Time
 }
 
@@ -99,7 +101,9 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 	}
 
 	var out SetPinResult
+	var validationRefusal error
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		validationRefusal = nil
 		caller, err := actor.resolve(ctx, az, s.now())
 		if err != nil {
 			return err
@@ -149,25 +153,50 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 		renewing := existingErr == nil && existing.Revision == target.Revision
 		historyGated := target.Revision != latest.Revision
 		schemaOverride := false
-		if renewing {
-			// Renewal rechecks exactly the grants recorded at creation or
-			// reassignment. A later publish cannot retroactively add a history
-			// requirement, and existing schema-invalid pins are grandfathered.
-			historyGated = existing.HistoryAuthorized
-			schemaOverride = existing.SchemaOverride
-		}
+		var disclosedSecrets []store.SnapshotEntry
 		if historyGated {
 			if _, err := az.Authorize(ctx, caller, authz.OpPinSetHistory, scope); err != nil {
 				return err
 			}
+			disclosedSecrets, err = pinnedHistoricalSecrets(ctx, r, p, target)
+			if err != nil {
+				return err
+			}
+			unit := make([]string, 0, len(disclosedSecrets))
+			for _, entry := range disclosedSecrets {
+				unit = append(unit, entry.KeyID)
+			}
+			if err := requireCeremony(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env), unit); err != nil {
+				return err
+			}
 		}
-		if !renewing {
-			if err := validatePinnedSnapshot(ctx, r, p, sealer, scope, target); err != nil {
-				if !request.OverrideSchema || !errors.Is(err, domain.ErrInvalid) {
+		validationErr := validatePinnedSnapshot(ctx, r, p, sealer, scope, target)
+		if validationErr != nil {
+			if !errors.Is(validationErr, domain.ErrInvalid) {
+				return validationErr
+			}
+			if renewing {
+				// Existing delivery remains grandfathered, but current drift is
+				// surfaced on every renewal instead of copying stale creation state.
+				schemaOverride = true
+			} else {
+				if !request.OverrideSchema {
+					validationRefusal = validationErr
+				} else {
+					schemaOverride = true
+				}
+			}
+		}
+		if historyGated {
+			for _, entry := range disclosedSecrets {
+				if err := auditSnapshotDisclosure(ctx, r.Audit(), p, caller.Principal,
+					entry, "pin", target.Revision); err != nil {
 					return err
 				}
-				schemaOverride = true
 			}
+		}
+		if validationRefusal != nil {
+			return nil
 		}
 		action := PinCreated
 		eventType := audit.EventPinCreated
@@ -245,6 +274,9 @@ func (s *Pins) Set(ctx context.Context, actor Actor, scope domain.Scope, request
 	if expiryRefusal != nil {
 		return SetPinResult{}, expiryRefusal
 	}
+	if validationRefusal != nil {
+		return SetPinResult{}, validationRefusal
+	}
 	return out, nil
 }
 
@@ -283,6 +315,72 @@ func validatePinnedSnapshot(ctx context.Context, r store.Repos, p authz.Proof, s
 		cells = append(cells, cell)
 	}
 	return validateResolved(cells, presence, string(scope.Env))
+}
+
+func pinnedHistoricalSecrets(ctx context.Context, r store.Repos, p authz.Proof,
+	snapshot store.Snapshot) ([]store.SnapshotEntry, error) {
+	keys, err := r.Catalogue().List(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	classification := make(map[string]string, len(keys))
+	for _, key := range keys {
+		classification[key.ID] = key.Classification
+	}
+	entries, err := r.Snapshots().Entries(ctx, p, snapshot.ID)
+	if err != nil {
+		return nil, err
+	}
+	valueEntryIDs := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		valueEntryIDs[entry.ValueEntryID] = struct{}{}
+	}
+	stickySecrets, err := stickySecretValueEntries(ctx, r, p, valueEntryIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.SnapshotEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Classification == string(schema.Secret) || stickySecrets[entry.ValueEntryID] ||
+			classification[entry.KeyID] == string(schema.Secret) {
+			out = append(out, entry)
+		}
+	}
+	return out, nil
+}
+
+// stickySecretValueEntries identifies value occurrences that have ever been
+// materialized as secret. The payload-free lineage survives snapshot payload
+// collection, so reclassification and GC cannot launder an occurrence.
+func stickySecretValueEntries(ctx context.Context, r store.Repos, p authz.Proof,
+	valueEntryIDs map[string]struct{}) (map[string]bool, error) {
+	out := make(map[string]bool, len(valueEntryIDs))
+	if len(valueEntryIDs) == 0 {
+		return out, nil
+	}
+	secretIDs, err := r.Snapshots().SecretValueOccurrenceIDs(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	for _, valueEntryID := range secretIDs {
+		if _, relevant := valueEntryIDs[valueEntryID]; relevant {
+			out[valueEntryID] = true
+		}
+	}
+	return out, nil
+}
+
+func auditSnapshotDisclosure(ctx context.Context, trail store.AuditRepo, p authz.Proof,
+	principal domain.PrincipalID, entry store.SnapshotEntry, surface string, revision int64) error {
+	ev, err := domainEvent(ctx, audit.EventValueRevealed, principal,
+		audit.Object{Type: "key", ID: entry.KeyID}, audit.Payload{
+			"key_id": entry.KeyID, "name": audit.SanitizeFreeText(entry.KeyName),
+			"surface": surface, "revision": revision,
+		})
+	if err != nil {
+		return err
+	}
+	return trail.InsertTenant(ctx, p, ev)
 }
 
 func (s *Pins) List(ctx context.Context, actor Actor, scope domain.Scope) ([]PinView, error) {

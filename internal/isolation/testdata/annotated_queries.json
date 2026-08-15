@@ -235,6 +235,12 @@
   },
   {
     "engine": "postgres",
+    "name": "DeletePinGenerationsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "aa40a887b65a58f80f2ca8d3ea60fa87f5d88865b21bcd08c8354b93b8470bcc"
+  },
+  {
+    "engine": "postgres",
     "name": "DeletePrincipal",
     "annotation": "authn-resolution",
     "hash": "5448846edd443d10d275c4371df2a690efacc89a31f8698c72be46c984b1b84d"
@@ -1498,6 +1504,12 @@
     "name": "DeletePendingTOTPForAccount",
     "annotation": "authn-resolution",
     "hash": "9cac0a620bc7fa2b5289015dddd8be9beb8d4c0c5166617f25c6bfffe0351904"
+  },
+  {
+    "engine": "sqlite",
+    "name": "DeletePinGenerationsForPrincipal",
+    "annotation": "authn-resolution",
+    "hash": "d87bf91f91059b8857871595ac328df666b46c58101615c5016cdb74e2f08e12"
   },
   {
     "engine": "sqlite",

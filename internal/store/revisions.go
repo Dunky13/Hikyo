@@ -53,6 +53,12 @@ type PendingChange struct {
 	StagedFromEntry string
 	CreatedAt       time.Time
 	Source          PendingSource
+	// Secret is sticky occurrence metadata retained with the draft even after
+	// historical payload collection.
+	Secret bool
+	// MaterialSecret classifies the value being staged, independently from a
+	// secret current-side comparison that may only make the preview sensitive.
+	MaterialSecret bool
 }
 
 // PendingMarker is a pending change stripped of its material: what another
@@ -78,6 +84,8 @@ type NewPendingChange struct {
 	StagedFromEntry    string
 	CreatedAt          time.Time
 	Source             PendingSource
+	Secret             bool
+	MaterialSecret     bool
 }
 
 // Snapshot is the immutable per-(project, environment) materialization's
@@ -193,6 +201,9 @@ type SnapshotReader interface {
 	List(ctx context.Context, p authz.Proof) ([]Snapshot, error)
 	// Entries returns one snapshot's resolved map, ordered by key name.
 	Entries(ctx context.Context, p authz.Proof, snapshotID string) ([]SnapshotEntry, error)
+	// SecretValueOccurrenceIDs returns the payload-free sticky sensitivity
+	// lineage for this environment.
+	SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error)
 	// Changes returns one revision's lineage rows.
 	Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error)
 }
@@ -205,6 +216,7 @@ type SnapshotRepo interface {
 	SnapshotReader
 	Insert(ctx context.Context, p authz.Proof, snapshot NewSnapshot) error
 	InsertEntry(ctx context.Context, p authz.Proof, entry NewSnapshotEntry) error
+	RecordSecretValueOccurrence(ctx context.Context, p authz.Proof, valueEntryID string) error
 	InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error
 	// DeleteEnvironment removes the environment's snapshots, their entries and
 	// their lineage, in the transaction that deletes the environment.

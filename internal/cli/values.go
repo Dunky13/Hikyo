@@ -61,7 +61,7 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 
 	var format, valueFile, left, right, source, destinations, keyNames, environments string
-	var versions string
+	var versions, previewToken, confirmedProtectedEnvironments string
 	var revision int64
 	var clear, reveal, stdin, dangerous, confirmProtected bool
 	var outputFile string
@@ -74,6 +74,10 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		if sub == "publish" {
 			fs.StringVar(&versions, "versions", "",
 				"the pending-change version ids to publish, comma-separated")
+			fs.StringVar(&previewToken, "preview-token", "",
+				"the exact-input token returned by a restore preview")
+			fs.StringVar(&confirmedProtectedEnvironments, "confirm-protected", "",
+				"exact protected environment ids reviewed by machine automation, comma-separated")
 		}
 		if sub == "export" {
 			fs.Int64Var(&revision, "revision", 0,
@@ -300,13 +304,21 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 		// SELECTIVE by construction: the verb takes version ids, not key
 		// names. A publish carries exactly the drafts it names plus whatever
 		// key-group closure requires, and the result says which was which.
-		base, err := environmentBase(project, resolved, flags, "values publish")
+		environment, err := addressed(resolved, DimEnv, flags.Env, "values publish")
 		if err != nil {
 			return err
 		}
+		base := project + "/environments/" + url.PathEscape(environment)
 		var result apigen.PublishResult
+		body := apigen.PublishRequest{VersionIds: splitList(versions)}
+		if previewToken != "" {
+			body.PreviewToken = &previewToken
+		}
+		if confirmedProtectedEnvironments != "" {
+			body.ConfirmedProtectedEnvironments = publishProtectedIDs(confirmedProtectedEnvironments)
+		}
 		if err := client.Do(ctx, http.MethodPost, base+"/publish",
-			apigen.PublishRequest{VersionIds: splitList(versions)}, &result); err != nil {
+			body, &result); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, publishTable(result))
@@ -350,6 +362,15 @@ func runValues(ctx context.Context, ios IO, args []string) error {
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
 	return failf(ExitInternal, "hikyo values: unhandled subverb %q", sub)
+}
+
+func publishProtectedIDs(raw string) *[]apigen.ID {
+	names := splitList(raw)
+	confirmed := make([]apigen.ID, 0, len(names))
+	for _, envID := range names {
+		confirmed = append(confirmed, apigen.ID(envID))
+	}
+	return &confirmed
 }
 
 // environmentBase addresses one environment. The environment is required

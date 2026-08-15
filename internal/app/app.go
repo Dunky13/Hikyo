@@ -279,7 +279,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		// mean a subscriber saw half the events.
 		Values:    &service.Values{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
 		Revisions: &service.Revisions{DB: db, Keyring: kr, Auth: authSvc, Advisory: advisory},
-		Pins:      &service.Pins{DB: db, Keyring: kr},
+		Pins:      &service.Pins{DB: db, Keyring: kr, Auth: authSvc},
 		Reveal:    &service.Reveal{DB: db, Auth: authSvc},
 		KeyGroups: &service.KeyGroups{DB: db, Keyring: kr, Advisory: advisory},
 		// One Auth across the grant surface, the settings knob and the machine

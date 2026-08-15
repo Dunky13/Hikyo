@@ -199,6 +199,26 @@ func (q *Queries) DeleteRevisionPinsForEnvironment(ctx context.Context, arg Dele
 	return result.RowsAffected(), nil
 }
 
+const deleteSecretValueOccurrencesForEnvironment = `-- name: DeleteSecretValueOccurrencesForEnvironment :execrows
+DELETE FROM secret_value_occurrences
+WHERE org_id = $1 AND project_id = $2
+  AND environment_id = $3
+`
+
+type DeleteSecretValueOccurrencesForEnvironmentParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+func (q *Queries) DeleteSecretValueOccurrencesForEnvironment(ctx context.Context, arg DeleteSecretValueOccurrencesForEnvironmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecretValueOccurrencesForEnvironment, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSnapshotEntriesForEnvironment = `-- name: DeleteSnapshotEntriesForEnvironment :execrows
 DELETE FROM snapshot_entries
 WHERE org_id = $1 AND project_id = $2
@@ -356,12 +376,12 @@ const insertPendingChange = `-- name: InsertPendingChange :exec
 
 INSERT INTO pending_changes (
     id, org_id, project_id, environment_id, key_id, owner_id,
-    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
+    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12
+    $10, $11, $12, $13, $14
 )
 `
 
@@ -378,6 +398,8 @@ type InsertPendingChangeParams struct {
 	StagedFromEntry    string
 	CreatedAt          pgtype.Timestamptz
 	Source             string
+	Secret             bool
+	MaterialSecret     bool
 }
 
 // Revisions, drafts and publishing (#51). Tenant-scoped statements: the
@@ -407,6 +429,8 @@ func (q *Queries) InsertPendingChange(ctx context.Context, arg InsertPendingChan
 		arg.StagedFromEntry,
 		arg.CreatedAt,
 		arg.Source,
+		arg.Secret,
+		arg.MaterialSecret,
 	)
 	return err
 }
@@ -571,7 +595,7 @@ func (q *Queries) InsertSnapshotEntry(ctx context.Context, arg InsertSnapshotEnt
 
 const listPendingChangesForOwner = `-- name: ListPendingChangesForOwner :many
 SELECT id, org_id, project_id, environment_id, key_id, owner_id,
-       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
 FROM pending_changes
 WHERE org_id = $1 AND project_id = $2
   AND owner_id = $3
@@ -610,6 +634,8 @@ func (q *Queries) ListPendingChangesForOwner(ctx context.Context, arg ListPendin
 			&i.StagedFromEntry,
 			&i.CreatedAt,
 			&i.Source,
+			&i.Secret,
+			&i.MaterialSecret,
 		); err != nil {
 			return nil, err
 		}
@@ -769,6 +795,40 @@ func (q *Queries) ListRevisionPins(ctx context.Context, arg ListRevisionPinsPara
 	return items, nil
 }
 
+const listSecretValueOccurrenceIDs = `-- name: ListSecretValueOccurrenceIDs :many
+SELECT value_entry_id
+FROM secret_value_occurrences
+WHERE org_id = $1 AND project_id = $2
+  AND environment_id = $3
+ORDER BY value_entry_id
+`
+
+type ListSecretValueOccurrenceIDsParams struct {
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+func (q *Queries) ListSecretValueOccurrenceIDs(ctx context.Context, arg ListSecretValueOccurrenceIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listSecretValueOccurrenceIDs, arg.ChainOrgID, arg.ChainProjectID, arg.ChainEnvID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var value_entry_id string
+		if err := rows.Scan(&value_entry_id); err != nil {
+			return nil, err
+		}
+		items = append(items, value_entry_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSnapshotEntries = `-- name: ListSnapshotEntries :many
 SELECT id, org_id, project_id, environment_id, snapshot_id,
        key_id, key_name, classification, ciphertext, value_entry_id
@@ -863,4 +923,30 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordSecretValueOccurrence = `-- name: RecordSecretValueOccurrence :exec
+INSERT INTO secret_value_occurrences (
+    value_entry_id, org_id, project_id, environment_id
+) VALUES (
+    $1, $2,
+    $3, $4
+)
+`
+
+type RecordSecretValueOccurrenceParams struct {
+	ValueEntryID   string
+	ChainOrgID     string
+	ChainProjectID string
+	ChainEnvID     string
+}
+
+func (q *Queries) RecordSecretValueOccurrence(ctx context.Context, arg RecordSecretValueOccurrenceParams) error {
+	_, err := q.db.Exec(ctx, recordSecretValueOccurrence,
+		arg.ValueEntryID,
+		arg.ChainOrgID,
+		arg.ChainProjectID,
+		arg.ChainEnvID,
+	)
+	return err
 }

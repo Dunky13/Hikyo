@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/audit"
@@ -108,6 +111,40 @@ type PublishResult struct {
 	Environments []PublishedEnvironment
 }
 
+// PublishRequest carries the reviewed selection and the protected-environment
+// decision. PreviewToken is required when any selected draft came from restore.
+type PublishRequest struct {
+	VersionIDs                     []string
+	PreviewToken                   string
+	ConfirmedProtectedEnvironments []string
+}
+
+// ImpactPreview is the reveal-safe before/after plan shown before a restore is
+// published. Secret-bearing rows never carry plaintext.
+type ImpactPreview struct {
+	Token        string
+	Environments []ImpactEnvironment
+}
+
+type ImpactEnvironment struct {
+	EnvironmentID  string
+	BaseRevision   int64
+	SchemaRevision int64
+	Protected      bool
+	Changes        []ImpactChange
+}
+
+type ImpactChange struct {
+	VersionID      string
+	KeyID          string
+	Name           string
+	Classification string
+	Operation      string
+	Status         string
+	Before         *string
+	After          *string
+}
+
 // ErrStalePending reports the optimistic freshness check failing: the
 // environment advanced after the draft was staged, or the named version was
 // superseded by a newer edit from its owner. Loud, never a silent rebase --
@@ -117,6 +154,8 @@ type PublishResult struct {
 // declares for it -- an unmapped sentinel here answered 500 and read as a
 // server fault rather than the caller's stale selection.
 var ErrStalePending = fmt.Errorf("%w: service: pending change is stale", domain.ErrConflict)
+
+var ErrStalePreview = fmt.Errorf("%w: service: publish preview is missing or stale", domain.ErrConflict)
 
 // pendingApply is one draft's effect on one cell during a materialization.
 type pendingApply struct {
@@ -131,6 +170,8 @@ type pendingApply struct {
 	// compares exactly this.
 	stagedFromEntry string
 	source          store.PendingSource
+	secret          bool
+	materialSecret  bool
 }
 
 // resolvedCell is one key's outcome in one environment after the selected
@@ -142,6 +183,9 @@ type resolvedCell struct {
 	// entryID is the published value-entry row this outcome materialized from
 	// -- the snapshot's pinned value-entry revision. Filled after the writes.
 	entryID string
+	// materialSecret follows an applied value that was historically secret,
+	// even when the current key schema is config.
+	materialSecret bool
 }
 
 // Publish commits a selection of the caller's own pending changes.
@@ -158,6 +202,13 @@ type resolvedCell struct {
 // unselected drafts and every other principal's are invisible to it, so the
 // materialized snapshot always corresponds to a state the publisher previewed.
 func (s *Revisions) Publish(ctx context.Context, actor Actor, scope domain.Scope, versionIDs []string) (PublishResult, error) {
+	return s.PublishPlanned(ctx, actor, scope, PublishRequest{VersionIDs: versionIDs})
+}
+
+// PublishPlanned commits a selection after checking its bound preview and any
+// protected-environment confirmation inside the same serialized transaction.
+func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domain.Scope, request PublishRequest) (PublishResult, error) {
+	versionIDs := request.VersionIDs
 	if scope.Env == "" {
 		return PublishResult{}, fmt.Errorf("%w: a publish addresses an environment", domain.ErrInvalid)
 	}
@@ -244,6 +295,64 @@ func (s *Revisions) Publish(ctx context.Context, actor Actor, scope domain.Scope
 		}
 		sort.Strings(envs)
 
+		restoreSelected := false
+		for _, applies := range selection {
+			for _, apply := range applies {
+				if apply.source == store.PendingSourceRestore {
+					restoreSelected = true
+				}
+			}
+		}
+		if restoreSelected {
+			token, err := publishPreviewToken(ctx, r, proofs, s.Keyring, az, caller.Principal, scope, selection)
+			if err != nil {
+				return err
+			}
+			if request.PreviewToken == "" || subtle.ConstantTimeCompare([]byte(request.PreviewToken), []byte(token)) != 1 {
+				return ErrStalePreview
+			}
+		}
+		protectedEnvironments := make([]string, 0, len(envs))
+		for _, envID := range envs {
+			settings, err := az.EnvironmentReauthSettings(ctx, envID)
+			if err != nil {
+				return err
+			}
+			if !settings.Protected {
+				continue
+			}
+			protectedEnvironments = append(protectedEnvironments, envID)
+		}
+		if skipsCeremony(caller) {
+			confirmed := slices.Clone(request.ConfirmedProtectedEnvironments)
+			sort.Strings(confirmed)
+			if dup, ok := firstDuplicate(confirmed); ok {
+				return invalidDetail("protected environment %q is confirmed more than once", dup)
+			}
+			for _, envID := range protectedEnvironments {
+				if !slices.Contains(confirmed, envID) {
+					return ProtectedDestinationRefusal(domain.EnvID(envID))
+				}
+			}
+			if !slices.Equal(confirmed, protectedEnvironments) {
+				return invalidDetail("protected-environment confirmation does not match the reviewed protected set")
+			}
+		} else if len(request.ConfirmedProtectedEnvironments) != 0 {
+			return invalidDetail("human protected-environment confirmation is supplied by the bound ceremony")
+		}
+		for _, envID := range protectedEnvironments {
+			if skipsCeremony(caller) {
+				continue
+			}
+			unit := make([]string, 0, len(selection[envID]))
+			for _, apply := range selection[envID] {
+				unit = append(unit, apply.keyID)
+			}
+			if err := requireCeremony(ctx, s.Auth, az, caller, PurposePublish, envID, unit); err != nil {
+				return err
+			}
+		}
+
 		for _, envID := range envs {
 			envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
 			ep := proofs[envID]
@@ -303,6 +412,175 @@ func (s *Revisions) Publish(ctx context.Context, actor Actor, scope domain.Scope
 	// and an advisory about a publish that rolled back would be a claim clients
 	// cannot correct.
 	s.Advisory.published(scope, out.Environments)
+	return out, nil
+}
+
+type previewTokenInput struct {
+	PrincipalGeneration int64                     `json:"principal_generation"`
+	Environments        []previewTokenEnvironment `json:"environments"`
+}
+
+type previewTokenEnvironment struct {
+	EnvironmentID  string               `json:"environment_id"`
+	BaseRevision   int64                `json:"base_revision"`
+	SchemaRevision int64                `json:"schema_revision"`
+	Protected      bool                 `json:"protected"`
+	Changes        []previewTokenChange `json:"changes"`
+}
+
+type previewTokenChange struct {
+	VersionID       string `json:"version_id"`
+	KeyID           string `json:"key_id"`
+	Set             bool   `json:"set"`
+	StagedFrom      int64  `json:"staged_from"`
+	StagedFromEntry string `json:"staged_from_entry"`
+	Source          string `json:"source"`
+}
+
+func publishPreviewToken(ctx context.Context, r store.Repos, proofs map[string]authz.Proof,
+	keyring *crypto.Keyring, az *authz.TxAuthorizer, principal domain.PrincipalID,
+	scope domain.Scope, selection map[string][]pendingApply) (string, error) {
+	generation, err := az.PrincipalGeneration(ctx, principal)
+	if err != nil {
+		return "", err
+	}
+	input := previewTokenInput{PrincipalGeneration: generation}
+	envs := make([]string, 0, len(selection))
+	for envID := range selection {
+		envs = append(envs, envID)
+	}
+	sort.Strings(envs)
+	for _, envID := range envs {
+		p := proofs[envID]
+		base, err := currentRevision(ctx, r, p)
+		if err != nil {
+			return "", err
+		}
+		schemaRevision, err := r.Catalogue().SchemaRevision(ctx, p)
+		if err != nil {
+			return "", err
+		}
+		settings, err := az.EnvironmentReauthSettings(ctx, envID)
+		if err != nil {
+			return "", err
+		}
+		env := previewTokenEnvironment{
+			EnvironmentID: envID, BaseRevision: base, SchemaRevision: schemaRevision,
+			Protected: settings.Protected,
+		}
+		for _, apply := range selection[envID] {
+			env.Changes = append(env.Changes, previewTokenChange{
+				VersionID: apply.versionID, KeyID: apply.keyID, Set: apply.set,
+				StagedFrom: apply.stagedFrom, StagedFromEntry: apply.stagedFromEntry,
+				Source: string(apply.source),
+			})
+		}
+		slices.SortFunc(env.Changes, func(a, b previewTokenChange) int { return strings.Compare(a.VersionID, b.VersionID) })
+		input.Environments = append(input.Environments, env)
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("service: encode publish preview: %w", err)
+	}
+	return keyring.PublishPreviewToken(string(scope.Org), string(scope.Project), string(scope.Env), encoded)
+}
+
+func buildImpactPreview(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
+	keyring *crypto.Keyring, az *authz.TxAuthorizer, caller authz.Identity, scope domain.Scope,
+	versionIDs []string, stickySecret map[string]bool) (ImpactPreview, error) {
+	selected, byID, err := resolveVersions(ctx, r, p, caller.Principal, versionIDs)
+	if err != nil {
+		return ImpactPreview{}, err
+	}
+	selection, _, err := selectVersions(ctx, r, p, caller.Principal, selected, byID)
+	if err != nil {
+		return ImpactPreview{}, err
+	}
+	proofs := map[string]authz.Proof{string(scope.Env): p}
+	token, err := publishPreviewToken(ctx, r, proofs, keyring, az, caller.Principal, scope, selection)
+	if err != nil {
+		return ImpactPreview{}, err
+	}
+	out := ImpactPreview{Token: token}
+	for envID, applies := range selection {
+		ep := proofs[envID]
+		base, err := currentRevision(ctx, r, ep)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		schemaRevision, err := r.Catalogue().SchemaRevision(ctx, ep)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		keys, err := r.Catalogue().List(ctx, ep)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		keyByID := make(map[string]store.CatalogueKey, len(keys))
+		for _, key := range keys {
+			keyByID[key.ID] = key
+		}
+		entries, err := r.Values().List(ctx, ep)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		entryByKey := make(map[string]store.ValueEntry, len(entries))
+		for _, entry := range entries {
+			entryByKey[entry.KeyID] = entry
+		}
+		envScope := domain.Scope{Org: scope.Org, Project: scope.Project, Env: domain.EnvID(envID)}
+		canRead, err := az.CallerHolds(ctx, caller, authz.OpRevisionShow, envScope)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		settings, err := az.EnvironmentReauthSettings(ctx, envID)
+		if err != nil {
+			return ImpactPreview{}, err
+		}
+		env := ImpactEnvironment{
+			EnvironmentID: envID, BaseRevision: base, SchemaRevision: schemaRevision,
+			Protected: settings.Protected,
+		}
+		for _, apply := range applies {
+			key := keyByID[apply.keyID]
+			_, beforeSet := entryByKey[apply.keyID]
+			status := "edited"
+			switch {
+			case apply.set && !beforeSet:
+				status = "added"
+			case !apply.set && beforeSet:
+				status = "removed"
+			case !apply.set:
+				status = "not-edited"
+			}
+			secret := apply.secret || stickySecret[apply.versionID] || key.Classification == string(schema.Secret)
+			change := ImpactChange{VersionID: apply.versionID, KeyID: key.ID, Name: key.Name,
+				Classification: key.Classification, Operation: map[bool]string{true: string(store.PendingSet), false: string(store.PendingUnset)}[apply.set], Status: status}
+			if secret {
+				change.Classification = string(schema.Secret)
+			} else if canRead {
+				if before, ok := entryByKey[apply.keyID]; ok {
+					value, err := openCell(sealer, before)
+					if err != nil {
+						return ImpactPreview{}, err
+					}
+					change.Before = &value
+				}
+				if apply.set {
+					plain, err := sealer.OpenField(pendingAAD(string(scope.Org), string(scope.Project), envID, apply.keyID, apply.versionID), apply.sealed)
+					if err != nil {
+						return ImpactPreview{}, err
+					}
+					value := string(plain)
+					change.After = &value
+				}
+			}
+			env.Changes = append(env.Changes, change)
+		}
+		slices.SortFunc(env.Changes, func(a, b ImpactChange) int { return strings.Compare(a.Name, b.Name) })
+		out.Environments = append(out.Environments, env)
+	}
+	slices.SortFunc(out.Environments, func(a, b ImpactEnvironment) int { return strings.Compare(a.EnvironmentID, b.EnvironmentID) })
 	return out, nil
 }
 
@@ -519,6 +797,8 @@ func selectVersions(ctx context.Context, r store.Repos, p authz.Proof,
 			stagedFrom:      change.StagedFromRevision,
 			stagedFromEntry: change.StagedFromEntry,
 			source:          change.Source,
+			secret:          change.Secret,
+			materialSecret:  change.MaterialSecret,
 		})
 	}
 	slices.Sort(closed)
@@ -633,6 +913,14 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 	for _, entry := range entries {
 		entryByKey[entry.KeyID] = entry
 	}
+	secretOccurrenceIDs, err := r.Snapshots().SecretValueOccurrenceIDs(ctx, p)
+	if err != nil {
+		return PublishedEnvironment{}, err
+	}
+	secretOccurrences := make(map[string]bool, len(secretOccurrenceIDs))
+	for _, id := range secretOccurrenceIDs {
+		secretOccurrences[id] = true
+	}
 	applyByKey := make(map[string]pendingApply, len(applies))
 	for _, apply := range applies {
 		applyByKey[apply.keyID] = apply
@@ -687,6 +975,7 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 				return PublishedEnvironment{}, err
 			}
 			cells[i].entryID = id
+			cells[i].materialSecret = apply.materialSecret
 		}
 		ev, err := domainEvent(ctx, event, publisher,
 			audit.Object{Type: "key", ID: cells[i].key.ID}, audit.Payload{
@@ -739,6 +1028,12 @@ func materialize(ctx context.Context, r store.Repos, p authz.Proof, sealer *cryp
 			Ciphertext: sealed, ValueEntryID: cell.entryID,
 		}); err != nil {
 			return PublishedEnvironment{}, err
+		}
+		if (cell.key.Classification == string(schema.Secret) || cell.materialSecret) && !secretOccurrences[cell.entryID] {
+			if err := r.Snapshots().RecordSecretValueOccurrence(ctx, p, cell.entryID); err != nil {
+				return PublishedEnvironment{}, err
+			}
+			secretOccurrences[cell.entryID] = true
 		}
 		rows = append(rows, delivery.Row{
 			Key: cell.key.Name, Classification: cell.key.Classification, Value: cell.value,

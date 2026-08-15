@@ -190,6 +190,7 @@ const (
 	OpRevisionSignals        Operation = "revision.signals"
 	OpRevisionRestore        Operation = "revision.restore"
 	OpRevisionRestoreHistory Operation = "revision.restore-reveal-history"
+	OpRevisionRestoreCurrent Operation = "revision.restore-reveal-current"
 
 	OpPinSet        Operation = "pin.set"
 	OpPinSetHistory Operation = "pin.set-reveal-history"
@@ -572,15 +573,17 @@ const (
 	StorePendingDiscardEnvironment StoreOp = "pending.DiscardEnvironment"
 	StorePendingDiscardKey         StoreOp = "pending.DiscardKey"
 
-	StoreSnapshotsLatest            StoreOp = "snapshots.Latest"
-	StoreSnapshotsAtRevision        StoreOp = "snapshots.AtRevision"
-	StoreSnapshotsList              StoreOp = "snapshots.List"
-	StoreSnapshotsEntries           StoreOp = "snapshots.Entries"
-	StoreSnapshotsChanges           StoreOp = "snapshots.Changes"
-	StoreSnapshotsInsert            StoreOp = "snapshots.Insert"
-	StoreSnapshotsInsertEntry       StoreOp = "snapshots.InsertEntry"
-	StoreSnapshotsInsertChange      StoreOp = "snapshots.InsertChange"
-	StoreSnapshotsDeleteEnvironment StoreOp = "snapshots.DeleteEnvironment"
+	StoreSnapshotsLatest                      StoreOp = "snapshots.Latest"
+	StoreSnapshotsAtRevision                  StoreOp = "snapshots.AtRevision"
+	StoreSnapshotsList                        StoreOp = "snapshots.List"
+	StoreSnapshotsEntries                     StoreOp = "snapshots.Entries"
+	StoreSnapshotsChanges                     StoreOp = "snapshots.Changes"
+	StoreSnapshotsInsert                      StoreOp = "snapshots.Insert"
+	StoreSnapshotsInsertEntry                 StoreOp = "snapshots.InsertEntry"
+	StoreSnapshotsSecretValueOccurrenceIDs    StoreOp = "snapshots.SecretValueOccurrenceIDs"
+	StoreSnapshotsRecordSecretValueOccurrence StoreOp = "snapshots.RecordSecretValueOccurrence"
+	StoreSnapshotsInsertChange                StoreOp = "snapshots.InsertChange"
+	StoreSnapshotsDeleteEnvironment           StoreOp = "snapshots.DeleteEnvironment"
 
 	StorePinsGetForWorkload    StoreOp = "pins.GetForWorkload"
 	StorePinsList              StoreOp = "pins.List"
@@ -722,37 +725,38 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	// stored credential is not something an unaudited operation may do — the
 	// fetch that presents it rides remote.list/show, which carry their own
 	// events.
-	StoreEnvironmentsGet:             true,
-	StoreEnvironmentsList:            true,
-	StoreEnvironmentsCount:           true,
-	StoreEnvironmentsNextOrder:       true,
-	StoreFoldersGet:                  true,
-	StoreFoldersList:                 true,
-	StoreEnvironmentsGetSettings:     true,
-	StoreCatalogueGet:                true,
-	StoreCatalogueList:               true,
-	StoreCatalogueCount:              true,
-	StoreCatalogueGroupGet:           true,
-	StoreCatalogueGroupList:          true,
-	StoreCatalogueGroupCount:         true,
-	StoreCataloguePresenceList:       true,
-	StoreCatalogueRevisionGet:        true,
-	StoreKeysActiveMasterWrappers:    true,
-	StoreKeysActiveTier3:             true,
-	StoreAuditTenantPage:             true,
-	StoreAuditInstancePage:           true,
-	StoreValuesGet:                   true,
-	StoreValuesList:                  true,
-	StoreValuesEnvironmentsWithValue: true,
-	StorePendingListForOwner:         true,
-	StorePendingListMarkers:          true,
-	StoreSnapshotsLatest:             true,
-	StoreSnapshotsAtRevision:         true,
-	StoreSnapshotsList:               true,
-	StoreSnapshotsEntries:            true,
-	StoreSnapshotsChanges:            true,
-	StorePinsGetForWorkload:          true,
-	StorePinsList:                    true,
+	StoreEnvironmentsGet:                   true,
+	StoreEnvironmentsList:                  true,
+	StoreEnvironmentsCount:                 true,
+	StoreEnvironmentsNextOrder:             true,
+	StoreFoldersGet:                        true,
+	StoreFoldersList:                       true,
+	StoreEnvironmentsGetSettings:           true,
+	StoreCatalogueGet:                      true,
+	StoreCatalogueList:                     true,
+	StoreCatalogueCount:                    true,
+	StoreCatalogueGroupGet:                 true,
+	StoreCatalogueGroupList:                true,
+	StoreCatalogueGroupCount:               true,
+	StoreCataloguePresenceList:             true,
+	StoreCatalogueRevisionGet:              true,
+	StoreKeysActiveMasterWrappers:          true,
+	StoreKeysActiveTier3:                   true,
+	StoreAuditTenantPage:                   true,
+	StoreAuditInstancePage:                 true,
+	StoreValuesGet:                         true,
+	StoreValuesList:                        true,
+	StoreValuesEnvironmentsWithValue:       true,
+	StorePendingListForOwner:               true,
+	StorePendingListMarkers:                true,
+	StoreSnapshotsLatest:                   true,
+	StoreSnapshotsAtRevision:               true,
+	StoreSnapshotsList:                     true,
+	StoreSnapshotsEntries:                  true,
+	StoreSnapshotsSecretValueOccurrenceIDs: true,
+	StoreSnapshotsChanges:                  true,
+	StorePinsGetForWorkload:                true,
+	StorePinsList:                          true,
 }
 
 // bootKeyringOps is boot's closed operation set. The tenant-isolation ADR
@@ -1582,8 +1586,10 @@ var operations = map[Operation]opSpec{
 			StorePendingDiscard:  true,
 			StoreSnapshotsLatest: true, StoreSnapshotsEntries: true,
 			StoreSnapshotsInsert: true, StoreSnapshotsInsertEntry: true,
-			StoreSnapshotsInsertChange: true,
-			StoreAuditTenantInsert:     true,
+			StoreSnapshotsSecretValueOccurrenceIDs:    true,
+			StoreSnapshotsRecordSecretValueOccurrence: true,
+			StoreSnapshotsInsertChange:                true,
+			StoreAuditTenantInsert:                    true,
 		},
 		events: []audit.EventType{
 			audit.EventRevisionPublished,
@@ -1686,17 +1692,36 @@ var operations = map[Operation]opSpec{
 		formula: Formula{{Cap: domain.CapEdit, At: domain.LevelEnv}},
 		storeOps: map[StoreOp]bool{
 			StoreProjectsLock: true, StoreCatalogueList: true,
-			StoreValuesList: true, StoreSnapshotsLatest: true,
+			StoreCatalogueRevisionGet: true,
+			StoreValuesList:           true, StoreSnapshotsLatest: true,
 			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
+			StoreSnapshotsSecretValueOccurrenceIDs: true,
+			StorePendingListForOwner:               true, StorePendingListMarkers: true,
 			StorePendingStage: true, StoreAuditTenantInsert: true,
 		},
 		humanOnly: true,
-		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+		events: []audit.EventType{
+			audit.EventValueStaged, audit.EventRevisionRestoreStaged, audit.EventValueRevealed,
+		},
 	},
 	OpRevisionRestoreHistory: {
-		class:     ClassTenant,
-		level:     domain.LevelEnv,
-		formula:   Formula{{Cap: domain.CapRevealHistory, At: domain.LevelEnv}},
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelEnv},
+			{Cap: domain.CapRevealHistory, At: domain.LevelEnv},
+		},
+		storeOps:  map[StoreOp]bool{},
+		humanOnly: true,
+		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+	},
+	OpRevisionRestoreCurrent: {
+		class: ClassTenant,
+		level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapRead, At: domain.LevelEnv},
+			{Cap: domain.CapReveal, At: domain.LevelEnv},
+		},
 		storeOps:  map[StoreOp]bool{},
 		humanOnly: true,
 		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
@@ -1712,13 +1737,14 @@ var operations = map[Operation]opSpec{
 			StoreProjectsLock: true, StoreCatalogueList: true,
 			StoreCataloguePresenceList: true, StoreSnapshotsLatest: true,
 			StoreSnapshotsAtRevision: true, StoreSnapshotsEntries: true,
-			StorePinsGetForWorkload: true, StorePinsCountProject: true,
+			StoreSnapshotsSecretValueOccurrenceIDs: true,
+			StorePinsGetForWorkload:                true, StorePinsCountProject: true,
 			StorePinsInsert: true, StorePinsDelete: true, StoreAuditTenantInsert: true,
 		},
 		humanOnly: true,
 		events: []audit.EventType{
 			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
-			audit.EventPinExpiryRefused,
+			audit.EventPinExpiryRefused, audit.EventValueRevealed,
 		},
 	},
 	OpPinSetHistory: {

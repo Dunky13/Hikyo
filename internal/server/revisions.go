@@ -37,7 +37,7 @@ const (
 
 // RevisionService is the domain surface this transport exposes.
 type RevisionService interface {
-	Publish(ctx context.Context, actor service.Actor, scope domain.Scope, versionIDs []string) (service.PublishResult, error)
+	PublishPlanned(ctx context.Context, actor service.Actor, scope domain.Scope, request service.PublishRequest) (service.PublishResult, error)
 	Restore(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64, keyName string) (service.RestoreResult, error)
 	History(ctx context.Context, actor service.Actor, scope domain.Scope) ([]service.RevisionView, error)
 	Show(ctx context.Context, actor service.Actor, scope domain.Scope, revision int64) (service.RevisionDetail, error)
@@ -54,8 +54,23 @@ type PinService interface {
 }
 
 func (a *API) PublishPendingChanges(ctx context.Context, req apigen.PublishPendingChangesRequestObject) (apigen.PublishPendingChangesResponseObject, error) {
-	result, err := a.Revisions.Publish(ctx, service.Bearer(bearer(ctx)),
-		envScope(req.Org, req.Project, req.Environment), req.Body.VersionIds)
+	previewToken := ""
+	if req.Body.PreviewToken != nil {
+		previewToken = *req.Body.PreviewToken
+	}
+	confirmedProtected := []string{}
+	if req.Body.ConfirmedProtectedEnvironments != nil {
+		confirmedProtected = make([]string, 0, len(*req.Body.ConfirmedProtectedEnvironments))
+		for _, envID := range *req.Body.ConfirmedProtectedEnvironments {
+			confirmedProtected = append(confirmedProtected, string(envID))
+		}
+	}
+	result, err := a.Revisions.PublishPlanned(ctx, service.Bearer(bearer(ctx)),
+		envScope(req.Org, req.Project, req.Environment), service.PublishRequest{
+			VersionIDs:                     req.Body.VersionIds,
+			PreviewToken:                   previewToken,
+			ConfirmedProtectedEnvironments: confirmedProtected,
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -112,8 +127,29 @@ func (a *API) RollbackRevision(ctx context.Context, req apigen.RollbackRevisionR
 		return nil, err
 	}
 	return apigen.RollbackRevision200JSONResponse(apigen.RollbackResult{
-		Revision: result.Revision, Changes: wirePending(result.Changes),
+		Revision: result.Revision, Changes: wirePending(result.Changes), Preview: wireImpactPreview(result.Preview),
 	}), nil
+}
+
+func wireImpactPreview(preview service.ImpactPreview) apigen.ImpactPreview {
+	out := apigen.ImpactPreview{Token: preview.Token, Environments: []apigen.ImpactEnvironment{}}
+	for _, env := range preview.Environments {
+		wireEnv := apigen.ImpactEnvironment{
+			EnvironmentId: env.EnvironmentID, BaseRevision: env.BaseRevision,
+			SchemaRevision: env.SchemaRevision, Protected: env.Protected,
+			Changes: []apigen.ImpactChange{},
+		}
+		for _, change := range env.Changes {
+			wireEnv.Changes = append(wireEnv.Changes, apigen.ImpactChange{
+				VersionId: change.VersionID, KeyId: change.KeyID, Name: change.Name,
+				Classification: apigen.KeyClassification(change.Classification),
+				Operation:      apigen.ImpactChangeOperation(change.Operation), Status: apigen.ImpactChangeStatus(change.Status),
+				Before: change.Before, After: change.After,
+			})
+		}
+		out.Environments = append(out.Environments, wireEnv)
+	}
+	return out
 }
 
 func wirePin(pin service.PinView) apigen.RevisionPin {

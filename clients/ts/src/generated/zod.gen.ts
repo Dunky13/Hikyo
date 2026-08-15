@@ -316,7 +316,9 @@ export const zRevisionPinList = z.object({
 });
 
 export const zPublishRequest = z.object({
-    version_ids: z.array(zId).min(1)
+    version_ids: z.array(zId).min(1),
+    preview_token: z.optional(z.string().min(1)),
+    confirmed_protected_environments: z.optional(z.array(zId))
 });
 
 export const zExportValuesRequest = z.object({
@@ -873,9 +875,39 @@ export const zPendingChange = z.object({
     created_at: z.iso.datetime()
 });
 
+export const zImpactChange = z.object({
+    version_id: zId,
+    key_id: zId,
+    name: zKeyName,
+    classification: zKeyClassification,
+    operation: z.enum(['set', 'unset']),
+    status: z.enum([
+        'added',
+        'edited',
+        'removed',
+        'not-edited'
+    ]),
+    before: z.optional(z.string()),
+    after: z.optional(z.string())
+});
+
+export const zImpactEnvironment = z.object({
+    environment_id: zId,
+    base_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    schema_revision: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    protected: z.boolean(),
+    changes: z.array(zImpactChange)
+});
+
+export const zImpactPreview = z.object({
+    token: z.string(),
+    environments: z.array(zImpactEnvironment)
+});
+
 export const zRollbackResult = z.object({
     revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
-    changes: z.array(zPendingChange)
+    changes: z.array(zPendingChange),
+    preview: zImpactPreview
 });
 
 export const zSnapshotKey = z.object({

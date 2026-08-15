@@ -150,6 +150,8 @@ func (r sqlitePending) Stage(ctx context.Context, p authz.Proof, change NewPendi
 		StagedFromEntry:    change.StagedFromEntry,
 		CreatedAt:          CanonTime(change.CreatedAt).Format(timeFormat),
 		Source:             string(change.Source),
+		Secret:             boolInt(change.Secret),
+		MaterialSecret:     boolInt(change.MaterialSecret),
 	}))
 }
 
@@ -225,7 +227,8 @@ func pendingFromSQLite(row sqlitegen.PendingChange) (PendingChange, error) {
 		EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
 		Operation: op, Ciphertext: row.Ciphertext,
 		StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
-		CreatedAt: created, Source: source,
+		CreatedAt: created, Source: source, Secret: row.Secret == 1,
+		MaterialSecret: row.MaterialSecret == 1,
 	}, nil
 }
 
@@ -339,6 +342,20 @@ func (r sqliteSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID 
 	return out, nil
 }
 
+func (r sqliteSnapshots) SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsSecretValueOccurrenceIDs, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsSecretValueOccurrenceIDs)
+	if err != nil {
+		return nil, err
+	}
+	return r.q.ListSecretValueOccurrenceIDs(ctx, sqlitegen.ListSecretValueOccurrenceIDsParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	})
+}
+
 func (r sqliteSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
 	if err != nil {
@@ -415,6 +432,20 @@ func (r sqliteSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry N
 	}))
 }
 
+func (r sqliteSnapshots) RecordSecretValueOccurrence(ctx context.Context, p authz.Proof, valueEntryID string) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsRecordSecretValueOccurrence, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsRecordSecretValueOccurrence)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.RecordSecretValueOccurrence(ctx, sqlitegen.RecordSecretValueOccurrenceParams{
+		ValueEntryID: valueEntryID, OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	}))
+}
+
 func (r sqliteSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
 	if err != nil {
@@ -445,6 +476,11 @@ func (r sqliteSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) e
 		return err
 	}
 	// Entries first: they reference the snapshot rows.
+	if _, err := r.q.DeleteSecretValueOccurrencesForEnvironment(ctx, sqlitegen.DeleteSecretValueOccurrencesForEnvironmentParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), EnvironmentID: env,
+	}); err != nil {
+		return constraint(err)
+	}
 	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, sqlitegen.DeleteSnapshotEntriesForEnvironmentParams{
 		OrgID:         string(chain.Org),
 		ProjectID:     string(chain.Project),
@@ -659,7 +695,8 @@ func (r pgPending) ListForOwner(ctx context.Context, p authz.Proof, ownerID stri
 			EnvironmentID: row.EnvironmentID, KeyID: row.KeyID, OwnerID: row.OwnerID,
 			Operation: op, Ciphertext: row.Ciphertext,
 			StagedFromRevision: row.StagedFromRevision, StagedFromEntry: row.StagedFromEntry,
-			CreatedAt: row.CreatedAt.Time.UTC(), Source: source,
+			CreatedAt: row.CreatedAt.Time.UTC(), Source: source, Secret: row.Secret,
+			MaterialSecret: row.MaterialSecret,
 		})
 	}
 	return out, nil
@@ -722,6 +759,8 @@ func (r pgPending) Stage(ctx context.Context, p authz.Proof, change NewPendingCh
 		StagedFromEntry:    change.StagedFromEntry,
 		CreatedAt:          pgtype.Timestamptz{Time: CanonTime(change.CreatedAt), Valid: true},
 		Source:             string(change.Source),
+		Secret:             change.Secret,
+		MaterialSecret:     change.MaterialSecret,
 	}))
 }
 
@@ -885,6 +924,20 @@ func (r pgSnapshots) Entries(ctx context.Context, p authz.Proof, snapshotID stri
 	return out, nil
 }
 
+func (r pgSnapshots) SecretValueOccurrenceIDs(ctx context.Context, p authz.Proof) ([]string, error) {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsSecretValueOccurrenceIDs, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsSecretValueOccurrenceIDs)
+	if err != nil {
+		return nil, err
+	}
+	return r.q.ListSecretValueOccurrenceIDs(ctx, pggen.ListSecretValueOccurrenceIDsParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	})
+}
+
 func (r pgSnapshots) Changes(ctx context.Context, p authz.Proof, revision int64) ([]RevisionKeyChange, error) {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsChanges, r.tok)
 	if err != nil {
@@ -961,6 +1014,20 @@ func (r pgSnapshots) InsertEntry(ctx context.Context, p authz.Proof, entry NewSn
 	}))
 }
 
+func (r pgSnapshots) RecordSecretValueOccurrence(ctx context.Context, p authz.Proof, valueEntryID string) error {
+	chain, err := authz.Verify(p, authz.StoreSnapshotsRecordSecretValueOccurrence, r.tok)
+	if err != nil {
+		return err
+	}
+	env, err := envOf(chain, authz.StoreSnapshotsRecordSecretValueOccurrence)
+	if err != nil {
+		return err
+	}
+	return constraint(r.q.RecordSecretValueOccurrence(ctx, pggen.RecordSecretValueOccurrenceParams{
+		ValueEntryID: valueEntryID, ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	}))
+}
+
 func (r pgSnapshots) InsertChange(ctx context.Context, p authz.Proof, revision int64, keyID, keyName string, change RevisionChange) error {
 	chain, err := authz.Verify(p, authz.StoreSnapshotsInsertChange, r.tok)
 	if err != nil {
@@ -989,6 +1056,11 @@ func (r pgSnapshots) DeleteEnvironment(ctx context.Context, p authz.Proof) error
 	env, err := envOf(chain, authz.StoreSnapshotsDeleteEnvironment)
 	if err != nil {
 		return err
+	}
+	if _, err := r.q.DeleteSecretValueOccurrencesForEnvironment(ctx, pggen.DeleteSecretValueOccurrencesForEnvironmentParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), ChainEnvID: env,
+	}); err != nil {
+		return constraint(err)
 	}
 	if _, err := r.q.DeleteSnapshotEntriesForEnvironment(ctx, pggen.DeleteSnapshotEntriesForEnvironmentParams{
 		ChainOrgID:     string(chain.Org),

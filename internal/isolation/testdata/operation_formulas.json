@@ -833,10 +833,20 @@
     ]
   },
   {
+    "operation": "revision.restore-reveal-current",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "read@environment",
+      "reveal@environment"
+    ]
+  },
+  {
     "operation": "revision.restore-reveal-history",
     "class": "tenant",
     "level": "environment",
     "formula": [
+      "read@environment",
       "reveal-history@environment"
     ]
   },

@@ -433,6 +433,43 @@ export type RollbackRequest = {
 export type RollbackResult = {
     revision: number;
     changes: Array<PendingChange>;
+    preview: ImpactPreview;
+};
+
+export type ImpactPreview = {
+    /**
+     * Opaque exact-input token required when publishing restore-authored drafts.
+     */
+    token: string;
+    environments: Array<ImpactEnvironment>;
+};
+
+export type ImpactEnvironment = {
+    environment_id: Id;
+    base_revision: number;
+    schema_revision: number;
+    /**
+     * Protection state bound into the preview token.
+     */
+    protected: boolean;
+    changes: Array<ImpactChange>;
+};
+
+export type ImpactChange = {
+    version_id: Id;
+    key_id: Id;
+    name: KeyName;
+    classification: KeyClassification;
+    operation: 'set' | 'unset';
+    status: 'added' | 'edited' | 'removed' | 'not-edited';
+    /**
+     * Config plaintext when the caller also holds read; absent for secrets or unreadable config.
+     */
+    before?: string;
+    /**
+     * Config plaintext when the caller also holds read; absent for secrets, clears, or unreadable config.
+     */
+    after?: string;
 };
 
 export type RevisionPinRequest = {
@@ -474,6 +511,14 @@ export type PublishRequest = {
      *
      */
     version_ids: Array<Id>;
+    /**
+     * Required when any selected or closure-added draft came from rollback.
+     */
+    preview_token?: string;
+    /**
+     * Exact protected-environment set reviewed by a machine principal; humans must use the bound ceremony.
+     */
+    confirmed_protected_environments?: Array<Id>;
 };
 
 export type PublishResult = {

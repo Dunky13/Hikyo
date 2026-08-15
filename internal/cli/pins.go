@@ -48,7 +48,7 @@ func runPin(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 	case "release":
-		if flags.positional() == "" {
+		if len(flags.positionals) != 1 {
 			return failf(ExitUsage, "usage: hikyo pin release <workload-principal>")
 		}
 	}

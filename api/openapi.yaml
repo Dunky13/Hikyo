@@ -7153,9 +7153,17 @@ paths:
         Publishing a version whose environment differs from the addressed one
         is permitted and each such environment is authorized for `publish`
         separately, immediately before commit.
+
+        Every protected environment reached requires its bound publish
+        confirmation. Machine callers name the exact protected set they
+        reviewed; human callers consume the bound ceremony. A selection containing restore-authored drafts also
+        requires the preview token returned by rollback; schema, published
+        state, authorization, selection, or key-group closure drift invalidates
+        that token and requires a fresh rollback preview.
       x-hikyo-class: tenant
       x-hikyo-operation: value.publish
       x-hikyo-formula: [publish@environment]
+      x-hikyo-dynamic-formula: [publish@each-affected-environment, protected-confirmation@exact-reviewed-protected-set]
       x-hikyo-artifacts: [human-session, machine-credential]
       x-hikyo-min-revision: 1
       requestBody:
@@ -7245,10 +7253,14 @@ paths:
         Computes a two-way set/unset diff and writes ordinary caller-owned
         pending changes. The normal publish verb commits them and validates
         against the current schema. Reading superseded secret material also
-        requires reveal-history at this staging step.
+        requires read AND reveal-history; comparing current secret plaintext
+        also requires read AND reveal. Both take reauthentication and one
+        disclosure event per key and revision at this staging step. The response includes the full,
+        reveal-safe impact preview and its exact-input publish token.
       x-hikyo-class: tenant
       x-hikyo-operation: revision.restore
       x-hikyo-formula: [edit@environment]
+      x-hikyo-dynamic-formula: ["read@environment + reveal-history@environment when superseded secret material is read", "read@environment + reveal@environment when current secret material is compared"]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       requestBody:
@@ -7305,10 +7317,12 @@ paths:
         operation renews the same revision or reassigns a different one, with
         authorization rechecked. Omitted expiry defaults to 180 days; the
         maximum is 365 days. A non-current revision requires reveal-history,
-        and a current-schema failure requires override_schema.
+        reauthentication, and one disclosure event per historical secret key;
+        a current-schema failure requires override_schema.
       x-hikyo-class: tenant
       x-hikyo-operation: pin.set
       x-hikyo-formula: [pin@environment, publish@environment]
+      x-hikyo-dynamic-formula: ["reveal-history@environment when target is non-current"]
       x-hikyo-artifacts: [human-session]
       x-hikyo-min-revision: 1
       requestBody:
@@ -8533,7 +8547,7 @@ components:
     RollbackResult:
       type: object
       additionalProperties: false
-      required: [revision, changes]
+      required: [revision, changes, preview]
       properties:
         revision:
           type: integer
@@ -8541,6 +8555,50 @@ components:
         changes:
           type: array
           items: {$ref: "#/components/schemas/PendingChange"}
+        preview:
+          $ref: "#/components/schemas/ImpactPreview"
+    ImpactPreview:
+      type: object
+      additionalProperties: false
+      required: [token, environments]
+      properties:
+        token:
+          type: string
+          description: Opaque exact-input token required when publishing restore-authored drafts.
+        environments:
+          type: array
+          items: {$ref: "#/components/schemas/ImpactEnvironment"}
+    ImpactEnvironment:
+      type: object
+      additionalProperties: false
+      required: [environment_id, base_revision, schema_revision, protected, changes]
+      properties:
+        environment_id: {$ref: "#/components/schemas/ID"}
+        base_revision: {type: integer, format: int64, minimum: 0}
+        schema_revision: {type: integer, format: int64, minimum: 0}
+        protected:
+          type: boolean
+          description: Protection state bound into the preview token.
+        changes:
+          type: array
+          items: {$ref: "#/components/schemas/ImpactChange"}
+    ImpactChange:
+      type: object
+      additionalProperties: false
+      required: [version_id, key_id, name, classification, operation, status]
+      properties:
+        version_id: {$ref: "#/components/schemas/ID"}
+        key_id: {$ref: "#/components/schemas/ID"}
+        name: {$ref: "#/components/schemas/KeyName"}
+        classification: {$ref: "#/components/schemas/KeyClassification"}
+        operation: {type: string, enum: [set, unset]}
+        status: {type: string, enum: [added, edited, removed, not-edited]}
+        before:
+          type: string
+          description: Config plaintext when the caller also holds read; absent for secrets or unreadable config.
+        after:
+          type: string
+          description: Config plaintext when the caller also holds read; absent for secrets, clears, or unreadable config.
     RevisionPinRequest:
       type: object
       additionalProperties: false
@@ -8597,6 +8655,15 @@ components:
             since.
           items:
             $ref: "#/components/schemas/ID"
+        preview_token:
+          type: string
+          minLength: 1
+          description: Required when any selected or closure-added draft came from rollback.
+        confirmed_protected_environments:
+          type: array
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
+          description: Exact protected-environment set reviewed by a machine principal; humans must use the bound ceremony.
     PublishResult:
       type: object
       required: [published, closed_in, environments]

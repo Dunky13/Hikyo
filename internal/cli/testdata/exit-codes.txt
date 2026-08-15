@@ -53,6 +53,9 @@ hikyo key declare key_x --declaration {"rule":{"type":"string"}} {"rule":{"type"
 hikyo key declare key_x --declaration {} --required-in env_a,,env_b --instance unknown-ref -> 2 usage
 hikyo key list stray --instance unknown-ref -> 2 usage
 hikyo key delete key_x typo --instance unknown-ref -> 2 usage
+hikyo revision rollback 12 typo --instance unknown-ref -> 2 usage
+hikyo revision rollback twelve --instance unknown-ref -> 2 usage
+hikyo pin release wld_x typo --instance unknown-ref -> 2 usage
 hikyo key group list stray --instance unknown-ref -> 2 usage
 hikyo key list --instance unknown-ref --org org_x --project prj_x -> 4 refused
 hikyo import -> 2 usage

@@ -15,12 +15,12 @@
 -- name: InsertPendingChange :exec
 INSERT INTO pending_changes (
     id, org_id, project_id, environment_id, key_id, owner_id,
-    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
+    operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
 ) VALUES (
     sqlc.arg(id), sqlc.arg(chain_org_id), sqlc.arg(chain_project_id),
     sqlc.arg(chain_env_id), sqlc.arg(key_id), sqlc.arg(owner_id),
     sqlc.arg(operation), sqlc.narg(ciphertext), sqlc.arg(staged_from_revision),
-    sqlc.arg(staged_from_entry), sqlc.arg(created_at), sqlc.arg(source)
+    sqlc.arg(staged_from_entry), sqlc.arg(created_at), sqlc.arg(source), sqlc.arg(secret), sqlc.arg(material_secret)
 );
 
 -- DeletePendingChangeForCell collects the superseded version. Editing a cell
@@ -59,7 +59,7 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 -- principal another's ciphertext.
 -- name: ListPendingChangesForOwner :many
 SELECT id, org_id, project_id, environment_id, key_id, owner_id,
-       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source
+       operation, ciphertext, staged_from_revision, staged_from_entry, created_at, source, secret, material_secret
 FROM pending_changes
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND owner_id = sqlc.arg(owner_id)
@@ -131,6 +131,26 @@ FROM snapshot_entries
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
   AND environment_id = sqlc.arg(chain_env_id) AND snapshot_id = sqlc.arg(snapshot_id)
 ORDER BY key_name;
+
+-- name: RecordSecretValueOccurrence :exec
+INSERT INTO secret_value_occurrences (
+    value_entry_id, org_id, project_id, environment_id
+) VALUES (
+    sqlc.arg(value_entry_id), sqlc.arg(chain_org_id),
+    sqlc.arg(chain_project_id), sqlc.arg(chain_env_id)
+);
+
+-- name: ListSecretValueOccurrenceIDs :many
+SELECT value_entry_id
+FROM secret_value_occurrences
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id)
+ORDER BY value_entry_id;
+
+-- name: DeleteSecretValueOccurrencesForEnvironment :execrows
+DELETE FROM secret_value_occurrences
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND environment_id = sqlc.arg(chain_env_id);
 
 -- name: DeleteSnapshotEntriesForEnvironment :execrows
 DELETE FROM snapshot_entries

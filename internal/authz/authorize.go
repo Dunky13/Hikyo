@@ -310,33 +310,79 @@ func (a *TxAuthorizer) Token() *TxToken { return a.tok }
 // tell them, and which they can read off their own grants.
 func (a *TxAuthorizer) CallerHolds(ctx context.Context, caller Identity,
 	op Operation, scope domain.Scope) (bool, error) {
-	spec, ok := operations[op]
-	if !ok {
-		return false, fmt.Errorf("authz: operation %q is not in the operation registry", op)
-	}
 	if caller.Principal == "" {
 		return false, errors.New("authz: empty principal")
 	}
-	chain, err := a.r.ResolveChain(ctx, scope)
-	if err != nil {
-		// Unresolvable is "no", not an error to surface: the caller has
-		// already been authorized for the scope it is asking about, so a
-		// resolution miss here is a race with a deletion and the honest answer
-		// to "may they reveal" is no.
-		if errors.Is(err, domain.ErrNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	grants, err := a.r.Grants(ctx, caller.Principal)
+	holds, err := a.principalHoldsFormula(ctx, caller.Principal, op, scope)
 	if err != nil {
 		return false, err
 	}
-	if !evaluate(spec.formula, chain, grants) {
+	if !holds {
 		return false, nil
 	}
 	// The same assurance floor Authorize() applies after the grant check. A
 	// surface that offered `reveal` to a password-only session would be
 	// offering something the chokepoint is about to refuse.
 	return !a.assuranceInadequate(caller, op), nil
+}
+
+// RecordedPrincipalHolds checks the grant formula for a principal recorded as
+// authority on a standing delegation. It deliberately does not synthesize a
+// caller identity or apply session policy: the principal is not the caller,
+// and the delegation's own fetch path records the decision and its outcome.
+func (a *TxAuthorizer) RecordedPrincipalHolds(ctx context.Context, caller Identity,
+	principal domain.PrincipalID, op Operation, scope domain.Scope) (bool, error) {
+	if caller.Principal == "" {
+		return false, errors.New("authz: empty caller principal")
+	}
+	if principal == "" {
+		return false, errors.New("authz: empty recorded authority principal")
+	}
+	spec, chain, holds, err := a.principalFormulaEvaluation(ctx, principal, op, scope)
+	if err != nil {
+		return false, err
+	}
+	if !holds {
+		before := len(a.denials)
+		if chain == (domain.Scope{}) {
+			a.captureDenial(ctx, caller.Principal, op, spec, resolutionUnresolvable, domain.Scope{}, scope)
+		} else {
+			a.captureDenial(ctx, caller.Principal, op, spec, resolutionResolvable, chain, domain.Scope{})
+		}
+		if len(a.denials) > before {
+			event := &a.denials[len(a.denials)-1].Event
+			event.Actor.CredentialID = caller.CredentialID
+			event.AuthorityID = string(principal)
+		}
+	}
+	return holds, nil
+}
+
+func (a *TxAuthorizer) principalHoldsFormula(ctx context.Context, principal domain.PrincipalID,
+	op Operation, scope domain.Scope) (bool, error) {
+	_, _, holds, err := a.principalFormulaEvaluation(ctx, principal, op, scope)
+	return holds, err
+}
+
+func (a *TxAuthorizer) principalFormulaEvaluation(ctx context.Context, principal domain.PrincipalID,
+	op Operation, scope domain.Scope) (opSpec, domain.Scope, bool, error) {
+	spec, ok := operations[op]
+	if !ok {
+		return opSpec{}, domain.Scope{}, false, fmt.Errorf("authz: operation %q is not in the operation registry", op)
+	}
+	chain, err := a.r.ResolveChain(ctx, scope)
+	if err != nil {
+		// Unresolvable is "no", not an error to surface: this is a race with
+		// scope deletion, and a missing scope cannot satisfy an affordance or a
+		// recorded delegation.
+		if errors.Is(err, domain.ErrNotFound) {
+			return spec, domain.Scope{}, false, nil
+		}
+		return opSpec{}, domain.Scope{}, false, err
+	}
+	grants, err := a.r.Grants(ctx, principal)
+	if err != nil {
+		return opSpec{}, domain.Scope{}, false, err
+	}
+	return spec, chain, evaluate(spec.formula, chain, grants), nil
 }

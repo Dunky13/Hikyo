@@ -848,14 +848,16 @@ var wireRoutes = map[string][]Operation{
 	// value.publish once per AFFECTED environment, which is the addressed one
 	// plus any other environment the selected versions -- or key-group closure
 	// -- reach.
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":                       {OpValuePublish},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":                        {OpRevisionSignals},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":                      {OpRevisionList},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}":           {OpRevisionShow},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": {OpRevisionRestore, OpRevisionRestoreHistory},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                           {OpPinList},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                          {OpPinSet, OpPinSetHistory},
-	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}":    {OpPinRelease},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/publish":             {OpValuePublish},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/signals":              {OpRevisionSignals},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions":            {OpRevisionList},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}": {OpRevisionShow},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/revisions/{revision}/rollback": {
+		OpRevisionRestore, OpRevisionRestoreHistory, OpRevisionRestoreCurrent,
+	},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                        {OpPinList},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins":                       {OpPinSet, OpPinSetHistory},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/environments/{environment}/pins/{workloadPrincipal}": {OpPinRelease},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/values/export": {
 		OpValueExport, OpValueExportReveal, OpValueExportRevealHistory,
 	},

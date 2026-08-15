@@ -17,6 +17,7 @@ import (
 type RestoreResult struct {
 	Revision int64
 	Changes  []StagedChange
+	Preview  ImpactPreview
 }
 
 // Restore stages the two-way difference between one historical snapshot and
@@ -40,10 +41,13 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 		owner domain.PrincipalID
 	}
 	var announced []announcement
+	stickySecret := map[string]bool{}
 	out := RestoreResult{Revision: revision}
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
 		out.Changes = nil
+		out.Preview = ImpactPreview{}
 		announced = nil
+		clear(stickySecret)
 		now := s.now()
 		caller, err := actor.resolve(ctx, az, now)
 		if err != nil {
@@ -71,6 +75,7 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 		if err != nil {
 			return err
 		}
+		allKeys := keys
 		if keyName != "" {
 			key, err := keyByName(keys, keyName)
 			if err != nil {
@@ -86,6 +91,12 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 			if err := validateSnapshotEntryKeys("revision", revision, keys, targetEntries); err != nil {
 				return err
 			}
+		} else {
+			for _, entry := range targetEntries {
+				if entry.KeyName == keyName && entry.KeyID != keys[0].ID {
+					return invalidDetail("revision %d contains an earlier key named %q with a different identity; refusing to clear its replacement", revision, keyName)
+				}
+			}
 		}
 		targetByKey := make(map[string]store.SnapshotEntry, len(targetEntries))
 		for _, entry := range targetEntries {
@@ -99,22 +110,77 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 		for _, entry := range currentEntries {
 			currentByKey[entry.KeyID] = entry
 		}
+		valueEntryIDs := make(map[string]struct{}, len(targetEntries)+len(currentEntries))
+		for _, entry := range targetEntries {
+			valueEntryIDs[entry.ValueEntryID] = struct{}{}
+		}
+		for _, entry := range currentEntries {
+			valueEntryIDs[entry.ID] = struct{}{}
+		}
+		stickyValueSecrets, err := stickySecretValueEntries(ctx, r, p, valueEntryIDs)
+		if err != nil {
+			return err
+		}
 
-		historyAuthorized := target.Revision == latest.Revision
+		historicalSecrets := make(map[string]store.SnapshotEntry)
+		currentSecrets := make(map[string]bool)
+		if target.Revision != latest.Revision {
+			currentClassification := make(map[string]string, len(allKeys))
+			for _, key := range allKeys {
+				currentClassification[key.ID] = key.Classification
+			}
+			unit := make([]string, 0, len(keys))
+			needsHistoricalReveal := false
+			needsCurrentReveal := false
+			for _, key := range keys {
+				entry, ok := targetByKey[key.ID]
+				currentEntry, currentSet := currentByKey[key.ID]
+				historicalSecret := ok && (entry.Classification == string(schema.Secret) ||
+					stickyValueSecrets[entry.ValueEntryID])
+				// Current plaintext is opened only to compare two set values. A
+				// restore-to-absent clear never reads it and therefore must not
+				// demand the current reveal formula.
+				currentSecret := ok && currentSet && (currentClassification[key.ID] == string(schema.Secret) ||
+					stickyValueSecrets[currentEntry.ID])
+				if !historicalSecret && !currentSecret {
+					continue
+				}
+				unit = append(unit, key.ID)
+				if historicalSecret {
+					needsHistoricalReveal = true
+					historicalSecrets[key.ID] = entry
+				}
+				if currentSecret {
+					needsCurrentReveal = true
+					currentSecrets[key.ID] = true
+				}
+			}
+			if needsHistoricalReveal {
+				if _, err := az.Authorize(ctx, caller, authz.OpRevisionRestoreHistory, scope); err != nil {
+					return err
+				}
+			}
+			if needsCurrentReveal {
+				if _, err := az.Authorize(ctx, caller, authz.OpRevisionRestoreCurrent, scope); err != nil {
+					return err
+				}
+			}
+			if len(unit) > 0 {
+				if err := requireCeremony(ctx, s.Auth, az, caller, PurposeReveal, string(scope.Env), unit); err != nil {
+					return err
+				}
+			}
+		}
 		for _, key := range keys {
+			if target.Revision == latest.Revision {
+				continue
+			}
 			targetEntry, targetSet := targetByKey[key.ID]
 			currentEntry, currentSet := currentByKey[key.ID]
 			operation := store.PendingUnset
 			value := ""
 			changed := targetSet != currentSet
 			if targetSet {
-				if !historyAuthorized && (targetEntry.Classification == string(schema.Secret) ||
-					key.Classification == string(schema.Secret)) {
-					if _, err := az.Authorize(ctx, caller, authz.OpRevisionRestoreHistory, scope); err != nil {
-						return err
-					}
-					historyAuthorized = true
-				}
 				plain, err := sealer.OpenField(snapshotAAD(
 					targetEntry.OrgID, targetEntry.ProjectID, targetEntry.EnvironmentID,
 					targetEntry.KeyID, targetEntry.SnapshotID, targetEntry.ID), targetEntry.Ciphertext)
@@ -122,11 +188,23 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 					return fmt.Errorf("service: snapshot entry %s: %w", targetEntry.ID, err)
 				}
 				value = string(plain)
+				if historical, ok := historicalSecrets[key.ID]; ok {
+					if err := auditSnapshotDisclosure(ctx, r.Audit(), p, caller.Principal,
+						historical, "restore", target.Revision); err != nil {
+						return err
+					}
+				}
 				operation = store.PendingSet
 				if currentSet {
 					current, err := openCell(sealer, currentEntry)
 					if err != nil {
 						return err
+					}
+					if currentSecrets[key.ID] {
+						if err := auditSnapshotDisclosure(ctx, r.Audit(), p, caller.Principal,
+							store.SnapshotEntry{KeyID: key.ID, KeyName: key.Name}, "restore", latest.Revision); err != nil {
+							return err
+						}
 					}
 					changed = current != value
 				}
@@ -155,6 +233,11 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 				Operation: operation, Ciphertext: sealed,
 				StagedFromRevision: latest.Revision, StagedFromEntry: baseline,
 				CreatedAt: now, Source: store.PendingSourceRestore,
+				Secret: targetEntry.Classification == string(schema.Secret) ||
+					stickyValueSecrets[targetEntry.ValueEntryID] || stickyValueSecrets[currentEntry.ID] ||
+					key.Classification == string(schema.Secret),
+				MaterialSecret: operation == store.PendingSet &&
+					(targetEntry.Classification == string(schema.Secret) || stickyValueSecrets[targetEntry.ValueEntryID]),
 			}); err != nil {
 				return err
 			}
@@ -175,7 +258,20 @@ func (s *Revisions) Restore(ctx context.Context, actor Actor, scope domain.Scope
 				Classification: key.Classification, Operation: string(operation),
 				StagedFromRevision: latest.Revision, CreatedAt: now,
 			})
+			stickySecret[versionID] = targetEntry.Classification == string(schema.Secret) ||
+				stickyValueSecrets[targetEntry.ValueEntryID] || stickyValueSecrets[currentEntry.ID] ||
+				key.Classification == string(schema.Secret)
 			announced = append(announced, announcement{keyID: key.ID, name: key.Name, owner: caller.Principal})
+		}
+		if len(out.Changes) > 0 {
+			versionIDs := make([]string, 0, len(out.Changes))
+			for _, change := range out.Changes {
+				versionIDs = append(versionIDs, change.VersionID)
+			}
+			out.Preview, err = buildImpactPreview(ctx, r, p, sealer, s.Keyring, az, caller, scope, versionIDs, stickySecret)
+			if err != nil {
+				return err
+			}
 		}
 		payload := audit.Payload{"revision": revision, "key_count": len(out.Changes)}
 		if keyName != "" {

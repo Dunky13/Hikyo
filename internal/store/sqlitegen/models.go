@@ -318,6 +318,8 @@ type PendingChange struct {
 	StagedFromEntry    string
 	CreatedAt          string
 	Source             string
+	Secret             int64
+	MaterialSecret     int64
 }
 
 type PinGeneration struct {
@@ -569,6 +571,13 @@ type ScimUser struct {
 	Attributes    string
 	CreatedAt     string
 	UpdatedAt     string
+}
+
+type SecretValueOccurrence struct {
+	ValueEntryID  string
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
 }
 
 type ServiceAccount struct {

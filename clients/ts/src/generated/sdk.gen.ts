@@ -3121,6 +3121,13 @@ export const revokeMySession = <ThrowOnError extends boolean = false>(options: O
  * is permitted and each such environment is authorized for `publish`
  * separately, immediately before commit.
  *
+ * Every protected environment reached requires its bound publish
+ * confirmation. Machine callers name the exact protected set they
+ * reviewed; human callers consume the bound ceremony. A selection containing restore-authored drafts also
+ * requires the preview token returned by rollback; schema, published
+ * state, authorization, selection, or key-group closure drift invalidates
+ * that token and requires a fresh rollback preview.
+ *
  */
 export const publishPendingChanges = <ThrowOnError extends boolean = false>(options: Options<PublishPendingChangesData, ThrowOnError>) => (options.client ?? client).post<PublishPendingChangesResponses, PublishPendingChangesErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -3162,7 +3169,10 @@ export const getEnvironmentSignals = <ThrowOnError extends boolean = false>(opti
  * Computes a two-way set/unset diff and writes ordinary caller-owned
  * pending changes. The normal publish verb commits them and validates
  * against the current schema. Reading superseded secret material also
- * requires reveal-history at this staging step.
+ * requires read AND reveal-history; comparing current secret plaintext
+ * also requires read AND reveal. Both take reauthentication and one
+ * disclosure event per key and revision at this staging step. The response includes the full,
+ * reveal-safe impact preview and its exact-input publish token.
  *
  */
 export const rollbackRevision = <ThrowOnError extends boolean = false>(options: Options<RollbackRevisionData, ThrowOnError>) => (options.client ?? client).post<RollbackRevisionResponses, RollbackRevisionErrors, ThrowOnError>({
@@ -3191,7 +3201,8 @@ export const listRevisionPins = <ThrowOnError extends boolean = false>(options: 
  * operation renews the same revision or reassigns a different one, with
  * authorization rechecked. Omitted expiry defaults to 180 days; the
  * maximum is 365 days. A non-current revision requires reveal-history,
- * and a current-schema failure requires override_schema.
+ * reauthentication, and one disclosure event per historical secret key;
+ * a current-schema failure requires override_schema.
  *
  */
 export const createRevisionPin = <ThrowOnError extends boolean = false>(options: Options<CreateRevisionPinData, ThrowOnError>) => (options.client ?? client).post<CreateRevisionPinResponses, CreateRevisionPinErrors, ThrowOnError>({

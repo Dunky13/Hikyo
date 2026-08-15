@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 )
@@ -50,8 +51,16 @@ func runRevision(ctx context.Context, ios IO, args []string) error {
 			return err
 		}
 	}
-	if sub == "rollback" && flags.positional() == "" {
-		return failf(ExitUsage, "usage: hikyo revision rollback <N> [--key KEY]")
+	var rollbackRevision int64
+	if sub == "rollback" {
+		positionals := flags.positionals
+		if len(positionals) != 1 {
+			return failf(ExitUsage, "usage: hikyo revision rollback <N> [--key KEY]")
+		}
+		rollbackRevision, err = strconv.ParseInt(positionals[0], 10, 64)
+		if err != nil || rollbackRevision < 1 {
+			return failf(ExitUsage, "revision rollback requires a positive numeric revision")
+		}
 	}
 
 	client, _, resolved, err := authenticatedTarget(st, ios, flags)
@@ -117,11 +126,6 @@ func runRevision(ctx context.Context, ios IO, args []string) error {
 		})
 
 	case "rollback":
-		which := flags.positional()
-		n, err := strconv.ParseInt(which, 10, 64)
-		if err != nil || n < 1 {
-			return failf(ExitUsage, "revision rollback requires a positive numeric revision")
-		}
 		body := apigen.RollbackRequest{}
 		if key != "" {
 			name := apigen.KeyName(key)
@@ -129,19 +133,44 @@ func runRevision(ctx context.Context, ios IO, args []string) error {
 		}
 		var out apigen.RollbackResult
 		if err := client.Do(ctx, http.MethodPost,
-			base+"/revisions/"+url.PathEscape(which)+"/rollback", body, &out); err != nil {
+			base+"/revisions/"+strconv.FormatInt(rollbackRevision, 10)+"/rollback", body, &out); err != nil {
 			return err
 		}
-		rows := make([][]string, 0, len(out.Changes))
+		versions := make([]string, 0, len(out.Changes))
 		for _, change := range out.Changes {
-			rows = append(rows, []string{change.VersionId, change.Name, string(change.Operation)})
+			versions = append(versions, change.VersionId)
 		}
-		return Render(ios.Stdout, f, Table{
-			Columns: []string{"VERSION", "KEY", "OPERATION"}, Rows: rows, JSON: out,
-		})
+		if out.Preview.Token != "" {
+			fmt.Fprintf(ios.Stderr, "impact preview; publish with: hikyo values publish --versions %s --preview-token %s\n",
+				strings.Join(versions, ","), out.Preview.Token)
+		}
+		return Render(ios.Stdout, f, rollbackTable(out))
 	}
 	// Unreachable: subverb() above admits only the cases enumerated here.
 	return failf(ExitInternal, "hikyo revision: unhandled subverb %q", sub)
+}
+
+func rollbackTable(out apigen.RollbackResult) Table {
+	rows := make([][]string, 0, len(out.Changes))
+	for _, environment := range out.Preview.Environments {
+		for _, change := range environment.Changes {
+			rows = append(rows, []string{
+				environment.EnvironmentId,
+				strconv.FormatBool(environment.Protected),
+				change.VersionId,
+				change.Name,
+				string(change.Classification),
+				string(change.Operation),
+				string(change.Status),
+				derefString(change.Before),
+				derefString(change.After),
+			})
+		}
+	}
+	return Table{
+		Columns: []string{"ENVIRONMENT", "PROTECTED", "VERSION", "KEY", "CLASS", "OPERATION", "STATUS", "BEFORE", "AFTER"},
+		Rows:    rows, JSON: out,
+	}
 }
 
 // runRotateTokenKey is the operator's `rotate-token-key`.

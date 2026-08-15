@@ -12,6 +12,30 @@ CREATE UNIQUE INDEX snapshots_chain_id
 ALTER TABLE pending_changes ADD COLUMN source TEXT NOT NULL DEFAULT 'values'
     CHECK (source IN ('values', 'restore'));
 
+-- Sensitivity is sticky to a staged occurrence. A restore may outlive the
+-- historical snapshot rows that proved the value was secret, so the pending
+-- row carries that one-bit disclosure boundary without retaining payload.
+ALTER TABLE pending_changes ADD COLUMN secret BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pending_changes ADD COLUMN material_secret BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- hikyo:table secret_value_occurrences class=environment chain=org_id,project_id
+-- Permanent, payload-free classification lineage for immutable value-entry
+-- occurrences. GC may delete snapshot_entries, but it must not make material
+-- that was ever secret eligible for config disclosure.
+CREATE TABLE secret_value_occurrences (
+    value_entry_id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    environment_id TEXT NOT NULL,
+    FOREIGN KEY (org_id, project_id, environment_id)
+        REFERENCES environments (org_id, project_id, id)
+);
+
+INSERT INTO secret_value_occurrences (value_entry_id, org_id, project_id, environment_id)
+SELECT DISTINCT value_entry_id, org_id, project_id, environment_id
+FROM snapshot_entries
+WHERE classification = 'secret';
+
 CREATE TABLE revision_pins (
     id TEXT PRIMARY KEY,
     org_id TEXT NOT NULL,

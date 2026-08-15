@@ -562,6 +562,87 @@ func runCopySourceTakesTheCeremony(t *testing.T, db *store.DB) {
 	}
 }
 
+func TestRestorePinAndProtectedPublishTakeCeremoniesSQLite(t *testing.T) {
+	runRestorePinAndProtectedPublishTakeCeremonies(t, seededDB(t, openSQLite))
+}
+
+func TestRestorePinAndProtectedPublishTakeCeremoniesPostgres(t *testing.T) {
+	runRestorePinAndProtectedPublishTakeCeremonies(t, seededDB(t, openPostgres))
+}
+
+func runRestorePinAndProtectedPublishTakeCeremonies(t *testing.T, db *store.DB) {
+	ctx := t.Context()
+	auth, token, values, dev := ceremonyFixture(t, db, "ceremony-restore-pin")
+	auth.ReauthWindow = 0
+	auth.ReauthHardCap = time.Hour
+	scope := scopeEnv(orgA, prjA1, envA1)
+	principal := queryString(t, db, "SELECT principal_id FROM accounts WHERE username = 'ceremony-restore-pin'")
+	for _, capability := range []string{"reveal-history", "pin"} {
+		execRaw(t, db, "INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ceremony_extra_"+
+			capability+"', '"+principal+"', '"+capability+"', 'org_a', 'prj_a1', 'env_a1', "+ts+")")
+	}
+
+	target := queryInt(t, db, "SELECT MAX(revision) FROM snapshots WHERE environment_id = 'env_a1'")
+	publishValue(t, values, service.LocalPrincipal(custodian), scope, ceremonySecretA, "rotated")
+	revisions := &service.Revisions{DB: db, Keyring: values.Keyring, Auth: auth}
+	beforeRestore := disclosureRows(t, db)
+	if _, err := revisions.Restore(ctx, service.Bearer(token), scope, target, ceremonySecretA); !errors.Is(err, service.ErrNoReauthWindow) {
+		t.Fatalf("historical restore without ceremony = %v, want ErrNoReauthWindow", err)
+	}
+	if got := disclosureRows(t, db); got != beforeRestore {
+		t.Fatalf("refused restore wrote %d disclosure events", got-beforeRestore)
+	}
+	token = passkeyCeremony(t, auth, ctx, token, service.PurposeReveal, string(envA1),
+		[]string{"key_" + ceremonySecretA}, dev).SessionToken
+	restored, err := revisions.Restore(ctx, service.Bearer(token), scope, target, ceremonySecretA)
+	if err != nil {
+		t.Fatalf("historical restore after ceremony: %v", err)
+	}
+	if got := disclosureRows(t, db); got != beforeRestore+2 {
+		t.Fatalf("restore wrote %d disclosure events, want historical and current reads", got-beforeRestore)
+	}
+
+	workload := "wld_ceremony_pin"
+	execRaw(t, db, "INSERT INTO principals (id, kind, created_at) VALUES ('"+workload+"', 'machine', "+ts+")")
+	execRaw(t, db, "INSERT INTO service_accounts (id, principal_id, org_id, project_id, name, kind, created_at, created_by) VALUES ('sa_ceremony_pin', '"+
+		workload+"', 'org_a', 'prj_a1', 'ceremony-pin', 'workload', "+ts+", '"+principal+"')")
+	pins := &service.Pins{DB: db, Keyring: values.Keyring, Auth: auth}
+	request := service.SetPinRequest{WorkloadPrincipalID: domain.PrincipalID(workload), Revision: target}
+	if _, err := pins.Set(ctx, service.Bearer(token), scope, request); !errors.Is(err, service.ErrReauthWindowSpent) &&
+		!errors.Is(err, service.ErrNoReauthWindow) && !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("historical pin without ceremony = %v, want ceremony refusal", err)
+	}
+	beforePin := disclosureRows(t, db)
+	token = passkeyCeremony(t, auth, ctx, token, service.PurposeReveal, string(envA1),
+		[]string{"key_" + ceremonySecretA, "key_" + ceremonySecretB}, dev).SessionToken
+	if _, err := pins.Set(ctx, service.Bearer(token), scope, request); err != nil {
+		t.Fatalf("historical pin after ceremony: %v", err)
+	}
+	if got := disclosureRows(t, db); got != beforePin+2 {
+		t.Fatalf("pin wrote %d disclosure events, want one per historical secret", got-beforePin)
+	}
+
+	staged, err := values.Set(ctx, service.Bearer(token), scope, ceremonySecretB, "protected-publish")
+	if err != nil {
+		t.Fatalf("stage protected publish: %v", err)
+	}
+	execRaw(t, db, "UPDATE environments SET protected = TRUE WHERE id = 'env_a1'")
+	if _, err := revisions.PublishPlanned(ctx, service.Bearer(token), scope,
+		service.PublishRequest{VersionIDs: []string{staged.VersionID}}); !errors.Is(err, service.ErrReauthWindowSpent) &&
+		!errors.Is(err, service.ErrNoReauthWindow) && !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("protected publish without ceremony = %v, want ceremony refusal", err)
+	}
+	token = passkeyCeremony(t, auth, ctx, token, service.PurposePublish, string(envA1),
+		[]string{"key_" + ceremonySecretB}, dev).SessionToken
+	if _, err := revisions.PublishPlanned(ctx, service.Bearer(token), scope,
+		service.PublishRequest{VersionIDs: []string{staged.VersionID}}); err != nil {
+		t.Fatalf("protected publish after ceremony: %v", err)
+	}
+	if len(restored.Changes) != 1 || restored.Preview.Token == "" {
+		t.Fatalf("restore result lost staged change or preview: %+v", restored)
+	}
+}
+
 func TestAMachineNeverReauthenticatesSQLite(t *testing.T) {
 	runAMachineNeverReauthenticates(t, seededDB(t, openSQLite))
 }

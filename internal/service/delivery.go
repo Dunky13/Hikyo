@@ -100,6 +100,13 @@ type Delivery struct {
 	// that did not wire federation should do.
 	Federation *Federation
 	Now        func() time.Time
+	// FetchProbe is a conformance-only retry seam. Production leaves it nil;
+	// it is invoked immediately after attempt-local response state is reset.
+	FetchProbe DeliveryConformanceProbe
+}
+
+type DeliveryConformanceProbe interface {
+	AfterAttemptReset(out *FetchResult) error
 }
 
 func (s *Delivery) now() time.Time {
@@ -164,6 +171,12 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 
 	var out FetchResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+		resetDeliveryAttempt(&out)
+		if s.FetchProbe != nil {
+			if err := s.FetchProbe.AfterAttemptReset(&out); err != nil {
+				return err
+			}
+		}
 		// The clock is read INSIDE the transaction: the sealer preflight above
 		// can take real time, and a credential whose idle, absolute or expiry
 		// deadline passes during it must be refused by the authentication this
@@ -189,26 +202,30 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		case pinErr != nil:
 			return pinErr
 		default:
-			authority := authz.Identity{Principal: domain.PrincipalID(pin.AuthorityPrincipalID)}
-			holds, err := az.CallerHolds(ctx, authority, authz.OpPinSet, scope)
+			authority := domain.PrincipalID(pin.AuthorityPrincipalID)
+			holds, err := az.RecordedPrincipalHolds(ctx, caller, authority, authz.OpPinSet, scope)
 			if err != nil {
 				return err
 			}
 			if !holds {
 				return invalidDetail("pinned delivery is refused because the recorded authority no longer holds pin and publish grants")
 			}
-			if pin.HistoryAuthorized {
-				holds, err := az.CallerHolds(ctx, authority, authz.OpPinSetHistory, scope)
+			snapshot, err := r.Snapshots().AtRevision(ctx, p, pin.Revision)
+			if err != nil {
+				return err
+			}
+			latest, err := r.Snapshots().Latest(ctx, p)
+			if err != nil {
+				return err
+			}
+			if snapshot.Revision != latest.Revision {
+				holds, err := az.RecordedPrincipalHolds(ctx, caller, authority, authz.OpPinSetHistory, scope)
 				if err != nil {
 					return err
 				}
 				if !holds {
 					return invalidDetail("pinned delivery of revision %d is refused because the recorded authority no longer holds reveal-history", pin.Revision)
 				}
-			}
-			snapshot, err := r.Snapshots().AtRevision(ctx, p, pin.Revision)
-			if err != nil {
-				return err
 			}
 			if !snapshot.PayloadPresent {
 				return invalidDetail("pinned delivery revision %d payload was collected", pin.Revision)
@@ -301,6 +318,11 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 	}
 	return out, nil
 }
+
+// resetDeliveryAttempt keeps response state attempt-local. tx.Write may rerun
+// its closure after a serialization failure; metadata observed by a rolled-back
+// attempt must not survive into the successful attempt.
+func resetDeliveryAttempt(out *FetchResult) { *out = FetchResult{} }
 
 // callerActor picks how the presented artifact resolves.
 //
