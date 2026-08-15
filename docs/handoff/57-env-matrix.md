@@ -95,7 +95,8 @@ shared with `reveal.spec.ts`; its counter-persistence contract is documented the
 
 ## Verification record (2026-08-15)
 
-`pnpm typecheck` clean · `pnpm test` 77/77 · full Playwright suite 116/116 (2.9 min,
+`pnpm typecheck` clean · `pnpm test` 77/77 · full Playwright suite 116/116 (3.2 min,
 both viewport projects). PR review fixes cover all nine threads; protected publish is
 enforced and regression-tested by rebased `main`'s transactional service path, while
-the remaining eight fixes live in this PR.
+the remaining eight fixes live in this PR. All findings from the capped three-round
+native Codex review were repaired; the final post-fix suite is the record above.

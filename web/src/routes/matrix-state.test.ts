@@ -189,6 +189,8 @@ describe('row editor state', () => {
   });
 
   it('validates common declared types while typing', () => {
+    expect(validateMatrixDraft({ type: 'string' }, '')?.message).toMatch(/allow_empty/);
+    expect(validateMatrixDraft({ type: 'string', allow_empty: true }, '   ')).toBeNull();
     expect(validateMatrixDraft({ type: 'boolean' }, 'truthy')?.message).toMatch(/true or false/);
     expect(validateMatrixDraft({ type: 'integer', min: 2n }, '1')?.message).toMatch(/at least 2/);
     expect(validateMatrixDraft({ type: 'integer' }, '01')).toBeNull();

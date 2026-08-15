@@ -233,6 +233,7 @@ export function matrixDraftChanges(
 
 export type MatrixDraftRule = {
   readonly type: 'string' | 'integer' | 'boolean' | 'enum' | 'url' | 'json';
+  readonly allow_empty?: boolean;
   readonly min_length?: number;
   readonly max_length?: number;
   readonly pattern?: string;
@@ -270,7 +271,14 @@ export function validateMatrixDraft(
 ): MatrixDraftValidation | null {
   const value = rawValue.trim();
   if (value === '') {
-    return null;
+    return rule.type === 'string' && rule.allow_empty === true
+      ? null
+      : validation(
+          'error',
+          rule.type === 'string'
+            ? 'Empty values require allow_empty in the declaration.'
+            : 'Enter a value.',
+        );
   }
   switch (rule.type) {
     case 'boolean':

@@ -240,12 +240,19 @@ export function Matrix() {
     matrix.signals.some((query) => query.isPending) ||
     matrix.settings.some((query) => query.isPending);
   const loadError =
-    matrix.environments.isError ||
-    matrix.keys.isError ||
-    matrix.groups.isError ||
-    matrix.values.some((query) => query.isError) ||
-    matrix.signals.some((query) => query.isError) ||
-    matrix.settings.some((query) => query.isError);
+    (matrix.environments.isError && matrix.environments.data === undefined) ||
+    (matrix.keys.isError && matrix.keys.data === undefined) ||
+    (matrix.groups.isError && matrix.groups.data === undefined) ||
+    matrix.values.some((query) => query.isError && query.data === undefined) ||
+    matrix.signals.some((query) => query.isError && query.data === undefined) ||
+    matrix.settings.some((query) => query.isError && query.data === undefined);
+  const backgroundRefreshError =
+    (matrix.environments.isError && matrix.environments.data !== undefined) ||
+    (matrix.keys.isError && matrix.keys.data !== undefined) ||
+    (matrix.groups.isError && matrix.groups.data !== undefined) ||
+    matrix.values.some((query) => query.isError && query.data !== undefined) ||
+    matrix.signals.some((query) => query.isError && query.data !== undefined) ||
+    matrix.settings.some((query) => query.isError && query.data !== undefined);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualPaddingTop = virtualRows[0]?.start ?? 0;
   const virtualPaddingBottom =
@@ -370,6 +377,13 @@ export function Matrix() {
           <span>{mutationError}</span>
         </p>
       )}
+
+      {backgroundRefreshError ? (
+        <p className="alert" role="status">
+          <span className="alert__glyph" aria-hidden="true">!</span>
+          <span>Live matrix refresh failed. Your loaded data and open edits are preserved; retrying automatically.</span>
+        </p>
+      ) : null}
 
       {publishOpen ? (
         <MatrixPublishSheet
@@ -618,12 +632,16 @@ export function Matrix() {
             };
           })}
           busy={stage.isPending || clear.isPending || copy.isPending}
+          mutationError={mutationError}
           onClose={() => setSelection(null)}
           onApply={async (changes) => {
             setMutationError(null);
             let normalizedCount = 0;
             for (const change of changes) {
               try {
+                const prior = signalsByCell.get(
+                  cellID(selectedKey.id, change.environmentId),
+                )?.pending_version_id;
                 if (change.operation === 'set') {
                   const normalizedValue = normalizeMatrixDraftValue(change.value);
                   if (normalizedValue !== change.value) normalizedCount += 1;
@@ -633,23 +651,33 @@ export function Matrix() {
                     value: normalizedValue,
                   });
                   if (selectedKey.classification === 'config') {
-                    writeMatrixDraftPreview(
-                      sessionStorage,
-                      ref,
-                      staged.version_id,
-                      normalizedValue,
-                    );
+                    try {
+                      if (prior !== undefined) {
+                        removeMatrixDraftPreview(sessionStorage, ref, prior);
+                      }
+                      writeMatrixDraftPreview(
+                        sessionStorage,
+                        ref,
+                        staged.version_id,
+                        normalizedValue,
+                      );
+                    } catch {
+                      setMutationError(
+                        'Draft saved, but its local publish preview could not be stored. Reopen and save it again after clearing browser storage.',
+                      );
+                    }
                   }
                 } else {
-                  const prior = signalsByCell.get(
-                    cellID(selectedKey.id, change.environmentId),
-                  )?.pending_version_id;
                   await clear.mutateAsync({
                     environment: change.environmentId,
                     key: selectedKey.name,
                   });
                   if (prior !== undefined) {
-                    removeMatrixDraftPreview(sessionStorage, ref, prior);
+                    try {
+                      removeMatrixDraftPreview(sessionStorage, ref, prior);
+                    } catch {
+                      // The server-side clear succeeded; stale local preview cleanup is best effort.
+                    }
                   }
                 }
                 clearValidation(selectedKey.id, change.environmentId);

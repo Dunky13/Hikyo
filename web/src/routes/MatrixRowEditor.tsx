@@ -45,6 +45,7 @@ export function MatrixRowEditor({
   protectedEnvironmentIds,
   rows,
   busy,
+  mutationError,
   onClose,
   onApply,
   onCopy,
@@ -56,6 +57,7 @@ export function MatrixRowEditor({
   protectedEnvironmentIds: readonly string[];
   rows: readonly EditorRow[];
   busy: boolean;
+  mutationError: string | null;
   onClose: () => void;
   onApply: (changes: readonly MatrixEditorChange[]) => Promise<void>;
   onCopy: (destinations: readonly string[], confirmProtected: boolean) => void;
@@ -309,6 +311,7 @@ export function MatrixRowEditor({
           </div>
 
           {applyError === null ? null : <p className="alert" role="alert">{applyError}</p>}
+          {mutationError === null ? null : <p className="alert" role="alert">{mutationError}</p>}
 
           <div className="matrix-editor__actions">
             <button
@@ -403,7 +406,6 @@ function validateDeclaration(
   keyRecord: MatrixKey,
   value: string,
 ): ReturnType<typeof validateMatrixDraft> {
-  if (value === '') return null;
   const rules = keyRecord.declaration.rule === undefined
     ? keyRecord.declaration.any_of ?? []
     : [keyRecord.declaration.rule];
