@@ -214,10 +214,10 @@ test.describe('environment matrix', () => {
       });
 
       const value = `matrix-${testInfo.project.name}`;
-      await editor.getByLabel('Fill all environments').fill(value);
+      await editor.getByLabel('Fill all environments').fill(`  ${value}  `);
       await editor.getByRole('button', { name: 'Fill all', exact: true }).click();
-      await expect(editor.getByLabel('development value')).toHaveValue(value);
-      await editor.getByLabel('production value').fill(`${value}-production`);
+      await expect(editor.getByLabel('development value')).toHaveValue(`  ${value}  `);
+      await editor.getByLabel('production value').fill(`\t${value}-production `);
       if (testInfo.project.name === 'mobile') {
         const box = await editor.boundingBox();
         expect(box).not.toBeNull();
@@ -230,6 +230,7 @@ test.describe('environment matrix', () => {
       }
       await editor.getByRole('button', { name: 'Save 2 drafts' }).click();
       await expect(page.locator('.notice')).toContainText('2 drafts updated for LOG_LEVEL');
+      await expect(page.locator('.notice')).toContainText('whitespace was removed from 2 values');
       await expect(page.getByRole('button', { name: /LOG_LEVEL in development:.*draft set/ })).toBeVisible();
 
       await page.getByRole('button', { name: 'Edit LOG_LEVEL across environments' }).click();

@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Pure state for the environment matrix.
  *
@@ -115,6 +117,20 @@ export function groupProblemCounts(
   return counts;
 }
 
+/** One lookup per rendered cell, independent of the project's total problem count. */
+export function indexMatrixProblems(
+  problems: readonly MatrixProblem[],
+): ReadonlyMap<string, readonly MatrixProblem[]> {
+  const byCell = new Map<string, MatrixProblem[]>();
+  for (const problem of problems) {
+    const id = `${problem.keyId}/${problem.environmentId}`;
+    const cellProblems = byCell.get(id) ?? [];
+    cellProblems.push(problem);
+    byCell.set(id, cellProblems);
+  }
+  return byCell;
+}
+
 export function keysForMatrixFilter<T extends MatrixStateKey>(
   keys: readonly T[],
   problems: readonly MatrixProblem[],
@@ -181,11 +197,38 @@ export function draftValueForMatrixCell(
   return publishedValue ?? '';
 }
 
+/** Mirrors the service's Unicode-aware schema.Normalize before staging and previewing. */
+export function normalizeMatrixDraftValue(value: string): string {
+  return value.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, '');
+}
+
 export function canClearMatrixCell(
   publishedSet: boolean,
   pendingOperation: 'set' | 'unset' | undefined,
 ): boolean {
   return publishedSet || pendingOperation === 'set';
+}
+
+export type MatrixDraftChange =
+  | { readonly environmentId: string; readonly operation: 'set'; readonly value: string }
+  | { readonly environmentId: string; readonly operation: 'unset' };
+
+/** Dirty and clear are separate so an explicit empty string is not mistaken for absent. */
+export function matrixDraftChanges(
+  environmentIds: readonly string[],
+  drafts: ReadonlyMap<string, string>,
+  dirty: ReadonlySet<string>,
+  clears: ReadonlySet<string>,
+): readonly MatrixDraftChange[] {
+  return environmentIds.flatMap<MatrixDraftChange>((environmentId) => {
+    if (clears.has(environmentId)) {
+      return [{ environmentId, operation: 'unset' }];
+    }
+    if (dirty.has(environmentId)) {
+      return [{ environmentId, operation: 'set', value: drafts.get(environmentId) ?? '' }];
+    }
+    return [];
+  });
 }
 
 export type MatrixDraftRule = {
@@ -298,4 +341,3 @@ export function validateMatrixDraft(
     }
   }
 }
-import { z } from 'zod';

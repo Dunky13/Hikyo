@@ -51,13 +51,14 @@ export function MatrixPublishSheet({
   const selectableEnvironmentIds = pendingEnvironmentIds.filter(
     (environmentId) => !blockedEnvironmentIds.has(environmentId),
   );
-  const [selectedEnvironmentIdsState, setSelectedEnvironmentIds] = useState<readonly string[]>(
-    selectableEnvironmentIds,
-  );
+  // `null` means "all currently selectable". Signal queries arrive independently,
+  // so taking one mount-time snapshot could omit a later environment forever.
+  const [selectedEnvironmentIdsState, setSelectedEnvironmentIds] =
+    useState<readonly string[] | null>(null);
   const [protectedConfirmed, setProtectedConfirmed] = useState(false);
-  const selectedEnvironmentIds = selectedEnvironmentIdsState.filter((environmentId) =>
-    selectableEnvironmentIds.includes(environmentId),
-  );
+  const selectedEnvironmentIds = (
+    selectedEnvironmentIdsState ?? selectableEnvironmentIds
+  ).filter((environmentId) => selectableEnvironmentIds.includes(environmentId));
   const selectedEntries = selectedEnvironmentIds.flatMap(
     (environmentId) => pendingByEnvironment.get(environmentId) ?? [],
   );
@@ -114,11 +115,12 @@ export function MatrixPublishSheet({
                   checked={checked}
                   disabled={blocked || busy}
                   onChange={() => {
-                    setSelectedEnvironmentIds((current) =>
-                      checked
-                        ? current.filter((id) => id !== environment.id)
-                        : [...current, environment.id],
-                    );
+                    setSelectedEnvironmentIds((current) => {
+                      const selected = current ?? selectableEnvironmentIds;
+                      return checked
+                        ? selected.filter((id) => id !== environment.id)
+                        : [...selected, environment.id];
+                    });
                     setProtectedConfirmed(false);
                   }}
                 />

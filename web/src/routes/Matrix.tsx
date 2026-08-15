@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 
 import {
@@ -28,7 +29,9 @@ import { MatrixRowEditor } from './MatrixRowEditor.tsx';
 import {
   computeMatrixProblems,
   groupProblemCounts,
+  indexMatrixProblems,
   keysForMatrixFilter,
+  normalizeMatrixDraftValue,
   requiredInEnvironment,
   toggleVisibleEnvironment,
   type MatrixFilter,
@@ -46,6 +49,10 @@ type DisplayGroup = {
   readonly name: string;
   readonly keys: readonly MatrixKey[];
 };
+
+type DisplayRow =
+  | { readonly kind: 'group'; readonly group: DisplayGroup }
+  | { readonly kind: 'key'; readonly key: MatrixKey };
 
 /**
  * Whole-project environment matrix (#57, frozen prototype iteration 31).
@@ -75,6 +82,8 @@ export function Matrix() {
   const [validationErrors, setValidationErrors] = useState<readonly MatrixValidationError[]>([]);
   const [publishOpen, setPublishOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const matrixScroll = useRef<HTMLDivElement>(null);
 
   const environmentSignature = environments.map((environment) => environment.id).join('/');
   useEffect(() => {
@@ -132,6 +141,7 @@ export function Matrix() {
     [environments, keys, signalsByCell, stateKeys, validationErrors, valuesByCell],
   );
   const problemCounts = useMemo(() => groupProblemCounts(problems), [problems]);
+  const problemsByCell = useMemo(() => indexMatrixProblems(problems), [problems]);
   const filteredKeyIDs = useMemo(
     () => new Set(keysForMatrixFilter(stateKeys, problems, filter).map((key) => key.id)),
     [filter, problems, stateKeys],
@@ -144,6 +154,35 @@ export function Matrix() {
     })),
     [displayGroupList, filteredKeyIDs],
   );
+  const displayRows = useMemo<readonly DisplayRow[]>(
+    () =>
+      groups.flatMap<DisplayRow>((group) =>
+        group.keys.length === 0
+          ? []
+          : [
+              { kind: 'group', group },
+              ...(collapsedGroups.has(group.id)
+                ? []
+                : group.keys.map((key): DisplayRow => ({ kind: 'key', key }))),
+            ],
+      ),
+    [collapsedGroups, groups],
+  );
+  const groupRowIndexes = useMemo(
+    () =>
+      new Map(
+        displayRows.flatMap((row, index) =>
+          row.kind === 'group' ? [[row.group.id, index] as const] : [],
+        ),
+      ),
+    [displayRows],
+  );
+  const rowVirtualizer = useVirtualizer({
+    count: displayRows.length,
+    getScrollElement: () => matrixScroll.current,
+    estimateSize: (index) => (displayRows[index]?.kind === 'group' ? 44 : 58),
+    overscan: 8,
+  });
   const visibleEnvironments = environments.filter((environment) =>
     visibleEnvironmentIds.includes(environment.id),
   );
@@ -207,6 +246,10 @@ export function Matrix() {
     matrix.values.some((query) => query.isError) ||
     matrix.signals.some((query) => query.isError) ||
     matrix.settings.some((query) => query.isError);
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const virtualPaddingTop = virtualRows[0]?.start ?? 0;
+  const virtualPaddingBottom =
+    rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1]?.end ?? 0);
 
   const clearValidation = (keyId: string, environmentId: string) =>
     setValidationErrors((current) =>
@@ -321,6 +364,13 @@ export function Matrix() {
         </p>
       )}
 
+      {mutationError === null ? null : (
+        <p className="alert" role="alert">
+          <span className="alert__glyph" aria-hidden="true">!</span>
+          <span>{mutationError}</span>
+        </p>
+      )}
+
       {publishOpen ? (
         <MatrixPublishSheet
           refData={ref}
@@ -349,7 +399,10 @@ export function Matrix() {
                 key={group.id}
                 disabled={actuallyHidden}
                 title={actuallyHidden ? 'hidden by the problems filter' : undefined}
-                onClick={() => document.getElementById(groupDOMID(group.id))?.scrollIntoView()}
+                onClick={() => {
+                  const index = groupRowIndexes.get(group.id);
+                  if (index !== undefined) rowVirtualizer.scrollToIndex(index, { align: 'start' });
+                }}
               >
                 <span className="mono">{group.name}/</span>
                 <span>{String(group.keys.length)}</span>
@@ -423,7 +476,7 @@ export function Matrix() {
               </button>
             </div>
           ) : (
-            <div className="matrix__scroll">
+            <div className="matrix__scroll" ref={matrixScroll}>
               <table className="matrix__table">
                 <thead>
                   <tr>
@@ -434,86 +487,107 @@ export function Matrix() {
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.flatMap((group) => {
-                    if (group.keys.length === 0) {
-                      return [];
+                  {virtualPaddingTop > 0 ? (
+                    <tr aria-hidden="true" className="matrix__virtual-spacer">
+                      <td
+                        colSpan={visibleEnvironments.length + 1}
+                        style={{ height: virtualPaddingTop }}
+                      />
+                    </tr>
+                  ) : null}
+                  {virtualRows.map((virtualRow) => {
+                    const row = displayRows[virtualRow.index];
+                    if (row === undefined) return null;
+                    if (row.kind === 'group') {
+                      const { group } = row;
+                      const collapsed = collapsedGroups.has(group.id);
+                      const count = problemCounts.get(group.id) ?? 0;
+                      return (
+                        <tr
+                          className="matrix__group-row"
+                          key={`group-${group.id}`}
+                          data-index={virtualRow.index}
+                          ref={rowVirtualizer.measureElement}
+                        >
+                          <th colSpan={visibleEnvironments.length + 1}>
+                            <button
+                              type="button"
+                              id={groupDOMID(group.id)}
+                              aria-expanded={!collapsed}
+                              onClick={() =>
+                                setCollapsedGroups((current) => {
+                                  const next = new Set(current);
+                                  if (next.has(group.id)) next.delete(group.id);
+                                  else next.add(group.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              <span aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+                              <span>{group.name}</span>
+                              <span>{String(group.keys.length)}</span>
+                              {count === 0 ? null : (
+                                <span className="matrix__problem-count count">
+                                  {`! ${String(count)} problem${count === 1 ? '' : 's'}`}
+                                </span>
+                              )}
+                              {collapsed ? (
+                                <span className="matrix__group-summary mono">
+                                  {group.keys.map((key) => key.name).join(', ')}
+                                </span>
+                              ) : null}
+                            </button>
+                          </th>
+                        </tr>
+                      );
                     }
-                    const collapsed = collapsedGroups.has(group.id);
-                    return [
-                      <tr className="matrix__group-row" key={`group-${group.id}`}>
-                        <th colSpan={visibleEnvironments.length + 1}>
+                    const { key } = row;
+                    return (
+                      <tr
+                        key={key.id}
+                        data-index={virtualRow.index}
+                        ref={rowVirtualizer.measureElement}
+                      >
+                        <th scope="row" title={key.name}>
                           <button
                             type="button"
-                            id={groupDOMID(group.id)}
-                            aria-expanded={!collapsed}
-                            onClick={() =>
-                              setCollapsedGroups((current) => {
-                                const next = new Set(current);
-                                if (next.has(group.id)) next.delete(group.id);
-                                else next.add(group.id);
-                                return next;
-                              })
-                            }
+                            className="matrix__key mono"
+                            aria-label={`Edit ${key.name} across environments`}
+                            onClick={() => setSelection({ keyId: key.id })}
                           >
-                            <span aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
-                            <span>{group.name}</span>
-                            <span>{String(group.keys.length)}</span>
-                            {(problemCounts.get(group.id) ?? 0) === 0 ? null : (
-                              <span className="matrix__problem-count count">
-                                {`! ${String(problemCounts.get(group.id))} problem${problemCounts.get(group.id) === 1 ? '' : 's'}`}
-                              </span>
-                            )}
-                            {collapsed ? (
-                              <span className="matrix__group-summary mono">
-                                {group.keys.map((key) => key.name).join(', ')}
-                              </span>
-                            ) : null}
+                            {key.classification === 'secret' ? <span aria-hidden="true">🔒 </span> : null}
+                            {key.name}
                           </button>
+                          <span className="matrix__required">{requiredLabel(key, environments)}</span>
                         </th>
-                      </tr>,
-                      ...(collapsed
-                        ? []
-                        : group.keys.map((key) => (
-                            <tr key={key.id}>
-                              <th scope="row" title={key.name}>
-                                <button
-                                  type="button"
-                                  className="matrix__key mono"
-                                  aria-label={`Edit ${key.name} across environments`}
-                                  onClick={() => setSelection({ keyId: key.id })}
-                                >
-                                  {key.classification === 'secret' ? <span aria-hidden="true">🔒 </span> : null}
-                                  {key.name}
-                                </button>
-                                <span className="matrix__required">
-                                  {requiredLabel(key, environments)}
-                                </span>
-                              </th>
-                              {visibleEnvironments.map((environment) => {
-                                const cell = valuesByCell.get(cellID(key.id, environment.id));
-                                const signal = signalsByCell.get(cellID(key.id, environment.id));
-                                const cellProblems = problems.filter(
-                                  (problem) =>
-                                    problem.keyId === key.id &&
-                                    problem.environmentId === environment.id,
-                                );
-                                return (
-                                  <td key={environment.id}>
-                                    <MatrixCell
-                                      cell={cell}
-                                      keyRecord={key}
-                                      environment={environment}
-                                      signal={signal}
-                                      problems={cellProblems}
-                                      onOpen={() => setSelection({ keyId: key.id, environmentId: environment.id })}
-                                    />
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))),
-                    ];
+                        {visibleEnvironments.map((environment) => {
+                          const id = cellID(key.id, environment.id);
+                          return (
+                            <td key={environment.id}>
+                              <MatrixCell
+                                cell={valuesByCell.get(id)}
+                                keyRecord={key}
+                                environment={environment}
+                                signal={signalsByCell.get(id)}
+                                problems={problemsByCell.get(id) ?? []}
+                                onOpen={() =>
+                                  setSelection({ keyId: key.id, environmentId: environment.id })
+                                }
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
                   })}
+                  {virtualPaddingBottom > 0 ? (
+                    <tr aria-hidden="true" className="matrix__virtual-spacer">
+                      <td
+                        colSpan={visibleEnvironments.length + 1}
+                        style={{ height: virtualPaddingBottom }}
+                      />
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
@@ -539,30 +613,31 @@ export function Matrix() {
                 signal?.pending_version_id === undefined
                   ? undefined
                   : readMatrixDraftPreview(sessionStorage, ref, signal.pending_version_id),
-              problems: problems.filter(
-                (problem) =>
-                  problem.keyId === selectedKey.id &&
-                  problem.environmentId === environment.id,
-              ),
+              problems:
+                problemsByCell.get(cellID(selectedKey.id, environment.id)) ?? [],
             };
           })}
           busy={stage.isPending || clear.isPending || copy.isPending}
           onClose={() => setSelection(null)}
           onApply={async (changes) => {
+            setMutationError(null);
+            let normalizedCount = 0;
             for (const change of changes) {
               try {
                 if (change.operation === 'set') {
+                  const normalizedValue = normalizeMatrixDraftValue(change.value);
+                  if (normalizedValue !== change.value) normalizedCount += 1;
                   const staged = await stage.mutateAsync({
                     environment: change.environmentId,
                     key: selectedKey.name,
-                    value: change.value,
+                    value: normalizedValue,
                   });
                   if (selectedKey.classification === 'config') {
                     writeMatrixDraftPreview(
                       sessionStorage,
                       ref,
                       staged.version_id,
-                      change.value,
+                      normalizedValue,
                     );
                   }
                 } else {
@@ -579,9 +654,7 @@ export function Matrix() {
                 }
                 clearValidation(selectedKey.id, change.environmentId);
               } catch (error) {
-                recordValidation(
-                  selectedKey.id,
-                  change.environmentId,
+                setMutationError(
                   matrixMutationError(
                     error instanceof Error ? error : new Error('matrix mutation failed'),
                     change.operation === 'set' ? 'stage' : 'clear',
@@ -591,11 +664,12 @@ export function Matrix() {
               }
             }
             setNotice(
-              `${String(changes.length)} draft${changes.length === 1 ? '' : 's'} updated for ${selectedKey.name}.`,
+              `${String(changes.length)} draft${changes.length === 1 ? '' : 's'} updated for ${selectedKey.name}.${normalizedCount === 0 ? '' : ` Leading and trailing whitespace was removed from ${String(normalizedCount)} value${normalizedCount === 1 ? '' : 's'}.`}`,
             );
             setSelection(null);
           }}
-          onCopy={(destinations, confirmProtected) =>
+          onCopy={(destinations, confirmProtected) => {
+            setMutationError(null);
             copy.mutate(
               {
                 sourceEnvironment: selectedEnvironment.id,
@@ -605,20 +679,16 @@ export function Matrix() {
               },
               {
                 onSuccess: () => {
+                  setMutationError(null);
                   setNotice(
                     `${selectedKey.name} copied to ${String(destinations.length)} environment${destinations.length === 1 ? '' : 's'}.`,
                   );
                   setSelection(null);
                 },
-                onError: (error) =>
-                  recordValidation(
-                    selectedKey.id,
-                    selectedEnvironment.id,
-                    matrixMutationError(error, 'copy'),
-                  ),
+                onError: (error) => setMutationError(matrixMutationError(error, 'copy')),
               },
-            )
-          }
+            );
+          }}
         />
       )}
     </section>

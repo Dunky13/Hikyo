@@ -3,7 +3,8 @@
 Ticket: [#57](https://github.com/Dunky13/hikyo/issues/57) (parent #41). Blocked-by #51
 (revisions/publish) and #56 (UI shell / flow registry) — both merged before this work
 started. Authored by Codex `gpt-5.6-sol` (high) under a Claude orchestrator, per the
-ticket's model routing; reviewed two-axis (standards + spec), one fix round, CLEAN.
+ticket's model routing; reviewed two-axis (standards + spec) and through the native
+Codex blocking review loop.
 
 ## What shipped
 
@@ -18,7 +19,9 @@ drift signal anywhere in this surface).
   horizontally scrolling environment lanes, mono cells.
 - Density valves: environment show/hide picker (min 1 visible,
   `toggleVisibleEnvironment`), collapsible groups (collapsed header shows the
-  comma-separated key list), both per prototype iterations 10/12.
+  comma-separated key list), both per prototype iterations 10/12. Rows are
+  virtualized and cell problems pre-indexed, so the 1,000-key × 50-environment
+  project limit does not create a 50,000-cell DOM or per-cell full problem scan.
 - Problems filter per iterations 30/31: client-computed problems
   (`required_in` × absent — including a staged `unset` — plus server validation
   refusals), filter bar "⚠ filter active: problems — showing n of m keys" +
@@ -27,8 +30,9 @@ drift signal anywhere in this surface).
 - `web/src/routes/MatrixRowEditor.tsx` — centered row editor opened from the key name
   or a cell: one field per readable environment, protected markers, fill-all,
   write-only secret placeholders, live per-field declaration checks, per-cell clear,
-  and provenance per environment. Config copy-to keeps its protected confirmation +
-  ceremony; secret reveal/copy stays on Values (#58).
+  and provenance per environment. Dirty state distinguishes untouched, explicit
+  empty `set`, and `unset`. Config copy-to keeps its protected confirmation + ceremony;
+  secret reveal/copy stays on Values (#58).
 - `web/src/routes/MatrixPublishSheet.tsx` — selective publish per the frozen
   `renderPublishSheet`: one section per environment holding drafts (checkbox default
   checked, `rN → rN+1`, draft preview with secrets masked and clears labelled),
@@ -43,9 +47,12 @@ drift signal anywhere in this surface).
 - `web/src/api/matrix.ts` — API boundary: catalogue + per-env values/settings/signals
   fan-out (tanstack-query `useQueries`), signals polled at 2s (the documented SSE
   polling fallback). A revision advance refreshes its matching values query; the
-  boundary refuses half-present pending signals. Config previews persist in
-  session storage under the immutable pending version id, so reload keeps publish
-  review exact. Everything crosses `parsed()` + generated Zod.
+  boundary refuses half-present pending signals. The first signal snapshot refreshes
+  values once to establish ordering; later refreshes happen only on revision advance.
+  Config previews persist in session storage under the immutable pending version id,
+  so reload keeps publish review exact. The UI applies the service's Unicode trim
+  before staging and previewing, and tells the user when normalization occurred.
+  Everything crosses `parsed()` + generated Zod.
 - `web/src/api/client.ts` parses the generated error contract before retaining a
   caller-safe detail. Publish adds a matrix validation problem only when that detail
   names one known key/environment; authorization, stale conflicts, network failures,
@@ -88,7 +95,7 @@ shared with `reveal.spec.ts`; its counter-persistence contract is documented the
 
 ## Verification record (2026-08-15)
 
-`pnpm typecheck` clean · `pnpm test` 75/75 · full Playwright suite 116/116 (3.1 min,
+`pnpm typecheck` clean · `pnpm test` 77/77 · full Playwright suite 116/116 (2.9 min,
 both viewport projects). PR review fixes cover all nine threads; protected publish is
 enforced and regression-tested by rebased `main`'s transactional service path, while
 the remaining eight fixes live in this PR.

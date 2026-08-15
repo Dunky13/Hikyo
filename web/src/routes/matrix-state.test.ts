@@ -4,10 +4,13 @@ import {
   copyRequiresProtectedConfirmation,
   computeMatrixProblems,
   groupProblemCounts,
+  indexMatrixProblems,
   keysForMatrixFilter,
   blockedPublishEnvironmentIds,
   canClearMatrixCell,
   draftValueForMatrixCell,
+  normalizeMatrixDraftValue,
+  matrixDraftChanges,
   requiredInEnvironment,
   toggleVisibleEnvironment,
   validateMatrixDraft,
@@ -111,6 +114,7 @@ describe('computeMatrixProblems', () => {
       'REQUIRED_KEY',
     ]);
     expect(keysForMatrixFilter(keys, problems, 'all')).toEqual(keys);
+    expect(indexMatrixProblems(problems).get('key_required/env_prod')).toEqual(problems);
   });
 });
 
@@ -162,6 +166,26 @@ describe('row editor state', () => {
     expect(canClearMatrixCell(false, 'set')).toBe(true);
     expect(canClearMatrixCell(false, undefined)).toBe(false);
     expect(canClearMatrixCell(true, undefined)).toBe(true);
+  });
+
+  it('normalizes Unicode edge whitespace before staging and previewing', () => {
+    expect(normalizeMatrixDraftValue('\u0085  value\n')).toBe('value');
+    expect(normalizeMatrixDraftValue('inside value')).toBe('inside value');
+    expect(normalizeMatrixDraftValue('   ')).toBe('');
+  });
+
+  it('keeps untouched, explicit empty, and unset editor states distinct', () => {
+    expect(
+      matrixDraftChanges(
+        ['untouched', 'empty', 'cleared'],
+        new Map([['empty', '']]),
+        new Set(['empty']),
+        new Set(['cleared']),
+      ),
+    ).toEqual([
+      { environmentId: 'empty', operation: 'set', value: '' },
+      { environmentId: 'cleared', operation: 'unset' },
+    ]);
   });
 
   it('validates common declared types while typing', () => {

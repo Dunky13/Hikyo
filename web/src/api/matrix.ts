@@ -62,6 +62,15 @@ export function revisionAdvanced(previous: bigint | undefined, next: bigint): bo
   return previous !== undefined && next > previous;
 }
 
+export function signalsRequireValuesRefresh(
+  previous: bigint | undefined,
+  next: bigint,
+): boolean {
+  // Values carry no revision. The first signal snapshot therefore establishes
+  // ordering by refreshing once; later snapshots refresh only on advancement.
+  return previous === undefined || revisionAdvanced(previous, next);
+}
+
 type PreviewStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 function matrixDraftPreviewKey(ref: MatrixRef, versionId: string): string {
@@ -192,7 +201,7 @@ export function useMatrixProject(ref: MatrixRef) {
           }),
           zMatrixEnvironmentSignals,
         );
-        if (revisionAdvanced(previous?.revision, next.revision)) {
+        if (signalsRequireValuesRefresh(previous?.revision, next.revision)) {
           await queries.invalidateQueries({
             queryKey: valuesKey({ ...ref, environment: environment.id }),
           });

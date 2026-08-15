@@ -791,9 +791,16 @@ select {
 }
 
 .matrix__scroll {
+  height: min(70vh, 720px);
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.matrix__virtual-spacer td {
+  height: 0;
+  padding: 0;
+  border: 0;
 }
 
 .matrix__table {

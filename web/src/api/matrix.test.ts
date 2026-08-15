@@ -6,6 +6,7 @@ import {
   parseMatrixEnvironmentSignals,
   readMatrixDraftPreview,
   revisionAdvanced,
+  signalsRequireValuesRefresh,
   writeMatrixDraftPreview,
   type MatrixRef,
 } from './matrix.ts';
@@ -62,10 +63,13 @@ describe('matrix signal boundary', () => {
 });
 
 describe('matrix cache coherence', () => {
-  it('refreshes values only when a known signal revision advances', () => {
+  it('establishes initial ordering, then refreshes only when the signal advances', () => {
     expect(revisionAdvanced(undefined, 2n)).toBe(false);
     expect(revisionAdvanced(2n, 2n)).toBe(false);
     expect(revisionAdvanced(2n, 3n)).toBe(true);
+    expect(signalsRequireValuesRefresh(undefined, 2n)).toBe(true);
+    expect(signalsRequireValuesRefresh(2n, 2n)).toBe(false);
+    expect(signalsRequireValuesRefresh(2n, 3n)).toBe(true);
   });
 });
 

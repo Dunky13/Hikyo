@@ -13,7 +13,9 @@ import {
   canClearMatrixCell,
   copyRequiresProtectedConfirmation,
   draftValueForMatrixCell,
+  matrixDraftChanges,
   validateMatrixDraft,
+  type MatrixDraftChange,
 } from './matrix-state.ts';
 import {
   useProtectedPublishCeremony,
@@ -32,9 +34,7 @@ type EditorRow = {
   readonly problems: readonly { readonly message: string }[];
 };
 
-export type MatrixEditorChange =
-  | { readonly environmentId: string; readonly operation: 'set'; readonly value: string }
-  | { readonly environmentId: string; readonly operation: 'unset' };
+export type MatrixEditorChange = MatrixDraftChange;
 
 /** Locked row editor: one independently staged field per readable environment. */
 export function MatrixRowEditor({
@@ -122,16 +122,12 @@ export function MatrixRowEditor({
     }
   }
 
-  const changes = rows.flatMap<MatrixEditorChange>((row) => {
-    if (clears.has(row.environment.id)) {
-      return [{ environmentId: row.environment.id, operation: 'unset' }];
-    }
-    const value = drafts.get(row.environment.id) ?? '';
-    if (dirty.has(row.environment.id) && value !== '') {
-      return [{ environmentId: row.environment.id, operation: 'set', value }];
-    }
-    return [];
-  });
+  const changes = matrixDraftChanges(
+    rows.map((row) => row.environment.id),
+    drafts,
+    dirty,
+    clears,
+  );
 
   const protectedTargets = (): readonly ProtectedPublishTarget[] =>
     destinations
@@ -171,7 +167,7 @@ export function MatrixRowEditor({
                 ) : null}
                 {keyRecord.name}
               </h2>
-              <p>One independent draft per readable environment. Empty fields stay unchanged.</p>
+              <p>One independent draft per readable environment. Untouched fields stay unchanged; a touched empty field stages an explicit empty value.</p>
             </div>
             <button
               type="button"
@@ -252,7 +248,7 @@ export function MatrixRowEditor({
                           : 'Write-only · set a new secret'
                         : publishedSet
                           ? 'Edit the explicit value'
-                          : 'Empty = unchanged'
+                          : 'Touch to stage an explicit value'
                     }
                     aria-invalid={liveValidation?.level === 'error' ? true : undefined}
                     aria-describedby={liveValidation === null ? undefined : `matrix-error-${environmentId}`}
