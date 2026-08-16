@@ -166,6 +166,8 @@ fi
 
 landing_page=$(fetch "$landing_url")
 require_response_text "$landing_page" '<title>Hikyo'
+require_response_text "$landing_page" '<link rel="manifest" href="/manifest.webmanifest">'
+require_response_text "$landing_page" 'navigator.serviceWorker.register("/sw.js"'
 reject_response_text "$landing_page" '="/hikyo/'
 landing_stylesheet=$(extract_asset_path "$landing_page" stylesheet)
 landing_module=$(extract_asset_path "$landing_page" module)
@@ -179,6 +181,36 @@ docs_stylesheet=$(extract_asset_path "$docs_page" stylesheet)
 docs_module=$(extract_asset_path "$docs_page" module)
 require_asset "$docs_stylesheet" stylesheet
 require_asset "$docs_module" module
+
+pwa_manifest=$(fetch "$docs_origin/manifest.webmanifest")
+printf '%s\n' "$pwa_manifest" | "$JQ_BIN" -e '
+  .id == "/" and
+  .start_url == "/" and
+  .scope == "/" and
+  .display == "standalone" and
+  any(.icons[]; .src == "/pwa-192x192.png" and .sizes == "192x192") and
+  any(.icons[]; .src == "/pwa-512x512.png" and .sizes == "512x512")
+' >/dev/null || {
+	printf 'live docs gate: PWA manifest is incomplete or invalid\n' >&2
+	exit 1
+}
+
+service_worker=$(fetch "$docs_origin/sw.js")
+require_response_text "$service_worker" 'docs/getting-started/index.html'
+require_response_text "$service_worker" 'pwa-512x512.png'
+for icon_path in /pwa-192x192.png /pwa-512x512.png; do
+	content_type=$("$CURL_BIN" --fail --location --silent --show-error \
+		--proto '=https' --tlsv1.2 --max-time 20 --output /dev/null \
+		--write-out '%{content_type}' "$docs_origin$icon_path")
+	case "$content_type" in
+	image/png*) ;;
+	*)
+		printf 'live docs gate: %s returned unexpected content type: %s\n' \
+			"$icon_path" "$content_type" >&2
+		exit 1
+		;;
+	esac
+done
 
 security_txt=$(fetch "$docs_origin/.well-known/security.txt")
 require_response_text "$security_txt" 'Contact: https://github.com/Hikyo-Org/hikyo/security/advisories/new'
@@ -227,4 +259,4 @@ printf '%s\n' "$mx_response" | "$JQ_BIN" -e \
 	exit 1
 }
 
-printf 'live docs gate: root assets, docs assets, policy pages, security.txt, and fallback MX passed\n'
+printf 'live docs gate: root, docs, PWA, policy, security.txt, and fallback MX passed\n'

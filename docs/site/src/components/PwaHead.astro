@@ -1,0 +1,31 @@
+---
+import { siteUrl } from '../lib/site';
+
+const faviconUrl = siteUrl('favicon-hikyo-48.png');
+const touchIconUrl = siteUrl('apple-touch-icon.png');
+const manifestUrl = siteUrl('manifest.webmanifest');
+const serviceWorkerScope = siteUrl();
+const serviceWorkerUrl = siteUrl('sw.js');
+const serviceWorkerRegistration = import.meta.env.PROD
+  ? `if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(${JSON.stringify(serviceWorkerUrl)}, {
+      scope: ${JSON.stringify(serviceWorkerScope)},
+      updateViaCache: 'none',
+    }).catch((error) => {
+      console.error('Hikyo service worker registration failed', error);
+    });
+  });
+}`
+  : '';
+---
+
+<link rel="icon" type="image/png" sizes="48x48" href={faviconUrl} />
+<link rel="apple-touch-icon" sizes="180x180" href={touchIconUrl} />
+<link rel="manifest" href={manifestUrl} />
+<meta name="application-name" content="Hikyo" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Hikyo" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<script is:inline set:html={serviceWorkerRegistration}></script>

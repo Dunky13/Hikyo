@@ -28,7 +28,7 @@ case "$url" in
 		else
 			base=
 		fi
-		printf '<title>Hikyo</title><link rel="stylesheet" href="%s/_astro/landing.css"><script type="module" src="%s/_astro/landing.js"></script>\n' \
+		printf '<title>Hikyo</title><link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="%s/_astro/landing.css"><script>navigator.serviceWorker.register("/sw.js")</script><script type="module" src="%s/_astro/landing.js"></script>\n' \
 			"$base" "$base"
 		;;
 	*/docs/ | */docs/\?*)
@@ -56,6 +56,24 @@ case "$url" in
 			printf '%s' 'application/javascript; charset=utf-8'
 		else
 			printf '%s\n' 'fixture module'
+		fi
+		;;
+	*/manifest.webmanifest)
+		if [ "${FAKE_STALE_PWA:-0}" -eq 1 ]; then
+			scope=/stale/
+		else
+			scope=/
+		fi
+		printf '{"id":"/","start_url":"/","scope":"%s","display":"standalone","icons":[{"src":"/pwa-192x192.png","sizes":"192x192"},{"src":"/pwa-512x512.png","sizes":"512x512"}]}\n' "$scope"
+		;;
+	*/sw.js)
+		printf '%s\n' 'docs/getting-started/index.html pwa-512x512.png'
+		;;
+	*/pwa-192x192.png | */pwa-512x512.png)
+		if [ "$write_content_type" -eq 1 ]; then
+			printf '%s' 'image/png'
+		else
+			printf '%s\n' 'fixture PNG'
 		fi
 		;;
 	*/.well-known/security.txt)
@@ -145,6 +163,13 @@ if FAKE_BAD_ASSET_TYPE=1 CURL_BIN="$fixture_dir/curl" \
 	"$repo_root/scripts/ci/check-docs-live.sh" \
 	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
 	printf 'live docs fixture failed: HTML stylesheet response was accepted\n' >&2
+	exit 1
+fi
+
+if FAKE_STALE_PWA=1 CURL_BIN="$fixture_dir/curl" \
+	"$repo_root/scripts/ci/check-docs-live.sh" \
+	https://hikyo.app security@developwent.io >/dev/null 2>&1; then
+	printf 'live docs fixture failed: stale PWA manifest was accepted\n' >&2
 	exit 1
 fi
 

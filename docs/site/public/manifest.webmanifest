@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Hikyo — fully open secrets and configuration",
+  "short_name": "Hikyo",
+  "description": "A fully open-source, self-hosted control plane for validated secrets and configuration across environments.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1b2225",
+  "theme_color": "#1b2225",
+  "categories": ["developer", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

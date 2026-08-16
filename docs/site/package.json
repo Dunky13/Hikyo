@@ -7,16 +7,16 @@
     "prepare-content": "node scripts/prepare-content.mjs",
     "dev": "pnpm run prepare-content && astro dev",
     "check": "pnpm run prepare-content && astro check",
-    "build": "pnpm run prepare-content && astro build",
-    "test": "pnpm run build && ../../scripts/ci/check-oss-policy.sh ../.. dist",
+    "build": "pnpm run prepare-content && astro build && node scripts/build-pwa.mjs",
+    "test": "pnpm run build && ../../scripts/ci/check-oss-policy.sh ../.. dist && ../../scripts/ci/check-docs-pwa.sh ../.. dist && node scripts/test-pwa-offline.mjs",
     "verify": "pnpm run check && pnpm run test"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "7.2.2",
     "@astrojs/mdx": "7.0.5",
     "@astrojs/react": "6.0.2",
-    "@fontsource/instrument-sans": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/instrument-sans": "5.3.0",
     "@tailwindcss/vite": "4.3.3",
     "astro": "7.2.0",
     "fumadocs-core": "16.14.2",
@@ -29,10 +29,12 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@playwright/test": "1.62.1",
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "workbox-build": "7.4.1"
   },
   "packageManager": "pnpm@11.10.0"
 }

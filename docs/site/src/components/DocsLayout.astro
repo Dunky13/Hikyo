@@ -1,5 +1,6 @@
 ---
-import { siteUrl, themeBootstrapScript } from '../lib/site';
+import PwaHead from './PwaHead.astro';
+import { themeBootstrapScript } from '../lib/site';
 
 interface Props {
   title: string;
@@ -16,7 +17,7 @@ const { title, description = 'Hikyo documentation' } = Astro.props;
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#1b2225" />
-    <link rel="icon" type="image/svg+xml" href={siteUrl('favicon.svg')} />
+    <PwaHead />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
     <title>{title} — Hikyo</title>
     <script is:inline set:html={themeBootstrapScript}></script>
