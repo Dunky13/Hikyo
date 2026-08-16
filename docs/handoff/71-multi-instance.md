@@ -98,14 +98,10 @@ that leg.
 
 1. **Grant API**: already structural via `domain.MachineMayHold` — the
    instance-connection class admits exactly `instance-directory`.
-2. **Artifact eligibility**: NEW. `internal/authz/eligibility.go` — a map from
-   artifact type to the closed operation set it may reach; an artifact type
-   absent from the map is unconfined (today's behaviour for `cli`/`br`/`wl`/`au`),
-   an artifact type present is confined to its list. `ic` maps to exactly
-   `{remote.directory-serve}`. Enforced at the top of
-   `TxAuthorizer.Authorize` — the single chokepoint — so it cannot be bypassed
-   by a new endpoint. CI invariant enumerates every registered operation and
-   asserts `ic` is refused on all but one.
+2. **Artifact eligibility**: superseded by #113. The embedded OpenAPI document
+   is now the only eligibility registry. `serveDirectory` declares
+   `instance-credential`; runtime admission reads that exact row through
+   `api/spec.go`, and CI asserts no other operation admits the class.
 
 ### Operations (authz registry)
 
@@ -241,16 +237,13 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
   conformance corpus on sqlite.
 
 - **DONE — artifact eligibility, the second half of the double confinement
-  (acceptance criterion 4b).** `internal/authz/eligibility.go`:
-  `artifactEligibility` is an ALLOWLIST OF CONFINED TYPES — absent = unconfined
-  (today's behaviour for every existing artifact), present = confined to the
-  listed operations. `ic` → exactly `{remote.directory-serve}`. Enforced at the
-  top of `TxAuthorizer.Authorize` (`internal/authz/authorize.go`), before the
-  formula and before chain resolution, so no future endpoint can bypass it; the
-  refusal wears the operation class's own uniform (`ErrNotFound` for tenant,
-  `ErrUnauthorized` for instance) so eligibility is not a side channel.
-  CI invariant: `internal/isolation/eligibility_test.go`, three tests, all
-  ranging over the LIVE operation registry rather than a restated list.
+  (acceptance criterion 4b; superseded implementation in #113).**
+  `api/openapi.yaml` declares `instance-credential` on exactly
+  `serveDirectory`. Request admission carries its operation id; the service
+  resolves the immutable `api/spec.go` row after authenticating inside the
+  transaction and returns the uniform nonexistent refusal on mismatch. CI
+  invariant: `internal/isolation/eligibility_test.go`, ranging over the embedded
+  contract registry rather than a restated eligibility table.
 - **DONE — `remote.directory-serve` registered** in the authz operation
   registry (instance class, `instance-directory@instance`), with its
   `operation_formulas.json` repin. It is registered ahead of its serving
@@ -290,11 +283,11 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
   does postgres' timestamptz work rather than sqlite's string parsing — the
   exact defect #61's R3 found.
 - **DONE — the `ic` and `ws` authentication legs.**
-  - `authenticateInstanceConnection` (`internal/authz/machine.go`) sets
-    `Artifact: string(crypto.ArtifactInstanceConn)` — **not** `conn.Kind` —
-    which is the trap noted below; the confinement is live because of it.
-    Two reads (connection row + epoch), not the machine leg's three, because
-    the connection row holds principal and credential as one unit.
+  - `authenticateInstanceConnection` (`internal/authz/machine.go`) sets the
+    exact `ic` artifact for forensic identity while `ClassInstanceConn` maps to
+    the distinct OpenAPI `instance-credential` admission class. Two reads
+    (connection row + epoch), not the machine leg's three, because the
+    connection row holds principal and credential as one unit.
   - `Authenticate` was refactored into `authenticateSession(..., admits ...)`.
     `Authenticate` admits `cli`+`browser` only; `AuthenticateCaller` admits
     `cli`+`browser`+`workspace`. So every account-security verb (logout, factor
@@ -383,16 +376,11 @@ Serving: `remote.credential_minted`, `remote.credential_revoked`,
    revoked row, and a 256-bit re-mint cannot collide.
 3. **New proof-free writers must be added to `lint.ResolutionSurfaceWriters`**
    (`internal/lint/appendonly.go`) or `TestDenialWriterIsSoleWriter` fails.
-4. **`Identity.Artifact` has THREE provenances, and two of them are traps.**
-   Sessions carry the DATABASE string (`cli` / `browser` / **`workspace`**),
-   `authenticateMachine` carries the CREDENTIAL KIND (`hikyo-token`), and
-   `authenticateInstanceConnection` carries the bearer-grammar TYPE (`ic`)
-   because #71 made it do so deliberately. Consequence for anyone extending the
-   eligibility table: a row keyed on `crypto.ArtifactWorkspaceSession` (`"ws"`)
-   **would never match**, because a workspace session's `Identity.Artifact` is
-   `"workspace"`. This is the same inertness trap the `ic` row nearly fell into;
-   the class key (`authz.confinedClasses`) is the defence, and it is why the
-   confinement is keyed twice.
+4. **Artifact admission classifies the resolved identity class, not its mixed-
+   provenance `Identity.Artifact` string.** Sessions map to `human-session`,
+   service-account identities to `machine-credential`, and
+   `domain.ClassInstanceConn` to `instance-credential`. Keep that last class
+   distinct: mapping `ic` to generic machine credentials widens it to delivery.
 
 ## Two forward collisions deliberately left in place
 
@@ -862,17 +850,9 @@ Original plan, kept for its reasoning. Status against the six locked criteria, A
 | 6 | **MET, with one scoping caveat stated plainly.** CI half: no-proxy closure over 16 pinned paths, each with a written confirmation of what it returns, plus the wire-registry half and the live dial instrumentation. Harness half: `two_instance_test.go` asserts `remotefetch.Dials()` is UNCHANGED across a full workspace arc driven by a client that is neither server, and `TestZeroRemotesOriginateZeroConnections` measures the air-gap statement. **Caveat:** two instances in ONE PROCESS (two datastores, two routers, two TLS servers, real pins), not two OS processes — see the scoping note above for why that is the stronger test for this criterion, and for Marc's disposition. |
 
 **Trap for the resumer, stated because it silently defeats criterion 4:**
-`Identity.Artifact` has mixed provenance — sessions carry the DB artifact string
-(`cli`/`browser`/`workspace`, NOT `br`/`ws`), while `authenticateMachine` sets
-`Artifact: string(cred.Kind)` = `"hikyo-token"` (`machine.go:102`). A resolver
-written by copying the machine leg verbatim would set the `ic` leg's Artifact to
-`"hikyo-token"`, the artifact table would never match, and the confinement would
-go inert while every test of the table stayed green. Two guards against that:
-the `ic` leg **MUST** set `Identity.Artifact = string(crypto.ArtifactInstanceConn)`,
-and the confinement is additionally keyed on `Identity.Class`
-(`authz.confinedClasses`), which the Identity contract requires to be set on
-every resolution path. `authz.Eligible(caller, op)` checks both; the chokepoint
-calls that, not `ArtifactEligible` alone.
+do not classify an `ic` bearer as generic `machine-credential`. Runtime
+admission maps `domain.ClassInstanceConn` to the distinct OpenAPI
+`instance-credential` class; collapsing it would admit `delivery.fetch`.
 
 1. **Viewing-side store layer.** `remotes` + `remote_snapshots` queries (the
    tables exist; only `instance_connections`/`instance_identity` have queries so
@@ -1454,11 +1434,10 @@ this human's own grants, which is the ADR's stated blast radius for it, and the
 shell needs it to render. Asserted in the same test.
 
 `TestContractSecuredOperationsTakeAnArtifact`
-(`internal/isolation/contract_test.go`) no longer restates
-`{"serveDirectory": true}`. The expectation is DERIVED from
-`authz.EligibleOperations(crypto.ArtifactInstanceConn)` and asserted in both
-directions, so dropping the contract's `machine-credential` declaration — which
-used to leave the test green — now fails.
+(`internal/isolation/contract_test.go`) validates the embedded declaration.
+`TestInstanceConnectionCredentialReachesOnlyDirectoryServe` asserts the
+`instance-credential` class occurs on exactly `serveDirectory`; runtime reads
+the same contract row, so no parallel enforcement registry exists.
 
 ## HIGH — origin binding at authentication (p1a-1)
 

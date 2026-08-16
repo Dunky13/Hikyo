@@ -3144,6 +3144,12 @@ export type LogoutErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -3181,6 +3187,12 @@ export type WhoamiErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -3227,6 +3239,12 @@ export type EnrolTotpStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -3271,6 +3289,12 @@ export type EnrolTotpConfirmErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -3317,6 +3341,12 @@ export type StepUpTotpErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -3361,6 +3391,12 @@ export type ReauthTotpErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
@@ -3416,6 +3452,12 @@ export type RemoveTotpErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -3460,6 +3502,12 @@ export type RegenerateRecoveryCodesErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -3561,6 +3609,12 @@ export type ListOrgsErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -3622,6 +3676,12 @@ export type CreateOrgErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
@@ -5181,6 +5241,12 @@ export type RevokeInstanceGrantErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
      * never cascade), or a structural bound reached (`limit_exceeded`, whose
@@ -5245,6 +5311,12 @@ export type ListInstanceGrantsErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -5307,6 +5379,12 @@ export type CreateInstanceGrantErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -5368,6 +5446,12 @@ export type ApplyInstanceTemplateErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -7912,23 +7996,6 @@ export type ListValueOccurrencesErrors = {
      */
     401: Error;
     /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
-    /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.
      *
@@ -7992,23 +8059,6 @@ export type ImportValuesErrors = {
      *
      */
     401: Error;
-    /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
     /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.
@@ -8331,6 +8381,12 @@ export type OidcStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8386,6 +8442,12 @@ export type OidcCallbackErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8428,6 +8490,12 @@ export type SamlStartErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8478,6 +8546,12 @@ export type SamlAcsErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8559,6 +8633,12 @@ export type ListMyOrgsErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8596,6 +8676,12 @@ export type ListIdentitiesErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8698,6 +8784,12 @@ export type UnlinkIdentityErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8740,6 +8832,12 @@ export type ResetCredentialErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8786,6 +8884,12 @@ export type EnrolPasskeyStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8830,6 +8934,12 @@ export type EnrolPasskeyFinishErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8876,6 +8986,12 @@ export type PasskeyLoginStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -8920,6 +9036,12 @@ export type PasskeyLoginFinishErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -8966,6 +9088,12 @@ export type StepUpPasskeyStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -9010,6 +9138,12 @@ export type StepUpPasskeyFinishErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -9056,6 +9190,12 @@ export type ReauthPasskeyStartErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -9101,6 +9241,12 @@ export type ReauthPasskeyFinishErrors = {
      */
     401: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -9138,6 +9284,12 @@ export type ListPasskeysErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -9188,6 +9340,12 @@ export type RemovePasskeyErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -9243,6 +9401,12 @@ export type ListOidcProvidersErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -9443,6 +9607,12 @@ export type PutOidcProviderErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -9498,6 +9668,12 @@ export type GetRetentionHealthErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -9552,6 +9728,12 @@ export type ListSamlProvidersErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -9834,6 +10016,12 @@ export type PutSamlProviderErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
      * never cascade), or a structural bound reached (`limit_exceeded`, whose
@@ -9979,6 +10167,12 @@ export type ListSamlSpKeysErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -10627,6 +10821,12 @@ export type GetCredentialPolicyErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -10689,6 +10889,12 @@ export type SetCredentialPolicyErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -10743,6 +10949,12 @@ export type ListFederationIssuersErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -10805,6 +11017,12 @@ export type CreateFederationIssuerErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
@@ -13498,6 +13716,12 @@ export type ServeDirectoryErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -13552,6 +13776,12 @@ export type ListRemotesErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -13614,6 +13844,12 @@ export type AddRemoteErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
@@ -13905,6 +14141,12 @@ export type ListInstanceConnectionsErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -13966,6 +14208,12 @@ export type MintInstanceConnectionErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -14231,6 +14479,12 @@ export type ListWorkspaceOriginsErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -14292,6 +14546,12 @@ export type AddWorkspaceOriginErrors = {
      *
      */
     403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The caller is authorized, but the current state refuses: a name already
      * in use among live siblings, a parent that still has children (deletes
@@ -14419,6 +14679,12 @@ export type ApproveWorkspaceHandoffErrors = {
      */
     403: Error;
     /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
      *
@@ -14511,6 +14777,12 @@ export type ListMySessionsErrors = {
      *
      */
     401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
     /**
      * The instance-wide admission budget or a per-source limit is
      * exhausted. Uniform on every path, with no unbounded work performed.
@@ -14807,23 +15079,6 @@ export type RollbackRevisionErrors = {
      */
     401: Error;
     /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
-    /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.
      *
@@ -14890,23 +15145,6 @@ export type ListRevisionPinsErrors = {
      */
     401: Error;
     /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
-    /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.
      *
@@ -14970,23 +15208,6 @@ export type CreateRevisionPinErrors = {
      *
      */
     401: Error;
-    /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
     /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.
@@ -15054,23 +15275,6 @@ export type ReleaseRevisionPinErrors = {
      *
      */
     401: Error;
-    /**
-     * Either the principal does not hold the operation's formula at instance
-     * scope — instance-class operations have no tenant object whose
-     * nonexistence could be mimicked, so the probe contract there is grant
-     * refusal, not tenancy — or the principal DOES hold it and the acting
-     * session's assurance is inadequate for an MFA-mandatory operation.
-     *
-     * The second case is why two tenant-scoped operations (`renameOrg`,
-     * `deleteOrg`) declare this status: their formula atom `instance-config`
-     * is MFA-mandatory, and the refusal fires only AFTER the grant check
-     * succeeded. A caller who reaches it can already reach the object, so
-     * naming the step-up discloses nothing the uniform 404 was protecting —
-     * and hiding it would tell a capability holder the object is missing.
-     * Grant refusal on a tenant-scoped operation is always the 404.
-     *
-     */
-    403: Error;
     /**
      * The addressed object does not exist **or** the principal may not reach
      * it — indistinguishable by design, byte-identical in status and body.

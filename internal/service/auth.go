@@ -990,6 +990,12 @@ func (s *Auth) SlideIdleClock(ctx context.Context, presented string) error {
 		if err != nil {
 			return err
 		}
+		// The SCIM wire stamps provisioning credentials inside its binding-
+		// checked transaction. This generic post-response path owns sessions and
+		// service-account credentials only.
+		if id.Class == domain.ClassProvisioning {
+			return nil
+		}
 		if now.Sub(id.LastSeenAt) < SlideGranularity {
 			return nil
 		}

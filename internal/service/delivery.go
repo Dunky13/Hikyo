@@ -126,10 +126,10 @@ func (s *Delivery) now() time.Time {
 // branch is on the shape the caller sent, never on anything the server has yet
 // decided to trust.
 //
-// A human session presenting itself here works too and is deliberate: the
-// surface is machine-shaped, not machine-only, and an operator debugging what a
-// workload will receive should be able to ask the same question the workload
-// asks. Authority is the same `read(E)` either way.
+// HTTP admission makes this surface machine-only from #113 onward. FetchAs
+// remains available to below-the-network local authority so operators and
+// conformance fixtures can exercise the delivery mechanism without forging a
+// machine artifact.
 func (s *Delivery) Fetch(ctx context.Context, presented string, scope domain.Scope, cursor string) (FetchResult, error) {
 	if s.Keyring == nil {
 		return FetchResult{}, ErrDeliveryKeyring

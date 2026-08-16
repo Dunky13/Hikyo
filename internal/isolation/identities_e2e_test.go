@@ -3,10 +3,13 @@ package isolation
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -946,6 +949,21 @@ func runIdentityLifecycle(t *testing.T, db *store.DB) {
 	minted, err := svc.MintCredential(ctx, admin, prjScope(), sa.ID, service.MintRequest{})
 	if err != nil {
 		t.Fatalf("identity.credential_minted: %v", err)
+	}
+
+	// #113's named authentication refusal: drive a live machine credential
+	// through a human-session-only contract row before revoking it. This is the
+	// real admission emitter the audit registry's runtime-closure check needs.
+	request := httptest.NewRequest(http.MethodGet,
+		api.PathPrefix+"/orgs/"+string(orgA)+"/projects/"+string(prjA1)+
+			"/environments/"+string(envA1), nil)
+	admissionCtx, ok := api.WithRequestOperation(ctx, request)
+	if !ok {
+		t.Fatal("getEnvironment did not resolve through the embedded contract")
+	}
+	if _, err := (&service.Environments{DB: db}).Get(admissionCtx,
+		service.Bearer(minted.Value), envScope(envA1)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("auth.artifact_class_refused: %v", err)
 	}
 	if _, err := svc.ListCredentials(ctx, admin, prjScope(), sa.ID); err != nil {
 		t.Fatalf("identity.credentials_listed: %v", err)

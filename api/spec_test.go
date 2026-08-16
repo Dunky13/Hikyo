@@ -155,7 +155,8 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 		"tenant": true, "instance": true, "unauthenticated": true, "system": true,
 	}
 	validArtifacts := map[string]bool{
-		"none": true, "human-session": true, "machine-credential": true, "local": true,
+		"none": true, "human-session": true, "machine-credential": true,
+		"instance-credential": true, "local": true,
 		// `scim-credential` is the SCIM provisioning connection's own artifact
 		// class (#73 §7): the machine-identity ADR's closed token-type list
 		// gains `scim` by the scim-provisioning amendment, and this is that
@@ -206,6 +207,33 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 		}
 		if !op.Secured && op.AuthzOp != "" {
 			t.Errorf("%s: reaches authz operation %q with the security requirement cleared", id, op.AuthzOp)
+		}
+	}
+}
+
+func TestBearerAdmittingOperationsDeclareArtifactRefusal(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := api.Operations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, item := range doc.Paths.Map() {
+		for method, operation := range item.Operations() {
+			row := ops[operation.OperationID]
+			admitsBearer := false
+			for _, artifact := range row.Artifacts {
+				if artifact != api.ArtifactNone {
+					admitsBearer = true
+					break
+				}
+			}
+			if admitsBearer && operation.Responses.Status(http.StatusNotFound) == nil {
+				t.Errorf("%s %s (%s) admits an authenticated artifact but does not declare the uniform 404 class-mismatch response",
+					method, path, operation.OperationID)
+			}
 		}
 	}
 }

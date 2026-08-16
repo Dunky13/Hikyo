@@ -31,7 +31,7 @@ store" structural rather than a per-connector courtesy.
 |---|---|
 | `import.presence` operation — phase 1's read, `read@project` (minimal form of the ADR's split formula — see § The precondition authorizes the union), human-only, audited-none | `internal/authz/registry.go` |
 | `value.import` operation — phase 2's batch write, `read@project ∧ edit(E) ∧ publish(E)`, human-only. The read atom is the security-gate finding: strict import's response (imported / skipped / rejected-by-name) is a presence-and-catalogue read even without a manifest, and a write-only editor (edit ∧ publish, no read) must not enumerate declarations or set/absent state by probing the verb — write-only rotation keeps `values set` | same |
-| `humanOnly` on the registry row + `machineRefused` at the chokepoint | `internal/authz/registry.go`, `authorize.go` |
+| Human-only artifact admission, derived from embedded OpenAPI | `api/openapi.yaml`, `api/spec.go`, `internal/service/service.go` |
 | Occurrence token minting (HMAC, scoped) | `internal/crypto/token.go` |
 | The occurrence canonical encoding | `internal/delivery/delivery.go` |
 | `Values.Occurrences` / `Values.Import` | `internal/service/import.go` |
@@ -345,7 +345,7 @@ no import path that reaches age/GPG without reaching the cloud backends.
 |---|---|---|
 | Connector fixtures | `internal/importer/connector_test.go` | (a) true-positive mapping per source, (b) adversarial parser fixtures (wrong kind, duplicate key, binary value, malformed), (c) hostile-error sanitization asserted against the value bytes that produced the refusal, (d) every bound fails loud naming itself, (e) the shared sanitized spawn path, on a real child process |
 | Plan / grammar / artifacts | `internal/importer/plan_test.go` | Valid names byte-preserved; the documented transform; hard stops; near-miss; `new \| set` buckets; enumerated overwrite; secret-by-default; template downgrades and types; renames surfaced and recorded; post-transform collision; trim preflight; single-Secret root targeting; existing declarations not re-declared; template/manifest strict round-trip and version-mismatch refusal |
-| Human-only | `internal/authz/authz_test.go` | The chokepoint predicate: machines refused, humans not, local host authority exempt, per-operation not global |
+| Human-only | `api/artifact_admission_test.go`, `internal/isolation/artifact_admission_wire_test.go` | Embedded-contract derivation plus byte-identical wire refusal for a real machine credential on a human-session-only route, on both engines |
 | Cross-engine (sqlite **and** postgres) | `internal/conformance/import_test.go` | Phase-1 presence + token movement (incl. `set → set` with a changed value); phase-2 strictness, skip-by-default, enumerated overwrite; imported values materialized into the committed snapshot; **phase-2 replay against moved state rejects by occurrence token, naming the key**; fabricated token indistinguishable from stale; definitions-revision mismatch; per-source fixture E2E for **all three** connectors (k8s, infisical, sops) with the collision, rename, typing and classification matrices — the sops leg is also the only E2E that decrypts through `WithSanitized` and asserts the plaintext hint downgrades nothing |
 | Security regressions | `internal/importer/connector_test.go`, `internal/conformance/import_test.go` | Oracle closure (precondition authorizes the union); per-file bound before the bytes are resident; alias bomb refused at the named bound with allocation asserted; hostile `kind`/`type`/name never echoed; personal overrides charged before they are skipped; run deadline interrupts decryption |
 | Golden CLI | `internal/cli/golden_test.go` + `testdata/` | `help.txt`, `exit-codes.txt` — including `import` with no source and no terminal being a hard error rather than a hung prompt — plus `-o json` shape fixtures for the two new response types (`value-occurrences-json.json`, `value-import-json.json`) |
@@ -457,11 +457,6 @@ run, with the shared revision event added by materialization.
 4. **Importing into an existing `config` declaration** is surfaced as a warning
    and proceeds (import does not mutate declarations, per the ADR). Should it
    instead hard-stop?
-5. **`x-hikyo-artifacts` was already documentation-only** — no runtime human-only
-   enforcement existed anywhere. This ticket added `humanOnly` to the operation
-   registry and enforced it at the chokepoint, and extended
-   `TestTenantRoutesDeclareForbiddenOnlyForMFA` to admit 403 for human-only
-   operations alongside MFA-mandatory ones (both are post-grant refusals, same
-   shape, same reasoning). The other human-only verbs the ADR names — `adopt`,
-   `scaffold`, `login` — are unbuilt; when they land they should set the same
-   flag.
+5. **Superseded by #113:** `x-hikyo-artifacts` is runtime-enforced from the
+   embedded OpenAPI document. Import declares `human-session`; a machine gets
+   the uniform nonexistent response. No parallel `humanOnly` registry remains.

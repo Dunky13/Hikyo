@@ -11,7 +11,6 @@ import (
 
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
-	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/scimproto"
 	"github.com/Hikyo-Org/hikyo/internal/store"
@@ -32,44 +31,21 @@ import (
 // that is NOT uniform is the binding mismatch's own sentinel, which exists so
 // the audit trail can record it — the response is identical either way.
 func resolveSCIMCredential(ctx context.Context, az *authz.TxAuthorizer, a Actor, now time.Time) (authz.Identity, error) {
-	if err := crypto.ParseArtifact(a.scimToken, crypto.ArtifactSCIM); err != nil {
-		// A truncated or mistyped value is refused with zero further work; it
-		// never reaches a database read at all.
-		return authz.Identity{}, domain.ErrUnauthenticated
-	}
-	row, err := az.SCIMCredentialByVerifier(ctx, crypto.ArtifactVerifier(a.scimToken))
-	if errors.Is(err, domain.ErrNotFound) {
-		return authz.Identity{}, domain.ErrUnauthenticated
-	}
+	identity, bindingID, err := az.AuthenticateSCIMCaller(ctx, a.scimToken, now)
 	if err != nil {
 		return authz.Identity{}, err
 	}
-	if !row.Live(now) {
-		return authz.Identity{}, domain.ErrUnauthenticated
-	}
-	// The credential epoch: a verifier restored from a backup is PERMANENTLY
-	// dead (locked, machine-identities ADR), which is what §9.1's "the org
-	// admin must re-mint" rests on.
-	epoch, err := az.CredentialEpoch(ctx)
-	if err != nil {
-		return authz.Identity{}, err
-	}
-	if row.CredentialEpoch != epoch {
-		return authz.Identity{}, domain.ErrUnauthenticated
-	}
-	if row.BindingID != a.scimBinding {
+	if bindingID != a.scimBinding {
 		// §8 requires the mismatch to be AUDITED. The event is NOT written here:
 		// this transaction is about to fail, and an event inside a rolled-back
 		// transaction is not a record. wireTx writes it afterwards, in its own
 		// transaction, which is what makes it durable.
-		return authz.Identity{}, mismatchError{credential: row.ID, binding: a.scimBinding}
+		return authz.Identity{}, mismatchError{credential: identity.CredentialID, binding: a.scimBinding}
 	}
-	if err := az.TouchSCIMCredential(ctx, row.ID, now); err != nil {
+	if err := az.TouchSCIMCredential(ctx, identity.CredentialID, now); err != nil {
 		return authz.Identity{}, err
 	}
-	// A machine identity: no session, no factors, no assurance. Machines do not
-	// reauthenticate, and the MFA-mandatory rule binds human sessions.
-	return authz.Identity{Principal: row.PrincipalID}, nil
+	return identity, nil
 }
 
 // mismatchError carries the credential and binding a refused presentation
