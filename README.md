@@ -33,6 +33,9 @@
 
 ## Implementation status
 
+<details>
+<summary>Show fully implemented, partially implemented, and not-started features</summary>
+
 “Implemented” means the feature and its acceptance coverage are present in the
 repository. It does not mean the API is frozen or that Hikyo 1.0 has shipped.
 The source and linked implementation tickets are authoritative; [#1] and [#41]
@@ -77,6 +80,8 @@ are planning/parent trackers rather than missing features.
 The remaining 1.0 implementation blockers are [#59], [#60], [#63]–[#66],
 [#70], [#74], [#75], [#77], and [#112]. Once they close, [#79] performs the
 full acceptance run and cuts the freeze/release tag.
+
+</details>
 
 [#1]: https://github.com/Hikyo-Org/Hikyo/issues/1
 [#41]: https://github.com/Hikyo-Org/Hikyo/issues/41
