@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/store/authn"
@@ -65,22 +66,22 @@ func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operat
 		return nil, errors.New("authz: empty principal")
 	}
 
-	// Artifact eligibility, BEFORE the formula and before any chain resolution
-	// (#71, the multi-instance ADR's double confinement). It sits here, at the
-	// single chokepoint every operation passes through, rather than on the
-	// routes that happen to exist today: a credential confined to one operation
-	// must stay confined when the next endpoint is written, and a check on the
-	// endpoint is a check the next endpoint's author has to remember.
-	//
-	// The refusal wears the class's own uniform: a confined credential
-	// addressing a tenant operation is answered exactly like an unauthorized
-	// one, so eligibility is not a side channel for which operations exist.
-	if !Eligible(caller, op) {
-		a.captureDenial(ctx, caller.Principal, op, spec, resolutionUnresolvable, domain.Scope{}, scope)
-		if spec.class == ClassTenant {
-			return nil, domain.ErrNotFound
+	// HTTP admission evaluates the exact request operation before reaching
+	// here. The instance-connection credential also has a locked in-process
+	// confinement invariant from #71, so preserve that one chokepoint guarantee
+	// through a view derived from the same embedded OpenAPI registry. Other
+	// in-process actors intentionally retain service-level semantics that may be
+	// broader than today's public wire declarations (for example machine reveal).
+	if _, exactWireOperation := api.OperationFromContext(ctx); !exactWireOperation && caller.Class == domain.ClassInstanceConn {
+		artifact := api.ArtifactInstanceCredential
+		admitted, described := api.AuthorizationOperationAdmitsArtifact(string(op), artifact)
+		if !described || !admitted {
+			a.captureDenial(ctx, caller.Principal, op, spec, resolutionUnresolvable, domain.Scope{}, scope)
+			if spec.class == ClassTenant {
+				return nil, domain.ErrNotFound
+			}
+			return nil, domain.ErrUnauthorized
 		}
-		return nil, domain.ErrUnauthorized
 	}
 
 	switch spec.class {
@@ -96,31 +97,31 @@ func (a *TxAuthorizer) Authorize(ctx context.Context, caller Identity, op Operat
 	}
 }
 
+// ContractArtifactClass maps a resolved identity to the vocabulary used by
+// x-hikyo-artifacts. Identity class, not bearer spelling, is authoritative.
+func ContractArtifactClass(caller Identity) string {
+	switch {
+	case caller.Class == "":
+		return api.ArtifactLocal
+	case caller.Class == domain.ClassHuman:
+		return api.ArtifactHumanSession
+	case caller.Class == domain.ClassInstanceConn:
+		return api.ArtifactInstanceCredential
+	case caller.Class == domain.ClassProvisioning:
+		return api.ArtifactSCIMCredential
+	case domain.IsServiceAccountKind(caller.Class):
+		return api.ArtifactMachineCredential
+	default:
+		return ""
+	}
+}
+
 // assuranceInadequate reports whether an MFA-mandatory operation must be
 // refused for want of session assurance. It is evaluated only after the grant
 // check succeeds, so a caller who does not hold the capability never learns a
 // step-up is what they lack.
 func (a *TxAuthorizer) assuranceInadequate(caller Identity, op Operation) bool {
 	return AssuranceEnforced && caller.SessionID != "" && FormulaDemandsMFA(op) && !AdequateAssurance(caller.Assurance)
-}
-
-// machineRefused reports whether a human-only operation must be refused because
-// the caller is a machine (api-cli-surface ADR § human-only list; import ADR's
-// declared amendment adds `import` to it).
-//
-// The test is the identity's CLASS, which every resolution path sets — never
-// the absence of a session id. Local host authority (bootstrap, break-glass,
-// `hikyo admin`) presents no class at all and is not a machine principal; it is
-// the one caller a human-only rule must not lock out, since it is how an
-// instance without any human yet gets one.
-//
-// Evaluated after the grant check, like the assurance floor, so a machine that
-// does not hold the capability learns nothing about which of the two it lacked.
-func (a *TxAuthorizer) machineRefused(caller Identity, op Operation) bool {
-	if !HumanOnly(op) {
-		return false
-	}
-	return caller.Class != "" && caller.Class != domain.ClassHuman
 }
 
 func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op Operation, spec opSpec, scope domain.Scope) (Proof, error) {
@@ -165,13 +166,6 @@ func (a *TxAuthorizer) authorizeTenant(ctx context.Context, caller Identity, op 
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}
-	if a.machineRefused(caller, op) {
-		// Same shape and the same reasoning as the assurance refusal: the grant
-		// is held, so the object's existence is not a secret from this caller —
-		// what they lack is the artifact class the verb requires.
-		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, chain, domain.Scope{})
-		return nil, domain.ErrUnauthorized
-	}
 	return &proof{kind: kindTenant, op: op, chain: chain, tok: a.tok}, nil
 }
 
@@ -187,7 +181,7 @@ func (a *TxAuthorizer) authorizeInstance(ctx context.Context, caller Identity, o
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}
-	if a.assuranceInadequate(caller, op) || a.machineRefused(caller, op) {
+	if a.assuranceInadequate(caller, op) {
 		a.captureDenial(ctx, principal, op, spec, resolutionResolvable, domain.Scope{}, domain.Scope{})
 		return nil, domain.ErrUnauthorized
 	}

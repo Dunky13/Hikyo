@@ -45,6 +45,11 @@ const (
 	// signal it actually needs.
 	EventAuthLogin  EventType = "auth.login"
 	EventAuthLogout EventType = "auth.logout"
+	// auth.artifact_class_refused records a valid authenticated identity whose
+	// artifact class the addressed OpenAPI operation does not admit. The wire
+	// response remains the uniform nonexistent shape; the named distinction is
+	// visible only in the security trail.
+	EventAuthArtifactClassRefused EventType = "auth.artifact_class_refused"
 	// auth.session_created records the artifact minted and the assurance it
 	// carries — the record the chokepoint will consult on every later request.
 	EventAuthSessionCreated EventType = "auth.session_created"
@@ -758,6 +763,18 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"session_id": {Kind: KindString, Required: true},
 			"artifact":   {Kind: KindString, Required: true},
+		},
+	},
+	EventAuthArtifactClassRefused: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"operation":      {Kind: KindString, Required: true},
+			"artifact_class": {Kind: KindString, Required: true},
+			"cause": {Kind: KindString, Required: true,
+				Enum: []string{"class-mismatch"}},
 		},
 	},
 	EventAuthSessionCreated: {

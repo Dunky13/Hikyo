@@ -2283,6 +2283,8 @@ export const createFederatedBinding = <ThrowOnError extends boolean = false>(opt
  * authenticate here, with identical authority: a machine principal's
  * authority is the union of the grants on its service account and nothing
  * else, so there is no per-credential scope for either kind to widen.
+ * Human sessions are refused at artifact admission with the uniform
+ * nonexistent response.
  *
  */
 export const fetchDelivery = <ThrowOnError extends boolean = false>(options: Options<FetchDeliveryData, ThrowOnError>) => (options.client ?? client).get<FetchDeliveryResponses, FetchDeliveryErrors, ThrowOnError>({
@@ -2809,9 +2811,9 @@ export const scimSearchGroups = <ThrowOnError extends boolean = false>(options: 
  * This instance's directory listing, as served to a connected instance.
  *
  * The ONE endpoint an instance-connection credential may reach. Artifact
- * eligibility caps the credential to this operation alone
- * (`internal/authz/eligibility.go`), so a future operation adopting the
- * `instance-directory` formula does not widen any existing token.
+ * eligibility caps the credential to this operation alone, so a future
+ * operation adopting the `instance-directory` formula does not widen any
+ * existing token.
  *
  * What it returns, exhaustively: this instance's opaque identity, its
  * version, and the NAMES and counts of organisations and projects. No

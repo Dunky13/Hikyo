@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -151,28 +152,21 @@ func AssuranceRank(a Assurance) int {
 // Authenticate resolves a presented artifact into a live identity inside this
 // transaction.
 //
-// Every failure returns domain.ErrUnauthenticated and nothing else: absent,
-// malformed, unknown, expired, generation-superseded and epoch-superseded
-// artifacts are indistinguishable, so presentation reveals nothing about
-// which artifacts exist.
+// Resolution failures return domain.ErrUnauthenticated and nothing else:
+// absent, malformed, unknown, expired, generation-superseded and
+// epoch-superseded artifacts are indistinguishable. On HTTP requests a live
+// identity is then admitted against the attached OpenAPI operation; an excluded
+// class returns the uniform domain.ErrNotFound and records the named refusal.
 func (a *TxAuthorizer) Authenticate(ctx context.Context, presented string, now time.Time) (Identity, error) {
-	// The grammar check is local and constant-cost, and a value that fails it
-	// cannot correspond to any row, so short-circuiting here reveals only
-	// that the caller sent something that is not a hikyo artifact — a fact
-	// they already knew. Both session artifact types are accepted here (A10):
-	// a CLI session ("cli") and a browser session ("br"). The transport decides
-	// which leg a value arrived on (header vs cookie) and enforces the CSRF
-	// requirement there; the verifier scheme is identical, so resolution does
-	// not branch on the type.
+	// The contract's human-session class includes workspace sessions for
+	// ordinary data access. This account-security door is narrower: a workspace
+	// bearer lives in another origin's JavaScript and may not mutate the human's
+	// own credentials.
 	//
-	// A MACHINE credential is refused here, and that is the point: this
-	// function is the human session mechanism, and its callers are the
-	// account-security surface — logout, factor enrolment, passkeys, identity
-	// linking, step-up. Every one of them assumes a session row exists to
-	// mutate, and a machine has none. AuthenticateCaller below is the single
-	// entry point that admits both, and it is what the operation chokepoint
-	// uses.
-	return a.authenticateSession(ctx, presented, now,
+	// In-process calls use the narrow CLI/browser grammar directly. HTTP calls
+	// first resolve every bearer class so the OpenAPI admission decision returns
+	// the uniform class-mismatch refusal before the structural session guard.
+	return a.authenticateSessionSurface(ctx, presented, now, false,
 		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession)
 }
 
@@ -219,11 +213,14 @@ func (a *TxAuthorizer) authenticateSession(ctx context.Context, presented string
 	return a.authenticateResolvedSession(ctx, row, rowErr, now)
 }
 
-// AuthenticateCaller resolves ANY authentication artifact class — a human
-// session or a machine credential — and is the only entry point that admits a
-// machine. Both resolve inside this same transaction, uncached, at the same
-// chokepoint that mints proofs, which is what the machine-identities ADR
-// requires and what makes revocation bite at the next request.
+// AuthenticateCaller resolves every ordinary caller class — a human session,
+// service-account credential, or instance connection — plus a SCIM
+// provisioning credential when an HTTP operation is attached. Direct
+// in-process SCIM callers must use AuthenticateSCIMCaller so the caller that
+// owns the wire can also enforce its binding-path match. All resolve inside
+// this same transaction, uncached, at the same chokepoint that mints proofs,
+// which is what the machine-identities ADR requires and what makes revocation
+// bite at the next request.
 //
 // The split from Authenticate is deliberate and is the guard: a machine
 // credential has no session, no cookie and no assurance record (#16), so a
@@ -242,6 +239,10 @@ func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string,
 		crypto.ParseArtifact(presented, crypto.ArtifactAutomation) == nil {
 		return a.authenticateMachine(ctx, presented, now)
 	}
+	if _, wire := api.OperationFromContext(ctx); wire && crypto.ParseArtifact(presented, crypto.ArtifactSCIM) == nil {
+		identity, _, err := a.AuthenticateSCIMCaller(ctx, presented, now)
+		return identity, err
+	}
 	// The instance-connection credential (#71). It is a machine artifact with
 	// its own table and its own resolution leg, and it is admitted HERE rather
 	// than in Authenticate for the same reason the service-account credentials
@@ -249,7 +250,7 @@ func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string,
 	// refuses it by construction.
 	//
 	// Admission is not authorization. What this credential may actually reach
-	// is decided at the chokepoint by the artifact-eligibility table, which
+	// is decided at the chokepoint from the embedded OpenAPI declaration, which
 	// confines it to the directory-serve operation and nothing else.
 	if crypto.ParseArtifact(presented, crypto.ArtifactInstanceConn) == nil {
 		return a.authenticateInstanceConnection(ctx, presented, now)
@@ -261,18 +262,45 @@ func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string,
 		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession, crypto.ArtifactWorkspaceSession)
 }
 
+// AuthenticateSCIMCaller resolves a live provisioning credential without
+// assuming which route received it. The SCIM wire applies its binding-path
+// match and last-used write after operation admission; generic HTTP routes need
+// only the trusted class so an excluded SCIM credential reaches that admission.
+func (a *TxAuthorizer) AuthenticateSCIMCaller(ctx context.Context, presented string, now time.Time) (Identity, string, error) {
+	if err := crypto.ParseArtifact(presented, crypto.ArtifactSCIM); err != nil {
+		return Identity{}, "", domain.ErrUnauthenticated
+	}
+	row, err := a.SCIMCredentialByVerifier(ctx, crypto.ArtifactVerifier(presented))
+	if errors.Is(err, domain.ErrNotFound) {
+		return Identity{}, "", domain.ErrUnauthenticated
+	}
+	if err != nil {
+		return Identity{}, "", err
+	}
+	if !row.Live(now) {
+		return Identity{}, "", domain.ErrUnauthenticated
+	}
+	epoch, err := a.CredentialEpoch(ctx)
+	if err != nil {
+		return Identity{}, "", err
+	}
+	if row.CredentialEpoch != epoch {
+		return Identity{}, "", domain.ErrUnauthenticated
+	}
+	return Identity{
+		Principal: row.PrincipalID, Class: domain.ClassProvisioning,
+		Artifact: string(crypto.ArtifactSCIM), CredentialID: row.ID,
+	}, row.BindingID, nil
+}
+
 // AuthenticateSelfSurface is the door for the SELF-SCOPED surface — the
 // caller's own active-session listing and its revoke. It admits the three
 // SESSION artifacts and nothing else.
 //
-// It is a third named entry rather than a flag on AuthenticateCaller because
-// the admitting set is the enforcement, exactly as it is for Authenticate: an
-// instance-connection credential (and every service-account token) is refused
-// HERE, by construction, before any handler logic runs, so no future
-// self-scoped verb can accidentally admit one. That closes the endpoint-level
-// half of acceptance criterion 4 — the artifact-eligibility table confines `ic`
-// at the operation chokepoint, and these routes deliberately call no operation,
-// so without this they were the one door it never passed through.
+// It remains a named entry rather than a flag on AuthenticateCaller because
+// the service behind it assumes a session row exists. HTTP calls first resolve
+// every bearer class and apply the exact OpenAPI operation declaration, then
+// this door narrows an admitted human-session to the three session artifacts.
 //
 // A workspace bearer IS admitted, and must be: the shell's liveness poll is
 // this endpoint, and it is how both kill switches become visible to a foreign
@@ -281,8 +309,31 @@ func (a *TxAuthorizer) AuthenticateCaller(ctx context.Context, presented string,
 // browser sessions is not a power a credential living in another origin's
 // JavaScript may hold.
 func (a *TxAuthorizer) AuthenticateSelfSurface(ctx context.Context, presented string, now time.Time) (Identity, error) {
-	return a.authenticateSession(ctx, presented, now,
+	return a.authenticateSessionSurface(ctx, presented, now, true,
 		crypto.ArtifactCLISession, crypto.ArtifactBrowserSession, crypto.ArtifactWorkspaceSession)
+}
+
+func (a *TxAuthorizer) authenticateSessionSurface(
+	ctx context.Context,
+	presented string,
+	now time.Time,
+	admitsWorkspace bool,
+	inProcessArtifacts ...crypto.ArtifactType,
+) (Identity, error) {
+	if _, wire := api.OperationFromContext(ctx); wire {
+		identity, err := a.AuthenticateCaller(ctx, presented, now)
+		if err != nil {
+			return Identity{}, err
+		}
+		if err := a.AdmitOperation(ctx, identity); err != nil {
+			return Identity{}, err
+		}
+		if identity.SessionID == "" || (!admitsWorkspace && identity.Artifact == WorkspaceArtifact) {
+			return Identity{}, domain.ErrUnauthenticated
+		}
+		return identity, nil
+	}
+	return a.authenticateSession(ctx, presented, now, inProcessArtifacts...)
 }
 
 // AuthenticateSessionByID revalidates the session recorded in a server-side

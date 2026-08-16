@@ -306,10 +306,9 @@ func (a *TxAuthorizer) authenticateInstanceConnection(ctx context.Context, prese
 	return Identity{
 		Principal: conn.PrincipalID,
 		// NOT string(conn.Kind). The credential kind is "hikyo-token" and says
-		// nothing about what this artifact may reach; the ARTIFACT TYPE is what
-		// the eligibility table is keyed on, and setting the kind here — the
-		// shape the machine leg above uses — would make the double confinement
-		// silently inert while every test of the table itself still passed.
+		// nothing about the artifact presented. ClassInstanceConn drives the
+		// distinct OpenAPI `instance-credential` admission class; Artifact keeps
+		// the exact `ic` type for identity and forensic records.
 		Artifact:     string(crypto.ArtifactInstanceConn),
 		Class:        domain.ClassInstanceConn,
 		CredentialID: conn.ID,

@@ -246,15 +246,11 @@ func TestWorkspaceSessionRefusesAForeignOrigin(t *testing.T) {
 	}
 }
 
-// THE SELF-SCOPED SURFACE IS CONFINED TOO (acceptance criterion 4, at the
-// endpoint rather than at the operation).
+// THE SELF-SCOPED SURFACE IS CONFINED TOO (acceptance criterion 4).
 //
-// `GET /api/v1/me/sessions` and its DELETE call no operation — deliberately, so
-// incident response never depends on an authority an attacker may have just
-// removed — which means the artifact-eligibility chokepoint never sees them.
-// They were therefore the one door an instance-connection credential could
-// walk through, and a workspace bearer could use to enumerate and end the
-// human's CLI and browser sessions, IP addresses and user agents included.
+// These direct service calls have no HTTP operation context, so their named
+// session-only door preserves the same confinement for in-process consumers.
+// On the wire, the embedded OpenAPI operation is the artifact-class authority.
 func TestSelfSessionSurfaceConfinesForeignArtifacts(t *testing.T) {
 	db := seededDB(t, openSQLite)
 	ctx := t.Context()
@@ -268,18 +264,13 @@ func TestSelfSessionSurfaceConfinesForeignArtifacts(t *testing.T) {
 	conn := mintInstanceConnection(t, db, "selfsurface")
 	if _, err := ws.ListSessions(ctx, service.Bearer(conn)); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Errorf("an instance-connection credential reached the session listing (%v) — "+
-			"an operation-less endpoint is exactly where the eligibility table cannot "+
-			"confine it, so the admitting set has to", err)
+			"the in-process session-only door must preserve wire confinement", err)
 	}
 	if err := ws.RevokeSession(ctx, service.Bearer(conn), "ses_anything"); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Errorf("an instance-connection credential reached the session revoke (%v)", err)
 	}
 
-	// The SAME door on /me/orgs, which is the other operation-less self-scoped
-	// projection and predates #71. It calls no operation either, so the
-	// eligibility chokepoint is equally blind to it, and an instance-connection
-	// credential presented there used to authenticate and receive a successful
-	// listing — the same endpoint-level criterion-4 failure, one route over.
+	// The same in-process door protects the self-scoped organisation projection.
 	orgs := &service.Orgs{DB: db}
 	if _, err := orgs.ListMine(ctx, service.Bearer(conn)); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Errorf("an instance-connection credential enumerated a principal's organisations (%v)", err)

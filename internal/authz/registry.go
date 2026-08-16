@@ -442,8 +442,9 @@ const (
 	// Multi-instance, the serving side (#71). The directory-serve operation is
 	// what an instance-connection credential presents against, and — per the
 	// ADR's amendment to the artifact-eligibility matrix — the ONLY operation
-	// it may reach. See internal/authz/eligibility.go for the other half of the
-	// confinement; the formula alone would not carry it, because a later
+	// it may reach. The embedded OpenAPI operation's `instance-credential`
+	// declaration is the other half of the confinement; the formula alone
+	// would not carry it, because a later
 	// operation adopting the same formula would widen every existing token.
 	//
 	// It is an instance-scope read that crosses org boundaries BY DESIGN: the
@@ -831,22 +832,7 @@ type opSpec struct {
 	// non-mutating operations, and refuses it everywhere else.
 	events      []audit.EventType
 	auditedNone bool
-
-	// humanOnly marks an operation on the api-cli-surface ADR's HUMAN-ONLY
-	// list: `adopt`, `scaffold`, `values import`, `login`, and — under the
-	// import ADR's declared amendment — `import`. A machine principal is
-	// refused, after the grant check, exactly like an inadequate assurance is.
-	//
-	// It lives on the registry row rather than in a service-layer `if` for the
-	// reason every other authorization property does: the chokepoint is the one
-	// place the decision cannot diverge from the grant table, and a hand-rolled
-	// check in one handler is a check the next handler forgets.
-	humanOnly bool
 }
-
-// HumanOnly reports whether an operation refuses machine principals. Exported
-// for the isolation harness, which asserts the list rather than restating it.
-func HumanOnly(op Operation) bool { return operations[op].humanOnly }
 
 // operations is the operation registry. Every formula is built from capability
 // atoms the permission ADR already fixes — this ticket adds no atom and
@@ -1537,7 +1523,6 @@ var operations = map[Operation]opSpec{
 			// manifest pins: phase 2 refuses a run whose declarations moved.
 			StoreCatalogueRevisionGet: true,
 		},
-		humanOnly:   true,
 		auditedNone: true,
 	},
 	// Phase 2's write. Same formula as `value.set`, same store surface, plus
@@ -1563,7 +1548,6 @@ var operations = map[Operation]opSpec{
 			StoreValuesList: true, StoreValuesPut: true,
 			StoreAuditTenantInsert: true,
 		},
-		humanOnly: true,
 		// The writes land as ordinary value writes, so they emit the ordinary
 		// event: a trail that spelled an imported write differently would make
 		// "which principal set this value" answerable only by knowing how it
@@ -1728,7 +1712,6 @@ var operations = map[Operation]opSpec{
 			StorePendingListForOwner:               true, StorePendingListMarkers: true,
 			StorePendingStage: true, StoreAuditTenantInsert: true,
 		},
-		humanOnly: true,
 		events: []audit.EventType{
 			audit.EventValueStaged, audit.EventRevisionRestoreStaged, audit.EventValueRevealed,
 		},
@@ -1740,9 +1723,8 @@ var operations = map[Operation]opSpec{
 			{Cap: domain.CapRead, At: domain.LevelEnv},
 			{Cap: domain.CapRevealHistory, At: domain.LevelEnv},
 		},
-		storeOps:  map[StoreOp]bool{},
-		humanOnly: true,
-		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+		storeOps: map[StoreOp]bool{},
+		events:   []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
 	},
 	OpRevisionRestoreCurrent: {
 		class: ClassTenant,
@@ -1751,9 +1733,8 @@ var operations = map[Operation]opSpec{
 			{Cap: domain.CapRead, At: domain.LevelEnv},
 			{Cap: domain.CapReveal, At: domain.LevelEnv},
 		},
-		storeOps:  map[StoreOp]bool{},
-		humanOnly: true,
-		events:    []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
+		storeOps: map[StoreOp]bool{},
+		events:   []audit.EventType{audit.EventValueStaged, audit.EventRevisionRestoreStaged},
 	},
 	OpPinSet: {
 		class: ClassTenant,
@@ -1770,18 +1751,16 @@ var operations = map[Operation]opSpec{
 			StorePinsGetForWorkload:                true, StorePinsCountProject: true,
 			StorePinsInsert: true, StorePinsDelete: true, StoreAuditTenantInsert: true,
 		},
-		humanOnly: true,
 		events: []audit.EventType{
 			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
 			audit.EventPinExpiryRefused, audit.EventValueRevealed,
 		},
 	},
 	OpPinSetHistory: {
-		class:     ClassTenant,
-		level:     domain.LevelEnv,
-		formula:   Formula{{Cap: domain.CapRevealHistory, At: domain.LevelEnv}},
-		storeOps:  map[StoreOp]bool{},
-		humanOnly: true,
+		class:    ClassTenant,
+		level:    domain.LevelEnv,
+		formula:  Formula{{Cap: domain.CapRevealHistory, At: domain.LevelEnv}},
+		storeOps: map[StoreOp]bool{},
 		events: []audit.EventType{
 			audit.EventPinCreated, audit.EventPinReassigned, audit.EventPinRenewed,
 		},
@@ -1791,7 +1770,6 @@ var operations = map[Operation]opSpec{
 		level:       domain.LevelEnv,
 		formula:     Formula{{Cap: domain.CapRead, At: domain.LevelEnv}},
 		storeOps:    map[StoreOp]bool{StorePinsList: true},
-		humanOnly:   true,
 		auditedNone: true,
 	},
 	OpPinRelease: {
@@ -1802,8 +1780,7 @@ var operations = map[Operation]opSpec{
 			StoreProjectsLock: true, StorePinsGetForWorkload: true, StorePinsDelete: true,
 			StoreAuditTenantInsert: true,
 		},
-		humanOnly: true,
-		events:    []audit.EventType{audit.EventPinReleased},
+		events: []audit.EventType{audit.EventPinReleased},
 	},
 	// The advisory channel touches no store operation at all: the events are
 	// metadata the server already emitted, and every one of them is authorized
