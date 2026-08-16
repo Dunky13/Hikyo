@@ -157,11 +157,14 @@ func TestInvariantAuditRegistryClosure(t *testing.T) {
 			}
 		}
 	}
-	// Every registered type is emitted by some operation or is the denial
-	// event (emitted by the authorization package, which has no operation
-	// row): a registered-but-unemittable type is dead catalogue.
+	// Every registered type is emitted by some operation or is one of the two
+	// cross-cutting settlement events: grant denial from authz, or artifact-class
+	// refusal from request admission. Neither has one operation row because each
+	// can occur across the operation registry. A registered-but-unemittable type
+	// is dead catalogue.
 	emitted := map[audit.EventType]bool{
-		audit.EventGrantDenied: true,
+		audit.EventGrantDenied:              true,
+		audit.EventAuthArtifactClassRefused: true,
 	}
 	for _, m := range facts.AuditMappings() {
 		for _, et := range m.Events {

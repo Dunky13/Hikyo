@@ -677,7 +677,12 @@ func (a *API) validateAgainstContract(next http.Handler) http.Handler {
 		err := api.ValidateRequest(r)
 		switch {
 		case err == nil:
-			next.ServeHTTP(w, r)
+			ctx, ok := api.WithRequestOperation(r.Context(), r)
+			if !ok {
+				writeError(w, apigen.ErrorCodeInternal, "")
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
 		case errors.Is(err, api.ErrNoRoute):
 			// A path the contract does not describe. 404, like any other
 			// thing that is not there.

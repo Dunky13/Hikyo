@@ -47,6 +47,7 @@ type accessWireEnv struct {
 	srv   *httptest.Server
 	token string
 	db    *store.DB
+	auth  *service.Auth
 	admin domain.PrincipalID
 	org   string
 	// project and env genuinely EXIST under org. They are what makes the
@@ -101,11 +102,13 @@ func newAccessWireEnv(t *testing.T, db *store.DB) accessWireEnv {
 		Folders:      &service.Folders{DB: db},
 		Grants:       &service.Grants{DB: db},
 		Settings:     &service.ProjectSettings{DB: db, Auth: auth},
+		Delivery:     &service.Delivery{DB: db, Keyring: auth.Keyring},
+		SCIMWire:     &service.SCIM{DB: db},
 		Version:      "wire",
 	}, nil))
 	t.Cleanup(srv.Close)
 	return accessWireEnv{
-		srv: srv, token: token, db: db, admin: boot.principal,
+		srv: srv, token: token, db: db, auth: auth, admin: boot.principal,
 		org: org.ID, project: wireProject, env: wireEnv,
 	}
 }
@@ -138,6 +141,10 @@ func bootstrapWebAuthnAdminBoot(t *testing.T, db *store.DB) (*service.Auth, boot
 
 // call issues one request against the live server and returns status + body.
 func (e accessWireEnv) call(t *testing.T, method, path string, body any) (int, []byte) {
+	return e.callAs(t, e.token, method, path, body)
+}
+
+func (e accessWireEnv) callAs(t *testing.T, token, method, path string, body any) (int, []byte) {
 	t.Helper()
 	var payload io.Reader
 	if body != nil {
@@ -151,7 +158,7 @@ func (e accessWireEnv) call(t *testing.T, method, path string, body any) (int, [
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+e.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

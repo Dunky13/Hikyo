@@ -14,6 +14,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -70,10 +71,11 @@ const (
 )
 
 var (
-	loadOnce sync.Once
-	doc      *openapi3.T
-	router   routers.Router
-	loadErr  error
+	loadOnce   sync.Once
+	doc        *openapi3.T
+	router     routers.Router
+	operations map[string]Operation
+	loadErr    error
 )
 
 // scimJSONDecoder teaches the request validator to read `application/scim+json`
@@ -139,6 +141,10 @@ func load() {
 		loadErr = fmt.Errorf("api: openapi.yaml is not a valid document: %w", loadErr)
 		return
 	}
+	operations, loadErr = collectOperations(doc)
+	if loadErr != nil {
+		return
+	}
 	router, loadErr = gorillamux.NewRouter(doc)
 	if loadErr != nil {
 		loadErr = fmt.Errorf("api: build router: %w", loadErr)
@@ -169,16 +175,103 @@ type Operation struct {
 	Secured bool
 }
 
+const (
+	ArtifactNone               = "none"
+	ArtifactHumanSession       = "human-session"
+	ArtifactMachineCredential  = "machine-credential"
+	ArtifactSCIMCredential     = "scim-credential"
+	ArtifactInstanceCredential = "instance-credential"
+	ArtifactLocal              = "local"
+)
+
+// AdmitsArtifact reports whether the operation's OpenAPI declaration admits
+// the authenticated artifact class. The declaration is a closed allowlist.
+func (o Operation) AdmitsArtifact(class string) bool {
+	for _, declared := range o.Artifacts {
+		if declared == class {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneOperation(op Operation) Operation {
+	op.Formula = append([]string(nil), op.Formula...)
+	op.Artifacts = append([]string(nil), op.Artifacts...)
+	return op
+}
+
+// AuthorizationOperationAdmitsArtifact reports whether any contract operation
+// mapped to the named authorization operation admits class. The HTTP path uses
+// its exact operation row; this derived view preserves the same contract at
+// in-process chokepoint calls where no request operation exists.
+func AuthorizationOperationAdmitsArtifact(id, class string) (admitted, described bool) {
+	loadOnce.Do(load)
+	if loadErr != nil {
+		return false, false
+	}
+	for _, op := range operations {
+		if op.AuthzOp != id {
+			continue
+		}
+		described = true
+		if op.AdmitsArtifact(class) {
+			admitted = true
+		}
+	}
+	return admitted, described
+}
+
+type operationContextKey struct{}
+
+// WithRequestOperation resolves a request through the embedded contract and
+// attaches only its operationId. Consumers re-read the immutable cached row;
+// no caller can inject a parallel artifact list through context.
+func WithRequestOperation(ctx context.Context, r *http.Request) (context.Context, bool) {
+	op, ok := OperationFor(r)
+	if !ok {
+		return ctx, false
+	}
+	return context.WithValue(ctx, operationContextKey{}, op.ID), true
+}
+
+// OperationFromContext returns the contract row attached at HTTP admission.
+// Absence means an in-process caller rather than an unclassified HTTP route.
+func OperationFromContext(ctx context.Context) (Operation, bool) {
+	id, ok := ctx.Value(operationContextKey{}).(string)
+	if !ok {
+		return Operation{}, false
+	}
+	loadOnce.Do(load)
+	if loadErr != nil {
+		return Operation{}, false
+	}
+	op, ok := operations[id]
+	if !ok {
+		return Operation{}, false
+	}
+	return cloneOperation(op), true
+}
+
 // Operations returns every operation in the contract, keyed by operationId.
 func Operations() (map[string]Operation, error) {
-	d, err := Doc()
+	_, err := Doc()
 	if err != nil {
 		return nil, err
 	}
+	out := make(map[string]Operation, len(operations))
+	for id, op := range operations {
+		out[id] = cloneOperation(op)
+	}
+	return out, nil
+}
+
+func collectOperations(d *openapi3.T) (map[string]Operation, error) {
 	global := len(d.Security) > 0
 	out := map[string]Operation{}
 	for path, item := range d.Paths.Map() {
 		for method, op := range item.Operations() {
+			var err error
 			row := Operation{
 				ID:      op.OperationID,
 				Method:  method,
@@ -199,6 +292,9 @@ func Operations() (map[string]Operation, error) {
 			}
 			if row.Artifacts, err = extStrings(op.Extensions, extArtifacts); err != nil {
 				return nil, fmt.Errorf("api: %s %s: %w", method, path, err)
+			}
+			if len(row.Artifacts) == 0 {
+				return nil, fmt.Errorf("api: %s %s: extension %s must declare at least one artifact class", method, path, extArtifacts)
 			}
 			if row.MinRevision, err = extInt(op.Extensions, extMinRevision); err != nil {
 				return nil, fmt.Errorf("api: %s %s: %w", method, path, err)
@@ -336,6 +432,25 @@ func OperationIDFor(r *http.Request) (string, bool) {
 		return "", false
 	}
 	return route.Operation.OperationID, true
+}
+
+// OperationFor reports the full contract row for the request. Artifact
+// admission consumes this row at runtime, so the same embedded OpenAPI bytes
+// drive both request validation and bearer-class eligibility.
+func OperationFor(r *http.Request) (Operation, bool) {
+	loadOnce.Do(load)
+	if loadErr != nil {
+		return Operation{}, false
+	}
+	route, _, err := router.FindRoute(r)
+	if err != nil || route.Operation == nil {
+		return Operation{}, false
+	}
+	op, ok := operations[route.Operation.OperationID]
+	if !ok {
+		return Operation{}, false
+	}
+	return cloneOperation(op), true
 }
 
 // jsonPointerInReason recovers the offending member from a schema error.

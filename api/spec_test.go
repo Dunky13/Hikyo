@@ -155,7 +155,8 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 		"tenant": true, "instance": true, "unauthenticated": true, "system": true,
 	}
 	validArtifacts := map[string]bool{
-		"none": true, "human-session": true, "machine-credential": true, "local": true,
+		"none": true, "human-session": true, "machine-credential": true,
+		"instance-credential": true, "local": true,
 		// `scim-credential` is the SCIM provisioning connection's own artifact
 		// class (#73 §7): the machine-identity ADR's closed token-type list
 		// gains `scim` by the scim-provisioning amendment, and this is that

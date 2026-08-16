@@ -20,11 +20,9 @@ import (
 // operation registry. This file is the other half, and it is the half that
 // makes acceptance criterion 4 true rather than merely asserted: a REAL minted
 // credential, resolved through the REAL chokepoint, presented against real
-// operations. Without it the eligibility table could be keyed on a field no
-// resolver ever sets and every predicate test would still pass — which is
-// exactly the failure mode the two `Artifact` provenances in this codebase
-// invite (a session carries the database's artifact string, the machine leg
-// carries the CREDENTIAL KIND).
+// operations. It also pins the resolver provenance consumed by the OpenAPI
+// artifact-class mapping: a session carries the database artifact string,
+// while the machine leg carries the credential artifact type.
 
 // mintInstanceConnection creates the principal, its `instance-directory` grant
 // and its credential as one unit — the shape `remote-credential create` writes
@@ -90,8 +88,8 @@ func runInstanceConnectionE2E(t *testing.T, db *store.DB) {
 	// refactor copies the machine leg's `Artifact: string(cred.Kind)`, this
 	// fails here rather than silently unconfining the credential.
 	if id.Artifact != string(crypto.ArtifactInstanceConn) {
-		t.Fatalf("artifact = %q, want %q — the eligibility table is keyed on this, "+
-			"and the credential kind is not it", id.Artifact, crypto.ArtifactInstanceConn)
+		t.Fatalf("artifact = %q, want %q — artifact admission consumes this resolver provenance",
+			id.Artifact, crypto.ArtifactInstanceConn)
 	}
 
 	// It reaches its one operation.

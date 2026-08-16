@@ -2990,8 +2990,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthenticated"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "429":
@@ -3051,8 +3049,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthenticated"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -4900,10 +4896,12 @@ paths:
         authenticate here, with identical authority: a machine principal's
         authority is the union of the grants on its service account and nothing
         else, so there is no per-credential scope for either kind to widen.
+        Human sessions are refused at artifact admission with the uniform
+        nonexistent response.
       x-hikyo-class: tenant
       x-hikyo-operation: delivery.fetch
       x-hikyo-formula: [read@environment]
-      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-artifacts: [machine-credential]
       x-hikyo-min-revision: 1
       responses:
         "200":
@@ -6622,9 +6620,9 @@ paths:
       summary: This instance's directory listing, as served to a connected instance.
       description: |
         The ONE endpoint an instance-connection credential may reach. Artifact
-        eligibility caps the credential to this operation alone
-        (`internal/authz/eligibility.go`), so a future operation adopting the
-        `instance-directory` formula does not widen any existing token.
+        eligibility caps the credential to this operation alone, so a future
+        operation adopting the `instance-directory` formula does not widen any
+        existing token.
 
         What it returns, exhaustively: this instance's opaque identity, its
         version, and the NAMES and counts of organisations and projects. No
@@ -6641,7 +6639,7 @@ paths:
       x-hikyo-class: instance
       x-hikyo-operation: remote.directory-serve
       x-hikyo-formula: [instance-directory@instance]
-      x-hikyo-artifacts: [human-session, machine-credential]
+      x-hikyo-artifacts: [human-session, instance-credential]
       x-hikyo-min-revision: 1
       responses:
         "200":
@@ -7478,7 +7476,6 @@ paths:
                 $ref: "#/components/schemas/RollbackResult"
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -7505,7 +7502,6 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RevisionPinList"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
         "500": {$ref: "#/components/responses/Internal"}
@@ -7539,7 +7535,6 @@ paths:
               schema: {$ref: "#/components/schemas/RevisionPinResult"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
@@ -7566,7 +7561,6 @@ paths:
       responses:
         "204": {description: Released.}
         "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
         "500": {$ref: "#/components/responses/Internal"}

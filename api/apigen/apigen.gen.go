@@ -22742,20 +22742,6 @@ func (response ListRevisionPins401JSONResponse) VisitListRevisionPinsResponse(w 
 	return err
 }
 
-type ListRevisionPins403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response ListRevisionPins403JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type ListRevisionPins404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response ListRevisionPins404JSONResponse) VisitListRevisionPinsResponse(w http.ResponseWriter) error {
@@ -22852,20 +22838,6 @@ func (response CreateRevisionPin401JSONResponse) VisitCreateRevisionPinResponse(
 	return err
 }
 
-type CreateRevisionPin403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response CreateRevisionPin403JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type CreateRevisionPin404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response CreateRevisionPin404JSONResponse) VisitCreateRevisionPinResponse(w http.ResponseWriter) error {
@@ -22952,20 +22924,6 @@ func (response ReleaseRevisionPin401JSONResponse) VisitReleaseRevisionPinRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ReleaseRevisionPin403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response ReleaseRevisionPin403JSONResponse) VisitReleaseRevisionPinResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -23431,20 +23389,6 @@ func (response RollbackRevision401JSONResponse) VisitRollbackRevisionResponse(w 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type RollbackRevision403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response RollbackRevision403JSONResponse) VisitRollbackRevisionResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -24022,20 +23966,6 @@ func (response ImportValues401JSONResponse) VisitImportValuesResponse(w http.Res
 	return err
 }
 
-type ImportValues403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response ImportValues403JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type ImportValues404JSONResponse struct{ NotFoundJSONResponse }
 
 func (response ImportValues404JSONResponse) VisitImportValuesResponse(w http.ResponseWriter) error {
@@ -24142,20 +24072,6 @@ func (response ListValueOccurrences401JSONResponse) VisitListValueOccurrencesRes
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type ListValueOccurrences403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response ListValueOccurrences403JSONResponse) VisitListValueOccurrencesResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
 	_, err := buf.WriteTo(w)
 	return err
 }

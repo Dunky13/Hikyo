@@ -14,8 +14,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/internal/audit"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
+	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
@@ -139,29 +141,42 @@ func SCIMCredentialActor(presented, bindingID string) Actor {
 // and is exempt from the MFA-mandatory assurance check at authorize(). A bearer
 // actor resolves to the full session assurance the chokepoint enforces.
 func (a Actor) resolve(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (authz.Identity, error) {
+	var (
+		identity authz.Identity
+		err      error
+	)
 	if a.principal != "" {
-		return authz.Identity{Principal: a.principal}, nil
+		identity = authz.Identity{Principal: a.principal}
+	} else if a.federated != nil {
+		identity, err = az.AuthenticateFederated(ctx, a.federated.IssuerID, a.federated.Subject, a.federated.Check, now)
+	} else if a.scimToken != "" {
+		if crypto.ParseArtifact(a.scimToken, crypto.ArtifactSCIM) == nil {
+			identity, err = resolveSCIMCredential(ctx, az, a, now)
+		} else if _, wire := api.OperationFromContext(ctx); wire {
+			// A valid bearer of another class must reach the exact SCIM
+			// operation's admission row, not fail early on SCIM grammar.
+			identity, err = az.AuthenticateCaller(ctx, a.scimToken, now)
+		} else {
+			identity, err = resolveSCIMCredential(ctx, az, a, now)
+		}
+	} else if a.bearer != "" {
+		identity, err = az.AuthenticateCaller(ctx, a.bearer, now)
+	} else {
+		err = domain.ErrUnauthenticated
 	}
-	if a.federated != nil {
-		return az.AuthenticateFederated(ctx, a.federated.IssuerID, a.federated.Subject, a.federated.Check, now)
+	if err != nil {
+		return authz.Identity{}, err
 	}
-	if a.scimToken != "" {
-		return resolveSCIMCredential(ctx, az, a, now)
+	if err := az.AdmitOperation(ctx, identity); err != nil {
+		return authz.Identity{}, err
 	}
-	if a.bearer == "" {
-		return authz.Identity{}, domain.ErrUnauthenticated
-	}
-	// The operation chokepoint admits both artifact classes: a machine
-	// credential authorizes operations exactly as a session does, and is
-	// refused by every session-surface verb because those call Authenticate.
-	return az.AuthenticateCaller(ctx, a.bearer, now)
+	return identity, nil
 }
 
 // resolveSelf is resolve for the SELF-SCOPED surface (the caller's own session
-// listing and revoke), which calls no operation and therefore never reaches the
-// artifact-eligibility chokepoint. It routes through AuthenticateSelfSurface,
-// whose admitting set refuses every machine artifact — instance-connection
-// credentials included — by construction rather than by a handler check.
+// listing and revoke). AuthenticateSelfSurface resolves every HTTP bearer class
+// and applies the request's OpenAPI artifact declaration before narrowing the
+// admitted human-session variants to this surface.
 func (a Actor) resolveSelf(ctx context.Context, az *authz.TxAuthorizer, now time.Time) (authz.Identity, error) {
 	if a.principal != "" {
 		return authz.Identity{Principal: a.principal}, nil
