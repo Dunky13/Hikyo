@@ -70,7 +70,19 @@ The shared dimensions are `--instance`, `--org`, `--project`, `--env`, and
 
 Code `5` deliberately combines missing and unauthorized resources.
 
+## Import and migration
+
+`import` supports Kubernetes, SOPS, Vault/OpenBao, and Infisical files plus
+live Kubernetes and Vault/OpenBao sources. Use explicit flag mode or replay a
+recorded mapping; run `hikyo import --help` for the current source-specific
+flags.
+
+The interactive, multi-environment wizard is not implemented yet. Running
+`hikyo import` without `--from` or `--mapping` refuses explicitly and directs
+you to the available modes. Completion is tracked by
+[#112](https://github.com/Hikyo-Org/Hikyo/issues/112).
+
 ## Commands not yet implemented
 
-`run`, `render`, `sync`, `adopt`, `definitions`, and `import` are reserved but
-not implemented in the current 0.x build. The binary refuses them explicitly.
+`run`, `render`, `sync`, `adopt`, and `definitions` are reserved but not
+implemented in the current 0.x build. The binary refuses them explicitly.

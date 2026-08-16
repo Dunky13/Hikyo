@@ -122,17 +122,22 @@ if ! printf '%s\n' "$main_gate_actual" | jq -e '
 	exit 1
 fi
 
-docs_script_actual=$(printf '%s\n' 'scripts/ci/check-docs-live.sh' | "$classifier" --files)
-if ! printf '%s\n' "$docs_script_actual" | jq -e '
-	.docs == true and
-	.lint == true and
-	([.client, .generated, .headline_guarantee, .release_snapshot, .supply_chain_checks, .test, .web] |
-		all(. == false))
-' >/dev/null; then
-	printf 'changed-path classifier fixture failed: docs-script plan was wrong\n' >&2
-	printf 'actual: %s\n' "$docs_script_actual" >&2
-	exit 1
-fi
+for docs_script in \
+	'scripts/ci/check-docs-live.sh' \
+	'scripts/ci/check-docs-pwa.sh'; do
+	docs_script_actual=$(printf '%s\n' "$docs_script" | "$classifier" --files)
+	if ! printf '%s\n' "$docs_script_actual" | jq -e '
+		.docs == true and
+		.lint == true and
+		([.client, .generated, .headline_guarantee, .release_snapshot, .supply_chain_checks, .test, .web] |
+			all(. == false))
+	' >/dev/null; then
+		printf 'changed-path classifier fixture failed: %s plan was wrong\n' \
+			"$docs_script" >&2
+		printf 'actual: %s\n' "$docs_script_actual" >&2
+		exit 1
+	fi
+done
 
 all_actual=$("$classifier" --all)
 if ! printf '%s\n' "$all_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then

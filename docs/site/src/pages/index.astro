@@ -1,4 +1,5 @@
 ---
+import PwaHead from '../components/PwaHead.astro';
 import { repositoryUrl, siteUrl, themeBootstrapScript } from '../lib/site';
 import '../styles/landing.css';
 
@@ -24,7 +25,7 @@ const links = {
       content="Hikyo is a fully open-source, self-hosted control plane for validated secrets and configuration across environments."
     />
     <meta name="theme-color" content="#1b2225" />
-    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <PwaHead />
     <link rel="canonical" href="https://hikyo.app/" />
     <title>Hikyo — fully open secrets and configuration</title>
     <script is:inline set:html={themeBootstrapScript}></script>

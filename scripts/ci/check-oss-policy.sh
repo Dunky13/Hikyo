@@ -93,6 +93,10 @@ reject_text "$repo_root/GOVERNANCE.md" 'organization 2FA are enforced'
 
 security_txt="$repo_root/docs/site/public/.well-known/security.txt"
 require_file "$security_txt"
+favicon="$repo_root/docs/site/public/favicon-hikyo-48.png"
+touch_icon="$repo_root/docs/site/public/apple-touch-icon.png"
+require_file "$favicon"
+require_file "$touch_icon"
 require_text "$security_txt" 'Contact: https://github.com/Hikyo-Org/hikyo/security/advisories/new'
 require_text "$security_txt" 'Contact: mailto:security@developwent.io'
 require_text "$security_txt" 'Expires:'
@@ -149,12 +153,16 @@ EOF
 require_text "$site_root/index.html" 'Every value is explicit'
 require_text "$site_root/index.html" 'Mozilla Public License 2.0'
 require_text "$site_root/index.html" '<link rel="canonical" href="https://hikyo.app/">'
+require_text "$site_root/index.html" '<link rel="icon" type="image/png" sizes="48x48" href="/favicon-hikyo-48.png">'
+require_text "$site_root/index.html" '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">'
 require_text "$site_root/index.html" 'href="/docs/"'
 reject_text "$site_root/index.html" 'href="/hikyo/'
 reject_text "$site_root/index.html" 'validated, inherited secrets'
 reject_text "$site_root/index.html" 'MIT licensed'
 
 require_text "$site_root/docs/index.html" 'Getting started'
+require_text "$site_root/docs/index.html" '<link rel="icon" type="image/png" sizes="48x48" href="/favicon-hikyo-48.png">'
+require_text "$site_root/docs/index.html" '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">'
 require_text "$site_root/docs/index.html" 'href="/docs/getting-started/"'
 require_text "$site_root/docs/index.html" 'href="/docs/installation/"'
 reject_text "$site_root/docs/index.html" 'href="/hikyo/'
@@ -168,6 +176,14 @@ require_text "$site_root/docs/self-hosting/index.html" 'Production startup is fa
 
 cmp "$security_txt" "$site_root/.well-known/security.txt" >/dev/null || {
 	printf 'OSS policy gate: served security.txt differs from its canonical source\n' >&2
+	exit 1
+}
+cmp "$favicon" "$site_root/favicon-hikyo-48.png" >/dev/null || {
+	printf 'OSS policy gate: served favicon differs from its canonical source\n' >&2
+	exit 1
+}
+cmp "$touch_icon" "$site_root/apple-touch-icon.png" >/dev/null || {
+	printf 'OSS policy gate: served touch icon differs from its canonical source\n' >&2
 	exit 1
 }
 

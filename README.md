@@ -31,6 +31,96 @@
 > are no published binaries, images, or Helm charts yet. Build from source to
 > evaluate it today.
 
+## Implementation status
+
+“Implemented” means the feature and its acceptance coverage are present in the
+repository. It does not mean the API is frozen or that Hikyo 1.0 has shipped.
+The source and linked implementation tickets are authoritative; [#1] and [#41]
+are planning/parent trackers rather than missing features.
+
+### Fully implemented
+
+| Feature | Included |
+| --- | --- |
+| Runtime and storage | Single multicall binary, SQLite and PostgreSQL stores, migrations, and CI ([#42]) |
+| Security foundations | Envelope encryption, the authorization chokepoint, append-only audit trails, and gap-free PostgreSQL audit export ([#43], [#44], [#45], [#84]) |
+| Core API and CLI | Bootstrap administration, local login, org/project/environment/folder CRUD, key declarations, validation, encrypted values, copy, clone, and bulk apply ([#47]–[#50]) |
+| Human identity and access | OIDC, WebAuthn, TOTP, recovery, sessions, grants, role templates, and protected environments ([#54], [#55]) |
+| Matrix and disclosure UI | Embedded app shell, environment matrix, row editor, problems filter, reveal/copy ceremonies, and protected publish flows ([#56]–[#58]) |
+| Machine access | Service accounts, display-once credentials, OIDC workload federation, and the machine-access UI ([#61], [#62], [#67]) |
+| Multi-instance workspaces | Directory-tier remotes and browser-direct workspace sessions ([#71]) |
+| Enterprise identity protocols | SAML service-provider support and SCIM provisioning, fully open-source ([#72], [#73]) |
+| Backup and restore | Encrypted export/restore plus the cross-engine recovery drill ([#76]) |
+| Supply chain and project site | Signed release pipeline and SBOMs ([#46]); documentation/governance site ([#78]); matching brand icons and an [offline-capable PWA](./docs/site/public/manifest.webmanifest) |
+
+### Partially implemented
+
+| Feature | What works now | Needed for complete implementation |
+| --- | --- | --- |
+| Revision lifecycle | Drafts, snapshots, selective publish, rollback, durable pins, retention, and garbage collection work through API/CLI ([#51]–[#53]) | History drawer, restore, and pin lifecycle UI: [#59] |
+| Administration UI | Authentication, grants, retention, sessions, and administration APIs exist; the shell exposes the current session surface ([#53]–[#55]) | Members, settings, account security, retention/danger zones, and instance-admin screens: [#60] |
+| Imports | File imports for Kubernetes, SOPS, and Infisical plus live Kubernetes and Vault/OpenBao connectors work in flag/replay mode ([#68], [#69]) | Interactive multi-environment wizard: [#112]; final definitions apply/phase advancement: [#70] |
+| Key rotation | Versioned keyrings and token-key rotation exist ([#43], [#51]) | All live-data rotations and crash-safe root-key rotation: [#75] |
+| Production operations | Backup/restore, retention health, and basic `doctor` checks exist ([#53], [#76]) | Compose delivery prerequisite: [#63]; complete bounds, upgrade, no-egress, doctor, and Pi-floor conformance: [#77] |
+| Public release and distribution | Cosign trust, SBOM generation, GoReleaser/Helm packaging, and installer verification exist ([#46]) | Complete all remaining implementation blockers, run full acceptance, freeze the API/CLI, and publish 1.0: [#79] |
+
+### Not started yet
+
+| Feature | Tracking ticket |
+| --- | --- |
+| Docker Compose delivery (`hikyo run`, rendered `env_file`, offline snapshots) | [#63] |
+| Kubernetes operator and CRDs | [#64] |
+| Deployment adapter outbox plus Forgejo and GitHub Actions adapters | [#65], [#66] |
+| Git-managed definitions (`export`, `check`, `plan`, `apply`) | [#70] |
+| Secret scanning | [#74] |
+
+The remaining 1.0 implementation blockers are [#59], [#60], [#63]–[#66],
+[#70], [#74], [#75], [#77], and [#112]. Once they close, [#79] performs the
+full acceptance run and cuts the freeze/release tag.
+
+[#1]: https://github.com/Hikyo-Org/Hikyo/issues/1
+[#41]: https://github.com/Hikyo-Org/Hikyo/issues/41
+[#42]: https://github.com/Hikyo-Org/Hikyo/issues/42
+[#43]: https://github.com/Hikyo-Org/Hikyo/issues/43
+[#44]: https://github.com/Hikyo-Org/Hikyo/issues/44
+[#45]: https://github.com/Hikyo-Org/Hikyo/issues/45
+[#46]: https://github.com/Hikyo-Org/Hikyo/issues/46
+[#47]: https://github.com/Hikyo-Org/Hikyo/issues/47
+[#48]: https://github.com/Hikyo-Org/Hikyo/issues/48
+[#49]: https://github.com/Hikyo-Org/Hikyo/issues/49
+[#50]: https://github.com/Hikyo-Org/Hikyo/issues/50
+[#51]: https://github.com/Hikyo-Org/Hikyo/issues/51
+[#52]: https://github.com/Hikyo-Org/Hikyo/issues/52
+[#53]: https://github.com/Hikyo-Org/Hikyo/issues/53
+[#54]: https://github.com/Hikyo-Org/Hikyo/issues/54
+[#55]: https://github.com/Hikyo-Org/Hikyo/issues/55
+[#56]: https://github.com/Hikyo-Org/Hikyo/issues/56
+[#57]: https://github.com/Hikyo-Org/Hikyo/issues/57
+[#58]: https://github.com/Hikyo-Org/Hikyo/issues/58
+[#59]: https://github.com/Hikyo-Org/Hikyo/issues/59
+[#60]: https://github.com/Hikyo-Org/Hikyo/issues/60
+[#61]: https://github.com/Hikyo-Org/Hikyo/issues/61
+[#62]: https://github.com/Hikyo-Org/Hikyo/issues/62
+[#63]: https://github.com/Hikyo-Org/Hikyo/issues/63
+[#64]: https://github.com/Hikyo-Org/Hikyo/issues/64
+[#65]: https://github.com/Hikyo-Org/Hikyo/issues/65
+[#66]: https://github.com/Hikyo-Org/Hikyo/issues/66
+[#67]: https://github.com/Hikyo-Org/Hikyo/issues/67
+[#68]: https://github.com/Hikyo-Org/Hikyo/issues/68
+[#69]: https://github.com/Hikyo-Org/Hikyo/issues/69
+[#70]: https://github.com/Hikyo-Org/Hikyo/issues/70
+[#71]: https://github.com/Hikyo-Org/Hikyo/issues/71
+[#72]: https://github.com/Hikyo-Org/Hikyo/issues/72
+[#73]: https://github.com/Hikyo-Org/Hikyo/issues/73
+[#74]: https://github.com/Hikyo-Org/Hikyo/issues/74
+[#75]: https://github.com/Hikyo-Org/Hikyo/issues/75
+[#76]: https://github.com/Hikyo-Org/Hikyo/issues/76
+[#77]: https://github.com/Hikyo-Org/Hikyo/issues/77
+[#78]: https://github.com/Hikyo-Org/Hikyo/issues/78
+[#79]: https://github.com/Hikyo-Org/Hikyo/issues/79
+[#84]: https://github.com/Hikyo-Org/Hikyo/issues/84
+[#112]: https://github.com/Hikyo-Org/Hikyo/issues/112
+
 ## One matrix. No hidden inheritance.
 
 Hikyo makes every environment answer for itself. A value is explicitly `set`

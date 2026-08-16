@@ -60,7 +60,7 @@ else
 			release_snapshot=true
 			supply_chain_checks=true
 			;;
-		scripts/ci/verify-docs.sh | scripts/ci/check-docs-live*.sh | scripts/ci/check-fallback-channel-test*.sh | scripts/ci/check-oss-policy*.sh)
+		scripts/ci/verify-docs.sh | scripts/ci/check-docs-live*.sh | scripts/ci/check-docs-pwa*.sh | scripts/ci/check-fallback-channel-test*.sh | scripts/ci/check-oss-policy*.sh)
 			docs=true
 			lint=true
 			;;
