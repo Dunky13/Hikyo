@@ -211,6 +211,33 @@ func TestEveryOperationCarriesItsContractExtensions(t *testing.T) {
 	}
 }
 
+func TestBearerAdmittingOperationsDeclareArtifactRefusal(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops, err := api.Operations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, item := range doc.Paths.Map() {
+		for method, operation := range item.Operations() {
+			row := ops[operation.OperationID]
+			admitsBearer := false
+			for _, artifact := range row.Artifacts {
+				if artifact != api.ArtifactNone {
+					admitsBearer = true
+					break
+				}
+			}
+			if admitsBearer && operation.Responses.Status(http.StatusNotFound) == nil {
+				t.Errorf("%s %s (%s) admits an authenticated artifact but does not declare the uniform 404 class-mismatch response",
+					method, path, operation.OperationID)
+			}
+		}
+	}
+}
+
 func TestRequestValidationRefusesUnknownMembers(t *testing.T) {
 	// `additionalProperties: false` on every request body is the fail-fast
 	// rule at the wire: an unknown member is a client that believes something

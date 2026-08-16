@@ -13,7 +13,8 @@ recorded as `auth.artifact_class_refused` before the response returns.
 1. `api/spec.go` parses every operation into an immutable cached row containing
    method, path, `operationId`, authorization operation, formula, artifact
    classes, and minimum revision. Loading fails if any operation omits or
-   empties `x-hikyo-artifacts`.
+   empties `x-hikyo-artifacts`; contract tests also require every operation
+   admitting an authenticated artifact to declare the uniform 404 response.
 2. Contract validation resolves the exact request row and places only its
    `operationId` in context. Consumers re-read the cached row, so callers cannot
    inject an alternate artifact list and there is no parallel route table.
@@ -62,6 +63,8 @@ error; the server never returns the uniform denial without its audit record.
 
 - `api/artifact_admission_test.go` proves request lookup and authorization-op
   views come from the embedded document and rejects missing/empty declarations.
+- `api/spec_test.go` prevents the runtime class-mismatch 404 from disappearing
+  from any bearer-admitting operation's documented response set.
 - `internal/isolation/artifact_admission_wire_test.go` exercises real HTTP on
   SQLite and PostgreSQL: machine to proof-backed, account-security, and
   self-scoped human-only routes; human to machine-only delivery; SCIM to human
@@ -80,5 +83,5 @@ error; the server never returns the uniform denial without its audit record.
 - Go generation, TypeScript client generation, typecheck/tests, docs checks,
   web typecheck/tests/build, UI-tagged Go build/tests, and `git diff --check`:
   green.
-- Full dual-engine Go suite: green (2,705 tests across 40 packages).
+- Full dual-engine Go suite: green (2,706 tests across 40 packages).
 - Independent standards and specification reviews: clean after fixes.
