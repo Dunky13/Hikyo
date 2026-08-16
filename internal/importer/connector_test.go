@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -310,6 +311,27 @@ func TestInfisicalRejectsDuplicateMembersBeforeProvenanceDecoding(t *testing.T) 
 	wantCode(t, err, CodeDuplicateKey)
 	if !strings.Contains(strings.ToLower(err.Error()), `"type"`) {
 		t.Fatalf("duplicate-member refusal does not name type: %v", err)
+	}
+}
+
+func TestVaultCaptureFixtureUsesLiveMappingContract(t *testing.T) {
+	got, err := run(t, vaultSource, "vault-capture.jsonl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Scope, Scope{Mount: "secret", PathPrefix: "apps", KVVersion: 2}) {
+		t.Fatalf("scope = %+v", got.Scope)
+	}
+	if strings.Join(got.Skipped, ",") != "apps/old" {
+		t.Fatalf("skipped = %v", got.Skipped)
+	}
+	want := []Record{
+		{Folder: []string{"db", "main"}, SourceName: "DB_URL", Value: "postgres://fixture", Type: schema.TypeString, Version: "4"},
+		{Folder: []string{"db", "main"}, SourceName: "OPTIONS", Value: `{"pool":5,"ssl":true}`, Type: schema.TypeJSON, Version: "4"},
+		{Folder: []string{"top"}, SourceName: "API_KEY", Value: "top-secret", Type: schema.TypeString, Version: "2"},
+	}
+	if !reflect.DeepEqual(got.Records, want) {
+		t.Fatalf("records = %#v, want %#v", got.Records, want)
 	}
 }
 

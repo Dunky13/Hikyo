@@ -11,13 +11,11 @@ import (
 // connector-interface invariant, not a per-connector courtesy: the subprocess
 // spawn path is shared and the stripping happens there").
 //
-// One connector reaches an external program today: SOPS, whose GPG key source
-// execs `gpg`. That exec happens INSIDE the getsops library, which exposes no
-// hook for the child's environment — so the sanitized path cannot be an
-// exec.Cmd builder we hand the library. It is instead a scope: WithSanitized
-// removes Hikyo material from THIS PROCESS's environment for the duration of
-// the call, which every child inherited from it therefore cannot see, whoever
-// spawns it.
+// SOPS GPG, kubeconfig exec plugins and Vault/OpenBao token helpers may spawn
+// inside client libraries that expose no common command-builder hook. The
+// sanitized path is therefore a scope: WithSanitized removes Hikyo material
+// from THIS PROCESS's environment for the duration, so every inherited child
+// is covered regardless of which library starts it.
 //
 // That is a deliberately blunt instrument and it is the right one here: the
 // import verb is client-local, single-purpose and short-lived, and a scrub that

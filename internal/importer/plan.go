@@ -73,11 +73,12 @@ type PlanInput struct {
 	// Scope is the connector's own source selector (k8s `{namespace, names[]}`),
 	// merged with the framework's file digest and env slug into the template.
 	Scope Scope
-	// FileDigest and EnvSlug identify the source for the template scope and the
-	// manifest's source identity.
-	FileDigest string
-	EnvSlug    string
-	State      ServerState
+	// FileDigest and EnvSlug identify file sources. SourceIdentity is the
+	// non-secret provider origin/context supplied by a live connector.
+	FileDigest     string
+	EnvSlug        string
+	SourceIdentity string
+	State          ServerState
 	// Template is the replayed template, or nil in flag mode. Replay is where
 	// manual renames, classification downgrades, richer types, enumerated
 	// overwrites and trim acknowledgements come from — flag mode has none of
@@ -110,7 +111,8 @@ type Plan struct {
 	// admitted. Consent binds to the reviewed occurrence through the manifest.
 	Overwritten []string
 	// SkippedBySource are entries a connector deliberately did not import
-	// (Infisical personal overrides), listed by name.
+	// (for example Infisical personal overrides or deleted Vault versions),
+	// listed by name.
 	SkippedBySource []string
 	// PlaintextHints names keys whose source leaf was stored in plaintext. A
 	// HINT: zero downgrades are performed from it.
@@ -463,7 +465,7 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 		FormatVersion:            FormatVersion,
 		ConnectorContractVersion: ConnectorContractVersion,
 		Template:                 TemplateReference{Digest: Digest(encoded)},
-		SourceIdentity:           SourceIdentity{Kind: in.Source, Context: in.FileDigest},
+		SourceIdentity:           SourceIdentity{Kind: in.Source, Context: sourceIdentity(in)},
 		Target: Target{
 			Project:      in.State.Project,
 			Environments: []string{in.State.Environment},
@@ -519,6 +521,13 @@ func BuildPlan(in PlanInput) (*Plan, error) {
 		plan.HasValues = true
 	}
 	return plan, nil
+}
+
+func sourceIdentity(in PlanInput) string {
+	if in.SourceIdentity != "" {
+		return in.SourceIdentity
+	}
+	return in.FileDigest
 }
 
 func desiredDeclaration(target string, classChoice map[string]string,
@@ -733,11 +742,16 @@ func emptySlices(t *Template) {
 // it to the emitted values files, which sit there until `values import`
 // completes and the human deletes them.
 func PlaintextWarning(sourcePath string, valuesFiles []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "plaintext is still on disk: %s", sourcePath)
-	for _, f := range valuesFiles {
-		fmt.Fprintf(&b, ", %s", f)
+	paths := make([]string, 0, len(valuesFiles)+1)
+	if sourcePath != "" {
+		paths = append(paths, sourcePath)
 	}
+	paths = append(paths, valuesFiles...)
+	if len(paths) == 0 {
+		return "no import plaintext artifact remains on disk"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "plaintext is still on disk: %s", strings.Join(paths, ", "))
 	b.WriteString("\ndelete them once `hikyo values import` has completed.")
 	return b.String()
 }

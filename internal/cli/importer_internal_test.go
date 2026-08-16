@@ -23,7 +23,7 @@ func TestHostileImportNamesAreEscapedOnSuccess(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	err := reportImport(IO{Stdout: &stdout, Stderr: &stderr}, plan,
-		"source.yaml", "", t.TempDir())
+		"address=BAO_ADDR, token=BAO_TOKEN", "source.yaml", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +35,9 @@ func TestHostileImportNamesAreEscapedOnSuccess(t *testing.T) {
 	}
 	if !strings.Contains(output, importer.QuoteName(hostile)) {
 		t.Fatalf("success output does not contain the escaped hostile name: %q", output)
+	}
+	if !strings.Contains(output, "source resolution: address=BAO_ADDR, token=BAO_TOKEN") {
+		t.Fatalf("success output omits live source resolution: %q", output)
 	}
 }
 
@@ -73,6 +76,94 @@ func TestFlagImportRequiresBothExplicitTargetFlags(t *testing.T) {
 				t.Fatalf("err = %v, want missing flag %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestLiveImportValidatesConnectorSelectorsBeforeSourceRead(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"file and live are exclusive",
+			[]string{"--from", "k8s", "--live", "--file", "export.yaml", "--project", "prj", "--environment", "env", "--namespace", "demo"},
+			"either --file or --live",
+		},
+		{
+			"sops is file only",
+			[]string{"--from", "sops", "--live", "--project", "prj", "--environment", "env"},
+			"file-only",
+		},
+		{
+			"k8s requires namespace",
+			[]string{"--from", "k8s", "--live", "--project", "prj", "--environment", "env"},
+			"--namespace",
+		},
+		{
+			"vault requires mount",
+			[]string{"--from", "vault", "--live", "--project", "prj", "--environment", "env"},
+			"--mount",
+		},
+		{
+			"vault version is closed",
+			[]string{"--from", "vault", "--live", "--project", "prj", "--environment", "env", "--mount", "secret", "--kv-version", "3"},
+			"--kv-version",
+		},
+		{
+			"k8s refuses vault selector",
+			[]string{"--from", "k8s", "--live", "--project", "prj", "--environment", "env", "--namespace", "demo", "--mount", "secret"},
+			"does not take",
+		},
+		{
+			"file mode refuses live selector",
+			[]string{"--from", "vault", "--file", "capture.jsonl", "--project", "prj", "--environment", "env", "--mount", "secret"},
+			"file mode does not take",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runImport(context.Background(), IO{Stderr: &bytes.Buffer{}}, tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want selector refusal containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestReplayInfersLiveModeAndSelectorsFromMapping(t *testing.T) {
+	mapping := importer.Template{
+		FormatVersion:            importer.FormatVersion,
+		ConnectorContractVersion: importer.ConnectorContractVersion,
+		Source:                   "k8s",
+		Scope:                    importer.Scope{Namespace: "demo", Names: []string{"app"}},
+		Project:                  "prj_reviewed",
+		Environments: []importer.EnvironmentMapping{{
+			Target: "env_reviewed",
+		}},
+		Folders:              []importer.FolderMapping{},
+		Renames:              []importer.Rename{},
+		Classifications:      []importer.ClassificationChoice{},
+		Types:                []importer.TypeChoice{},
+		Overwrites:           []importer.KeyEnvironment{},
+		TrimAcknowledgements: []importer.KeyEnvironment{},
+	}
+	raw, err := importer.Encode(mapping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "mapping.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing-kubeconfig"))
+
+	err = runImport(t.Context(), IO{Stderr: &bytes.Buffer{}}, []string{"--mapping", path})
+	if err == nil || !strings.Contains(err.Error(), "kubeconfig") {
+		t.Fatalf("err = %v, want live kubeconfig read from mapping selectors", err)
+	}
+	if strings.Contains(err.Error(), "--file") {
+		t.Fatalf("live replay incorrectly required a file: %v", err)
 	}
 }
 

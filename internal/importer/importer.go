@@ -1,11 +1,11 @@
 // Package importer is the client-side import framework (#68, import-paths ADR
 // as amended by the flat-model ADR).
 //
-// It is a pure library over foreign bytes: a connector parses an export the
-// user produced with the source's own tooling and returns records; the
-// framework enforces the uniform bounds, applies the canonical key grammar,
-// and authors the four phase-1 artifacts. It contacts no server — the CLI does
-// that, with the server-minted material this package records.
+// Connectors read foreign bytes from bounded export files or read-only live
+// provider APIs and return records; the framework enforces uniform bounds,
+// applies the canonical key grammar, and authors the four phase-1 artifacts.
+// It never contacts the Hikyo server — the CLI does that, with the
+// server-minted material this package records.
 //
 // Two invariants govern every line here:
 //
@@ -70,6 +70,15 @@ const (
 	// contact a KMS or run gpg) as well as parsing, so a hung key service fails
 	// loud instead of hanging a migration.
 	RunDeadline = 60 * time.Second
+	// MaxResponseBytes is the live connector's cap for one provider response.
+	// It matches the runtime response cap fixed by the ops catalogue.
+	MaxResponseBytes = 5 << 20
+	// RequestDeadline bounds every live provider request independently.
+	RequestDeadline = 30 * time.Second
+	// LiveRunDeadline bounds a complete paged traversal.
+	LiveRunDeadline = 10 * time.Minute
+	// MaxLivePages bounds provider pagination even when every page is empty.
+	MaxLivePages = 1000
 )
 
 // Code is the stable, content-free machine code on every refusal this package
@@ -193,6 +202,19 @@ type Input struct {
 	EnvSlug string
 }
 
+// LiveInput is one read-only live connector invocation. Fields are
+// connector-shaped: Kubernetes uses Context/Namespace/Name; Vault/OpenBao uses
+// Mount/Path/KVVersion. Ambient source credentials never enter this struct.
+type LiveInput struct {
+	Context   string
+	Namespace string
+	Name      string
+	Names     []string
+	Mount     string
+	Path      string
+	KVVersion int
+}
+
 // Record is one leaf a connector found, in the source's own vocabulary. The
 // name is the SOURCE name, untransformed: the rename transform runs in the
 // framework so every connector renames identically.
@@ -229,18 +251,32 @@ type Result struct {
 	// k8s reports {namespace, names[]} read off the manifests, sops and
 	// infisical report nothing and the framework stamps the file digest.
 	Scope Scope
+	// Identity is the non-secret live source identity: Kubernetes
+	// cluster/context or Vault/OpenBao origin. File connectors leave it empty.
+	Identity string
+	// Resolution states which non-secret ambient convention won (environment
+	// variable or helper kind). It is reported to the operator, never persisted
+	// in a mapping or manifest.
+	Resolution string
 }
 
 // Connector is the in-process connector interface. It is deliberately narrow
 // and deliberately read-only: there is no Write, no Delete and no Put to
 // implement, so no connector can mutate a foreign store even by accident. It
-// is NOT an extension point — the OSS-mechanics ADR fixes exactly two, and this
-// adds none.
+// is NOT a runtime extension point: the served set is compiled into the
+// registry below.
 type Connector interface {
 	// Name is the `--from` spelling.
 	Name() string
 	// Read parses one export into records, charging the budget as it decodes.
 	Read(ctx context.Context, in Input, b *Budget) (Result, error)
+}
+
+// LiveConnector is the live half of a connector. It remains structurally
+// read-only: the interface has no write, delete or mutation operation.
+type LiveConnector interface {
+	Connector
+	ReadLive(ctx context.Context, in LiveInput, b *Budget) (Result, error)
 }
 
 // connectors is the compile-time registry: a map literal, not an init()
@@ -250,6 +286,7 @@ var connectors = map[string]Connector{
 	k8sSource:       k8sConnector{},
 	sopsSource:      sopsConnector{},
 	infisicalSource: infisicalConnector{},
+	vaultSource:     vaultConnector{},
 }
 
 // Sources returns the served `--from` spellings, sorted, for usage text.
@@ -345,6 +382,43 @@ func Run(ctx context.Context, name string, in Input) (Result, error) {
 		return Result{}, failure(name, CodeBound, in.Path,
 			"the run exceeded the %s whole-run deadline", RunDeadline)
 	}
+	return validateResult(name, result, b)
+}
+
+// RunLive reads a foreign source through its live connector under the shared
+// response, request, pagination, decoded-byte, record and whole-run bounds.
+// The sanitized scope sits at this interface boundary so credential helpers
+// and kube exec plugins cannot bypass it from inside a client library.
+func RunLive(ctx context.Context, name string, in LiveInput) (Result, error) {
+	c, ok := connectors[name]
+	if !ok {
+		return Result{}, failure("import", CodeMalformed, "",
+			"%q is not a served source; served sources are %v", name, Sources())
+	}
+	live, ok := c.(LiveConnector)
+	if !ok {
+		return Result{}, failure(name, CodeMalformed, "", "this connector has no live mode")
+	}
+	ctx, cancel := context.WithTimeout(ctx, LiveRunDeadline)
+	defer cancel()
+
+	b := &Budget{source: name, maxBytes: MaxDecodedBytes, maxCount: MaxRecords}
+	var result Result
+	if err := WithSanitized(func() error {
+		var err error
+		result, err = live.ReadLive(ctx, in, b)
+		return err
+	}); err != nil {
+		return Result{}, err
+	}
+	if ctx.Err() != nil {
+		return Result{}, failure(name, CodeBound, "",
+			"the run exceeded the %s whole-run deadline", LiveRunDeadline)
+	}
+	return validateResult(name, result, b)
+}
+
+func validateResult(name string, result Result, b *Budget) (Result, error) {
 	// The per-value bound and the UTF-8/NUL rule are uniform source rules
 	// (import-paths ADR § Per-source structural mapping). "Refusal is per-key,
 	// not per-import" means the refusal NAMES EVERY OFFENDING KEY — a refusal
