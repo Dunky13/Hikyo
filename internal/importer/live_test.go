@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/vault/api/tokenhelper"
-	"k8s.io/client-go/rest"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
@@ -193,7 +192,7 @@ users:
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1
-      interactiveMode: Never
+      interactiveMode: IfAvailable
       provideClusterInfo: true
       command: %q
       env:
@@ -248,11 +247,11 @@ users:
   user:
     exec:
       apiVersion: client.authentication.k8s.io/v1
-      interactiveMode: Never
+      interactiveMode: IfAvailable
       command: /bin/sh
       args:
       - -c
-      - 'if env | grep -q "^HIKYO_"; then exit 71; fi; printf ''{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"exec-fixture-token"}}'''
+      - 'if env | grep -q "^HIKYO_"; then exit 71; fi; printf %%s "$KUBERNETES_EXEC_INFO" | grep -q ''"interactive":false'' || exit 72; printf ''{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","status":{"token":"exec-fixture-token"}}'''
 `, server.URL)
 	if err := os.WriteFile(kubeconfig, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -269,6 +268,76 @@ users:
 	}
 	if os.Getenv("HIKYO_TOKEN") != "hikyo_token_must_not_reach_exec_plugin" {
 		t.Fatal("shared sanitized scope did not restore Hikyo environment")
+	}
+}
+
+func TestK8sExecWrapperPreservesOriginalPluginPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy clientcmdapi.PluginPolicy
+		ok     bool
+	}{
+		{name: "deny all", policy: clientcmdapi.PluginPolicy{PolicyType: clientcmdapi.PluginPolicyDenyAll}},
+		{name: "matching allowlist", policy: clientcmdapi.PluginPolicy{
+			PolicyType: clientcmdapi.PluginPolicyAllowlist,
+			Allowlist:  []clientcmdapi.AllowlistEntry{{Command: "/bin/sh"}},
+		}, ok: true},
+		{name: "mismatched allowlist", policy: clientcmdapi.PluginPolicy{
+			PolicyType: clientcmdapi.PluginPolicyAllowlist,
+			Allowlist:  []clientcmdapi.AllowlistEntry{{Command: "/bin/false"}},
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plugin := &clientcmdapi.ExecConfig{Command: "/bin/sh", PluginPolicy: test.policy}
+			err := wrapKubeExecProvider(t.Context(), plugin)
+			if !test.ok {
+				wantCode(t, err, CodeProvenance)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plugin.Command == "/bin/sh" || plugin.PluginPolicy.PolicyType != clientcmdapi.PluginPolicyAllowAll {
+				t.Fatalf("validated plugin was not safely rewritten: %+v", plugin)
+			}
+			if !plugin.StdinUnavailable || !strings.Contains(plugin.StdinUnavailableMessage, "does not permit interactive") {
+				t.Fatalf("wrapped plugin did not disable interactive stdin: %+v", plugin)
+			}
+		})
+	}
+}
+
+func TestK8sAlwaysInteractiveExecPluginFailsBeforeExecution(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "interactive-plugin-ran")
+	kubeconfig := filepath.Join(dir, "config")
+	config := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: fixture-cluster
+  cluster: {server: "https://127.0.0.1:1", insecure-skip-tls-verify: true}
+contexts:
+- name: fixture-context
+  context: {cluster: fixture-cluster, user: exec-user}
+current-context: fixture-context
+users:
+- name: exec-user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      interactiveMode: Always
+      command: /bin/sh
+      args: [-c, %q]
+`, "touch "+marker)
+	if err := os.WriteFile(kubeconfig, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", kubeconfig)
+	_, err := RunLive(t.Context(), k8sSource, LiveInput{Namespace: "demo", Name: "app"})
+	wantCode(t, err, CodeProvenance, marker)
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("interactive plugin ran: %v", statErr)
 	}
 }
 
@@ -456,10 +525,28 @@ users:
 }
 
 func TestK8sLiveExecCredentialV1RequiresInteractiveMode(t *testing.T) {
-	cfg := &rest.Config{ExecProvider: &clientcmdapi.ExecConfig{
-		Command: "/bin/true", APIVersion: "client.authentication.k8s.io/v1",
-	}}
-	_, err := resolveKubeExecCredential(t.Context(), cfg, &clientcmdapi.Cluster{})
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	config := `apiVersion: v1
+kind: Config
+clusters:
+- name: fixture-cluster
+  cluster: {server: "https://127.0.0.1:1", insecure-skip-tls-verify: true}
+contexts:
+- name: fixture-context
+  context: {cluster: fixture-cluster, user: exec-user}
+current-context: fixture-context
+users:
+- name: exec-user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: /bin/true
+`
+	if err := os.WriteFile(kubeconfig, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", kubeconfig)
+	_, err := RunLive(t.Context(), k8sSource, LiveInput{Namespace: "demo", Name: "app"})
 	if err == nil {
 		t.Fatal("v1 exec credential without interactiveMode was accepted")
 	}
@@ -501,6 +588,37 @@ users:
 		t.Fatalf("exec plugin ignored connector deadline for %s", elapsed)
 	}
 	wantCode(t, err, CodeBound)
+}
+
+func TestK8sLiveExecPluginCannotExceedOutputCap(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "config")
+	config := `apiVersion: v1
+kind: Config
+clusters:
+- name: fixture-cluster
+  cluster: {server: "https://127.0.0.1:1", insecure-skip-tls-verify: true}
+contexts:
+- name: fixture-context
+  context: {cluster: fixture-cluster, user: exec-user}
+current-context: fixture-context
+users:
+- name: exec-user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      interactiveMode: Never
+      command: /bin/sh
+      args: [-c, "while :; do printf 0123456789; done"]
+`
+	if err := os.WriteFile(kubeconfig, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", kubeconfig)
+	_, err := RunLive(t.Context(), k8sSource, LiveInput{Namespace: "demo"})
+	wantCode(t, err, CodeBound)
+	if !strings.Contains(err.Error(), "response exceeds") {
+		t.Fatalf("overflow refusal does not name response cap: %v", err)
+	}
 }
 
 func TestK8sLiveProviderErrorCannotDiscloseBody(t *testing.T) {
@@ -747,6 +865,66 @@ func TestVaultExternalTokenHelperUsesSanitizedBoundedPath(t *testing.T) {
 	}
 	if token != "helper-fixture-token" {
 		t.Fatalf("token = %q", token)
+	}
+}
+
+func TestVaultExternalTokenHelperMapsWrapperBounds(t *testing.T) {
+	t.Run("deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		helper := &tokenhelper.ExternalTokenHelper{
+			BinaryPath: "/bin/sh", Args: []string{"-c", "sleep 30"},
+		}
+		started := time.Now()
+		_, err := readVaultTokenHelper(ctx, helper, "https://vault.example.test")
+		wantCode(t, err, CodeBound)
+		if elapsed := time.Since(started); elapsed > 2*time.Second {
+			t.Fatalf("token helper ignored connector deadline for %s", elapsed)
+		}
+	})
+
+	t.Run("stdout cap", func(t *testing.T) {
+		helper := &tokenhelper.ExternalTokenHelper{
+			BinaryPath: "/bin/sh",
+			Args:       []string{"-c", "while :; do printf 0123456789; done"},
+		}
+		_, err := readVaultTokenHelper(t.Context(), helper, "https://vault.example.test")
+		wantCode(t, err, CodeBound)
+		if !strings.Contains(err.Error(), "response exceeds") {
+			t.Fatalf("overflow refusal does not name response cap: %v", err)
+		}
+	})
+}
+
+func TestVaultLiveAndCapturePreserveSameJSONNumbers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "LIST" || r.URL.Query().Get("list") == "true" {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"errors":[]}`)
+			return
+		}
+		if r.URL.Path != "/v1/secret/apps/numbers" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.String())
+		}
+		fmt.Fprint(w, `{"data":{"DECIMAL":0.12345678901234567890123456789,"LARGE_INTEGER":9007199254740993}}`)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BAO_ADDR", server.URL)
+	t.Setenv("BAO_TOKEN", "fixture-token")
+
+	live, err := RunLive(t.Context(), vaultSource, LiveInput{
+		Mount: "secret", Path: "apps/numbers", KVVersion: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := run(t, vaultSource, "vault-capture-numbers.jsonl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(live.Records, file.Records) {
+		t.Fatalf("live records = %#v, file records = %#v", live.Records, file.Records)
 	}
 }
 

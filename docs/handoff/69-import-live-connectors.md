@@ -35,10 +35,11 @@ not.
   replay may carry multiple previously discovered names.
 - Imports Secret `data`, records each Secret `resourceVersion`, and preserves
   namespace/name selectors in `mapping.json`.
-- Uses the official Kubernetes client and ExecCredential v1/v1beta1 shapes.
-  Exec auth plugins run through the shared sanitized subprocess boundary with
-  a deadline and bounded output; expiring or rejected credentials refresh, and
-  their credentials never enter argv.
+- Uses the official Kubernetes client. ExecCredential resolution, decoding,
+  caching, refresh, and transport injection remain owned by client-go. The
+  configured plugin command is carried in an environment-only invocation spec
+  through Hikyo's hidden re-exec wrapper, which enforces the shared sanitized
+  environment, deadline, and output cap before starting the plugin.
 
 ## Vault/OpenBao connector
 
@@ -49,10 +50,11 @@ not.
 - Recursively LISTs and reads keys, imports only the latest live version, and
   skips deleted or destroyed KV v2 versions. Non-string values are canonical
   JSON.
-- Supports ambient tokens, token files, and external token helpers. Helpers
-  use the same sanitized subprocess boundary, deadline, and output cap.
-  Operator output states whether `BAO_*`, compatible `VAULT_*`, `~/.bao`, or
-  Vault helper configuration won; only the origin enters the run manifest.
+- Supports ambient tokens, token files, and external token helpers. The Vault
+  library still owns `TokenHelper.Get`; external helpers are pointed at the
+  same hidden re-exec wrapper so the actual helper receives the selected
+  address and shared environment, deadline, and output bounds. Operator output
+  states which ambient convention won; only the origin enters the manifest.
 - Adds strict JSONL capture-file parsing for replay fixtures. Each line pins
   path, mount, engine version, secret version, deletion state, and data.
 
@@ -121,16 +123,19 @@ Both live connectors are read-only and share these fail-closed limits:
 | list pages / requests | 1,000 |
 
 Cross-origin redirects are refused before credentials can follow. Provider
-response bodies are never copied into errors. Every subprocess receives an
-environment stripped of the complete `HIKYO_*` namespace by `WithSanitized`;
-output is bounded and the process is killed when its context expires.
+response bodies are never copied into errors. Every connector auth subprocess
+runs through the hidden shared wrapper; its opaque invocation spec is removed
+from the environment before the foreign child starts, all `HIKYO_*` material
+is stripped, stderr is discarded, and timeout/overflow failures name only the
+bound.
 
 ## Verification map
 
 - `internal/importer/live_test.go`: pagination, exact scope/identity/version,
   hostile provider errors, redirects, OpenBao/Vault environment precedence,
   token helpers, and bounded Kubernetes exec auth.
-- `internal/importer/connector_test.go`: strict Vault/OpenBao JSONL capture.
+- `internal/importer/connector_test.go`: strict Vault/OpenBao JSONL capture,
+  exact JSON-number preservation, and streaming record bounds.
 - `internal/cli/importer_internal_test.go`: fail-closed selector validation and
   live mapping replay.
 - `internal/conformance/import_test.go`: live Kubernetes and Vault fixtures run

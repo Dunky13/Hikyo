@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"bytes"
 	"errors"
 	"net/http"
 	"net/url"
@@ -50,18 +49,4 @@ func refuseCredentialRedirect(req *http.Request, via []*http.Request) error {
 		from = originOf(via[0].URL)
 	}
 	return &refusedRedirect{from: from, to: originOf(req.URL)}
-}
-
-type cappedOutput struct {
-	buf      bytes.Buffer
-	max      int
-	overflow bool
-}
-
-func (w *cappedOutput) Write(p []byte) (int, error) {
-	if w.buf.Len()+len(p) > w.max {
-		w.overflow = true
-		return len(p), nil
-	}
-	return w.buf.Write(p)
 }

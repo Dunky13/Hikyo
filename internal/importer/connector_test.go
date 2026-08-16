@@ -335,6 +335,32 @@ func TestVaultCaptureFixtureUsesLiveMappingContract(t *testing.T) {
 	}
 }
 
+func TestVaultCapturePreservesJSONNumbersByteForByte(t *testing.T) {
+	got, err := run(t, vaultSource, "vault-capture-numbers.jsonl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Record{
+		{Folder: nil, SourceName: "DECIMAL", Value: "0.12345678901234567890123456789", Type: schema.TypeJSON},
+		{Folder: nil, SourceName: "LARGE_INTEGER", Value: "9007199254740993", Type: schema.TypeJSON},
+	}
+	if !reflect.DeepEqual(got.Records, want) {
+		t.Fatalf("records = %#v, want %#v", got.Records, want)
+	}
+}
+
+func TestVaultCaptureStopsWhileScanningAtRecordBound(t *testing.T) {
+	in := Input{Path: "capture.jsonl", Data: []byte(
+		`{"path":"apps/one","mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"A":"one","B":"two"}}`)}
+	b := &Budget{source: vaultSource, maxBytes: MaxDecodedBytes, maxCount: 1}
+
+	_, err := (vaultConnector{}).Read(t.Context(), in, b)
+	wantCode(t, err, CodeBound)
+	if !strings.Contains(err.Error(), "capture.jsonl line 1") {
+		t.Fatalf("record cap was not enforced while scanning: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The shared sanitized spawn path (M5 acceptance)
 // ---------------------------------------------------------------------------

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -59,6 +58,7 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
+		dec.UseNumber()
 		var capture vaultCapture
 		if err := dec.Decode(&capture); err != nil {
 			return Result{}, failure(vaultSource, CodeMalformed, where,
@@ -71,6 +71,17 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 		}
 		if err := validateVaultCapture(capture, where); err != nil {
 			return Result{}, err
+		}
+		if capture.Deleted || capture.Destroyed {
+			if err := b.Record(where); err != nil {
+				return Result{}, err
+			}
+		} else {
+			for _, name := range sortedVaultFieldNames(capture.Data) {
+				if err := b.Record(where + " field " + quoteName(name)); err != nil {
+					return Result{}, err
+				}
+			}
 		}
 		captures = append(captures, capture)
 	}
@@ -99,25 +110,14 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 	for _, capture := range captures {
 		where := "secret " + quoteName(capture.Path)
 		if capture.Deleted || capture.Destroyed {
-			if err := b.Record(where); err != nil {
-				return Result{}, err
-			}
 			skipped = append(skipped, capture.Path)
 			continue
 		}
 		folder := pathSegments(strings.TrimPrefix(capture.Path, prefix))
-		fieldNames := make([]string, 0, len(capture.Data))
-		for name := range capture.Data {
-			fieldNames = append(fieldNames, name)
-		}
-		slices.Sort(fieldNames)
-		for _, name := range fieldNames {
+		for _, name := range sortedVaultFieldNames(capture.Data) {
 			fieldWhere := where + " field " + quoteName(name)
 			value, typ, err := vaultValue(b, fieldWhere, capture.Data[name])
 			if err != nil {
-				return Result{}, err
-			}
-			if err := b.Record(fieldWhere); err != nil {
 				return Result{}, err
 			}
 			sourceVersion := ""
@@ -144,16 +144,9 @@ func validateVaultCapture(capture vaultCapture, where string) error {
 		return failure(vaultSource, CodeProvenance, where,
 			"the capture record carries no single mount name")
 	}
-	segments := pathSegments(capture.Path)
-	if len(segments) == 0 || joinSourcePath(segments...) != capture.Path {
+	if !canonicalSourcePath(capture.Path) {
 		return failure(vaultSource, CodeProvenance, where,
 			"the capture record carries no canonical secret path")
-	}
-	for _, segment := range segments {
-		if segment == "." || segment == ".." {
-			return failure(vaultSource, CodeProvenance, where,
-				"the capture record's secret path is not canonical")
-		}
 	}
 	if capture.EngineVersion != 1 && capture.EngineVersion != 2 {
 		return failure(vaultSource, CodeProvenance, where,
@@ -367,56 +360,26 @@ func ambientTokenHelper() (tokenhelper.TokenHelper, string, error) {
 }
 
 func readVaultTokenHelper(ctx context.Context, helper tokenhelper.TokenHelper, address string) (string, error) {
-	var raw []byte
-	var err error
-	switch helper := helper.(type) {
-	case *tokenhelper.InternalTokenHelper:
-		tokenPath := helper.Path()
-		if tokenPath == "" {
-			home, homeErr := os.UserHomeDir()
-			if homeErr != nil {
-				return "", failure(vaultSource, CodeProvenance, "token helper",
-					"the ambient token helper failed")
-			}
-			tokenPath = filepath.Join(home, ".vault-token")
+	if external, ok := helper.(*tokenhelper.ExternalTokenHelper); ok {
+		wrapped, err := wrapVaultTokenHelper(ctx, external, address)
+		if err != nil {
+			return "", err
 		}
-		raw, err = ReadFile(tokenPath)
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
-	case *tokenhelper.ExternalTokenHelper:
-		commandCtx, cancel := context.WithTimeout(ctx, RequestDeadline)
-		defer cancel()
-		args := append(append([]string{}, helper.Args...), "get")
-		cmd := exec.CommandContext(commandCtx, helper.BinaryPath, args...)
-		cmd.Stderr = io.Discard
-		env := helper.Env
-		if env == nil {
-			env = os.Environ()
-		}
-		env = replaceEnv(env, "BAO_ADDR", address)
-		env = replaceEnv(env, "VAULT_ADDR", address)
-		cmd.Env = SanitizedEnv(env)
-		stdout := &cappedOutput{max: MaxValueBytes}
-		cmd.Stdout = stdout
-		if runErr := cmd.Run(); runErr != nil {
-			if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
-				return "", failure(vaultSource, CodeBound, "token helper",
-					"the ambient token helper exceeded the %s per-request deadline", RequestDeadline)
-			}
-			return "", failure(vaultSource, CodeProvenance, "token helper",
-				"the ambient token helper failed")
-		}
-		if stdout.overflow {
-			return "", failure(vaultSource, CodeBound, "token helper",
-				"the ambient token helper response exceeds the %d-byte cap", MaxValueBytes)
-		}
-		raw = stdout.buf.Bytes()
-	default:
+		helper = wrapped
+	} else if _, internal := helper.(*tokenhelper.InternalTokenHelper); !internal {
 		return "", failure(vaultSource, CodeProvenance, "token helper",
 			"the ambient token helper kind is unsupported")
 	}
+	raw, err := helper.Get()
 	if err != nil {
+		if code, bounded := boundedSubprocessExit(err); bounded {
+			if code == subprocessExitOverflow {
+				return "", failure(vaultSource, CodeBound, "token helper",
+					"the ambient token helper response exceeds the %d-byte cap", MaxValueBytes)
+			}
+			return "", failure(vaultSource, CodeBound, "token helper",
+				"the ambient token helper exceeded the %s per-request deadline", RequestDeadline)
+		}
 		return "", failure(vaultSource, CodeProvenance, "token helper",
 			"the ambient token helper failed")
 	}
@@ -424,7 +387,32 @@ func readVaultTokenHelper(ctx context.Context, helper tokenhelper.TokenHelper, a
 		return "", failure(vaultSource, CodeBound, "token helper",
 			"the ambient token helper response exceeds the %d-byte cap", MaxValueBytes)
 	}
-	return strings.TrimSpace(string(raw)), nil
+	return strings.TrimSpace(raw), nil
+}
+
+func wrapVaultTokenHelper(ctx context.Context, helper *tokenhelper.ExternalTokenHelper, address string) (tokenhelper.TokenHelper, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, failure(vaultSource, CodeProvenance, "token helper",
+			"the bounded ambient token helper runner is unavailable")
+	}
+	encoded, err := encodeSubprocessSpec(newSubprocessSpec(ctx, helper.BinaryPath, helper.Args, MaxValueBytes))
+	if err != nil {
+		return nil, failure(vaultSource, CodeProvenance, "token helper",
+			"the bounded ambient token helper runner could not be configured")
+	}
+	env := append([]string{}, helper.Env...)
+	if helper.Env == nil {
+		env = os.Environ()
+	}
+	env = replaceEnv(env, "BAO_ADDR", address)
+	env = replaceEnv(env, "VAULT_ADDR", address)
+	env = replaceEnv(env, subprocessSpecEnv, encoded)
+	return &tokenhelper.ExternalTokenHelper{
+		BinaryPath: executable,
+		Args:       []string{internalSubprocessMode},
+		Env:        env,
+	}, nil
 }
 
 func detectKVVersion(ctx context.Context, client *baoapi.Client, meter *requestMeter,
@@ -583,13 +571,8 @@ func (r *vaultTreeReader) readLeaf(sourcePath string) error {
 				"the pinned secret response does not match metadata version %s", version)
 		}
 	}
-	fieldNames := make([]string, 0, len(data))
-	for name := range data {
-		fieldNames = append(fieldNames, name)
-	}
-	slices.Sort(fieldNames)
 	folder := pathSegments(strings.TrimPrefix(sourcePath, r.prefix))
-	for _, name := range fieldNames {
+	for _, name := range sortedVaultFieldNames(data) {
 		fieldWhere := where + " field " + quoteName(name)
 		value, typ, err := vaultValue(r.budget, fieldWhere, data[name])
 		if err != nil {
@@ -603,6 +586,15 @@ func (r *vaultTreeReader) readLeaf(sourcePath string) error {
 		})
 	}
 	return nil
+}
+
+func sortedVaultFieldNames(data map[string]any) []string {
+	names := make([]string, 0, len(data))
+	for name := range data {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (r *vaultTreeReader) providerPath(operation, sourcePath string) string {

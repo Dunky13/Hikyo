@@ -3,7 +3,6 @@ package importer
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,18 +14,13 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/schema"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	authv1 "k8s.io/client-go/pkg/apis/clientauthentication/v1"
-	authv1beta1 "k8s.io/client-go/pkg/apis/clientauthentication/v1beta1"
 	clientexec "k8s.io/client-go/plugin/pkg/client/auth/exec"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -113,28 +107,14 @@ func (k8sConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Resu
 			(len(cfg.TLSClientConfig.KeyData) != 0 || cfg.TLSClientConfig.KeyFile != "")) {
 		cfg.ExecProvider = nil
 	}
-	baseCfg := rest.CopyConfig(cfg)
-	execConfigured := baseCfg.ExecProvider != nil
-	var client typedcorev1.CoreV1Interface
-	var credentialExpiry time.Time
-	refreshClient := func(force bool) (typedcorev1.CoreV1Interface, error) {
-		if !force && client != nil && (credentialExpiry.IsZero() || time.Now().Before(credentialExpiry)) {
-			return client, nil
+	if cfg.ExecProvider != nil {
+		if err := wrapKubeExecProvider(ctx, cfg.ExecProvider); err != nil {
+			return Result{}, err
 		}
-		candidate := rest.CopyConfig(baseCfg)
-		expiry, err := resolveKubeExecCredential(ctx, candidate, raw.Clusters[clusterName])
-		if err != nil {
-			return nil, err
-		}
-		configured, err := newKubeClient(candidate)
-		if err != nil {
-			return nil, err
-		}
-		client = configured
-		credentialExpiry = expiry
-		return client, nil
 	}
-	if _, err := refreshClient(false); err != nil {
+	execConfigured := cfg.ExecProvider != nil
+	client, err := newKubeClient(cfg)
+	if err != nil {
 		return Result{}, err
 	}
 	requests := 0
@@ -151,44 +131,28 @@ func (k8sConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Resu
 		if err := takeRequest(where); err != nil {
 			return nil, err
 		}
-		current, err := refreshClient(false)
-		if err != nil {
-			return nil, err
-		}
-		secret, err := current.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
+		secret, err := client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if !apierrors.IsUnauthorized(err) || !execConfigured {
 			return secret, err
 		}
 		if err := takeRequest(where + " credential retry"); err != nil {
 			return nil, err
 		}
-		current, err = refreshClient(true)
-		if err != nil {
-			return nil, err
-		}
-		return current.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
+		return client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
 	}
 	listSecrets := func(options metav1.ListOptions) (*corev1.SecretList, error) {
 		where := "namespace " + quoteName(in.Namespace)
 		if err := takeRequest(where); err != nil {
 			return nil, err
 		}
-		current, err := refreshClient(false)
-		if err != nil {
-			return nil, err
-		}
-		list, err := current.Secrets(in.Namespace).List(ctx, options)
+		list, err := client.Secrets(in.Namespace).List(ctx, options)
 		if !apierrors.IsUnauthorized(err) || !execConfigured {
 			return list, err
 		}
 		if err := takeRequest(where + " credential retry"); err != nil {
 			return nil, err
 		}
-		current, err = refreshClient(true)
-		if err != nil {
-			return nil, err
-		}
-		return current.Secrets(in.Namespace).List(ctx, options)
+		return client.Secrets(in.Namespace).List(ctx, options)
 	}
 
 	var records []Record
@@ -295,15 +259,6 @@ func (k8sConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Resu
 	}, nil
 }
 
-const maxExecCredentialBytes = 1 << 20
-
-type execCredentialStatus struct {
-	token      string
-	cert       string
-	key        string
-	expiration time.Time
-}
-
 func newKubeClient(cfg *rest.Config) (typedcorev1.CoreV1Interface, error) {
 	cfg.Timeout = RequestDeadline
 	priorWrap := cfg.WrapTransport
@@ -327,216 +282,71 @@ func newKubeClient(cfg *rest.Config) (typedcorev1.CoreV1Interface, error) {
 	return client, nil
 }
 
-func resolveKubeExecCredential(ctx context.Context, cfg *rest.Config,
-	cluster *clientcmdapi.Cluster,
-) (time.Time, error) {
-	plugin := cfg.ExecProvider
-	if plugin == nil {
-		return time.Time{}, nil
-	}
+const maxExecCredentialBytes = 1 << 20
+
+func wrapKubeExecProvider(ctx context.Context, plugin *clientcmdapi.ExecConfig) error {
 	where := "kube exec plugin " + quoteName(plugin.Command)
 	if err := clientexec.ValidatePluginPolicy(plugin.PluginPolicy); err != nil {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
+		return failure(k8sSource, CodeProvenance, where,
 			"the credential-plugin policy is invalid")
 	}
-	if !credentialPluginAllowed(plugin) {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
+	command, allowed := allowedCredentialPluginCommand(plugin)
+	if !allowed {
+		return failure(k8sSource, CodeProvenance, where,
 			"the credential-plugin policy does not allow this command")
 	}
-	interactive := term.IsTerminal(int(os.Stdin.Fd()))
-	switch plugin.InteractiveMode {
-	case clientcmdapi.NeverExecInteractiveMode:
-		interactive = false
-	case clientcmdapi.IfAvailableExecInteractiveMode:
-	case "":
-		if plugin.APIVersion == "client.authentication.k8s.io/v1" {
-			return time.Time{}, failure(k8sSource, CodeProvenance, where,
-				"a v1 credential plugin must declare interactiveMode")
-		}
-	case clientcmdapi.AlwaysExecInteractiveMode:
-		if !interactive {
-			return time.Time{}, failure(k8sSource, CodeProvenance, where,
-				"the credential plugin requires an interactive terminal")
-		}
-	default:
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin has an unknown interactive mode")
-	}
-	execInfo, err := encodeExecInfo(plugin, cluster, interactive)
+	executable, err := os.Executable()
 	if err != nil {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin input could not be encoded")
+		return failure(k8sSource, CodeProvenance, where,
+			"the bounded credential-plugin runner is unavailable")
 	}
-
-	env := append([]string{}, os.Environ()...)
+	encoded, err := encodeSubprocessSpec(newSubprocessSpec(ctx, command, plugin.Args, maxExecCredentialBytes))
+	if err != nil {
+		return failure(k8sSource, CodeProvenance, where,
+			"the bounded credential-plugin runner could not be configured")
+	}
+	env := make([]clientcmdapi.ExecEnvVar, 0, len(plugin.Env)+1)
 	for _, item := range plugin.Env {
-		env = append(env, item.Name+"="+item.Value)
-	}
-	env = SanitizedEnv(env)
-	env = replaceEnv(env, "KUBERNETES_EXEC_INFO", string(execInfo))
-	commandCtx, cancel := context.WithTimeout(ctx, RequestDeadline)
-	defer cancel()
-	cmd := exec.CommandContext(commandCtx, plugin.Command, plugin.Args...)
-	cmd.Env = env
-	cmd.Stderr = io.Discard
-	if interactive {
-		cmd.Stdin = os.Stdin
-	}
-	stdout := &cappedOutput{max: maxExecCredentialBytes}
-	cmd.Stdout = stdout
-	if err := cmd.Run(); err != nil {
-		switch {
-		case errors.Is(commandCtx.Err(), context.DeadlineExceeded):
-			return time.Time{}, failure(k8sSource, CodeBound, where,
-				"the credential plugin exceeded the %s per-request deadline", RequestDeadline)
-		default:
-			return time.Time{}, failure(k8sSource, CodeProvenance, where,
-				"the credential plugin failed")
+		if item.Name != subprocessSpecEnv {
+			env = append(env, item)
 		}
 	}
-	if stdout.overflow {
-		return time.Time{}, failure(k8sSource, CodeBound, where,
-			"the credential plugin response exceeds the %d-byte cap", maxExecCredentialBytes)
-	}
-	status, err := decodeExecCredential(plugin.APIVersion, stdout.buf.Bytes())
-	if err != nil {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin returned no valid ExecCredential")
-	}
-	if status.token == "" && status.cert == "" && status.key == "" {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin returned no token or client certificate")
-	}
-	if (status.cert == "") != (status.key == "") {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin returned an incomplete client certificate pair")
-	}
-	if !status.expiration.IsZero() && !time.Now().Before(status.expiration) {
-		return time.Time{}, failure(k8sSource, CodeProvenance, where,
-			"the credential plugin returned already-expired credentials")
-	}
-	if status.token != "" {
-		cfg.BearerToken = status.token
-		cfg.BearerTokenFile = ""
-	}
-	if status.cert != "" {
-		cfg.TLSClientConfig.CertData = []byte(status.cert)
-		cfg.TLSClientConfig.KeyData = []byte(status.key)
-		cfg.TLSClientConfig.CertFile = ""
-		cfg.TLSClientConfig.KeyFile = ""
-	}
-	cfg.ExecProvider = nil
-	return status.expiration, nil
+	env = append(env, clientcmdapi.ExecEnvVar{Name: subprocessSpecEnv, Value: encoded})
+	plugin.Command = executable
+	plugin.Args = []string{internalSubprocessMode}
+	plugin.Env = env
+	plugin.StdinUnavailable = true
+	plugin.StdinUnavailableMessage = "hikyo import does not permit interactive credential plugins"
+	plugin.PluginPolicy = clientcmdapi.PluginPolicy{PolicyType: clientcmdapi.PluginPolicyAllowAll}
+	return nil
 }
 
-func credentialPluginAllowed(plugin *clientcmdapi.ExecConfig) bool {
+func allowedCredentialPluginCommand(plugin *clientcmdapi.ExecConfig) (string, bool) {
 	switch plugin.PluginPolicy.PolicyType {
 	case "", clientcmdapi.PluginPolicyAllowAll:
-		return true
+		return plugin.Command, true
 	case clientcmdapi.PluginPolicyDenyAll:
-		return false
+		return "", false
 	case clientcmdapi.PluginPolicyAllowlist:
 		command, err := exec.LookPath(filepath.Clean(plugin.Command))
 		if err != nil {
-			return false
+			return "", false
 		}
 		for _, entry := range plugin.PluginPolicy.Allowlist {
 			allowed, err := exec.LookPath(filepath.Clean(entry.Command))
 			if err == nil && allowed == command {
-				return true
+				return command, true
 			}
 		}
 	}
-	return false
-}
-
-func encodeExecInfo(plugin *clientcmdapi.ExecConfig, cluster *clientcmdapi.Cluster, interactive bool) ([]byte, error) {
-	switch plugin.APIVersion {
-	case "client.authentication.k8s.io/v1":
-		credential := authv1.ExecCredential{
-			TypeMeta: metav1.TypeMeta{APIVersion: plugin.APIVersion, Kind: "ExecCredential"},
-			Spec:     authv1.ExecCredentialSpec{Interactive: interactive},
-		}
-		if plugin.ProvideClusterInfo {
-			credential.Spec.Cluster = &authv1.Cluster{
-				Server: cluster.Server, TLSServerName: cluster.TLSServerName,
-				InsecureSkipTLSVerify:    cluster.InsecureSkipTLSVerify,
-				CertificateAuthorityData: append([]byte{}, cluster.CertificateAuthorityData...),
-				ProxyURL:                 cluster.ProxyURL, DisableCompression: cluster.DisableCompression,
-				Config: runtime.RawExtension{Object: plugin.Config},
-			}
-		}
-		return json.Marshal(credential)
-	case "client.authentication.k8s.io/v1beta1":
-		credential := authv1beta1.ExecCredential{
-			TypeMeta: metav1.TypeMeta{APIVersion: plugin.APIVersion, Kind: "ExecCredential"},
-			Spec:     authv1beta1.ExecCredentialSpec{Interactive: interactive},
-		}
-		if plugin.ProvideClusterInfo {
-			credential.Spec.Cluster = &authv1beta1.Cluster{
-				Server: cluster.Server, TLSServerName: cluster.TLSServerName,
-				InsecureSkipTLSVerify:    cluster.InsecureSkipTLSVerify,
-				CertificateAuthorityData: append([]byte{}, cluster.CertificateAuthorityData...),
-				ProxyURL:                 cluster.ProxyURL, DisableCompression: cluster.DisableCompression,
-				Config: runtime.RawExtension{Object: plugin.Config},
-			}
-		}
-		return json.Marshal(credential)
-	default:
-		return nil, errors.New("unsupported ExecCredential API version")
-	}
-}
-
-func decodeExecCredential(apiVersion string, raw []byte) (execCredentialStatus, error) {
-	switch apiVersion {
-	case "client.authentication.k8s.io/v1":
-		var credential authv1.ExecCredential
-		if err := json.Unmarshal(raw, &credential); err != nil || credential.APIVersion != apiVersion ||
-			credential.Kind != "ExecCredential" || credential.Status == nil {
-			return execCredentialStatus{}, errors.New("invalid ExecCredential")
-		}
-		expiration := time.Time{}
-		if credential.Status.ExpirationTimestamp != nil {
-			expiration = credential.Status.ExpirationTimestamp.Time
-		}
-		return execCredentialStatus{
-			token: credential.Status.Token, cert: credential.Status.ClientCertificateData,
-			key: credential.Status.ClientKeyData, expiration: expiration,
-		}, nil
-	case "client.authentication.k8s.io/v1beta1":
-		var credential authv1beta1.ExecCredential
-		if err := json.Unmarshal(raw, &credential); err != nil || credential.APIVersion != apiVersion ||
-			credential.Kind != "ExecCredential" || credential.Status == nil {
-			return execCredentialStatus{}, errors.New("invalid ExecCredential")
-		}
-		expiration := time.Time{}
-		if credential.Status.ExpirationTimestamp != nil {
-			expiration = credential.Status.ExpirationTimestamp.Time
-		}
-		return execCredentialStatus{
-			token: credential.Status.Token, cert: credential.Status.ClientCertificateData,
-			key: credential.Status.ClientKeyData, expiration: expiration,
-		}, nil
-	default:
-		return execCredentialStatus{}, errors.New("unsupported ExecCredential API version")
-	}
-}
-
-func replaceEnv(env []string, name, value string) []string {
-	prefix := name + "="
-	out := make([]string, 0, len(env)+1)
-	for _, item := range env {
-		if !strings.HasPrefix(item, prefix) {
-			out = append(out, item)
-		}
-	}
-	return append(out, prefix+value)
+	return "", false
 }
 
 func k8sLiveFailure(err error, origin *url.URL) error {
 	var internal *Error
 	var redirect *refusedRedirect
 	var tooLarge *http.MaxBytesError
+	subprocessCode, subprocessBounded := boundedSubprocessExit(err)
 	switch {
 	case errors.As(err, &internal):
 		return internal
@@ -549,6 +359,16 @@ func k8sLiveFailure(err error, origin *url.URL) error {
 	case errors.Is(err, context.DeadlineExceeded):
 		return failure(k8sSource, CodeBound, originOf(origin),
 			"a provider request exceeded the %s per-request deadline", RequestDeadline)
+	case subprocessBounded:
+		if subprocessCode == subprocessExitOverflow {
+			return failure(k8sSource, CodeBound, "kubeconfig",
+				"the credential plugin response exceeds the %d-byte cap", maxExecCredentialBytes)
+		}
+		return failure(k8sSource, CodeBound, "kubeconfig",
+			"the credential plugin exceeded the %s per-request deadline", RequestDeadline)
+	case strings.Contains(err.Error(), "getting credentials: exec plugin cannot support interactive mode"):
+		return failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the credential plugin requires interactive stdin, which import does not permit")
 	default:
 		return failure(k8sSource, CodeMalformed, originOf(origin),
 			"the Kubernetes API read failed")
