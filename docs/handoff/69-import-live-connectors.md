@@ -54,9 +54,11 @@ not.
   library still owns `TokenHelper.Get`; external helpers are pointed at the
   same hidden re-exec wrapper so the actual helper receives the selected
   address and shared environment, deadline, and output bounds. Operator output
-  states which ambient convention won; only the origin enters the manifest.
-- Adds strict JSONL capture-file parsing for replay fixtures. Each line pins
-  path, mount, engine version, secret version, deletion state, and data.
+  states which ambient address, token, namespace, and TLS convention names won
+  without exposing their values; only the origin enters the manifest.
+- Adds strict JSONL capture-file parsing for replay fixtures. Each line must
+  explicitly pin path, mount, engine version, secret version, both deletion
+  state members, and data (including `{}` for skipped rows).
 
 ### Vault/OpenBao capture recipe
 

@@ -393,6 +393,37 @@ func TestVaultCaptureRejectsDuplicateCanonicalRowsWhileScanning(t *testing.T) {
 	}
 }
 
+func TestVaultCaptureRequiresEveryPinnedStateMember(t *testing.T) {
+	valid := `{"path":"apps/current","mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"value"}}`
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{
+			name: "deleted",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"destroyed":false,"data":{"KEY":"value"}}`,
+		},
+		{
+			name: "destroyed",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"deleted":false,"data":{"KEY":"value"}}`,
+		},
+		{
+			name: "data on skipped row",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"deleted":true,"destroyed":false}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(tc.row + "\n" + valid)
+			_, err := Run(t.Context(), vaultSource, Input{Path: "missing-member.jsonl", Data: raw})
+			wantCode(t, err, CodeMalformed)
+			if !strings.Contains(err.Error(), "missing-member.jsonl line 1") {
+				t.Fatalf("missing-member refusal does not name its row: %v", err)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The shared sanitized spawn path (M5 acceptance)
 // ---------------------------------------------------------------------------

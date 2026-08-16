@@ -30,13 +30,13 @@ type vaultConnector struct{}
 func (vaultConnector) Name() string { return vaultSource }
 
 type vaultCapture struct {
-	Path          string         `json:"path"`
-	Mount         string         `json:"mount"`
-	EngineVersion int            `json:"engine_version"`
-	SecretVersion *int           `json:"secret_version,omitempty"`
-	Deleted       bool           `json:"deleted"`
-	Destroyed     bool           `json:"destroyed"`
-	Data          map[string]any `json:"data"`
+	Path          string          `json:"path"`
+	Mount         string          `json:"mount"`
+	EngineVersion int             `json:"engine_version"`
+	SecretVersion *int            `json:"secret_version,omitempty"`
+	Deleted       *bool           `json:"deleted"`
+	Destroyed     *bool           `json:"destroyed"`
+	Data          *map[string]any `json:"data"`
 }
 
 func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, error) {
@@ -82,12 +82,12 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 				"the capture file declares this mount and canonical secret path more than once")
 		}
 		seenCaptures[identity] = struct{}{}
-		if capture.Deleted || capture.Destroyed {
+		if *capture.Deleted || *capture.Destroyed {
 			if err := b.Record(where); err != nil {
 				return Result{}, err
 			}
 		} else {
-			for _, name := range sortedVaultFieldNames(capture.Data) {
+			for _, name := range sortedVaultFieldNames(*capture.Data) {
 				if err := b.Record(where + " field " + quoteName(name)); err != nil {
 					return Result{}, err
 				}
@@ -119,14 +119,14 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 	var skipped []string
 	for _, capture := range captures {
 		where := "secret " + quoteName(capture.Path)
-		if capture.Deleted || capture.Destroyed {
+		if *capture.Deleted || *capture.Destroyed {
 			skipped = append(skipped, capture.Path)
 			continue
 		}
 		folder := pathSegments(strings.TrimPrefix(capture.Path, prefix))
-		for _, name := range sortedVaultFieldNames(capture.Data) {
+		for _, name := range sortedVaultFieldNames(*capture.Data) {
 			fieldWhere := where + " field " + quoteName(name)
-			value, typ, err := vaultValue(b, fieldWhere, capture.Data[name])
+			value, typ, err := vaultValue(b, fieldWhere, (*capture.Data)[name])
 			if err != nil {
 				return Result{}, err
 			}
@@ -150,6 +150,20 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 }
 
 func validateVaultCapture(capture vaultCapture, where string) error {
+	var missing []string
+	if capture.Deleted == nil {
+		missing = append(missing, "deleted")
+	}
+	if capture.Destroyed == nil {
+		missing = append(missing, "destroyed")
+	}
+	if capture.Data == nil {
+		missing = append(missing, "data")
+	}
+	if len(missing) != 0 {
+		return failure(vaultSource, CodeMalformed, where,
+			"the capture record omits required %s", strings.Join(missing, ", "))
+	}
 	if capture.Mount == "" || strings.Contains(capture.Mount, "/") {
 		return failure(vaultSource, CodeProvenance, where,
 			"the capture record carries no single mount name")
@@ -170,7 +184,7 @@ func validateVaultCapture(capture vaultCapture, where string) error {
 		return failure(vaultSource, CodeProvenance, where,
 			"a KV v2 capture record carries no positive secret_version")
 	}
-	if !capture.Deleted && !capture.Destroyed && len(capture.Data) == 0 {
+	if !*capture.Deleted && !*capture.Destroyed && len(*capture.Data) == 0 {
 		return failure(vaultSource, CodeMalformed, where,
 			"a current capture record carries no data fields")
 	}
@@ -288,9 +302,33 @@ func newVaultClient(ctx context.Context) (*baoapi.Client, string, string, error)
 		return nil, "", "", failure(vaultSource, CodeProvenance, originOf(parsed),
 			"ambient Vault/OpenBao credentials are absent")
 	}
-	resolution := fmt.Sprintf("address=%s, token=%s, namespace=%s",
-		addressResolution, tokenResolution, namespaceResolution)
+	resolution := fmt.Sprintf("address=%s, token=%s, namespace=%s, tls=%s",
+		addressResolution, tokenResolution, namespaceResolution, ambientTLSResolution())
 	return client, originOf(parsed), resolution, nil
+}
+
+func ambientTLSResolution() string {
+	variables := []string{
+		baoapi.EnvVaultCACert,
+		baoapi.EnvVaultCACertBytes,
+		baoapi.EnvVaultCAPath,
+		baoapi.EnvVaultClientCert,
+		baoapi.EnvVaultClientCertBytes,
+		baoapi.EnvVaultClientKey,
+		baoapi.EnvVaultClientKeyBytes,
+		baoapi.EnvVaultSkipVerify,
+		baoapi.EnvVaultTLSServerName,
+	}
+	selected := make([]string, 0, len(variables))
+	for _, variable := range variables {
+		if resolution := ambientVariableResolution(variable, ""); resolution != "" {
+			selected = append(selected, resolution)
+		}
+	}
+	if len(selected) == 0 {
+		return "defaults"
+	}
+	return strings.Join(selected, "+")
 }
 
 func ambientVariableResolution(baoName, fallback string) string {

@@ -726,6 +726,10 @@ func TestVaultOpenBaoLiveFixtureImportsKVv2Tree(t *testing.T) {
 	t.Setenv("BAO_TOKEN", "bao-fixture-token")
 	t.Setenv("VAULT_TOKEN", "wrong-vault-token")
 	t.Setenv("BAO_NAMESPACE", "team-a")
+	t.Setenv("BAO_SKIP_VERIFY", "false")
+	t.Setenv("VAULT_SKIP_VERIFY", "true")
+	t.Setenv("BAO_TLS_SERVER_NAME", "bao.example.test")
+	t.Setenv("VAULT_TLS_SERVER_NAME", "vault.example.test")
 
 	result, err := RunLive(t.Context(), vaultSource, LiveInput{
 		Mount: "secret", Path: "apps", KVVersion: 2,
@@ -736,7 +740,7 @@ func TestVaultOpenBaoLiveFixtureImportsKVv2Tree(t *testing.T) {
 	if result.Identity != server.URL {
 		t.Fatalf("identity = %q, want %q", result.Identity, server.URL)
 	}
-	if result.Resolution != "address=BAO_ADDR, token=BAO_TOKEN, namespace=BAO_NAMESPACE" {
+	if result.Resolution != "address=BAO_ADDR, token=BAO_TOKEN, namespace=BAO_NAMESPACE, tls=BAO_SKIP_VERIFY+BAO_TLS_SERVER_NAME" {
 		t.Fatalf("resolution = %q", result.Resolution)
 	}
 	if !reflect.DeepEqual(result.Scope, Scope{Mount: "secret", PathPrefix: "apps", KVVersion: 2}) {
