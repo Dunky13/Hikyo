@@ -1,7 +1,11 @@
 package conformance
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +29,104 @@ func init() {
 		scenario{"import_phase2_is_strict_and_skips_by_default", scenarioImportStrict},
 		scenario{"import_phase2_rejects_moved_state_by_occurrence_token", scenarioImportMovedState},
 		scenario{"import_e2e_per_source_fixtures", scenarioImportPerSourceE2E},
+		scenario{"import_e2e_live_source_fixtures", scenarioImportLiveSourcesE2E},
 		scenario{"import_precondition_is_not_an_oracle", scenarioImportPreconditionOracle},
 		scenario{"import_undeclared_transition_binds_declaration", scenarioImportUndeclaredTransition},
 	)
+}
+
+// scenarioImportLiveSourcesE2E is #69's M5 live acceptance: real kubeconfig
+// and Vault/OpenBao HTTP fixture reads enter the same phase-1 planner, then the
+// resulting values cross the real service phase-2 transaction on both engines.
+func scenarioImportLiveSourcesE2E(t *testing.T, db *store.DB) {
+	for _, source := range []string{"k8s", "vault"} {
+		t.Run(source, func(t *testing.T) {
+			var result importer.Result
+			var err error
+			switch source {
+			case "k8s":
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodGet {
+						t.Fatalf("live import attempted %s; connectors are read-only", r.Method)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, `{"apiVersion":"v1","kind":"SecretList","metadata":{},"items":[{"metadata":{"name":"app","namespace":"demo","resourceVersion":"7"},"data":{"api-key":"%s"}}]}`,
+						base64.StdEncoding.EncodeToString([]byte("k8s-live-value")))
+				}))
+				t.Cleanup(server.Close)
+				kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+				body := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- name: fixture-cluster
+  cluster:
+    server: %s
+    insecure-skip-tls-verify: true
+contexts:
+- name: fixture-context
+  context: {cluster: fixture-cluster, user: fixture-user}
+current-context: fixture-context
+users:
+- name: fixture-user
+  user: {token: fixture-token}
+`, server.URL)
+				if err := os.WriteFile(kubeconfig, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("KUBECONFIG", kubeconfig)
+				result, err = importer.RunLive(t.Context(), source, importer.LiveInput{Namespace: "demo"})
+			case "vault":
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodGet && r.Method != "LIST" {
+						t.Fatalf("live import attempted %s; connectors are read-only", r.Method)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Path {
+					case "/v1/secret/metadata/apps":
+						fmt.Fprint(w, `{"data":{"keys":["service"]}}`)
+					case "/v1/secret/metadata/apps/service":
+						fmt.Fprint(w, `{"data":{"current_version":3,"versions":{"3":{"deletion_time":"","destroyed":false}}}}`)
+					case "/v1/secret/data/apps/service":
+						fmt.Fprint(w, `{"data":{"data":{"db-url":"vault-live-value"},"metadata":{"version":3}}}`)
+					default:
+						t.Fatalf("unexpected live provider path %s", r.URL.Path)
+					}
+				}))
+				t.Cleanup(server.Close)
+				t.Setenv("BAO_ADDR", server.URL)
+				t.Setenv("BAO_TOKEN", "fixture-token")
+				result, err = importer.RunLive(t.Context(), source,
+					importer.LiveInput{Mount: "secret", Path: "apps", KVVersion: 2})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			who, scope, values, envs, keys := valueFixture(t, db, "importlive"+source)
+			actor := service.LocalPrincipal(who)
+			prod := mustEnv(t, envs, actor, scope, "prod")
+			plan := mustPlan(t, source, result, values, actor, scope, prod, nil, "")
+			if plan.Manifest.SourceIdentity.Context != result.Identity {
+				t.Fatalf("manifest identity = %q, want %q", plan.Manifest.SourceIdentity.Context, result.Identity)
+			}
+			if plan.Template.Scope.FileDigest != "" {
+				t.Fatalf("live template recorded a file digest: %q", plan.Template.Scope.FileDigest)
+			}
+			for _, key := range plan.Bundle.Keys {
+				if key.Classification != string(schema.Secret) {
+					t.Fatalf("live key %s defaulted to %s, want secret", key.Name, key.Classification)
+				}
+				mustKey(t, keys, actor, scope, key.Name, key.Classification, schema.DefaultPresenceRules())
+			}
+			imported, err := values.Import(t.Context(), actor, prod, importRequestFrom(plan))
+			if err != nil {
+				t.Fatalf("phase 2 refused live fixture: %v", err)
+			}
+			if len(imported.Imported) != len(plan.Bundle.Keys) {
+				t.Fatalf("imported = %v, bundle keys = %d", imported.Imported, len(plan.Bundle.Keys))
+			}
+		})
+	}
 }
 
 // scenarioImportPresence: phase 1 reads declared keys, two-state presence and a
@@ -529,7 +628,10 @@ func mustPlan(t *testing.T, source string, result importer.Result, values *servi
 	t.Helper()
 	in := importer.PlanInput{
 		Source: source, Records: result.Records, Skipped: result.Skipped,
-		Scope: result.Scope, FileDigest: importer.Digest(raw), EnvSlug: slug,
+		Scope: result.Scope, EnvSlug: slug, SourceIdentity: result.Identity,
+	}
+	if raw != nil {
+		in.FileDigest = importer.Digest(raw)
 	}
 	planned, err := importer.PlannedCandidates(in)
 	if err != nil {

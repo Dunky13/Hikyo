@@ -47,7 +47,9 @@ var importSourceList = strings.Join(importer.Sources(), "|")
 
 var importUsage = "usage: hikyo import --from <" + importSourceList + "> --project <p> --environment <e> " +
 	"--file <path> [--env <slug>] [--out-dir <dir>]\n" +
-	"       hikyo import --mapping <mapping.json> --file <path> [--out-dir <dir>]"
+	"       hikyo import --from k8s --live --namespace <ns> [--name <secret>] --project <p> --environment <e>\n" +
+	"       hikyo import --from vault --live --mount <mount> [--path <prefix>] [--kv-version <1|2>] --project <p> --environment <e>\n" +
+	"       hikyo import --mapping <mapping.json> [--file <path>] [--out-dir <dir>]"
 
 // artifact file names inside --out-dir. Fixed, because the phase-2 commands
 // name them and a reviewer reads them in a pull request.
@@ -69,6 +71,13 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	environment := fs.String("environment", "", "the target environment (exactly one per invocation)")
 	from := fs.String("from", "", "the source connector: "+importSourceList)
 	file := fs.String("file", "", "the export file the source's own tooling produced")
+	live := fs.Bool("live", false, "read the source through its ambient client configuration")
+	namespace := fs.String("namespace", "", "Kubernetes source namespace")
+	name := fs.String("name", "", "one Kubernetes Secret name")
+	kubeContext := fs.String("kube-context", "", "Kubernetes kubeconfig context (current context by default)")
+	mount := fs.String("mount", "", "Vault/OpenBao KV mount")
+	pathPrefix := fs.String("path", "", "Vault/OpenBao path prefix")
+	kvVersion := fs.Int("kv-version", 0, "Vault/OpenBao KV engine version (1 or 2; detected when omitted)")
 	envSlug := fs.String("env", "", "the SOURCE environment slug inside the export (Infisical)")
 	mapping := fs.String("mapping", "", "replay a recorded mapping template")
 	outDir := fs.String("out-dir", ".", "where the emitted artifacts are written")
@@ -80,6 +89,7 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "hikyo import takes no positional arguments, got: %s", strings.Join(positional, " "))
 	}
 	c.Env = *environment
+	explicitLive := *live
 
 	// Mode selection. The no-arguments case is a HARD ERROR either way — never
 	// a hung prompt — and the two halves differ only in which sentence is
@@ -114,22 +124,42 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 				"hikyo import --from requires an explicit target; missing %s (ambient context is not accepted for a committable migration)",
 				strings.Join(missing, " and "))
 		}
+		switch {
+		case *live && *file != "":
+			return failf(ExitUsage, "hikyo import takes either --file or --live, not both")
+		case !*live && *file == "":
+			return failf(ExitUsage, "hikyo import --from requires either --file <path> or --live.\n%s", importUsage)
+		case *live && *from != "k8s" && *from != "vault":
+			return failf(ExitUsage, "hikyo import source %q is file-only in v1", *from)
+		case *live && *from == "k8s" && *namespace == "":
+			return failf(ExitUsage, "hikyo import --from k8s --live requires --namespace <namespace>")
+		case *live && *from == "vault" && *mount == "":
+			return failf(ExitUsage, "hikyo import --from vault --live requires --mount <mount>")
+		case *kvVersion != 0 && *kvVersion != 1 && *kvVersion != 2:
+			return failf(ExitUsage, "hikyo import --kv-version is neither 1 nor 2")
+		}
+		if *live && *from == "k8s" && (*mount != "" || *pathPrefix != "" || *kvVersion != 0 || *envSlug != "") {
+			return failf(ExitUsage, "Kubernetes live mode does not take Vault/Infisical selectors")
+		}
+		if *live && *from == "vault" && (*namespace != "" || *name != "" || *kubeContext != "" || *envSlug != "") {
+			return failf(ExitUsage, "Vault/OpenBao live mode does not take Kubernetes/Infisical selectors")
+		}
+		if !*live && (*namespace != "" || *name != "" || *kubeContext != "" || *mount != "" || *pathPrefix != "" || *kvVersion != 0) {
+			return failf(ExitUsage, "file mode does not take live source selectors")
+		}
 	}
-	if *file == "" {
-		return failf(ExitUsage, "hikyo import reads an export file: pass --file <path>.\n%s", importUsage)
-	}
-
 	var template *importer.Template
+	var replayNames []string
 	source := *from
 	if *mapping != "" {
 		// A replay's target comes from the template it replays, so naming a
 		// different one on the command line is refused rather than silently
 		// overridden: an artifact that records the choices and then watches a
 		// flag override them is not a record.
-		if c.Project != "" || *environment != "" {
+		if c.Project != "" || *environment != "" || explicitLive || *namespace != "" || *name != "" ||
+			*kubeContext != "" || *mount != "" || *pathPrefix != "" || *kvVersion != 0 || *envSlug != "" {
 			return failf(ExitUsage,
-				"hikyo import --mapping takes its project and environment from the template; "+
-					"remove --project/--environment, or run flag mode instead")
+				"hikyo import --mapping takes its target, mode and source selectors from the template; remove selector overrides")
 		}
 		raw, err := importer.ReadFile(*mapping)
 		if err != nil {
@@ -153,21 +183,42 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 		source = parsed.Source
 		c.Project = parsed.Project
 		c.Env = parsed.Environments[0].Target
-		if parsed.Scope.EnvSlug != "" && *envSlug == "" {
-			*envSlug = parsed.Scope.EnvSlug
+		*envSlug = parsed.Scope.EnvSlug
+		if parsed.Scope.FileDigest == "" && (source == "k8s" || source == "vault") {
+			if *file != "" {
+				return failf(ExitUsage, "this mapping records live mode; remove --file")
+			}
+			*live = true
+			*namespace = parsed.Scope.Namespace
+			replayNames = append([]string{}, parsed.Scope.Names...)
+			*mount = parsed.Scope.Mount
+			*pathPrefix = parsed.Scope.PathPrefix
+			*kvVersion = parsed.Scope.KVVersion
+		} else if *file == "" {
+			return failf(ExitUsage, "this mapping records file mode: pass --file <path>.\n%s", importUsage)
 		}
 	}
 
-	// The source is read BEFORE the session is touched, so a caller who names
-	// the wrong file or a file the bounds refuse hears about it without a round
-	// trip that carries anything. ReadExport applies the per-file bound BEFORE
-	// the bytes are resident.
-	in, err := importer.ReadExport(*file)
-	if err != nil {
-		return failf(ExitUsage, "reading the export: %v", err)
+	// The foreign source is read BEFORE the Hikyo session is touched, so a
+	// caller who names an invalid source or exceeds a connector bound hears
+	// about it without a Hikyo round trip carrying anything.
+	var in importer.Input
+	var result importer.Result
+	sourcePath := ""
+	if *live {
+		result, err = importer.RunLive(ctx, source, importer.LiveInput{
+			Context: *kubeContext, Namespace: *namespace, Name: *name, Names: replayNames,
+			Mount: *mount, Path: *pathPrefix, KVVersion: *kvVersion,
+		})
+	} else {
+		in, err = importer.ReadExport(*file)
+		if err != nil {
+			return failf(ExitUsage, "reading the export: %v", err)
+		}
+		in.EnvSlug = *envSlug
+		result, err = importer.Run(ctx, source, in)
+		sourcePath = *file
 	}
-	in.EnvSlug = *envSlug
-	result, err := importer.Run(ctx, source, in)
 	if err != nil {
 		return failf(ExitRefused, "%v", err)
 	}
@@ -175,10 +226,15 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	// The rename transform runs BEFORE the server is asked anything: the
 	// presence read mints a token per candidate key, and it cannot do that
 	// without knowing which names this run will propose.
+	fileDigest := ""
+	if !*live {
+		fileDigest = importer.Digest(in.Data)
+	}
 	planIn := importer.PlanInput{
 		Source: source, Records: result.Records, Skipped: result.Skipped,
-		Scope: result.Scope, FileDigest: importer.Digest(in.Data), EnvSlug: *envSlug,
-		Template: template,
+		Scope: result.Scope, FileDigest: fileDigest, EnvSlug: *envSlug,
+		SourceIdentity: result.Identity,
+		Template:       template,
 	}
 	candidates, err := importer.PlannedCandidates(planIn)
 	if err != nil {
@@ -243,7 +299,7 @@ func runImport(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	return reportImport(ios, plan, *file, valuesPath, *outDir)
+	return reportImport(ios, plan, result.Resolution, sourcePath, valuesPath, *outDir)
 }
 
 func wireImportCandidates(in []importer.PlannedCandidate) []apigen.ValueOccurrenceCandidate {
@@ -356,8 +412,11 @@ func writeArtifacts(ios IO, outDir, envID string, plan *importer.Plan) (string, 
 
 // reportImport prints what happened. Every rename is surfaced, every skipped
 // key is named, and the run ends with the plaintext-still-on-disk warning.
-func reportImport(ios IO, plan *importer.Plan, sourcePath, valuesPath, outDir string) error {
+func reportImport(ios IO, plan *importer.Plan, sourceResolution, sourcePath, valuesPath, outDir string) error {
 	w := ios.Stderr
+	if sourceResolution != "" {
+		fmt.Fprintf(w, "source resolution: %s\n", sourceResolution)
+	}
 	for _, r := range plan.Renames {
 		fmt.Fprintf(w, "rename: %s -> %s (%s)\n",
 			importer.QuoteName(r.From), importer.QuoteName(r.To), r.Transform)
@@ -367,7 +426,14 @@ func reportImport(ios IO, plan *importer.Plan, sourcePath, valuesPath, outDir st
 			importer.QuoteName(n.Imported), importer.QuoteName(n.Declared))
 	}
 	if len(plan.SkippedBySource) > 0 {
-		fmt.Fprintf(w, "skipped at the source (personal overrides): %s\n", quoteImportNames(plan.SkippedBySource))
+		reason := "connector exclusions"
+		switch plan.Template.Source {
+		case "infisical":
+			reason = "personal overrides"
+		case "vault":
+			reason = "deleted or destroyed latest versions"
+		}
+		fmt.Fprintf(w, "skipped at the source (%s): %s\n", reason, quoteImportNames(plan.SkippedBySource))
 	}
 	if len(plan.PlaintextHints) > 0 {
 		fmt.Fprintf(w, "plaintext at the source (a classification HINT; nothing was downgraded): %s\n",

@@ -179,7 +179,7 @@ func TestExitCodeMatrix(t *testing.T) {
 		{"import without a source or a mapping", []string{"import"}, cli.ExitUsage},
 		{"import with both a source and a mapping", []string{"import", "--from", "k8s", "--mapping", "m.json"}, cli.ExitUsage},
 		{"import without an export file", []string{"import", "--from", "k8s", "--project", "prj_x", "--environment", "env_x"}, cli.ExitUsage},
-		{"import with an unserved source", []string{"import", "--from", "vault", "--file", "x.yaml"}, cli.ExitUsage},
+		{"import with an unserved source", []string{"import", "--from", "phase", "--file", "x.yaml"}, cli.ExitUsage},
 		{"import without an explicit project", []string{"import", "--from", "k8s", "--environment", "env_x", "--file", "x.yaml"}, cli.ExitRefused},
 		{"import without an explicit environment", []string{"import", "--from", "k8s", "--project", "prj_x", "--file", "x.yaml"}, cli.ExitRefused},
 		{"import with a missing export file", []string{"import", "--from", "k8s", "--project", "prj_x", "--environment", "env_x", "--file", "nope.yaml"}, cli.ExitUsage},

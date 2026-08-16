@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -41,6 +42,14 @@ func run(t *testing.T, source, fixture string, slug string) (Result, error) {
 	in := read(t, fixture)
 	in.EnvSlug = slug
 	return Run(t.Context(), source, in)
+}
+
+func overDepthPath() string {
+	segments := make([]string, MaxDepth+1)
+	for i := range segments {
+		segments[i] = "segment"
+	}
+	return strings.Join(segments, "/")
 }
 
 // wantCode asserts the refusal's stable code and that its prose carries no
@@ -310,6 +319,108 @@ func TestInfisicalRejectsDuplicateMembersBeforeProvenanceDecoding(t *testing.T) 
 	wantCode(t, err, CodeDuplicateKey)
 	if !strings.Contains(strings.ToLower(err.Error()), `"type"`) {
 		t.Fatalf("duplicate-member refusal does not name type: %v", err)
+	}
+}
+
+func TestVaultCaptureFixtureUsesLiveMappingContract(t *testing.T) {
+	got, err := run(t, vaultSource, "vault-capture.jsonl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Scope, Scope{Mount: "secret", PathPrefix: "apps", KVVersion: 2}) {
+		t.Fatalf("scope = %+v", got.Scope)
+	}
+	if strings.Join(got.Skipped, ",") != "apps/old" {
+		t.Fatalf("skipped = %v", got.Skipped)
+	}
+	want := []Record{
+		{Folder: []string{"db", "main"}, SourceName: "DB_URL", Value: "postgres://fixture", Type: schema.TypeString, Version: "4"},
+		{Folder: []string{"db", "main"}, SourceName: "OPTIONS", Value: `{"pool":5,"ssl":true}`, Type: schema.TypeJSON, Version: "4"},
+		{Folder: []string{"top"}, SourceName: "API_KEY", Value: "top-secret", Type: schema.TypeString, Version: "2"},
+	}
+	if !reflect.DeepEqual(got.Records, want) {
+		t.Fatalf("records = %#v, want %#v", got.Records, want)
+	}
+}
+
+func TestVaultCapturePreservesJSONNumbersByteForByte(t *testing.T) {
+	got, err := run(t, vaultSource, "vault-capture-numbers.jsonl", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Record{
+		{Folder: nil, SourceName: "DECIMAL", Value: "0.12345678901234567890123456789", Type: schema.TypeJSON},
+		{Folder: nil, SourceName: "LARGE_INTEGER", Value: "9007199254740993", Type: schema.TypeJSON},
+	}
+	if !reflect.DeepEqual(got.Records, want) {
+		t.Fatalf("records = %#v, want %#v", got.Records, want)
+	}
+}
+
+func TestVaultCaptureStopsWhileScanningAtRecordBound(t *testing.T) {
+	in := Input{Path: "capture.jsonl", Data: []byte(
+		`{"path":"apps/one","mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"A":"one","B":"two"}}`)}
+	b := &Budget{source: vaultSource, maxBytes: MaxDecodedBytes, maxCount: 1}
+
+	_, err := (vaultConnector{}).Read(t.Context(), in, b)
+	wantCode(t, err, CodeBound)
+	if !strings.Contains(err.Error(), "capture.jsonl line 1") {
+		t.Fatalf("record cap was not enforced while scanning: %v", err)
+	}
+}
+
+func TestVaultCaptureChargesFullCanonicalPathDepth(t *testing.T) {
+	raw := []byte(fmt.Sprintf(
+		`{"path":%q,"mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"value"}}`,
+		overDepthPath(),
+	))
+	_, err := Run(t.Context(), vaultSource, Input{Path: "deep.jsonl", Data: raw})
+	wantCode(t, err, CodeBound)
+	if !strings.Contains(err.Error(), "tree depth") {
+		t.Fatalf("depth refusal does not name bound: %v", err)
+	}
+}
+
+func TestVaultCaptureRejectsDuplicateCanonicalRowsWhileScanning(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"path":"apps/service","mount":"secret","engine_version":2,"secret_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"one"}}`,
+		`{"path":"apps/service","mount":"secret","engine_version":2,"secret_version":2,"deleted":false,"destroyed":false,"data":{"KEY":"two"}}`,
+	}, "\n"))
+	_, err := Run(t.Context(), vaultSource, Input{Path: "duplicate.jsonl", Data: raw})
+	wantCode(t, err, CodeDuplicateKey, "one", "two")
+	if !strings.Contains(err.Error(), "duplicate.jsonl line 2") {
+		t.Fatalf("duplicate capture was not refused during streaming scan: %v", err)
+	}
+}
+
+func TestVaultCaptureRequiresEveryPinnedStateMember(t *testing.T) {
+	valid := `{"path":"apps/current","mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"value"}}`
+	tests := []struct {
+		name string
+		row  string
+	}{
+		{
+			name: "deleted",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"destroyed":false,"data":{"KEY":"value"}}`,
+		},
+		{
+			name: "destroyed",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"deleted":false,"data":{"KEY":"value"}}`,
+		},
+		{
+			name: "data on skipped row",
+			row:  `{"path":"apps/malformed","mount":"secret","engine_version":1,"deleted":true,"destroyed":false}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(tc.row + "\n" + valid)
+			_, err := Run(t.Context(), vaultSource, Input{Path: "missing-member.jsonl", Data: raw})
+			wantCode(t, err, CodeMalformed)
+			if !strings.Contains(err.Error(), "missing-member.jsonl line 1") {
+				t.Fatalf("missing-member refusal does not name its row: %v", err)
+			}
+		})
 	}
 }
 

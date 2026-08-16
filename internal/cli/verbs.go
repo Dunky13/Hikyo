@@ -160,9 +160,14 @@ values:                                            --env selects the environment
   hikyo values export [--revision N] [--reveal] [--output-file PATH | --dangerously-print]
 
 import:                                            authors artifacts, then stops
-  hikyo import --from <k8s|sops|infisical> --project <p> --environment <e>
+  hikyo import --from <k8s|sops|vault|infisical> --project <p> --environment <e>
       --file <path> [--env <slug>] [--out-dir <dir>]
-  hikyo import --mapping <mapping.json> --file <path> [--out-dir <dir>]
+  hikyo import --from k8s --live --namespace <ns> [--name <secret>]
+      --project <p> --environment <e> [--out-dir <dir>]
+  hikyo import --from vault --live --mount <mount> [--path <prefix>] [--kv-version <1|2>]
+      --project <p> --environment <e> [--out-dir <dir>]
+  hikyo import --mapping <mapping.json> [--file <path>] [--out-dir <dir>]
+      file-mode mappings require --file; live mappings reuse recorded selectors
 
   phase 1 emits a definitions bundle, a per-environment values file, mapping.json
   and run-manifest.json. Review the bundle, apply it, then run

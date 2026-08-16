@@ -3,18 +3,32 @@ package importer
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	clientexec "k8s.io/client-go/plugin/pkg/client/auth/exec"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// The Kubernetes Secret manifest connector (import-paths ADR § Per-source
-// structural mapping, K8s row). FILE MODE ONLY in this ticket — live mode
-// (kubeconfig) rides with #69.
+// The Kubernetes Secret connector (import-paths ADR § Per-source structural
+// mapping, K8s row): manifest-file mode plus read-only live kubeconfig mode.
 //
 // Input: a YAML or JSON file holding one or more Kubernetes Secret manifests,
 // as `kubectl get secret -o yaml` emits them (multi-document `---` streams
@@ -34,15 +48,324 @@ import (
 //   - a value that is not UTF-8 text, or carries NUL, is refused BY NAME —
 //     per key, never per import (the framework's uniform rule, in Run).
 //
-// Deliberately NOT imported: client-go. Parsing a manifest is yaml.v3 plus four
-// field reads; pulling the Kubernetes client library into a file parser would
-// add a dependency tree the size of the rest of this binary for nothing.
+// File parsing stays yaml.v3 plus four field reads. Live mode uses client-go,
+// but the file path does not route through Kubernetes runtime decoding; this
+// keeps its strict duplicate-key and content-safe error behavior unchanged.
 
 const k8sSource = "k8s"
 
 type k8sConnector struct{}
 
 func (k8sConnector) Name() string { return k8sSource }
+
+func (k8sConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Result, error) {
+	if in.Namespace == "" {
+		return Result{}, failure(k8sSource, CodeProvenance, "", "live mode requires --namespace <namespace>")
+	}
+	loading := clientcmd.NewDefaultClientConfigLoadingRules()
+	overrides := &clientcmd.ConfigOverrides{}
+	if in.Context != "" {
+		overrides.CurrentContext = in.Context
+	}
+	deferred := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loading, overrides)
+	raw, err := deferred.RawConfig()
+	if err != nil {
+		return Result{}, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the ambient kubeconfig could not be loaded")
+	}
+	contextName := raw.CurrentContext
+	if in.Context != "" {
+		contextName = in.Context
+	}
+	selected, ok := raw.Contexts[contextName]
+	if !ok || selected == nil {
+		return Result{}, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected context is not defined")
+	}
+	clusterName := selected.Cluster
+	if _, ok := raw.Clusters[clusterName]; !ok {
+		return Result{}, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected context's cluster is not defined")
+	}
+
+	cfg, err := deferred.ClientConfig()
+	if err != nil {
+		return Result{}, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected context could not produce a client configuration")
+	}
+	serverURL, err := url.Parse(cfg.Host)
+	if err != nil || serverURL.User != nil || serverURL.Scheme == "" || serverURL.Host == "" {
+		return Result{}, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected cluster does not name a credential-safe origin")
+	}
+	// Match client-go's credential precedence: an exec plugin is ignored when
+	// the selected user already has bearer, basic, or complete certificate
+	// authentication. Besides compatibility, this avoids executing third-party
+	// code that the kubeconfig did not actually select.
+	if cfg.BearerToken != "" || cfg.BearerTokenFile != "" || cfg.Username != "" ||
+		((len(cfg.TLSClientConfig.CertData) != 0 || cfg.TLSClientConfig.CertFile != "") &&
+			(len(cfg.TLSClientConfig.KeyData) != 0 || cfg.TLSClientConfig.KeyFile != "")) {
+		cfg.ExecProvider = nil
+	}
+	if cfg.ExecProvider != nil {
+		if err := wrapKubeExecProvider(ctx, cfg.ExecProvider); err != nil {
+			return Result{}, err
+		}
+	}
+	execConfigured := cfg.ExecProvider != nil
+	client, err := newKubeClient(cfg)
+	if err != nil {
+		return Result{}, err
+	}
+	requests := newRequestMeter(k8sSource)
+	getSecret := func(name string) (*corev1.Secret, error) {
+		where := "Secret " + quoteName(name)
+		if err := requests.take(where); err != nil {
+			return nil, err
+		}
+		secret, err := client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if !apierrors.IsUnauthorized(err) || !execConfigured {
+			return secret, err
+		}
+		if err := requests.take(where + " credential retry"); err != nil {
+			return nil, err
+		}
+		return client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
+	}
+	listSecrets := func(options metav1.ListOptions) (*corev1.SecretList, error) {
+		where := "namespace " + quoteName(in.Namespace)
+		if err := requests.take(where); err != nil {
+			return nil, err
+		}
+		list, err := client.Secrets(in.Namespace).List(ctx, options)
+		if !apierrors.IsUnauthorized(err) || !execConfigured {
+			return list, err
+		}
+		if err := requests.take(where + " credential retry"); err != nil {
+			return nil, err
+		}
+		return client.Secrets(in.Namespace).List(ctx, options)
+	}
+
+	var records []Record
+	var names []string
+	seenNames := make(map[string]struct{})
+	appendSecret := func(secret corev1.Secret) error {
+		if secret.Name == "" {
+			return failure(k8sSource, CodeMalformed, in.Namespace,
+				"a live Secret carries no metadata.name")
+		}
+		if _, exists := seenNames[secret.Name]; exists {
+			return failure(k8sSource, CodeMalformed, in.Namespace,
+				"the live traversal returned Secret %s more than once", quoteName(secret.Name))
+		}
+		if len(names) >= MaxRecords {
+			return failure(k8sSource, CodeBound, in.Namespace,
+				"Secret count exceeds the %d-record traversal cap", MaxRecords)
+		}
+		seenNames[secret.Name] = struct{}{}
+		names = append(names, secret.Name)
+		keys := make([]string, 0, len(secret.Data))
+		for key := range secret.Data {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			where := fmt.Sprintf("namespace %s secret %s key %s",
+				quoteName(in.Namespace), quoteName(secret.Name), quoteName(key))
+			if err := b.Bytes(where, len(secret.Data[key])); err != nil {
+				return err
+			}
+			if err := b.Record(where); err != nil {
+				return err
+			}
+			records = append(records, Record{
+				Folder: []string{secret.Name}, SourceName: key,
+				Value: string(secret.Data[key]), Type: schema.TypeString,
+				Version: secret.ResourceVersion,
+			})
+		}
+		return nil
+	}
+
+	selectedNames := append([]string{}, in.Names...)
+	if in.Name != "" {
+		selectedNames = append(selectedNames, in.Name)
+	}
+	slices.Sort(selectedNames)
+	selectedNames = slices.Compact(selectedNames)
+	if len(selectedNames) > 0 {
+		if len(selectedNames) > MaxLivePages {
+			return Result{}, failure(k8sSource, CodeBound, in.Namespace,
+				"named Secret selection exceeds the %d-page/request cap", MaxLivePages)
+		}
+		for _, selectedName := range selectedNames {
+			secret, err := getSecret(selectedName)
+			if err != nil {
+				return Result{}, k8sLiveFailure(err, serverURL)
+			}
+			if err := appendSecret(*secret); err != nil {
+				return Result{}, err
+			}
+		}
+	} else {
+		continueToken := ""
+		for {
+			list, err := listSecrets(metav1.ListOptions{
+				Limit: 500, Continue: continueToken,
+			})
+			if err != nil {
+				return Result{}, k8sLiveFailure(err, serverURL)
+			}
+			for _, secret := range list.Items {
+				if err := appendSecret(secret); err != nil {
+					return Result{}, err
+				}
+			}
+			continueToken = list.Continue
+			if continueToken == "" {
+				break
+			}
+		}
+	}
+	if len(names) == 0 {
+		return Result{}, failure(k8sSource, CodeMalformed, in.Namespace,
+			"the live selection holds no Kubernetes Secret")
+	}
+	if len(records) == 0 {
+		return Result{}, failure(k8sSource, CodeMalformed, in.Namespace,
+			"the live selection holds no Kubernetes Secret entry")
+	}
+	slices.Sort(names)
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Folder[0] != records[j].Folder[0] {
+			return records[i].Folder[0] < records[j].Folder[0]
+		}
+		return records[i].SourceName < records[j].SourceName
+	})
+	return Result{
+		Records:    records,
+		Scope:      Scope{Namespace: in.Namespace, Names: names},
+		Identity:   clusterName + "/" + contextName,
+		Resolution: "kubeconfig context=" + quoteName(contextName),
+	}, nil
+}
+
+func newKubeClient(cfg *rest.Config) (typedcorev1.CoreV1Interface, error) {
+	cfg.Timeout = RequestDeadline
+	priorWrap := cfg.WrapTransport
+	cfg.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
+		if priorWrap != nil {
+			rt = priorWrap(rt)
+		}
+		return cappedRoundTripper{next: rt}
+	}
+	httpClient, err := rest.HTTPClientFor(cfg)
+	if err != nil {
+		return nil, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected context could not configure transport security")
+	}
+	httpClient.CheckRedirect = refuseCredentialRedirect
+	client, err := typedcorev1.NewForConfigAndClient(cfg, httpClient)
+	if err != nil {
+		return nil, failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the selected context could not create a Kubernetes client")
+	}
+	return client, nil
+}
+
+const maxExecCredentialBytes = 1 << 20
+
+func wrapKubeExecProvider(ctx context.Context, plugin *clientcmdapi.ExecConfig) error {
+	where := "kube exec plugin " + quoteName(plugin.Command)
+	if err := clientexec.ValidatePluginPolicy(plugin.PluginPolicy); err != nil {
+		return failure(k8sSource, CodeProvenance, where,
+			"the credential-plugin policy is invalid")
+	}
+	command, allowed := allowedCredentialPluginCommand(plugin)
+	if !allowed {
+		return failure(k8sSource, CodeProvenance, where,
+			"the credential-plugin policy does not allow this command")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return failure(k8sSource, CodeProvenance, where,
+			"the bounded credential-plugin runner is unavailable")
+	}
+	encoded, err := encodeSubprocessSpec(newSubprocessSpec(ctx, command, plugin.Args, maxExecCredentialBytes))
+	if err != nil {
+		return failure(k8sSource, CodeProvenance, where,
+			"the bounded credential-plugin runner could not be configured")
+	}
+	env := make([]clientcmdapi.ExecEnvVar, 0, len(plugin.Env)+1)
+	for _, item := range plugin.Env {
+		if item.Name != subprocessSpecEnv {
+			env = append(env, item)
+		}
+	}
+	env = append(env, clientcmdapi.ExecEnvVar{Name: subprocessSpecEnv, Value: encoded})
+	plugin.Command = executable
+	plugin.Args = []string{internalSubprocessMode}
+	plugin.Env = env
+	plugin.StdinUnavailable = true
+	plugin.StdinUnavailableMessage = "hikyo import does not permit interactive credential plugins"
+	plugin.PluginPolicy = clientcmdapi.PluginPolicy{PolicyType: clientcmdapi.PluginPolicyAllowAll}
+	return nil
+}
+
+func allowedCredentialPluginCommand(plugin *clientcmdapi.ExecConfig) (string, bool) {
+	switch plugin.PluginPolicy.PolicyType {
+	case "", clientcmdapi.PluginPolicyAllowAll:
+		return plugin.Command, true
+	case clientcmdapi.PluginPolicyDenyAll:
+		return "", false
+	case clientcmdapi.PluginPolicyAllowlist:
+		command, err := exec.LookPath(filepath.Clean(plugin.Command))
+		if err != nil {
+			return "", false
+		}
+		for _, entry := range plugin.PluginPolicy.Allowlist {
+			allowed, err := exec.LookPath(filepath.Clean(entry.Command))
+			if err == nil && allowed == command {
+				return command, true
+			}
+		}
+	}
+	return "", false
+}
+
+func k8sLiveFailure(err error, origin *url.URL) error {
+	var internal *Error
+	var redirect *refusedRedirect
+	var tooLarge *http.MaxBytesError
+	subprocessCode, subprocessBounded := boundedSubprocessExit(err)
+	switch {
+	case errors.As(err, &internal):
+		return internal
+	case errors.As(err, &redirect):
+		return failure(k8sSource, CodeProvenance, "",
+			"credential-bearing redirect from %s to %s was refused", redirect.from, redirect.to)
+	case errors.Is(err, errLiveResponseTooLarge), errors.As(err, &tooLarge):
+		return failure(k8sSource, CodeBound, originOf(origin),
+			"a provider response exceeds the %d-byte per-response cap", MaxResponseBytes)
+	case errors.Is(err, context.DeadlineExceeded):
+		return failure(k8sSource, CodeBound, originOf(origin),
+			"a provider request exceeded the %s per-request deadline", RequestDeadline)
+	case subprocessBounded:
+		if subprocessCode == subprocessExitOverflow {
+			return failure(k8sSource, CodeBound, "kubeconfig",
+				"the credential plugin response exceeds the %d-byte cap", maxExecCredentialBytes)
+		}
+		return failure(k8sSource, CodeBound, "kubeconfig",
+			"the credential plugin exceeded the %s per-request deadline", RequestDeadline)
+	case strings.Contains(err.Error(), "getting credentials: exec plugin cannot support interactive mode"):
+		return failure(k8sSource, CodeProvenance, "kubeconfig",
+			"the credential plugin requires interactive stdin, which import does not permit")
+	default:
+		return failure(k8sSource, CodeMalformed, originOf(origin),
+			"the Kubernetes API read failed")
+	}
+}
 
 // k8sSecret is the exact subset of a Secret manifest this connector reads.
 // Unknown fields are IGNORED rather than refused: a manifest carries

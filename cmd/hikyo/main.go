@@ -15,6 +15,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/app"
 	"github.com/Hikyo-Org/hikyo/internal/cli"
 	"github.com/Hikyo-Org/hikyo/internal/config"
+	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
 // Set by GoReleaser. Development builds deliberately identify themselves as
@@ -30,6 +31,9 @@ func main() {
 }
 
 func run() int {
+	if handled, code := importer.RunInternalSubprocess(os.Args[1:], os.Stdout); handled {
+		return code
+	}
 	if len(os.Args) < 2 {
 		usage()
 		return 2

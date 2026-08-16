@@ -41,13 +41,17 @@ const ConnectorContractVersion = 1
 // ---------------------------------------------------------------------------
 
 // Scope is the connector-shaped source selector. Every field is optional
-// because the shape is per connector: k8s uses {namespace, names}; sops and
-// infisical use {file_digest}, infisical additionally {env_slug}.
+// because the shape is per connector: k8s uses {namespace, names}; vault uses
+// {mount, path_prefix, kv_version}; sops and infisical use {file_digest}, with
+// infisical additionally using {env_slug}.
 type Scope struct {
 	Namespace  string   `json:"namespace,omitempty"`
 	Names      []string `json:"names,omitempty"`
 	FileDigest string   `json:"file_digest,omitempty"`
 	EnvSlug    string   `json:"env_slug,omitempty"`
+	Mount      string   `json:"mount,omitempty"`
+	PathPrefix string   `json:"path_prefix,omitempty"`
+	KVVersion  int      `json:"kv_version,omitempty"`
 }
 
 // EnvironmentMapping is one source-environment → target-environment row.
@@ -116,7 +120,8 @@ type TemplateReference struct {
 }
 
 // SourceIdentity is the non-secret identity of the source, as far as the
-// connector can state it: for the file connectors, the export file's digest.
+// connector can state it: provider origin/context for live mode, export digest
+// for file mode.
 type SourceIdentity struct {
 	Kind    string `json:"kind"`
 	Context string `json:"context"`

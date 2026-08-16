@@ -705,6 +705,16 @@ func TestPlaintextWarningNamesEveryFileStillOnDisk(t *testing.T) {
 	}
 }
 
+func TestPlaintextWarningForLiveModeNamesOnlyAuthoredValues(t *testing.T) {
+	got := PlaintextWarning("", []string{"/out/values-env_prod.json"})
+	if strings.Contains(got, "source") || !strings.Contains(got, "/out/values-env_prod.json") {
+		t.Fatalf("live warning = %q", got)
+	}
+	if got := PlaintextWarning("", nil); got != "no import plaintext artifact remains on disk" {
+		t.Fatalf("empty live warning = %q", got)
+	}
+}
+
 // TestTemplateManualRenameIsTheHardStopEscapeHatch: every unmappable-name
 // refusal points at the template's `renames`, so the template had better be
 // able to resolve one. This pins that promise.
