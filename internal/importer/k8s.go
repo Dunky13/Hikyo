@@ -117,39 +117,31 @@ func (k8sConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	requests := 0
-	takeRequest := func(where string) error {
-		requests++
-		if requests > MaxLivePages {
-			return failure(k8sSource, CodeBound, where,
-				"live traversal exceeds the %d-page/request cap", MaxLivePages)
-		}
-		return nil
-	}
+	requests := newRequestMeter(k8sSource)
 	getSecret := func(name string) (*corev1.Secret, error) {
 		where := "Secret " + quoteName(name)
-		if err := takeRequest(where); err != nil {
+		if err := requests.take(where); err != nil {
 			return nil, err
 		}
 		secret, err := client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if !apierrors.IsUnauthorized(err) || !execConfigured {
 			return secret, err
 		}
-		if err := takeRequest(where + " credential retry"); err != nil {
+		if err := requests.take(where + " credential retry"); err != nil {
 			return nil, err
 		}
 		return client.Secrets(in.Namespace).Get(ctx, name, metav1.GetOptions{})
 	}
 	listSecrets := func(options metav1.ListOptions) (*corev1.SecretList, error) {
 		where := "namespace " + quoteName(in.Namespace)
-		if err := takeRequest(where); err != nil {
+		if err := requests.take(where); err != nil {
 			return nil, err
 		}
 		list, err := client.Secrets(in.Namespace).List(ctx, options)
 		if !apierrors.IsUnauthorized(err) || !execConfigured {
 			return list, err
 		}
-		if err := takeRequest(where + " credential retry"); err != nil {
+		if err := requests.take(where + " credential retry"); err != nil {
 			return nil, err
 		}
 		return client.Secrets(in.Namespace).List(ctx, options)

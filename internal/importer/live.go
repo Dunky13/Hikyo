@@ -12,6 +12,24 @@ import (
 
 var errLiveResponseTooLarge = errors.New("live provider response exceeds cap")
 
+type requestMeter struct {
+	source string
+	count  int
+}
+
+func newRequestMeter(source string) *requestMeter {
+	return &requestMeter{source: source}
+}
+
+func (m *requestMeter) take(where string) error {
+	m.count++
+	if m.count > MaxLivePages {
+		return failure(m.source, CodeBound, where,
+			"live traversal exceeds the %d-page/request cap", MaxLivePages)
+	}
+	return nil
+}
+
 type cappedRoundTripper struct {
 	next http.RoundTripper
 }

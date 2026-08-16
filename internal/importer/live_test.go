@@ -665,6 +665,28 @@ func TestK8sLiveFailurePreservesInternalRefusal(t *testing.T) {
 	}
 }
 
+func TestSharedRequestMeterAttributesConnectorSource(t *testing.T) {
+	for _, source := range []string{k8sSource, vaultSource} {
+		t.Run(source, func(t *testing.T) {
+			meter := newRequestMeter(source)
+			for range MaxLivePages {
+				if err := meter.take("fixture"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := meter.take("fixture")
+			wantCode(t, err, CodeBound)
+			var importerErr *Error
+			if !errors.As(err, &importerErr) || importerErr.Source != source {
+				t.Fatalf("source = %q, want %q", importerErr.Source, source)
+			}
+			if !strings.Contains(err.Error(), "page/request cap") {
+				t.Fatalf("request refusal changed text: %v", err)
+			}
+		})
+	}
+}
+
 func TestVaultOpenBaoLiveFixtureImportsKVv2Tree(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Vault-Token"); got != "bao-fixture-token" {
@@ -727,6 +749,25 @@ func TestVaultOpenBaoLiveFixtureImportsKVv2Tree(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Records, want) {
 		t.Fatalf("records = %#v, want %#v", result.Records, want)
+	}
+}
+
+func TestVaultLiveRejectsDeepSelectedPrefixBeforeProviderRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"keys":[]}}`)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("BAO_ADDR", server.URL)
+	t.Setenv("BAO_TOKEN", "fixture-token")
+	_, err := RunLive(t.Context(), vaultSource, LiveInput{
+		Mount: "secret", Path: overDepthPath(), KVVersion: 1,
+	})
+	wantCode(t, err, CodeBound)
+	if requests != 0 {
+		t.Fatalf("deep prefix made %d provider request(s)", requests)
 	}
 }
 

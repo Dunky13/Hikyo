@@ -43,6 +43,7 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 	scanner := bufio.NewScanner(bytes.NewReader(in.Data))
 	scanner.Buffer(make([]byte, 64<<10), MaxFileBytes)
 	var captures []vaultCapture
+	seenCaptures := make(map[struct{ mount, path string }]struct{})
 	for line := 1; scanner.Scan(); line++ {
 		if err := ctx.Err(); err != nil {
 			return Result{}, failure(vaultSource, CodeBound, in.Path,
@@ -72,6 +73,15 @@ func (vaultConnector) Read(ctx context.Context, in Input, b *Budget) (Result, er
 		if err := validateVaultCapture(capture, where); err != nil {
 			return Result{}, err
 		}
+		if err := b.Depth(where, len(pathSegments(capture.Path))); err != nil {
+			return Result{}, err
+		}
+		identity := struct{ mount, path string }{mount: capture.Mount, path: capture.Path}
+		if _, duplicate := seenCaptures[identity]; duplicate {
+			return Result{}, failure(vaultSource, CodeDuplicateKey, where,
+				"the capture file declares this mount and canonical secret path more than once")
+		}
+		seenCaptures[identity] = struct{}{}
 		if capture.Deleted || capture.Destroyed {
 			if err := b.Record(where); err != nil {
 				return Result{}, err
@@ -180,19 +190,6 @@ func commonPathPrefix(paths [][]string) string {
 	return strings.Join(prefix, "/")
 }
 
-type requestMeter struct {
-	count int
-}
-
-func (m *requestMeter) take(where string) error {
-	m.count++
-	if m.count > MaxLivePages {
-		return failure(vaultSource, CodeBound, where,
-			"live traversal exceeds the %d-page/request cap", MaxLivePages)
-	}
-	return nil
-}
-
 func (vaultConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Result, error) {
 	mount := strings.Trim(in.Mount, "/")
 	if mount == "" || mount == "." || mount == ".." || strings.Contains(mount, "/") {
@@ -203,6 +200,9 @@ func (vaultConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Re
 		return Result{}, failure(vaultSource, CodeProvenance, quoteName(prefix),
 			"--path is not a canonical Vault/OpenBao path prefix")
 	}
+	if err := b.Depth(quoteName(prefix), len(pathSegments(prefix))); err != nil {
+		return Result{}, err
+	}
 	if in.KVVersion != 0 && in.KVVersion != 1 && in.KVVersion != 2 {
 		return Result{}, failure(vaultSource, CodeProvenance, mount,
 			"--kv-version is neither 1 nor 2")
@@ -212,7 +212,7 @@ func (vaultConnector) ReadLive(ctx context.Context, in LiveInput, b *Budget) (Re
 	if err != nil {
 		return Result{}, err
 	}
-	meter := &requestMeter{}
+	meter := newRequestMeter(vaultSource)
 	kvVersion := in.KVVersion
 	if kvVersion == 0 {
 		kvVersion, err = detectKVVersion(ctx, client, meter, mount, origin)
@@ -458,10 +458,11 @@ type vaultTreeReader struct {
 }
 
 func (r *vaultTreeReader) walk(relative string) error {
-	if err := r.budget.Depth(relative, len(pathSegments(relative))); err != nil {
+	fullPath := joinSourcePath(r.prefix, relative)
+	if err := r.budget.Depth(quoteName(fullPath), len(pathSegments(fullPath))); err != nil {
 		return err
 	}
-	providerPath := r.providerPath("list", joinSourcePath(r.prefix, relative))
+	providerPath := r.providerPath("list", fullPath)
 	if err := r.requests.take(quoteName(providerPath)); err != nil {
 		return err
 	}
@@ -500,6 +501,9 @@ func (r *vaultTreeReader) walk(relative string) error {
 
 func (r *vaultTreeReader) readLeaf(sourcePath string) error {
 	where := "secret " + quoteName(sourcePath)
+	if err := r.budget.Depth(where, len(pathSegments(sourcePath))); err != nil {
+		return err
+	}
 	version := ""
 	if r.kvVersion == 2 {
 		if err := r.requests.take(where + " metadata"); err != nil {

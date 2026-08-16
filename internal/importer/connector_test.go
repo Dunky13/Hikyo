@@ -44,6 +44,14 @@ func run(t *testing.T, source, fixture string, slug string) (Result, error) {
 	return Run(t.Context(), source, in)
 }
 
+func overDepthPath() string {
+	segments := make([]string, MaxDepth+1)
+	for i := range segments {
+		segments[i] = "segment"
+	}
+	return strings.Join(segments, "/")
+}
+
 // wantCode asserts the refusal's stable code and that its prose carries no
 // forbidden substring.
 func wantCode(t *testing.T, err error, code Code, forbidden ...string) {
@@ -358,6 +366,30 @@ func TestVaultCaptureStopsWhileScanningAtRecordBound(t *testing.T) {
 	wantCode(t, err, CodeBound)
 	if !strings.Contains(err.Error(), "capture.jsonl line 1") {
 		t.Fatalf("record cap was not enforced while scanning: %v", err)
+	}
+}
+
+func TestVaultCaptureChargesFullCanonicalPathDepth(t *testing.T) {
+	raw := []byte(fmt.Sprintf(
+		`{"path":%q,"mount":"secret","engine_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"value"}}`,
+		overDepthPath(),
+	))
+	_, err := Run(t.Context(), vaultSource, Input{Path: "deep.jsonl", Data: raw})
+	wantCode(t, err, CodeBound)
+	if !strings.Contains(err.Error(), "tree depth") {
+		t.Fatalf("depth refusal does not name bound: %v", err)
+	}
+}
+
+func TestVaultCaptureRejectsDuplicateCanonicalRowsWhileScanning(t *testing.T) {
+	raw := []byte(strings.Join([]string{
+		`{"path":"apps/service","mount":"secret","engine_version":2,"secret_version":1,"deleted":false,"destroyed":false,"data":{"KEY":"one"}}`,
+		`{"path":"apps/service","mount":"secret","engine_version":2,"secret_version":2,"deleted":false,"destroyed":false,"data":{"KEY":"two"}}`,
+	}, "\n"))
+	_, err := Run(t.Context(), vaultSource, Input{Path: "duplicate.jsonl", Data: raw})
+	wantCode(t, err, CodeDuplicateKey, "one", "two")
+	if !strings.Contains(err.Error(), "duplicate.jsonl line 2") {
+		t.Fatalf("duplicate capture was not refused during streaming scan: %v", err)
 	}
 }
 
