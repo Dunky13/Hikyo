@@ -191,7 +191,7 @@ jobs:
   release-snapshot:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).release_snapshot }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -323,7 +323,7 @@ jobs:
   docs:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).docs }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -343,7 +343,7 @@ jobs:
   web:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).web }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -584,7 +584,7 @@ jobs:
       - supply-chain-checks
       - test
       - web
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
