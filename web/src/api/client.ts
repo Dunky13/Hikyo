@@ -74,8 +74,15 @@ export class ApiError extends Error {
 type SdkResult<T> = {
   data?: T | undefined;
   error?: unknown;
-  response: Response;
+  response?: Response | undefined;
 };
+
+function requireResponse(result: SdkResult<unknown>): Response {
+  if (result.response === undefined) {
+    throw new Error('SDK call completed without an HTTP response');
+  }
+  return result.response;
+}
 
 /**
  * parsed runs a generated SDK call and returns its response parsed by the
@@ -88,11 +95,12 @@ export async function parsed<T>(
   schema: ZodType<T>,
 ): Promise<T> {
   const result = await call;
-  if (!result.response.ok) {
+  const response = requireResponse(result);
+  if (!response.ok) {
     const refusal = zError.safeParse(result.error);
     throw new ApiError(
-      result.response.status,
-      `request failed with ${result.response.status}`,
+      response.status,
+      `request failed with ${response.status}`,
       refusal.success ? refusal.data.error.detail ?? undefined : undefined,
     );
   }
@@ -109,12 +117,13 @@ export async function parsed<T>(
  */
 export async function ok(call: Promise<SdkResult<unknown>>): Promise<void> {
   const result = await call;
-  if (!result.response.ok) {
-    throw new ApiError(result.response.status, `request failed with ${result.response.status}`);
+  const response = requireResponse(result);
+  if (!response.ok) {
+    throw new ApiError(response.status, `request failed with ${response.status}`);
   }
-  if (result.response.status !== 204) {
+  if (response.status !== 204) {
     throw new Error(
-      `expected a bodyless 204, got ${result.response.status}: parse this response instead of discarding it`,
+      `expected a bodyless 204, got ${response.status}: parse this response instead of discarding it`,
     );
   }
 }

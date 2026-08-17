@@ -21,7 +21,7 @@ import {
 import { useMutation, useQueries, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import type { z } from 'zod';
 
-import { ApiError, parsed } from './client.ts';
+import { ApiError, ok, parsed } from './client.ts';
 
 /**
  * The machine-access surface, as the SPA sees it (#67, locked prototype #31
@@ -221,17 +221,16 @@ export function useRevokeCredential(p: ProjectRef) {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async (input: { serviceAccount: string; credential: string }) => {
-      const result = await revokeMachineCredential({
-        path: {
-          org: p.org,
-          project: p.project,
-          serviceAccount: input.serviceAccount,
-          credential: input.credential,
-        },
-      });
-      if (!result.response.ok) {
-        throw new ApiError(result.response.status, `revoke failed with ${result.response.status}`);
-      }
+      await ok(
+        revokeMachineCredential({
+          path: {
+            org: p.org,
+            project: p.project,
+            serviceAccount: input.serviceAccount,
+            credential: input.credential,
+          },
+        }),
+      );
     },
     onSuccess: (_void, input) => {
       void queries.invalidateQueries({ queryKey: credentialsKey(p, input.serviceAccount) });
