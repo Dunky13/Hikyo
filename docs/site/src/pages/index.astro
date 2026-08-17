@@ -42,7 +42,7 @@ const links = {
         <div class="nav-links">
           <a href="#matrix">Product</a>
           <a href="#self-host">Self-hosting</a>
-          <a href="#why">Why Hikyo</a>
+          <a href="#compare">Compare</a>
           <a href={links.docs}>Docs</a>
         </div>
         <div class="nav-actions">
@@ -249,6 +249,132 @@ const links = {
             <div><dt>encryption</dt><dd>Envelope encryption with <strong>operator-held root key material</strong>.</dd></div>
             <div><dt>deploy</dt><dd>A first-party <strong>Helm chart</strong> for Kubernetes and K3s.</dd></div>
           </dl>
+        </div>
+      </section>
+
+      <section class="block comparison" id="compare" aria-labelledby="comparison-heading">
+        <div class="wrap">
+          <div class="comparison-intro">
+            <div>
+              <p class="kicker">// choose with the gaps visible</p>
+              <h2 id="comparison-heading">Different tools, different jobs.</h2>
+            </div>
+            <p class="section-lede">
+              Hikyo starts with explicit environment state and validated values. OpenBao leads on dynamic
+              infrastructure credentials; Infisical and Phase pair broad delivery workflows with paid tiers.
+            </p>
+          </div>
+
+          <div class="comparison-scroll" role="region" aria-labelledby="comparison-heading" tabindex="0">
+            <table class="comparison-table">
+              <caption class="sr-only">
+                Product capability comparison between Hikyo, OpenBao, Infisical, and Phase
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Capability</th>
+                  <th class="hikyo-column" scope="col"><span>Hikyo</span><small>fully open</small></th>
+                  <th scope="col">OpenBao</th>
+                  <th scope="col">Infisical</th>
+                  <th scope="col">Phase</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Self-hosted</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Fully open production path</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Config and secrets</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Explicit environment matrix</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status no" aria-label="Not available">×</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Value and presence validation</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status no" aria-label="Not available">×</span></td>
+                  <td><span class="comparison-status no" aria-label="Not available">×</span></td>
+                  <td><span class="comparison-status no" aria-label="Not available">×</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Workload plaintext delivery</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Dynamic secrets</th>
+                  <td class="hikyo-column">
+                    <a class="comparison-status planned" href={`${repository}/issues/147`} aria-label="Planned for version 1.1, issue 147">◷ <small>v1.1</small></a>
+                  </td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status tier" aria-label="Enterprise tier">EE</span></td>
+                  <td><span class="comparison-status tier" aria-label="Enterprise tier">EE</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Automated secret rotation</th>
+                  <td class="hikyo-column">
+                    <a class="comparison-status planned" href={`${repository}/issues/148`} aria-label="Planned for version 1.1, issue 148">◷ <small>v1.1</small></a>
+                  </td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status tier" aria-label="Paid Pro tier">Pro</span></td>
+                  <td><span class="comparison-status tier" aria-label="Paid Pro tier">Pro</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">SCIM provisioning</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status no" aria-label="Not available">×</span></td>
+                  <td><span class="comparison-status tier" aria-label="Enterprise tier">EE</span></td>
+                  <td><span class="comparison-status tier" aria-label="Enterprise tier">EE</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Native multi-node HA</th>
+                  <td class="hikyo-column">
+                    <a class="comparison-status planned" href={`${repository}/issues/146`} aria-label="Planned for version 1.1, issue 146">◷ <small>v1.1</small></a>
+                  </td>
+                  <td><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status partial" aria-label="Deployment dependent">—</span></td>
+                  <td><span class="comparison-status partial" aria-label="Deployment dependent">—</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Application-level recovery</th>
+                  <td class="hikyo-column"><span class="comparison-status yes" aria-label="Included">✓</span></td>
+                  <td><span class="comparison-status partial" aria-label="Partial support">—</span></td>
+                  <td><span class="comparison-status tier" aria-label="Paid Pro tier">Pro</span></td>
+                  <td><span class="comparison-status tier" aria-label="Paid Pro tier">Pro</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="comparison-notes">
+            <p><span class="yes">✓ included</span><span>— partial or indirect</span><span>× unavailable</span><span>Pro paid tier</span><span>EE enterprise tier</span></p>
+            <p>
+              Clocks link to public roadmap tickets. Compared against public self-hosted documentation and plan
+              availability on 17 August 2026: <a href="https://openbao.org/docs/what-is-openbao/">OpenBao</a>,
+              <a href="https://infisical.com/pricing">Infisical</a>, and <a href="https://phase.dev/pricing/">Phase</a>.
+            </p>
+          </div>
         </div>
       </section>
 
