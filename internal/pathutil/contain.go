@@ -2,6 +2,8 @@
 package pathutil
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,21 +19,29 @@ func Within(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// ResolveWithin resolves symlinks and returns the resolved target only when it
-// remains inside the resolved root. Both paths must exist; use Within for a
-// destination that has not been created yet. Callers should read the returned
-// path so the checked symlink is not followed again.
-func ResolveWithin(root, target string) (string, bool) {
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+// ReadFileWithin reads target through an open handle to root. The rooted read
+// follows symlinks only while they remain inside root, so validation and use
+// cannot be separated by a pathname race.
+func ReadFileWithin(root, target string) ([]byte, error) {
+	rootClean := filepath.Clean(root)
+	targetClean := filepath.Clean(target)
+	rel, err := filepath.Rel(rootClean, targetClean)
 	if err != nil {
-		return "", false
+		return nil, fmt.Errorf("make target %q relative to root %q: %w", targetClean, rootClean, err)
 	}
-	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("target %q escapes root %q: %w", targetClean, rootClean, os.ErrInvalid)
+	}
+
+	rootHandle, err := os.OpenRoot(rootClean)
 	if err != nil {
-		return "", false
+		return nil, fmt.Errorf("open root %q: %w", rootClean, err)
 	}
-	if !Within(resolvedRoot, resolvedTarget) {
-		return "", false
+	defer rootHandle.Close()
+
+	b, err := rootHandle.ReadFile(rel)
+	if err != nil {
+		return nil, fmt.Errorf("read target %q within root %q: %w", rel, rootClean, err)
 	}
-	return resolvedTarget, true
+	return b, nil
 }

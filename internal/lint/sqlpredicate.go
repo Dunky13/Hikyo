@@ -452,11 +452,8 @@ func eachSQLFile(dir string, fn func(path, src string) error) error {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
 		}
-		path, ok := pathutil.ResolveWithin(dir, filepath.Join(dir, e.Name()))
-		if !ok {
-			return fmt.Errorf("invalid file path")
-		}
-		b, err := os.ReadFile(path)
+		path := filepath.Join(dir, e.Name())
+		b, err := pathutil.ReadFileWithin(dir, path)
 		if err != nil {
 			return err
 		}

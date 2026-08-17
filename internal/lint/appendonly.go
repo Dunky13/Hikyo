@@ -92,20 +92,15 @@ func checkNoSyncCommitDowngrade(repoRoot string) []string {
 			if !strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, ".sql") {
 				return nil
 			}
-			targetClean, ok := pathutil.ResolveWithin(root, path)
-			if !ok {
-				findings = append(findings, fmt.Sprintf("appendonly: invalid file path"))
-				return nil
-			}
-			b, rerr := os.ReadFile(targetClean)
+			b, rerr := pathutil.ReadFileWithin(root, path)
 			if rerr != nil {
-				findings = append(findings, fmt.Sprintf("appendonly: read %s: %v", targetClean, rerr))
+				findings = append(findings, fmt.Sprintf("appendonly: %v", rerr))
 				return nil
 			}
 			if syncCommitRe.Match(b) {
 				findings = append(findings, fmt.Sprintf(
 					"appendonly: %s issues SET synchronous_commit — durability is a boot-verified server setting, never a session downgrade (audit-model ADR CI invariant 7)",
-					targetClean))
+					path))
 			}
 			return nil
 		})
