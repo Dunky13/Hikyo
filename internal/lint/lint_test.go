@@ -91,6 +91,63 @@ func TestQueryScanRejectsSymlinkEscape(t *testing.T) {
 	}
 	if _, err := ParseQueries(queryDir); err == nil {
 		t.Fatal("query scan followed a symlink outside its root")
+	} else if !strings.Contains(err.Error(), "read target") {
+		t.Fatalf("query scan hid target-read cause: %v", err)
+	}
+}
+
+func TestCheckSQLPredicatesReportsReadCauseWithoutDuplicatePrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not reliably available on Windows")
+	}
+	repo := t.TempDir()
+	migrationDir := filepath.Join(repo, "internal", "store", "migrations", "sqlite")
+	if err := os.MkdirAll(migrationDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.sql")
+	if err := os.WriteFile(outside, []byte("CREATE TABLE outside (id TEXT);\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(migrationDir, "escape.sql")); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := CheckSQLPredicates(repo)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one refused read", findings)
+	}
+	if count := strings.Count(findings[0], "sqlpredicate:"); count != 1 {
+		t.Fatalf("finding has %d subsystem prefixes, want one: %s", count, findings[0])
+	}
+	if !strings.Contains(findings[0], "read target") {
+		t.Fatalf("finding hid target-read cause: %s", findings[0])
+	}
+}
+
+func TestAppendOnlyScanRejectsSymlinkEscapeWithReadCause(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not reliably available on Windows")
+	}
+	repo := t.TempDir()
+	storeDir := filepath.Join(repo, "internal", "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.sql")
+	if err := os.WriteFile(outside, []byte("SELECT 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(storeDir, "escape.sql")); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := checkNoSyncCommitDowngrade(repo)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want one refused read", findings)
+	}
+	if !strings.Contains(findings[0], "read target") {
+		t.Fatalf("append-only scan hid target-read cause: %s", findings[0])
 	}
 }
 
