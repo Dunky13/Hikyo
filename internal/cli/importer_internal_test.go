@@ -14,6 +14,49 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/importer"
 )
 
+func TestImportCommandsRemainRoutable(t *testing.T) {
+	ios := IO{
+		Stderr: &bytes.Buffer{},
+		Env: Env{Getenv: func(key string) string {
+			if key == "HIKYO_STATE_DIR" {
+				return t.TempDir()
+			}
+			return ""
+		}},
+	}
+
+	if code := Run(t.Context(), ios, []string{"import"}); code != ExitUsage {
+		t.Fatalf("hikyo import exit = %d, want %d", code, ExitUsage)
+	}
+	if got := ios.Stderr.(*bytes.Buffer).String(); strings.Contains(got, "unknown command") {
+		t.Fatalf("hikyo import is not routed: %s", got)
+	}
+
+	ios.Stderr.(*bytes.Buffer).Reset()
+	if code := Run(t.Context(), ios, []string{"values", "import"}); code != ExitUsage {
+		t.Fatalf("hikyo values import exit = %d, want %d", code, ExitUsage)
+	}
+	if got := ios.Stderr.(*bytes.Buffer).String(); strings.Contains(got, "unknown values verb") {
+		t.Fatalf("hikyo values import is not routed: %s", got)
+	}
+}
+
+func TestNewStateAcceptsDoubleDotsInsidePathComponents(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hikyo..prod", "state")
+	state, err := NewState(Env{Getenv: func(key string) string {
+		if key == "HIKYO_STATE_DIR" {
+			return dir
+		}
+		return ""
+	}})
+	if err != nil {
+		t.Fatalf("valid state directory rejected: %v", err)
+	}
+	if state.Dir() != dir {
+		t.Fatalf("state directory = %q, want %q", state.Dir(), dir)
+	}
+}
+
 func TestHostileImportNamesAreEscapedOnSuccess(t *testing.T) {
 	hostile := "bad\x1b[2J\x07name"
 	plan := &importer.Plan{

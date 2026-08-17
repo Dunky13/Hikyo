@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -46,6 +47,50 @@ func TestProofForgeryRepo(t *testing.T) {
 func TestSQLPredicatesRepo(t *testing.T) {
 	for _, f := range CheckSQLPredicates(repoRoot(t)) {
 		t.Error(f)
+	}
+}
+
+func TestFileScansAcceptDoubleDotsInsidePathComponents(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo..prod")
+	queryDir := filepath.Join(repo, "queries")
+	if err := os.MkdirAll(queryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(queryDir, "001..safe.sql"), []byte("-- name: Safe :one\nSELECT 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseQueries(queryDir); err != nil {
+		t.Fatalf("valid dotted query path rejected: %v", err)
+	}
+
+	storeDir := filepath.Join(repo, "internal", "store")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storeDir, "..safe.sql"), []byte("SELECT 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range checkNoSyncCommitDowngrade(repo) {
+		if strings.Contains(finding, "invalid file path") {
+			t.Fatalf("valid dotted walked path rejected: %s", finding)
+		}
+	}
+}
+
+func TestQueryScanRejectsSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation is not reliably available on Windows")
+	}
+	queryDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.sql")
+	if err := os.WriteFile(outside, []byte("-- name: Outside :one\nSELECT 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(queryDir, "escape.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseQueries(queryDir); err == nil {
+		t.Fatal("query scan followed a symlink outside its root")
 	}
 }
 

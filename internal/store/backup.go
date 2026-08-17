@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/internal/pathutil"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"modernc.org/sqlite"
@@ -212,8 +213,12 @@ func exportPostgres(ctx context.Context, db *DB, tw *tar.Writer, m *Manifest, wo
 	}
 
 	for _, table := range tables {
-		path := filepath.Join(workDir, "copy-"+table)
-		f, err := os.Create(path)
+		baseClean := filepath.Clean(workDir)
+		targetClean := filepath.Clean(filepath.Join(baseClean, "copy-"+table))
+		if !pathutil.Within(baseClean, targetClean) {
+			return fmt.Errorf("invalid file path")
+		}
+		f, err := os.Create(targetClean)
 		if err != nil {
 			return fmt.Errorf("store: stage copy stream for %s: %w", table, err)
 		}
@@ -225,7 +230,7 @@ func exportPostgres(ctx context.Context, db *DB, tw *tar.Writer, m *Manifest, wo
 		if closeErr != nil {
 			return fmt.Errorf("store: stage copy stream for %s: %w", table, closeErr)
 		}
-		if err := writeFileMember(tw, pgMemberPrefix+table, path); err != nil {
+		if err := writeFileMember(tw, pgMemberPrefix+table, targetClean); err != nil {
 			return err
 		}
 	}

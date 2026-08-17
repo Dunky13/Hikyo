@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/Hikyo-Org/hikyo/internal/pathutil"
 )
 
 // This file is analyzer 2 (tenant-isolation ADR, invariant 8): sqlc queries
@@ -450,7 +452,10 @@ func eachSQLFile(dir string, fn func(path, src string) error) error {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
+		path, ok := pathutil.ResolveWithin(dir, filepath.Join(dir, e.Name()))
+		if !ok {
+			return fmt.Errorf("invalid file path")
+		}
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return err
