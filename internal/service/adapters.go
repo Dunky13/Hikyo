@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
@@ -18,11 +19,12 @@ import (
 )
 
 type Adapters struct {
-	DB         *store.DB
-	Auth       *Auth
-	Keyring    *crypto.Keyring
-	Now        func() time.Time
-	PlanModule func(origin, credential string) (adapter.Module, func(), error)
+	DB             *store.DB
+	Auth           *Auth
+	Keyring        *crypto.Keyring
+	Now            func() time.Time
+	PlanModule     func(origin, credential string) (adapter.Module, func(), error)
+	ProviderModule func(provider, origin, credential string) (adapter.Module, func(), error)
 }
 
 func (s *Adapters) now() time.Time {
@@ -52,15 +54,106 @@ type AdapterRecord = store.AdapterRecord
 type AdapterMove = store.AdapterMove
 
 type AdapterTargetInput struct {
-	EnvironmentID    string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	NamePrefix       string
-	KeyIDs           []string
+	EnvironmentID          string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	Visibility             string
+	SelectedRepositoryIDs  []int64
+	NamePrefix             string
+	KeyIDs                 []string
+}
+
+func adapterDestination(input AdapterTargetInput) adapter.Destination {
+	return adapter.Destination{
+		Kind: adapter.DestinationKind(input.DestinationKind), Owner: input.DestinationOwner,
+		Name: input.DestinationName, Environment: input.DestinationEnvironment,
+		Visibility: input.Visibility, SelectedRepositoryIDs: append([]int64(nil), input.SelectedRepositoryIDs...),
+	}
+}
+
+func targetMutation(id, adapterID string, input AdapterTargetInput, connection adapter.Connection) store.AdapterTargetMutation {
+	repositoryID := int64(0)
+	if input.DestinationKind == string(adapter.Environment) {
+		repositoryID = connection.RepositoryID
+	}
+	return store.AdapterTargetMutation{
+		ID: id, AdapterID: adapterID, EnvironmentID: input.EnvironmentID,
+		DestinationKind: input.DestinationKind, DestinationOwner: input.DestinationOwner,
+		DestinationName: input.DestinationName, DestinationEnvironment: input.DestinationEnvironment,
+		DestinationID: connection.DestinationID, RepositoryID: repositoryID,
+		Visibility: input.Visibility, SelectedRepositoryIDs: append([]int64(nil), input.SelectedRepositoryIDs...),
+		NamePrefix: input.NamePrefix, KeyIDs: append([]string(nil), input.KeyIDs...),
+	}
+}
+
+func (s *Adapters) environmentCreateAudit(actor Actor, scope domain.Scope, targetID string, input AdapterTargetInput, correlationID string) (func(context.Context) error, func(context.Context, error) error) {
+	var effectID string
+	payload := audit.Payload{"surface": "environment", "effective_name": input.DestinationEnvironment, "disposition": "create"}
+	before := func(ctx context.Context) error {
+		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+			now := store.CanonTime(s.now())
+			caller, err := actor.resolve(ctx, az, now)
+			if err != nil {
+				return err
+			}
+			proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+			if err != nil {
+				return err
+			}
+			event, err := newAuditEvent(ctx, audit.EventAdapterPushIntent, caller.Principal, audit.Object{Type: "adapter-target", ID: targetID}, audit.OutcomeIntent, correlationID, payload)
+			if err != nil {
+				return err
+			}
+			fence := store.AdapterConfigureFence{
+				TargetID: targetID, EnvironmentID: input.EnvironmentID, DestinationKind: input.DestinationKind,
+				DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, DestinationEnvironment: input.DestinationEnvironment,
+				Generation: 1, EffectID: event.ID, LeaseExpiresAt: now.Add(adapter.LeaseTime), At: now,
+			}
+			if err := r.Adapters().BeginConfigureEffect(ctx, proof, fence); err != nil {
+				return err
+			}
+			if err := r.Audit().InsertTenant(ctx, proof, event); err != nil {
+				return err
+			}
+			effectID = event.ID
+			return nil
+		})
+	}
+	after := func(ctx context.Context, providerErr error) error {
+		if effectID == "" {
+			return fmt.Errorf("%w: environment configure effect has no durable fence", domain.ErrConflict)
+		}
+		return tx.Write(ctx, s.DB, func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) error {
+			now := store.CanonTime(s.now())
+			caller, err := actor.resolve(ctx, az, now)
+			if err != nil {
+				return err
+			}
+			proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+			if err != nil {
+				return err
+			}
+			outcome, state := audit.OutcomeSuccess, "succeeded"
+			if providerErr != nil {
+				outcome, state = audit.OutcomeFailure, "failed"
+			}
+			event, err := newAuditEvent(ctx, audit.EventAdapterPushOutcome, caller.Principal, audit.Object{Type: "adapter-target", ID: targetID}, outcome, correlationID, payload)
+			if err != nil {
+				return err
+			}
+			if err := r.Adapters().FinishConfigureEffect(ctx, proof, targetID, effectID, state, now); err != nil {
+				return err
+			}
+			return r.Audit().InsertTenant(ctx, proof, event)
+		})
+	}
+	return before, after
 }
 
 type CreateAdapterRequest struct {
+	Provider   string
 	Origin     string
 	Credential []byte
 	Target     AdapterTargetInput
@@ -77,6 +170,7 @@ type AdoptAdapterRequest struct {
 	ArtifactID            string
 	ExpectedGeneration    int64
 	ExpectedDestinationID int64
+	ExpectedRepositoryID  int64
 	Entries               []store.AdapterConflictEntry
 }
 
@@ -154,6 +248,9 @@ func (s *Adapters) consumeAdapterCeremony(ctx context.Context, actor Actor, scop
 }
 
 func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, request CreateAdapterRequest) (AdapterView, error) {
+	if request.Provider == "" {
+		request.Provider = "forgejo"
+	}
 	if scope.Project == "" || scope.Env != "" || request.Origin == "" || len(request.Credential) == 0 || request.Target.EnvironmentID == "" || len(request.Target.KeyIDs) == 0 {
 		return AdapterView{}, fmt.Errorf("%w: adapter create requires project scope, credential, and first target", domain.ErrInvalid)
 	}
@@ -179,7 +276,7 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 	if err != nil {
 		return AdapterView{}, err
 	}
-	module, release, err := s.planModule(request.Origin, string(plain))
+	module, release, err := s.planModule(request.Provider, request.Origin, string(plain))
 	if err != nil {
 		return AdapterView{}, err
 	}
@@ -189,8 +286,13 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 	if err := module.ValidateConfig(adapter.Config{Origin: request.Origin}); err != nil {
 		return AdapterView{}, err
 	}
-	destination := adapter.Destination{Kind: adapter.DestinationKind(request.Target.DestinationKind), Owner: request.Target.DestinationOwner, Name: request.Target.DestinationName}
-	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: request.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, request.Target.EnvironmentID)})
+	configureEventID, err := audit.NewEventID()
+	if err != nil {
+		return AdapterView{}, err
+	}
+	beforeCreate, afterCreate := s.environmentCreateAudit(actor, scope, targetID, request.Target, configureEventID)
+	destination := adapterDestination(request.Target)
+	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: request.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, request.Target.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
 	if err != nil {
 		return AdapterView{}, err
 	}
@@ -204,7 +306,7 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
-		mutation := store.AdapterCreate{ID: adapterID, Origin: request.Origin, CredentialCiphertext: sealed, AuthorityPrincipalID: string(caller.Principal), At: now, Target: store.AdapterTargetMutation{ID: targetID, AdapterID: adapterID, EnvironmentID: request.Target.EnvironmentID, DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner, DestinationName: request.Target.DestinationName, DestinationID: connection.DestinationID, NamePrefix: request.Target.NamePrefix, KeyIDs: append([]string(nil), request.Target.KeyIDs...)}}
+		mutation := store.AdapterCreate{ID: adapterID, Provider: request.Provider, Origin: request.Origin, CredentialCiphertext: sealed, CredentialExpiresAt: connection.CredentialExpiresAt, AuthorityPrincipalID: string(caller.Principal), At: now, Target: targetMutation(targetID, adapterID, request.Target, connection)}
 		record, target, err := r.Adapters().Create(ctx, proof, mutation)
 		if err != nil {
 			return err
@@ -214,6 +316,7 @@ func (s *Adapters) Create(ctx context.Context, actor Actor, scope domain.Scope, 
 		if err != nil {
 			return err
 		}
+		ev.ID = configureEventID
 		return r.Audit().InsertTenant(ctx, proof, ev)
 	})
 	return out, err
@@ -354,19 +457,24 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 		return store.AdapterTarget{}, err
 	}
 	defer crypto.Zero(plain)
-	module, release, err := s.planModule(record.Origin, string(plain))
+	module, release, err := s.planModule(record.Provider, record.Origin, string(plain))
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
 	if release != nil {
 		defer release()
 	}
-	destination := adapter.Destination{Kind: adapter.DestinationKind(input.DestinationKind), Owner: input.DestinationOwner, Name: input.DestinationName}
-	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, input.EnvironmentID)})
+	targetID, err := newID("tgt")
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
-	targetID, err := newID("tgt")
+	configureEventID, err := audit.NewEventID()
+	if err != nil {
+		return store.AdapterTarget{}, err
+	}
+	beforeCreate, afterCreate := s.environmentCreateAudit(actor, scope, targetID, input, configureEventID)
+	destination := adapterDestination(input)
+	connection, err := module.TestConnection(ctx, adapter.ConnectionRequest{Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)}, Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, input.EnvironmentID), AllowEnvironmentCreate: true, BeforeEnvironmentCreate: beforeCreate, AfterEnvironmentCreate: afterCreate})
 	if err != nil {
 		return store.AdapterTarget{}, err
 	}
@@ -387,7 +495,7 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 		if currentSet := adapterEnvironmentSet(environmentIDs, input.EnvironmentID); !slices.Equal(currentSet, authorizedEnvironments) {
 			return ErrReauthUnitMismatch
 		}
-		added, err := r.Adapters().AddTarget(ctx, p, store.AdapterTargetUpdate{AuthorityPrincipalID: string(caller.Principal), At: now, Target: store.AdapterTargetMutation{ID: targetID, AdapterID: adapterID, EnvironmentID: input.EnvironmentID, DestinationKind: input.DestinationKind, DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, DestinationID: connection.DestinationID, NamePrefix: input.NamePrefix, KeyIDs: append([]string(nil), input.KeyIDs...)}})
+		added, err := r.Adapters().AddTarget(ctx, p, store.AdapterTargetUpdate{CredentialExpiresAt: connection.CredentialExpiresAt, AuthorityPrincipalID: string(caller.Principal), At: now, Target: targetMutation(targetID, adapterID, input, connection)})
 		if err != nil {
 			return err
 		}
@@ -398,6 +506,7 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 		if err != nil {
 			return err
 		}
+		ev.ID = configureEventID
 		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	return out, err
@@ -406,6 +515,9 @@ func (s *Adapters) AddTarget(ctx context.Context, actor Actor, scope domain.Scop
 func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) (store.AdapterTarget, error) {
 	if scope.Project == "" || scope.Env != "" || request.TargetID == "" || request.ExpectedGeneration <= 0 || len(request.Target.KeyIDs) == 0 {
 		return store.AdapterTarget{}, fmt.Errorf("%w: target update requires target, generation, and full keys replacement", domain.ErrInvalid)
+	}
+	if err := s.preflightTargetRouting(ctx, actor, scope, request); err != nil {
+		return store.AdapterTarget{}, err
 	}
 	now := store.CanonTime(s.now())
 	var out store.AdapterTarget
@@ -426,6 +538,9 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 			if current.Generation != request.ExpectedGeneration {
 				return adapter.ErrSuperseded
 			}
+			if current.Provider == "github-actions" && request.Target.DestinationKind == string(adapter.Organization) && request.Target.Visibility == "" {
+				return fmt.Errorf("%w: GitHub organization target requires all, private, or selected visibility", domain.ErrInvalid)
+			}
 			oldIDs, err := r.Adapters().TargetKeyIDs(ctx, p, request.TargetID)
 			if err != nil {
 				return err
@@ -440,7 +555,8 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 					break
 				}
 			}
-			full := widened || request.Target.NamePrefix != current.NamePrefix
+			full := widened || request.Target.NamePrefix != current.NamePrefix ||
+				adapter.RecipientSetNeedsCeremony(current.Visibility, current.SelectedRepositoryIDs, request.Target.Visibility, request.Target.SelectedRepositoryIDs)
 			authority := current.AuthorityPrincipalID
 			if full {
 				environmentIDs, err := r.Adapters().Environments(ctx, p, current.AdapterID)
@@ -452,7 +568,7 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 				}
 				authority = string(caller.Principal)
 			}
-			updated, err := r.Adapters().UpdateTarget(ctx, p, store.AdapterTargetUpdate{ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: authority, At: now, Target: store.AdapterTargetMutation{ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID, DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner, DestinationName: request.Target.DestinationName, DestinationID: current.DestinationID, NamePrefix: request.Target.NamePrefix, KeyIDs: newIDs}})
+			updated, err := r.Adapters().UpdateTarget(ctx, p, store.AdapterTargetUpdate{ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: authority, At: now, Target: store.AdapterTargetMutation{ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID, DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner, DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment, DestinationID: current.DestinationID, RepositoryID: current.RepositoryID, Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix, KeyIDs: newIDs}})
 			if err != nil {
 				return err
 			}
@@ -492,6 +608,64 @@ func (s *Adapters) UpdateTarget(ctx context.Context, actor Actor, scope domain.S
 		})
 	})
 	return out, err
+}
+
+func (s *Adapters) preflightTargetRouting(ctx context.Context, actor Actor, scope domain.Scope, request UpdateAdapterTargetRequest) error {
+	var current store.AdapterTarget
+	var record store.AdapterRecord
+	var ciphertext []byte
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+		if err != nil {
+			return err
+		}
+		current, err = r.Adapters().Target(ctx, proof, request.TargetID)
+		if err != nil {
+			return err
+		}
+		if current.Generation != request.ExpectedGeneration {
+			return adapter.ErrSuperseded
+		}
+		if current.Provider != "github-actions" || current.DestinationKind != string(adapter.Organization) || (current.Visibility == request.Target.Visibility && slices.Equal(current.SelectedRepositoryIDs, request.Target.SelectedRepositoryIDs)) {
+			return nil
+		}
+		record, ciphertext, err = r.Adapters().Configuration(ctx, proof, current.AdapterID)
+		return err
+	})
+	if err != nil || record.ID == "" {
+		return err
+	}
+	if len(ciphertext) == 0 {
+		return adapter.ErrProviderAuth
+	}
+	sealer, err := sealerFor(ctx, s.DB, s.Keyring, actor, authz.OpAdapterConfigure, scope)
+	if err != nil {
+		return err
+	}
+	plain, err := sealer.OpenField(crypto.ProjectFieldAAD{OrgID: string(scope.Org), ProjectID: string(scope.Project), OwnerTable: "adapters", OwnerRowID: current.AdapterID, FieldTag: "credential"}, ciphertext)
+	if err != nil {
+		return err
+	}
+	defer crypto.Zero(plain)
+	module, release, err := s.planModule(record.Provider, record.Origin, string(plain))
+	if err != nil {
+		return err
+	}
+	if release != nil {
+		defer release()
+	}
+	destination := adapterDestination(request.Target)
+	destination.NumericID = current.DestinationID
+	destination.RepositoryID = current.RepositoryID
+	_, err = module.TestConnection(ctx, adapter.ConnectionRequest{
+		Config: adapter.Config{Origin: record.Origin}, Destination: destination, Access: adapter.Access{Credential: string(plain)},
+		Gate: s.providerGate(actor, authz.OpAdapterConfigure, scope, current.EnvironmentID),
+	})
+	return err
 }
 
 // MoveTarget begins the scrub-before-switch transition for a destination or
@@ -535,7 +709,8 @@ func (s *Adapters) MoveTarget(ctx context.Context, actor Actor, scope domain.Sco
 				Target: store.AdapterTargetMutation{
 					ID: request.TargetID, AdapterID: current.AdapterID, EnvironmentID: request.Target.EnvironmentID,
 					DestinationKind: request.Target.DestinationKind, DestinationOwner: request.Target.DestinationOwner,
-					DestinationName: request.Target.DestinationName, NamePrefix: request.Target.NamePrefix,
+					DestinationName: request.Target.DestinationName, DestinationEnvironment: request.Target.DestinationEnvironment,
+					Visibility: request.Target.Visibility, SelectedRepositoryIDs: append([]int64(nil), request.Target.SelectedRepositoryIDs...), NamePrefix: request.Target.NamePrefix,
 					KeyIDs: append([]string(nil), request.Target.KeyIDs...),
 				},
 				ExpectedGeneration: request.ExpectedGeneration, AuthorityPrincipalID: string(caller.Principal),
@@ -590,7 +765,11 @@ func (s *Adapters) MoveOrigin(ctx context.Context, actor Actor, scope domain.Sco
 	}
 	plain := append([]byte(nil), credential...)
 	defer crypto.Zero(plain)
-	module, release, err := s.planModule(origin, string(plain))
+	provider, err := s.providerForAdapter(ctx, actor, scope, adapterID)
+	if err != nil {
+		return store.AdapterRouteMoveBatch{}, err
+	}
+	module, release, err := s.planModule(provider, origin, string(plain))
 	if err != nil {
 		return store.AdapterRouteMoveBatch{}, err
 	}
@@ -805,7 +984,11 @@ func (s *Adapters) ResumeOriginMove(ctx context.Context, actor Actor, scope doma
 	}
 	plain := append([]byte(nil), credential...)
 	defer crypto.Zero(plain)
-	module, release, err := s.planModule(origin, string(plain))
+	provider, err := s.providerForMove(ctx, actor, scope, moveID)
+	if err != nil {
+		return store.AdapterMove{}, err
+	}
+	module, release, err := s.planModule(provider, origin, string(plain))
 	if err != nil {
 		return store.AdapterMove{}, err
 	}
@@ -966,7 +1149,7 @@ func (s *Adapters) TestTarget(ctx context.Context, actor Actor, scope domain.Sco
 		return adapter.Connection{}, err
 	}
 	defer crypto.Zero(credential)
-	module, release, err := s.planModule(material.Target.Origin, string(credential))
+	module, release, err := s.planModule(material.Target.Provider, material.Target.Origin, string(credential))
 	if err != nil {
 		return adapter.Connection{}, err
 	}
@@ -1004,8 +1187,13 @@ func (s *Adapters) TestTarget(ctx context.Context, actor Actor, scope domain.Sco
 		if err != nil {
 			return err
 		}
-		if current.Generation != material.Target.Generation || current.DestinationID != material.Target.DestinationID {
+		if current.Generation != material.Target.Generation || current.DestinationID != material.Target.DestinationID || current.RepositoryID != material.Target.RepositoryID {
 			return fmt.Errorf("%w: adapter target changed while testing", domain.ErrConflict)
+		}
+		if !connection.CredentialExpiresAt.IsZero() {
+			if err := r.Adapters().RecordCredentialExpiry(ctx, proof, material.Target.AdapterID, connection.CredentialExpiresAt); err != nil {
+				return err
+			}
 		}
 		event, err := domainEvent(ctx, audit.EventAdapterTest, caller.Principal,
 			audit.Object{Type: "adapter-target", ID: targetID}, audit.Payload{
@@ -1123,17 +1311,66 @@ func (s *Adapters) RevokeCredential(ctx context.Context, actor Actor, scope doma
 	return result, err
 }
 
-func (s *Adapters) planModule(origin, credential string) (adapter.Module, func(), error) {
+func (s *Adapters) planModule(provider, origin, credential string) (adapter.Module, func(), error) {
+	if s.ProviderModule != nil {
+		return s.ProviderModule(provider, origin, credential)
+	}
 	if s.PlanModule == nil {
 		return nil, nil, errors.New("service: adapter plan module is not configured")
 	}
 	return s.PlanModule(origin, credential)
 }
 
+func (s *Adapters) providerForAdapter(ctx context.Context, actor Actor, scope domain.Scope, adapterID string) (string, error) {
+	var provider string
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+		if err != nil {
+			return err
+		}
+		record, _, err := r.Adapters().Configuration(ctx, proof, adapterID)
+		if err != nil {
+			return err
+		}
+		provider = record.Provider
+		return nil
+	})
+	return provider, err
+}
+
+func (s *Adapters) providerForMove(ctx context.Context, actor Actor, scope domain.Scope, moveID string) (string, error) {
+	var provider string
+	err := tx.Read(ctx, s.DB, func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error {
+		caller, err := actor.resolve(ctx, az, s.now())
+		if err != nil {
+			return err
+		}
+		proof, err := az.Authorize(ctx, caller, authz.OpAdapterConfigure, scope)
+		if err != nil {
+			return err
+		}
+		move, err := r.Adapters().Move(ctx, proof, moveID)
+		if err != nil {
+			return err
+		}
+		record, _, err := r.Adapters().Configuration(ctx, proof, move.AdapterID)
+		if err != nil {
+			return err
+		}
+		provider = record.Provider
+		return nil
+	})
+	return provider, err
+}
+
 func adapterTarget(target store.AdapterTarget) adapter.Target {
 	return adapter.Target{
 		ID: target.ID, Environment: target.EnvironmentID, NamePrefix: target.NamePrefix, Generation: target.Generation,
-		Destination: adapter.Destination{Kind: adapter.DestinationKind(target.DestinationKind), Owner: target.DestinationOwner, Name: target.DestinationName, NumericID: target.DestinationID},
+		Destination: adapter.Destination{Kind: adapter.DestinationKind(target.DestinationKind), Owner: target.DestinationOwner, Name: target.DestinationName, Environment: target.DestinationEnvironment, NumericID: target.DestinationID, RepositoryID: target.RepositoryID, Visibility: target.Visibility, SelectedRepositoryIDs: append([]int64(nil), target.SelectedRepositoryIDs...)},
 	}
 }
 
@@ -1169,7 +1406,7 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 		return AdapterPlanResult{}, err
 	}
 	defer crypto.Zero(credential)
-	module, release, err := s.planModule(material.Target.Origin, string(credential))
+	module, release, err := s.planModule(material.Target.Provider, material.Target.Origin, string(credential))
 	if err != nil {
 		return AdapterPlanResult{}, err
 	}
@@ -1208,7 +1445,7 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 		if err != nil {
 			return err
 		}
-		if current.Generation != material.Target.Generation || current.DestinationID != material.Target.DestinationID {
+		if current.Generation != material.Target.Generation || current.DestinationID != material.Target.DestinationID || current.RepositoryID != material.Target.RepositoryID {
 			return fmt.Errorf("%w: adapter target changed while planning", domain.ErrConflict)
 		}
 		conflicts := make([]store.AdapterConflictEntry, 0)
@@ -1220,7 +1457,7 @@ func (s *Adapters) Plan(ctx context.Context, actor Actor, scope domain.Scope, ta
 			}
 		}
 		if len(conflicts) != 0 {
-			if err := r.Adapters().RecordPlan(ctx, p, targetID, artifactID, material.Target.Generation, material.Target.DestinationID, conflicts, now); err != nil {
+			if err := r.Adapters().RecordPlan(ctx, p, targetID, artifactID, material.Target.Generation, material.Target.RepositoryID, material.Target.DestinationID, conflicts, now); err != nil {
 				return err
 			}
 		}
@@ -1262,9 +1499,12 @@ func (s *Adapters) InspectTarget(ctx context.Context, actor Actor, scope domain.
 		if err != nil {
 			return err
 		}
-		out.Workflow, err = adapter.Workflow(out.Target.NamePrefix, out.Mapping)
+		out.Workflow, err = adapter.WorkflowForProvider(out.Target.Provider, out.Target.NamePrefix, out.Mapping)
 		if err != nil {
 			return err
+		}
+		if out.Target.Provider == "github-actions" && out.Target.DestinationKind == string(adapter.Environment) {
+			out.Workflow = "environment: " + strconv.Quote(out.Target.DestinationEnvironment) + "\n" + out.Workflow
 		}
 		ev, err := domainEvent(ctx, audit.EventAdapterInspect, caller.Principal, audit.Object{Type: "adapter-target", ID: targetID}, audit.Payload{"row_count": 1})
 		if err != nil {
@@ -1306,7 +1546,7 @@ func (s *Adapters) Adopt(ctx context.Context, actor Actor, scope domain.Scope, r
 		if err != nil {
 			return err
 		}
-		if target.Generation != request.ExpectedGeneration || target.DestinationID != request.ExpectedDestinationID {
+		if target.Generation != request.ExpectedGeneration || target.RepositoryID != request.ExpectedRepositoryID || target.DestinationID != request.ExpectedDestinationID {
 			return fmt.Errorf("%w: adoption target no longer matches the selected artifact", domain.ErrConflict)
 		}
 		environments, err := r.Adapters().TargetEnvironments(ctx, p, request.TargetID)

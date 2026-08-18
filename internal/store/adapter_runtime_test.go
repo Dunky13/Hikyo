@@ -66,11 +66,11 @@ func TestAdapterJournalCommitsIntentOutcomeAndLedgerAtomically(t *testing.T) {
 	if err := journal.Prepare(t.Context(), effect, state); err != nil {
 		t.Fatal(err)
 	}
-	if err := journal.Finish(t.Context(), effect, adapter.Completion{Outcome: "success", State: adapter.Owned}); err != nil {
+	if err := journal.Finish(t.Context(), effect, adapter.Completion{Outcome: "success", State: adapter.Owned, ProviderStatus: 201}); err != nil {
 		t.Fatal(err)
 	}
 	var ledgerState, effectOutcome string
-	var intents, outcomes, delivered int
+	var intents, outcomes, delivered, providerStatuses int
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT state FROM adapter_ledger WHERE target_id='tgt_1' AND surface='secret' AND normalized_name='TOKEN'`).Scan(&ledgerState); err != nil {
 		t.Fatal(err)
 	}
@@ -83,16 +83,50 @@ func TestAdapterJournalCommitsIntentOutcomeAndLedgerAtomically(t *testing.T) {
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE correlation_id='job_1' AND type='adapter.push_outcome'`).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE correlation_id='job_1' AND type='adapter.push_outcome' AND json_extract(payload,'$.provider_status')=201`).Scan(&providerStatuses); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE correlation_id='job_1' AND type='adapter.key_delivered' AND json_extract(payload,'$.key_id')='key_1'`).Scan(&delivered); err != nil {
 		t.Fatal(err)
 	}
-	if ledgerState != "owned" || effectOutcome != "success" || intents != 1 || outcomes != 1 || delivered != 1 {
-		t.Fatalf("ledger=%q effect=%q intents=%d outcomes=%d delivered=%d", ledgerState, effectOutcome, intents, outcomes, delivered)
+	if ledgerState != "owned" || effectOutcome != "success" || intents != 1 || outcomes != 1 || providerStatuses != 1 || delivered != 1 {
+		t.Fatalf("ledger=%q effect=%q intents=%d outcomes=%d provider_statuses=%d delivered=%d", ledgerState, effectOutcome, intents, outcomes, providerStatuses, delivered)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if _, err := runtime.Enqueue(ctx, adapter.Job{OrgID: job.OrgID, ProjectID: job.ProjectID, EnvironmentID: job.EnvironmentID, TargetID: job.TargetID, Kind: adapter.Converge, AuthorityPrincipal: job.AuthorityPrincipal}, now); err != nil {
 		t.Fatalf("Finish did not release provider fence: %v", err)
+	}
+}
+
+func TestAdapterJournalPersistsOwnedMissingAndAuditFinding(t *testing.T) {
+	db := adapterRuntimeDB(t)
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ('led_missing','org_adapter','prj_adapter','env_adapter','tgt_1','https://git.example','repository',0,42,'variable','MODE','MODE','owned','2026-08-17T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	runtime := store.NewAdapterRuntime(db, func(context.Context, adapter.Job, adapter.Effect) error { return nil })
+	job, ok, err := runtime.ClaimDue(t.Context(), "worker_1", time.Now().UTC(), time.Now().UTC().Add(adapter.LeaseTime))
+	if err != nil || !ok {
+		t.Fatalf("ClaimDue() = %+v, %v, %v", job, ok, err)
+	}
+	effect := adapter.Effect{Surface: adapter.Variable, EffectiveName: "MODE", Disposition: adapter.Update, KeyID: "key_1"}
+	journal := runtime.Journal(job)
+	if err := journal.Prepare(t.Context(), effect, adapter.Owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Finish(t.Context(), effect, adapter.Completion{Outcome: "failure", State: adapter.Owned, Missing: true, ProviderStatus: 404, Finding: "owned_missing"}); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	var missing, auditRows int
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT state,missing FROM adapter_ledger WHERE id='led_missing'`).Scan(&state, &missing); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE correlation_id='job_1' AND type='adapter.push_outcome' AND json_extract(payload,'$.provider_status')=404 AND json_extract(payload,'$.finding')='owned_missing' AND json_extract(payload,'$.owned_missing')=1`).Scan(&auditRows); err != nil {
+		t.Fatal(err)
+	}
+	if state != "owned" || missing != 1 || auditRows != 1 {
+		t.Fatalf("state=%q missing=%d audit_rows=%d", state, missing, auditRows)
 	}
 }
 
@@ -127,8 +161,15 @@ func TestAdapterJournalPUTNotFoundEndsEffectBeforeFreshCreateRetry(t *testing.T)
 	}
 
 	due := now.Add(time.Second)
-	if err := runtime.Retry(t.Context(), job, due, []adapter.Change{{Surface: adapter.Variable, EffectiveName: "LOG_LEVEL", Disposition: adapter.Update}}, errors.New("provider returned 404")); err != nil {
+	if err := runtime.Retry(t.Context(), job, due, []adapter.Change{{Surface: adapter.Variable, EffectiveName: "LOG_LEVEL", Disposition: adapter.Update}}, []string{"provider capacity is near"}, errors.New("provider returned 404")); err != nil {
 		t.Fatal(err)
+	}
+	var retryWarnings string
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT warnings FROM adapter_targets WHERE id='tgt_1'`).Scan(&retryWarnings); err != nil {
+		t.Fatal(err)
+	}
+	if retryWarnings != `["provider capacity is near"]` {
+		t.Fatalf("retry warnings = %s", retryWarnings)
 	}
 	retryJob, ok, err := runtime.ClaimDue(t.Context(), "worker_2", due.Add(time.Second), due.Add(time.Second).Add(adapter.LeaseTime))
 	if err != nil || !ok {
@@ -378,7 +419,7 @@ func TestCrashReservationReleaseIsGenerationFencedAndLeavesNoConflict(t *testing
 			if err := newJournal.ReleaseReservation(t.Context(), adapter.Effect{Surface: adapter.Secret, EffectiveName: "STALE", Disposition: adapter.Delete}); err != nil {
 				t.Fatal(err)
 			}
-			if err := runtime.Succeed(t.Context(), newJob, 0, now.Add(3*time.Second)); err != nil {
+			if err := runtime.Succeed(t.Context(), newJob, 0, nil, now.Add(3*time.Second)); err != nil {
 				t.Fatalf("Succeed(%s) = %v", kind, err)
 			}
 
@@ -561,7 +602,7 @@ func TestAdapterFinishJobRequiresExactLeaseAndGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	job.LeaseOwner = "other-worker"
-	if err := runtime.Succeed(t.Context(), job, 3, now); !errors.Is(err, adapter.ErrSuperseded) {
+	if err := runtime.Succeed(t.Context(), job, 3, nil, now); !errors.Is(err, adapter.ErrSuperseded) {
 		t.Fatalf("Succeed() = %v, want superseded", err)
 	}
 	var state string
@@ -637,6 +678,26 @@ func TestAdapterDeadCredentialScrubTerminatesAndEnumeratesOrphans(t *testing.T) 
 	}
 	if targetState != "tombstoned" || syncStatus != "failed" || failureNames != `["secret:TOKEN"]` || outcome != "failure" || payload != `{"orphaned":["secret:TOKEN"]}` || ledgerState != "released" {
 		t.Fatalf("target=%q status=%q failures=%s audit=%q %s ledger=%q", targetState, syncStatus, failureNames, outcome, payload, ledgerState)
+	}
+}
+
+func TestAdapterSuccessPersistsProviderWarnings(t *testing.T) {
+	db := adapterRuntimeDB(t)
+	runtime := store.NewAdapterRuntime(db, nil)
+	now := time.Now().UTC()
+	job, ok, err := runtime.ClaimDue(t.Context(), "worker_1", now, now.Add(adapter.LeaseTime))
+	if err != nil || !ok {
+		t.Fatalf("ClaimDue() = %+v, %v, %v", job, ok, err)
+	}
+	if err := runtime.Succeed(t.Context(), job, 7, []string{"github-actions: workflow secret delivery is truncated"}, now); err != nil {
+		t.Fatal(err)
+	}
+	var status, warnings string
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT sync_status,warnings FROM adapter_targets WHERE id='tgt_1'`).Scan(&status, &warnings); err != nil {
+		t.Fatal(err)
+	}
+	if status != "converged" || warnings != `["github-actions: workflow secret delivery is truncated"]` {
+		t.Fatalf("status=%q warnings=%s", status, warnings)
 	}
 }
 
@@ -795,7 +856,7 @@ func TestAdapterPlanArtifactAdoptionIsBoundAndAtomic(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_1", 1, 42, []store.AdapterConflictEntry{entry}, now)
+		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_1", 1, 0, 42, []store.AdapterConflictEntry{entry}, now)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +921,7 @@ func TestAdapterAdoptionRefusesStaleArtifactAndLiveProviderFence(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_stale", 1, 42, []store.AdapterConflictEntry{entry}, now)
+				return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_stale", 1, 0, 42, []store.AdapterConflictEntry{entry}, now)
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -905,7 +966,7 @@ func TestAdapterAdoptionClearsExpiredProviderFence(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_expired", 1, 42, []store.AdapterConflictEntry{entry}, now)
+		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_expired", 1, 0, 42, []store.AdapterConflictEntry{entry}, now)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -941,7 +1002,7 @@ func TestAdapterConcurrentAdoptionHasOneWinner(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_race", 1, 42, []store.AdapterConflictEntry{entry}, now)
+		return repos.Adapters().RecordPlan(ctx, p, "tgt_1", "plan_race", 1, 0, 42, []store.AdapterConflictEntry{entry}, now)
 	}); err != nil {
 		t.Fatal(err)
 	}

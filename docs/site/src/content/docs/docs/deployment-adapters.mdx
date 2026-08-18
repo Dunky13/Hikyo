@@ -1,16 +1,17 @@
 ---
-title: Forgejo deployment adapters
-description: Push selected published values to Forgejo Actions without reading provider values back.
+title: Deployment adapters
+description: Push selected published values to Forgejo or GitHub Actions without reading provider values back.
 editUrl: https://github.com/Hikyo-Org/hikyo/edit/main/docs/site/src/content/docs/docs/deployment-adapters.mdx
 ---
 
-If a job can fetch values at runtime, use Forgejo OIDC federation. Use a
+If a job can fetch values at runtime, use workload federation. Use a
 deployment adapter only for static values that must exist before the first
 fetch.
 
-The Forgejo adapter is one-way and value-blind. It writes selected values from
-one Hikyo environment to a repository or organization Actions namespace. It
-never calls a Forgejo variable GET or list endpoint. Secret planning reads
+Both compiled-in adapters are one-way and value-blind. They write selected
+values from one Hikyo environment to a repository, organization, or GitHub
+repository-environment Actions
+namespace. Neither adapter links a variable GET or list endpoint. Secret planning reads
 names only; variable planning uses Hikyo's ownership ledger. Hikyo therefore
 cannot detect provider-side value drift. Run a converge to restore the last
 published Hikyo state.
@@ -21,6 +22,12 @@ published Hikyo state.
 - A repository target PAT with `write:repository`, or an organization target
   PAT with `write:organization`. Forgejo write scopes also permit GET requests,
   but Hikyo's variable-read operations do not exist in the client.
+- GitHub requires a fine-grained PAT (`github_pat_`); classic `ghp_` PATs are
+  refused before provider contact. Grant the fine-grained Secrets and Variables
+  write permissions for the chosen repository or organization. Creating a
+  missing environment additionally requires Administration (write): either
+  pre-create it in GitHub and keep the delivery token narrow, or grant that
+  permission for Hikyo-managed creation.
 - `manage-adapters` for inspection and lifecycle operations. Creating,
   widening, adopting, changing a prefix, replacing a credential, and manually
   syncing also require reveal authority and adapter reauthentication for every
@@ -32,13 +39,27 @@ from `--stdin` or `--value-file`. There is no credential-value argument.
 
 ## Targets and names
 
-An adapter owns one Forgejo origin and credential. Each target binds one Hikyo
-environment to one Forgejo repository or organization and an explicit,
+An adapter owns one provider origin and credential. Each target binds one Hikyo
+environment to one provider destination and an explicit,
 non-empty key subset. Organization targets are wide: every repository in that
-Forgejo organization can consume the organization-level values. That breadth
-is a Forgejo storage-level property, not an override guarantee: a repository-
+organization allowed by its `all`, `private`, or `selected` visibility can
+consume the organization-level values. Selected repositories are stored and
+verified by immutable numeric id. Moving to `all`, changing between `private`
+and `selected`, or adding selected ids is a widening ceremony; `all` to
+`private`/`selected` and selected-id removal are plain narrowing. That breadth
+is a storage-level property, not an override guarantee: a repository-
 level secret or variable with the same name shadows the organization-level
 value for workflows in that repository.
+
+For GitHub, a repository environment is the recommended multi-environment
+shape: map dev, stage, and production to separate GitHub environments with no
+prefix. A missing environment is created during the reauthenticated target-add
+flow with an empty settings body, then its repository id and environment id are
+pinned. Later absence or either id changing is refused; Hikyo never redirects
+the write to repository scope. Free-plan private repositories without
+environments must be reconfigured explicitly to repository scope with prefixes.
+Workflow output for an environment target includes the exact `environment:`
+selection before the canonical-name mapping.
 
 Effective provider names are `prefix + canonical key name`. The optional
 prefix applies to every key and to the `MANAGED_BY_WENV` sentinels. Effective
@@ -58,9 +79,19 @@ the Kubernetes operator continue to use `DATABASE_URL`.
 
 ## Lifecycle
 
-Create is an atomic bootstrap: provider connection and destination identity are
-validated before one transaction stores the adapter credential and first
-target. A failed validation or target insert leaves no partial adapter.
+Create validates the provider connection and destination identity before
+storing the adapter credential and first target. A missing GitHub environment
+is the configure flow's first provider write: a durable generation-1 effect
+fence and correlated `adapter.push_intent` exist before its settings-free PUT,
+and `adapter.push_outcome` closes that fence.
+
+GitHub storage caps are 100 secrets/500 variables per repository, 1,000/1,000
+per organization, and 100/100 per environment. Plans warn exactly from the
+complete secret-name list and report variables as a lower bound because Hikyo
+cannot safely read provider variables. Organization workflows expose only the
+first 100 secrets alphabetically; combined organization and repository
+variables over 256 KB can also truncate at consumption time. Plan/sync warnings
+name both limits.
 
 Published environment changes automatically queue a newest-wins converge for
 intersecting targets under their recorded authority. `adapter plan` reports
@@ -112,10 +143,13 @@ orphaned names. Remove targets while the PAT still authenticates. If a dead or
 revoked credential prevents scrub, Hikyo completes local teardown but reports
 the remote names as orphaned.
 
-## Private Forgejo origins
+## Private origins and GHES
 
 Adapters deny private, loopback, link-local, documentation, and reserved
 addresses by default. Operators can add origin-scoped exceptions with
 `HIKYO_ADAPTER_EGRESS_POLICY_FILE`; see
 [server configuration](/docs/configuration/). HTTPS, certificate validation,
 DNS rebinding protection, and the no-redirect rule remain mandatory.
+GitHub Enterprise Server uses its configured HTTPS API base and inherits the
+GitHub contract best-effort; github.com contract pins do not claim every GHES
+version behaves identically.

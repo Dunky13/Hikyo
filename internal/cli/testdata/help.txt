@@ -92,19 +92,25 @@ revisions:                                         --env selects the environment
   hikyo rotate-token-key --yes                      new token key; one full fetch, no restart wave
 
 adapters:
-  hikyo adapter create --origin <https-origin> --env E --kind repository|organization
-      --owner <owner> [--repo <repo>] --prefix <prefix> --keys <id,...>
+  hikyo adapter create --provider forgejo|github-actions --origin <https-origin> --env E --kind repository|organization|environment
+      --owner <owner> [--repo <repo>] [--destination-environment <name>]
+      [--visibility all|private|selected] [--selected-repository-ids <id,...>]
+      --prefix <prefix> --keys <id,...>
       [--stdin | --value-file PATH]
   hikyo adapter list [-o table|json]
   hikyo adapter show <adapter> [-o table|json]
   hikyo adapter update <adapter> --origin <https-origin>
   hikyo adapter update <adapter> --target <target> --env E --kind <kind>
-      --owner <owner> [--repo <repo>] --prefix <prefix> --keys <id,...>
+      --owner <owner> [--repo <repo>] [--destination-environment <name>]
+      [--visibility all|private|selected] [--selected-repository-ids <id,...>]
+      --prefix <prefix> --keys <id,...>
   hikyo adapter delete <adapter> [--keep-remote]
   hikyo adapter credential set --adapter <adapter> [--stdin | --value-file PATH]
   hikyo adapter credential revoke --adapter <adapter>
   hikyo adapter target add --adapter <adapter> --env E --kind <kind> --owner <owner>
-      [--repo <repo>] [--prefix <prefix>] --keys <id,...>
+      [--repo <repo>] [--destination-environment <name>]
+      [--visibility all|private|selected] [--selected-repository-ids <id,...>]
+      [--prefix <prefix>] --keys <id,...>
   hikyo adapter target list --adapter <adapter>
   hikyo adapter target show <target> [--format detail|workflow]
   hikyo adapter target remove <target> [--keep-remote]

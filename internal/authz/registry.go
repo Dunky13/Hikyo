@@ -569,35 +569,38 @@ const (
 	StoreCataloguePresenceCascade   StoreOp = "catalogue.DeletePresenceForEnvironment"
 	StoreCatalogueRevisionGet       StoreOp = "catalogue.SchemaRevision"
 
-	StoreAdaptersTarget             StoreOp = "adapters.Target"
-	StoreAdaptersGet                StoreOp = "adapters.Get"
-	StoreAdaptersConfiguration      StoreOp = "adapters.Configuration"
-	StoreAdaptersList               StoreOp = "adapters.List"
-	StoreAdaptersListTargets        StoreOp = "adapters.ListTargets"
-	StoreAdaptersTargetKeyIDs       StoreOp = "adapters.TargetKeyIDs"
-	StoreAdaptersCreate             StoreOp = "adapters.Create"
-	StoreAdaptersAddTarget          StoreOp = "adapters.AddTarget"
-	StoreAdaptersUpdateTarget       StoreOp = "adapters.UpdateTarget"
-	StoreAdaptersMoveTarget         StoreOp = "adapters.MoveTarget"
-	StoreAdaptersMoveOrigin         StoreOp = "adapters.MoveOrigin"
-	StoreAdaptersMove               StoreOp = "adapters.Move"
-	StoreAdaptersCancelMove         StoreOp = "adapters.CancelMove"
-	StoreAdaptersReplaceMoveTarget  StoreOp = "adapters.ReplaceMoveTarget"
-	StoreAdaptersReplaceMoveOrigin  StoreOp = "adapters.ReplaceMoveOrigin"
-	StoreAdaptersMapping            StoreOp = "adapters.Mapping"
-	StoreAdaptersPlanMaterial       StoreOp = "adapters.PlanMaterial"
-	StoreAdaptersTargetEnvironments StoreOp = "adapters.TargetEnvironments"
-	StoreAdaptersEnvironments       StoreOp = "adapters.Environments"
-	StoreAdaptersConflicts          StoreOp = "adapters.Conflicts"
-	StoreAdaptersRecordPlan         StoreOp = "adapters.RecordPlan"
-	StoreAdaptersAdopt              StoreOp = "adapters.Adopt"
-	StoreAdaptersEnqueuePublished   StoreOp = "adapters.EnqueuePublished"
-	StoreAdaptersTeardownTarget     StoreOp = "adapters.TeardownTarget"
-	StoreAdaptersTeardownAdapter    StoreOp = "adapters.TeardownAdapter"
-	StoreAdaptersReplaceCredential  StoreOp = "adapters.ReplaceCredential"
-	StoreAdaptersRevokeCredential   StoreOp = "adapters.RevokeCredential"
-	StoreAdaptersEnqueueManual      StoreOp = "adapters.EnqueueManual"
-	StoreCatalogueRevisionBump      StoreOp = "catalogue.BumpSchemaRevision"
+	StoreAdaptersTarget                 StoreOp = "adapters.Target"
+	StoreAdaptersGet                    StoreOp = "adapters.Get"
+	StoreAdaptersConfiguration          StoreOp = "adapters.Configuration"
+	StoreAdaptersList                   StoreOp = "adapters.List"
+	StoreAdaptersListTargets            StoreOp = "adapters.ListTargets"
+	StoreAdaptersTargetKeyIDs           StoreOp = "adapters.TargetKeyIDs"
+	StoreAdaptersCreate                 StoreOp = "adapters.Create"
+	StoreAdaptersAddTarget              StoreOp = "adapters.AddTarget"
+	StoreAdaptersRecordCredentialExpiry StoreOp = "adapters.RecordCredentialExpiry"
+	StoreAdaptersBeginConfigureEffect   StoreOp = "adapters.BeginConfigureEffect"
+	StoreAdaptersFinishConfigureEffect  StoreOp = "adapters.FinishConfigureEffect"
+	StoreAdaptersUpdateTarget           StoreOp = "adapters.UpdateTarget"
+	StoreAdaptersMoveTarget             StoreOp = "adapters.MoveTarget"
+	StoreAdaptersMoveOrigin             StoreOp = "adapters.MoveOrigin"
+	StoreAdaptersMove                   StoreOp = "adapters.Move"
+	StoreAdaptersCancelMove             StoreOp = "adapters.CancelMove"
+	StoreAdaptersReplaceMoveTarget      StoreOp = "adapters.ReplaceMoveTarget"
+	StoreAdaptersReplaceMoveOrigin      StoreOp = "adapters.ReplaceMoveOrigin"
+	StoreAdaptersMapping                StoreOp = "adapters.Mapping"
+	StoreAdaptersPlanMaterial           StoreOp = "adapters.PlanMaterial"
+	StoreAdaptersTargetEnvironments     StoreOp = "adapters.TargetEnvironments"
+	StoreAdaptersEnvironments           StoreOp = "adapters.Environments"
+	StoreAdaptersConflicts              StoreOp = "adapters.Conflicts"
+	StoreAdaptersRecordPlan             StoreOp = "adapters.RecordPlan"
+	StoreAdaptersAdopt                  StoreOp = "adapters.Adopt"
+	StoreAdaptersEnqueuePublished       StoreOp = "adapters.EnqueuePublished"
+	StoreAdaptersTeardownTarget         StoreOp = "adapters.TeardownTarget"
+	StoreAdaptersTeardownAdapter        StoreOp = "adapters.TeardownAdapter"
+	StoreAdaptersReplaceCredential      StoreOp = "adapters.ReplaceCredential"
+	StoreAdaptersRevokeCredential       StoreOp = "adapters.RevokeCredential"
+	StoreAdaptersEnqueueManual          StoreOp = "adapters.EnqueueManual"
+	StoreCatalogueRevisionBump          StoreOp = "catalogue.BumpSchemaRevision"
 
 	StoreFoldersCreate StoreOp = "folders.Create"
 	StoreFoldersGet    StoreOp = "folders.Get"
@@ -2851,8 +2854,8 @@ var operations = map[Operation]opSpec{
 	OpAdapterConfigure: {
 		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
 		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAdaptersCreate: true, StoreAdaptersAddTarget: true, StoreAdaptersUpdateTarget: true, StoreAdaptersMoveTarget: true, StoreAdaptersMoveOrigin: true, StoreAdaptersCancelMove: true, StoreAdaptersReplaceMoveTarget: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersMove: true, StoreAdaptersConfiguration: true, StoreAdaptersTarget: true, StoreAdaptersTargetKeyIDs: true, StoreAdaptersEnvironments: true, StoreAuditTenantInsert: true},
-		events:   []audit.EventType{audit.EventAdapterConfigure, audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded, audit.EventAdapterScrub},
+		storeOps: map[StoreOp]bool{StoreAdaptersCreate: true, StoreAdaptersAddTarget: true, StoreAdaptersBeginConfigureEffect: true, StoreAdaptersFinishConfigureEffect: true, StoreAdaptersUpdateTarget: true, StoreAdaptersMoveTarget: true, StoreAdaptersMoveOrigin: true, StoreAdaptersCancelMove: true, StoreAdaptersReplaceMoveTarget: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersMove: true, StoreAdaptersConfiguration: true, StoreAdaptersTarget: true, StoreAdaptersTargetKeyIDs: true, StoreAdaptersEnvironments: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterConfigure, audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded, audit.EventAdapterScrub, audit.EventAdapterPushIntent, audit.EventAdapterPushOutcome},
 	},
 	OpAdapterCredentialSet: {
 		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
@@ -2887,7 +2890,7 @@ var operations = map[Operation]opSpec{
 	OpAdapterTest: {
 		class: ClassTenant, level: domain.LevelProject,
 		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
-		storeOps: map[StoreOp]bool{StoreAdaptersPlanMaterial: true, StoreAdaptersTarget: true, StoreAuditTenantInsert: true},
+		storeOps: map[StoreOp]bool{StoreAdaptersPlanMaterial: true, StoreAdaptersTarget: true, StoreAdaptersRecordCredentialExpiry: true, StoreAuditTenantInsert: true},
 		events:   []audit.EventType{audit.EventAdapterTest},
 	},
 	OpAdapterSync: {

@@ -29,6 +29,7 @@ func runAdapterEnvironmentChainRefusal(t *testing.T, cfg store.Config) {
 			`INSERT INTO environments (id,org_id,project_id,name,note,created_at,display_order) VALUES ('env_adapter_b','org_adapter','prj_adapter','b','','2026-08-17T00:00:00Z',1)`,
 			`INSERT INTO principals (id,kind,created_at) VALUES ('usr_adapter','human','2026-08-17T00:00:00Z')`,
 			`INSERT INTO adapters (id,org_id,project_id,provider,origin,authority_principal_id,state,created_at) VALUES ('adp_1','org_adapter','prj_adapter','forgejo','https://git.example','usr_adapter','active','2026-08-17T00:00:00Z')`,
+			`INSERT INTO adapters (id,org_id,project_id,provider,origin,authority_principal_id,state,created_at) VALUES ('adp_github','org_adapter','prj_adapter','github-actions','https://api.github.com','usr_adapter','active','2026-08-17T00:00:00Z')`,
 			`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_1','org_adapter','prj_adapter','env_adapter_a','adp_1','repository','acme','app',42,'',1,'active','never','2026-08-17T00:00:00Z')`,
 			`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_2','org_adapter','prj_adapter','env_adapter_b','adp_1','repository','acme','app',42,'TWO_',1,'active','never','2026-08-17T00:00:00Z')`,
 		}
@@ -56,6 +57,18 @@ func runAdapterEnvironmentChainRefusal(t *testing.T, cfg store.Config) {
 		}
 		if _, err := db.ExecContext(t.Context(), `UPDATE adapter_ledger SET state='owned' WHERE id='led_released'`); err == nil {
 			return fmt.Errorf("active provider name uniqueness admitted a second owner")
+		}
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ('led_env_a','org_adapter','prj_adapter','env_adapter_a','tgt_1','https://api.github.com','environment',111,99,'secret','ENV_TOKEN','ENV_TOKEN','owned','2026-08-17T00:02:00Z')`); err != nil {
+			return fmt.Errorf("insert first repository-environment custody pair: %w", err)
+		}
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ('led_env_b','org_adapter','prj_adapter','env_adapter_b','tgt_2','https://api.github.com','environment',222,99,'secret','ENV_TOKEN','ENV_TOKEN','owned','2026-08-17T00:02:01Z')`); err != nil {
+			return fmt.Errorf("repository-environment identity collapsed distinct repository ids: %w", err)
+		}
+		if _, err := db.ExecContext(t.Context(), `DELETE FROM adapter_ledger WHERE id='led_env_b'`); err != nil {
+			return fmt.Errorf("clear distinct repository-environment fixture: %w", err)
+		}
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ('led_env_duplicate','org_adapter','prj_adapter','env_adapter_b','tgt_2','https://api.github.com','environment',111,99,'secret','ENV_TOKEN','ENV_TOKEN','owned','2026-08-17T00:02:02Z')`); err == nil {
+			return fmt.Errorf("repository-environment custody admitted a duplicate identity pair")
 		}
 		if _, err := db.ExecContext(t.Context(), `DELETE FROM adapter_route_moves WHERE id='move_bad_env'`); err != nil {
 			return fmt.Errorf("clear cross-environment move fixture: %w", err)
@@ -106,6 +119,23 @@ func runAdapterEnvironmentChainRefusal(t *testing.T, cfg store.Config) {
 				return fmt.Errorf("reclaim deleted pending effective name: %w", err)
 			}
 		}
+		if cfg.Engine == store.EngineSQLite {
+			var enabled int
+			if err := db.QueryRowContext(t.Context(), `PRAGMA foreign_keys`).Scan(&enabled); err != nil {
+				return err
+			}
+			if enabled != 1 {
+				return fmt.Errorf("sqlite foreign_keys remained disabled after migration")
+			}
+			rows, err := db.QueryContext(t.Context(), `PRAGMA foreign_key_check`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			if rows.Next() {
+				return fmt.Errorf("sqlite foreign_key_check reported a violation")
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -115,6 +145,67 @@ func runAdapterEnvironmentChainRefusal(t *testing.T, cfg store.Config) {
 
 func TestAdapterEnvironmentChainRefusalSQLite(t *testing.T) {
 	runAdapterEnvironmentChainRefusal(t, store.Config{Engine: store.EngineSQLite, Path: filepath.Join(t.TempDir(), "adapter.db")})
+}
+
+func TestGitHubAdapterSQLiteMigrationIsAtomicAndRetrySafe(t *testing.T) {
+	cfg := store.Config{Engine: store.EngineSQLite, Path: filepath.Join(t.TempDir(), "adapter-retry.db")}
+	if err := RunUpTo(t.Context(), cfg, 24); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `CREATE TABLE adapter_configure_fences (collision TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Run(t.Context(), cfg); err == nil || !strings.Contains(err.Error(), "adapter_configure_fences") {
+		t.Fatalf("migration with deliberate late collision = %v, want named failure", err)
+	}
+	db, err = sql.Open("sqlite", cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var githubColumns int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pragma_table_info('adapter_targets') WHERE name='destination_environment'`).Scan(&githubColumns); err != nil {
+		t.Fatal(err)
+	}
+	if githubColumns != 0 {
+		t.Fatalf("failed migration partially rebuilt adapter_targets: github columns=%d", githubColumns)
+	}
+	if _, err := db.ExecContext(t.Context(), `DROP TABLE adapter_configure_fences`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Run(t.Context(), cfg); err != nil {
+		t.Fatalf("retry migration: %v", err)
+	}
+	db, err = sql.Open("sqlite", cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pragma_table_info('adapter_targets') WHERE name IN ('destination_environment','warnings')`).Scan(&githubColumns); err != nil {
+		t.Fatal(err)
+	}
+	if githubColumns != 2 {
+		t.Fatalf("retry did not finish adapter target rebuild: github columns=%d", githubColumns)
+	}
+	rows, err := db.QueryContext(t.Context(), `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("retry left a foreign-key violation")
+	}
 }
 
 func TestAdapterEnvironmentChainRefusalPostgres(t *testing.T) {

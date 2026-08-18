@@ -424,27 +424,34 @@ type AdapterConflictArtifact struct {
 	TargetID         string
 	JobID            string
 	DestinationID    int64
+	RepositoryID     int64
 	TargetGeneration int64
 	Entries          []AdapterConflictEntry
 	CreatedAt        time.Time
 }
 
 type AdapterTarget struct {
-	ID                   string
-	AdapterID            string
-	EnvironmentID        string
-	Origin               string
-	DestinationKind      string
-	DestinationOwner     string
-	DestinationName      string
-	DestinationID        int64
-	NamePrefix           string
-	Generation           int64
-	State                string
-	SyncStatus           string
-	ConvergedRevision    *int64
-	FailureNames         []string
-	AuthorityPrincipalID string
+	ID                     string
+	AdapterID              string
+	Provider               string
+	EnvironmentID          string
+	Origin                 string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	DestinationID          int64
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIDs  []int64
+	NamePrefix             string
+	Generation             int64
+	State                  string
+	SyncStatus             string
+	ConvergedRevision      *int64
+	FailureNames           []string
+	Warnings               []string
+	AuthorityPrincipalID   string
 }
 
 type AdapterRecord struct {
@@ -453,35 +460,56 @@ type AdapterRecord struct {
 	Origin               string
 	CredentialPresent    bool
 	CredentialSetAt      string
+	CredentialExpiresAt  string
 	AuthorityPrincipalID string
 	State                string
 	CreatedAt            string
 }
 
 type AdapterTargetMutation struct {
-	ID               string
-	AdapterID        string
-	EnvironmentID    string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	DestinationID    int64
-	NamePrefix       string
-	KeyIDs           []string
+	ID                     string
+	AdapterID              string
+	EnvironmentID          string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	DestinationID          int64
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIDs  []int64
+	NamePrefix             string
+	KeyIDs                 []string
 }
 
 type AdapterCreate struct {
 	ID                   string
+	Provider             string
 	Origin               string
 	CredentialCiphertext []byte
+	CredentialExpiresAt  time.Time
 	AuthorityPrincipalID string
 	Target               AdapterTargetMutation
 	At                   time.Time
 }
 
+type AdapterConfigureFence struct {
+	TargetID               string
+	EnvironmentID          string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	Generation             int64
+	EffectID               string
+	LeaseExpiresAt         time.Time
+	At                     time.Time
+}
+
 type AdapterTargetUpdate struct {
 	Target               AdapterTargetMutation
 	ExpectedGeneration   int64
+	CredentialExpiresAt  time.Time
 	AuthorityPrincipalID string
 	At                   time.Time
 }
@@ -538,10 +566,11 @@ type AdapterMoveJob struct {
 }
 
 type AdapterMoveTarget struct {
-	TargetID, EnvironmentID, DestinationKind, DestinationOwner, DestinationName, NamePrefix string
-	DestinationID                                                                           int64
-	Orphaned                                                                                []string
-	Jobs                                                                                    []AdapterMoveJob
+	TargetID, EnvironmentID, DestinationKind, DestinationOwner, DestinationName, DestinationEnvironment, Visibility, NamePrefix string
+	DestinationID, RepositoryID                                                                                                 int64
+	SelectedRepositoryIDs                                                                                                       []int64
+	Orphaned                                                                                                                    []string
+	Jobs                                                                                                                        []AdapterMoveJob
 }
 
 type AdapterMove struct {
@@ -593,14 +622,17 @@ type AdapterPlanMaterial struct {
 type AdapterRepo interface {
 	AdapterReader
 	Create(ctx context.Context, p authz.Proof, mutation AdapterCreate) (AdapterRecord, AdapterTarget, error)
+	BeginConfigureEffect(ctx context.Context, p authz.Proof, fence AdapterConfigureFence) error
+	FinishConfigureEffect(ctx context.Context, p authz.Proof, targetID, effectID, outcome string, at time.Time) error
 	AddTarget(ctx context.Context, p authz.Proof, mutation AdapterTargetUpdate) (AdapterTargetAddResult, error)
+	RecordCredentialExpiry(ctx context.Context, p authz.Proof, adapterID string, expiresAt time.Time) error
 	UpdateTarget(ctx context.Context, p authz.Proof, mutation AdapterTargetUpdate) (AdapterTargetUpdateResult, error)
 	MoveTarget(ctx context.Context, p authz.Proof, mutation AdapterRouteMoveMutation) (AdapterRouteMoveResult, error)
 	MoveOrigin(ctx context.Context, p authz.Proof, mutation AdapterOriginMoveMutation) (AdapterRouteMoveBatch, error)
 	CancelMove(ctx context.Context, p authz.Proof, moveID, authorityPrincipalID string, at time.Time) (AdapterMove, error)
 	ReplaceMoveTarget(ctx context.Context, p authz.Proof, moveID string, target AdapterTargetMutation, authorityPrincipalID string, at time.Time) (AdapterMove, error)
 	ReplaceMoveOrigin(ctx context.Context, p authz.Proof, moveID, origin string, pendingCredential []byte, authorityPrincipalID string, at time.Time) (AdapterMove, error)
-	RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error
+	RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedRepositoryID, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error
 	Adopt(ctx context.Context, p authz.Proof, adoption AdapterAdoption) (AdapterAdoptionResult, error)
 	EnqueuePublished(ctx context.Context, p authz.Proof, at time.Time) ([]AdapterEnqueueResult, error)
 	TeardownTarget(ctx context.Context, p authz.Proof, targetID string, keepRemote bool, at time.Time) (AdapterTeardownResult, error)

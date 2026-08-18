@@ -79,7 +79,10 @@ func (m fakeAdapterPlanModule) TestConnection(context.Context, adapter.Connectio
 	return adapter.Connection{}, nil
 }
 
-type fakeAdapterTestModule struct{ gates *int }
+type fakeAdapterTestModule struct {
+	gates            *int
+	credentialExpiry time.Time
+}
 
 func (fakeAdapterTestModule) ValidateConfig(adapter.Config) error { return nil }
 func (m fakeAdapterTestModule) TestConnection(ctx context.Context, request adapter.ConnectionRequest) (adapter.Connection, error) {
@@ -91,13 +94,59 @@ func (m fakeAdapterTestModule) TestConnection(ctx context.Context, request adapt
 		return adapter.Connection{}, err
 	}
 	*m.gates++
-	return adapter.Connection{Version: "1.21.11", DestinationID: request.Destination.NumericID}, nil
+	return adapter.Connection{Version: "1.21.11", DestinationID: request.Destination.NumericID, CredentialExpiresAt: m.credentialExpiry}, nil
 }
 
 type fakeAdapterConfigureModule struct {
-	gates         *int
-	err           error
-	destinationID int64
+	gates            *int
+	err              error
+	destinationID    int64
+	credentialExpiry time.Time
+}
+
+type fakeEnvironmentConfigureModule struct{}
+
+func (fakeEnvironmentConfigureModule) ValidateConfig(adapter.Config) error { return nil }
+func (fakeEnvironmentConfigureModule) TestConnection(ctx context.Context, request adapter.ConnectionRequest) (adapter.Connection, error) {
+	if request.BeforeEnvironmentCreate == nil || request.AfterEnvironmentCreate == nil {
+		return adapter.Connection{}, errors.New("missing environment configure callbacks")
+	}
+	if err := request.Gate(ctx); err != nil {
+		return adapter.Connection{}, err
+	}
+	if err := request.BeforeEnvironmentCreate(ctx); err != nil {
+		return adapter.Connection{}, err
+	}
+	if err := request.AfterEnvironmentCreate(ctx, nil); err != nil {
+		return adapter.Connection{}, err
+	}
+	return adapter.Connection{Version: "github-actions", DestinationID: 73, RepositoryID: 42}, nil
+}
+func (fakeEnvironmentConfigureModule) Plan(context.Context, adapter.PlanRequest) (adapter.Plan, error) {
+	return adapter.Plan{}, nil
+}
+func (fakeEnvironmentConfigureModule) Sync(context.Context, adapter.SyncRequest, adapter.Journal) (adapter.SyncResult, error) {
+	return adapter.SyncResult{}, nil
+}
+
+type fakeRoutingPreflightModule struct {
+	seen *[]int64
+	err  error
+}
+
+func (fakeRoutingPreflightModule) ValidateConfig(adapter.Config) error { return nil }
+func (m fakeRoutingPreflightModule) TestConnection(_ context.Context, request adapter.ConnectionRequest) (adapter.Connection, error) {
+	*m.seen = append([]int64(nil), request.Destination.SelectedRepositoryIDs...)
+	if m.err != nil {
+		return adapter.Connection{}, m.err
+	}
+	return adapter.Connection{Version: "github-actions", DestinationID: request.Destination.NumericID}, nil
+}
+func (fakeRoutingPreflightModule) Plan(context.Context, adapter.PlanRequest) (adapter.Plan, error) {
+	return adapter.Plan{}, nil
+}
+func (fakeRoutingPreflightModule) Sync(context.Context, adapter.SyncRequest, adapter.Journal) (adapter.SyncResult, error) {
+	return adapter.SyncResult{}, nil
 }
 
 func TestAdapterCreateAndAddTargetRefuseBeforeCredentialOrProviderWithoutCeremony(t *testing.T) {
@@ -155,7 +204,7 @@ func (m fakeAdapterConfigureModule) TestConnection(ctx context.Context, request 
 	if destinationID == 0 {
 		destinationID = 77
 	}
-	return adapter.Connection{Version: "1.21.11", DestinationID: destinationID}, nil
+	return adapter.Connection{Version: "1.21.11", DestinationID: destinationID, CredentialExpiresAt: m.credentialExpiry}, nil
 }
 func (fakeAdapterConfigureModule) Plan(context.Context, adapter.PlanRequest) (adapter.Plan, error) {
 	return adapter.Plan{}, nil
@@ -178,11 +227,12 @@ func TestAdapterCreateAtomicallyBootstrapsCredentialAndFirstTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	gates := 0
+	expires := time.Date(2026, 9, 30, 12, 34, 56, 0, time.UTC)
 	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://new.example" || credential != "provider-token" {
 			t.Fatalf("factory=%q/%q", origin, credential)
 		}
-		return fakeAdapterConfigureModule{gates: &gates}, nil, nil
+		return fakeAdapterConfigureModule{gates: &gates, credentialExpiry: expires}, nil, nil
 	}}
 	view, err := svc.Create(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{Origin: "https://new.example", Credential: []byte("provider-token"), Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "new", NamePrefix: "PROD_", KeyIDs: []string{"key_create"}}})
 	if err != nil {
@@ -190,6 +240,10 @@ func TestAdapterCreateAtomicallyBootstrapsCredentialAndFirstTarget(t *testing.T)
 	}
 	if !view.Adapter.CredentialPresent || len(view.Targets) != 1 || view.Targets[0].DestinationID != 77 || gates != 2 {
 		t.Fatalf("Create()=%+v gates=%d", view, gates)
+	}
+	storedExpiry, err := time.Parse(time.RFC3339Nano, view.Adapter.CredentialExpiresAt)
+	if err != nil || !storedExpiry.Equal(expires) {
+		t.Fatalf("credential expiry = %q (%v), want persisted provider metadata", view.Adapter.CredentialExpiresAt, err)
 	}
 	var stored []byte
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT credential_ciphertext FROM adapters WHERE id=?`, view.Adapter.ID).Scan(&stored); err != nil {
@@ -211,6 +265,127 @@ func TestAdapterCreateAtomicallyBootstrapsCredentialAndFirstTarget(t *testing.T)
 	}
 	if !shown.Adapter.CredentialPresent || len(shown.Targets) != 1 {
 		t.Fatalf("Get()=%+v", shown)
+	}
+}
+
+func TestEnvironmentCreatePersistsGenerationFenceAndCorrelatedAudit(t *testing.T) {
+	db := adapterServiceDB(t)
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_env_create','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	root, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Adapters{DB: db, Keyring: kr, ProviderModule: func(provider, _, _ string) (adapter.Module, func(), error) {
+		if provider != "github-actions" {
+			t.Fatalf("provider = %q, want persisted github-actions", provider)
+		}
+		return fakeEnvironmentConfigureModule{}, nil, nil
+	}}
+	view, err := svc.Create(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, CreateAdapterRequest{
+		Provider: "github-actions", Origin: "https://api.github.com", Credential: []byte("github_pat_fine"),
+		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "environment", DestinationOwner: "acme", DestinationName: "app", DestinationEnvironment: "production", KeyIDs: []string{"key_env_create"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := view.Targets[0]
+	var generation int64
+	var state, effectID string
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT generation,state,effect_id FROM adapter_configure_fences WHERE target_id=?`, target.ID).Scan(&generation, &state, &effectID); err != nil {
+		t.Fatal(err)
+	}
+	if generation != 1 || state != "succeeded" || effectID == "" {
+		t.Fatalf("configure fence generation=%d state=%q effect=%q", generation, state, effectID)
+	}
+	var correlated int
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events intent JOIN audit_tenant_events configured ON configured.id=intent.correlation_id WHERE intent.id=? AND intent.type='adapter.push_intent' AND intent.object_id=? AND configured.type='adapter.configure'`, effectID, target.ID).Scan(&correlated); err != nil {
+		t.Fatal(err)
+	}
+	if correlated != 1 {
+		t.Fatalf("correlated configure intent rows = %d", correlated)
+	}
+	var outcomes int
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE type='adapter.push_outcome' AND correlation_id=(SELECT correlation_id FROM audit_tenant_events WHERE id=?) AND object_id=? AND outcome='success'`, effectID, target.ID).Scan(&outcomes); err != nil {
+		t.Fatal(err)
+	}
+	if outcomes != 1 {
+		t.Fatalf("correlated configure outcomes = %d", outcomes)
+	}
+}
+
+func TestOrganizationSelectedRepositoryIDsAreVerifiedBeforeRoutingCommit(t *testing.T) {
+	db := adapterServiceDB(t)
+	for _, statement := range []string{
+		`INSERT INTO keys (id,org_id,project_id,name,folder_path,classification,description,deprecated,deprecation_note,declaration,required_mode,forbidden_mode,created_at) VALUES ('key_org_route','org_adapter','prj_adapter','API_TOKEN','','secret','',0,'','optional','none','none','2026-08-17T00:00:00Z')`,
+		`INSERT INTO adapter_target_keys (org_id,project_id,environment_id,target_id,adapter_id,key_id) VALUES ('org_adapter','prj_adapter','env_one','tgt_one','adp_1','key_org_route')`,
+		`UPDATE adapters SET provider='github-actions' WHERE id='adp_1'`,
+		`UPDATE adapter_targets SET destination_kind='organization',destination_name='',visibility='all' WHERE id='tgt_one'`,
+	} {
+		if _, err := db.SQLiteWrite().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := crypto.GenerateRootKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kr, err := crypto.LoadKeyring(t.Context(), &keyring.Store{DB: db}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer, err := kr.ForProject(t.Context(), "org_adapter", "prj_adapter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := sealer.SealField(crypto.ProjectFieldAAD{OrgID: "org_adapter", ProjectID: "prj_adapter", OwnerTable: "adapters", OwnerRowID: "adp_1", FieldTag: "credential"}, []byte("github_pat_fine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z' WHERE id='adp_1'`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	seen := []int64{}
+	svc := &Adapters{DB: db, Keyring: kr, ProviderModule: func(provider, _, _ string) (adapter.Module, func(), error) {
+		if provider != "github-actions" {
+			t.Fatalf("provider = %q", provider)
+		}
+		return fakeRoutingPreflightModule{seen: &seen}, nil, nil
+	}}
+	updated, err := svc.UpdateTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, UpdateAdapterTargetRequest{
+		TargetID: "tgt_one", ExpectedGeneration: 1,
+		Target: AdapterTargetInput{EnvironmentID: "env_one", DestinationKind: "organization", DestinationOwner: "acme", Visibility: "selected", SelectedRepositoryIDs: []int64{11, 22}, NamePrefix: "ONE_", KeyIDs: []string{"key_org_route"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(seen, []int64{11, 22}) || !slices.Equal(updated.SelectedRepositoryIDs, []int64{11, 22}) {
+		t.Fatalf("verified=%v stored=%v", seen, updated.SelectedRepositoryIDs)
+	}
+}
+
+func TestAdapterRoutingStateRoundTripsFromStore(t *testing.T) {
+	db := adapterServiceDB(t)
+	for _, statement := range []string{
+		`INSERT INTO adapters (id,org_id,project_id,provider,origin,authority_principal_id,state,created_at) VALUES ('adp_github','org_adapter','prj_adapter','github-actions','https://api.github.com','usr_adapter','active','2026-08-17T00:00:00Z')`,
+		`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_github','org_adapter','prj_adapter','env_one','adp_github','environment','acme','app','prod/blue',73,42,'','[]','',1,'active','never','2026-08-17T00:00:00Z')`,
+	} {
+		if _, err := db.SQLiteWrite().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := (&Adapters{DB: db}).Get(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := view.Targets[0]
+	if target.Provider != "github-actions" || target.DestinationEnvironment != "prod/blue" || target.DestinationID != 73 || target.RepositoryID != 42 {
+		t.Fatalf("round-trip target = %+v", target)
 	}
 }
 
@@ -247,8 +422,9 @@ func TestAdapterTargetAddAuditsTransactionAuthorityTransition(t *testing.T) {
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z' WHERE id='adp_1'`, sealed); err != nil {
 		t.Fatal(err)
 	}
+	expires := time.Date(2026, 10, 1, 2, 3, 4, 0, time.UTC)
 	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(string, string) (adapter.Module, func(), error) {
-		return fakeAdapterConfigureModule{gates: new(int), destinationID: 303}, nil, nil
+		return fakeAdapterConfigureModule{gates: new(int), destinationID: 303, credentialExpiry: expires}, nil, nil
 	}}
 	target, err := svc.AddTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", AdapterTargetInput{
 		EnvironmentID: "env_three", DestinationKind: "repository", DestinationOwner: "acme", DestinationName: "next", NamePrefix: "THREE_", KeyIDs: []string{"key_add_authority"},
@@ -262,6 +438,13 @@ func TestAdapterTargetAddAuditsTransactionAuthorityTransition(t *testing.T) {
 	}
 	if target.AuthorityPrincipalID != "usr_adapter" || audited != 1 {
 		t.Fatalf("target=%+v authority audits=%d", target, audited)
+	}
+	var storedExpiry string
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT credential_expires_at FROM adapters WHERE id='adp_1'`).Scan(&storedExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, storedExpiry); err != nil || !parsed.Equal(expires) {
+		t.Fatalf("add target credential expiry = %q (%v), want %s", storedExpiry, err, expires)
 	}
 }
 
@@ -550,7 +733,7 @@ func TestAdapterTargetMoveScrubCompletionQueuesPendingRouteActivation(t *testing
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_ledger SET state='released' WHERE target_id='tgt_one'`); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Succeed(t.Context(), job, 0, now.Add(2*time.Second)); err != nil {
+	if err := runtime.Succeed(t.Context(), job, 0, nil, now.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	var targetState, targetName, moveState, nextKind, nextMove string
@@ -791,7 +974,8 @@ func TestAdapterTargetMoveActivationTestsPendingRouteThenEnqueuesConverge(t *tes
 	if pending.Origin != "https://git.example" || pending.Target.Destination.Name != "next" || pending.Target.Destination.NumericID != 0 || len(pending.CredentialCiphertext) == 0 {
 		t.Fatalf("LoadActivation() = %+v", pending)
 	}
-	if err := runtime.Activate(t.Context(), job, adapter.Connection{Version: "1.21.11", DestinationID: 99}, now.Add(2*time.Second)); err != nil {
+	expires := time.Date(2026, 12, 3, 4, 5, 6, 0, time.UTC)
+	if err := runtime.Activate(t.Context(), job, adapter.Connection{Version: "1.21.11", DestinationID: 99, CredentialExpiresAt: expires}, now.Add(2*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	var targetState, targetName, prefix, moveState, nextKind string
@@ -804,6 +988,13 @@ func TestAdapterTargetMoveActivationTestsPendingRouteThenEnqueuesConverge(t *tes
 	}
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT kind,generation FROM adapter_outbox WHERE target_id='tgt_one' AND state='queued'`).Scan(&nextKind, &nextGeneration); err != nil {
 		t.Fatal(err)
+	}
+	var storedExpiry string
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT credential_expires_at FROM adapters WHERE id='adp_1'`).Scan(&storedExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, storedExpiry); err != nil || !parsed.Equal(expires) {
+		t.Fatalf("activation credential expiry = %q (%v), want %s", storedExpiry, err, expires)
 	}
 	if targetState != "active" || targetName != "next" || destinationID != 99 || prefix != "NEXT_" || generation != 3 || moveState != "completed" || nextKind != "converge" || nextGeneration != 3 {
 		t.Fatalf("activated target=%q/%q#%d prefix=%q gen=%d move=%q next=%q/%d", targetState, targetName, destinationID, prefix, generation, moveState, nextKind, nextGeneration)
@@ -883,7 +1074,7 @@ func TestAdapterOriginMoveKeepsOldRouteAndCredentialThroughScrubBarrier(t *testi
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_ledger SET state='released' WHERE target_id=?`, first.TargetID); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Succeed(t.Context(), first, 0, now.Add(time.Second)); err != nil {
+	if err := runtime.Succeed(t.Context(), first, 0, nil, now.Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	var activationJobs int
@@ -903,7 +1094,7 @@ func TestAdapterOriginMoveKeepsOldRouteAndCredentialThroughScrubBarrier(t *testi
 	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_ledger SET state='released' WHERE target_id=?`, second.TargetID); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Succeed(t.Context(), second, 0, now.Add(3*time.Second)); err != nil {
+	if err := runtime.Succeed(t.Context(), second, 0, nil, now.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT state FROM adapter_route_moves WHERE id=?`, move.MoveID).Scan(&moveState); err != nil {
@@ -1188,7 +1379,7 @@ func recordAdapterPlanArtifact(t *testing.T, db *store.DB, artifactID string) {
 		if err != nil {
 			return err
 		}
-		return repos.Adapters().RecordPlan(ctx, p, "tgt_one", artifactID, 1, 42, []store.AdapterConflictEntry{{Surface: "secret", EffectiveName: "ONE_TOKEN"}}, time.Now().UTC())
+		return repos.Adapters().RecordPlan(ctx, p, "tgt_one", artifactID, 1, 0, 42, []store.AdapterConflictEntry{{Surface: "secret", EffectiveName: "ONE_TOKEN"}}, time.Now().UTC())
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1313,7 +1504,7 @@ func TestAdapterDeleteQueuesEveryScrubAndRetainsCredentialUntilLastTerminal(t *t
 		if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_ledger SET state='released' WHERE target_id=?`, job.TargetID); err != nil {
 			t.Fatal(err)
 		}
-		if err := runtime.Succeed(t.Context(), job, 0, now); err != nil {
+		if err := runtime.Succeed(t.Context(), job, 0, nil, now); err != nil {
 			t.Fatal(err)
 		}
 		var present int
@@ -1489,22 +1680,44 @@ func TestAdapterTargetConnectionReauthorizesEveryProviderRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z' WHERE id='adp_1'`, sealed); err != nil {
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET credential_ciphertext=?,credential_set_at='2026-08-17T00:00:00Z',credential_expires_at='2026-08-18T00:00:00Z' WHERE id='adp_1'`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('gr_reveal_two_test_expiry','usr_adapter','reveal','org_adapter','prj_adapter','env_two','2026-08-17T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	gates := 0
+	expires := time.Date(2026, 11, 2, 3, 4, 5, 0, time.UTC)
 	svc := &Adapters{DB: db, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
 		if origin != "https://git.example" || credential != "provider-token" {
 			t.Fatalf("factory origin=%q credential=%q", origin, credential)
 		}
-		return fakeAdapterTestModule{gates: &gates}, nil, nil
+		return fakeAdapterTestModule{gates: &gates, credentialExpiry: expires}, nil, nil
 	}}
+	if _, err := svc.ReplaceCredential(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1", []byte("provider-token")); err != nil {
+		t.Fatal(err)
+	}
+	var clearedExpiry any
+	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT credential_expires_at FROM adapters WHERE id='adp_1'`).Scan(&clearedExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if clearedExpiry != nil {
+		t.Fatalf("credential replacement retained stale expiry %v", clearedExpiry)
+	}
 	connection, err := svc.TestTarget(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "tgt_one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if connection.Version != "1.21.11" || connection.DestinationID != 42 || gates != 2 {
 		t.Fatalf("TestTarget() = %+v gates=%d", connection, gates)
+	}
+	shown, err := svc.Get(t.Context(), LocalPrincipal("usr_adapter"), domain.Scope{Org: "org_adapter", Project: "prj_adapter"}, "adp_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedExpiry, err := time.Parse(time.RFC3339Nano, shown.Adapter.CredentialExpiresAt)
+	if err != nil || !storedExpiry.Equal(expires) {
+		t.Fatalf("shown credential expiry = %q (%v), want %s", shown.Adapter.CredentialExpiresAt, err, expires)
 	}
 	var audits int
 	if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE type='adapter.test' AND object_id='tgt_one' AND json_extract(payload,'$.version')='1.21.11' AND json_extract(payload,'$.destination_id')=42`).Scan(&audits); err != nil {
@@ -1581,6 +1794,20 @@ func TestAdapterPlanPersistsProviderConflictArtifactAndInspectReturnsIt(t *testi
 	}
 	if view.Workflow != "env:\n  API_TOKEN: ${{ secrets.ONE_API_TOKEN }}\n" {
 		t.Fatalf("workflow = %q", view.Workflow)
+	}
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapters SET provider='github-actions' WHERE id='adp_1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_targets SET destination_kind='environment',destination_environment='prod/slash',repository_id=41 WHERE id='tgt_one'`); err != nil {
+		t.Fatal(err)
+	}
+	environmentView, err := svc.InspectTarget(t.Context(), LocalPrincipal("usr_adapter"), scope, "tgt_one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWorkflow := "environment: \"prod/slash\"\nenv:\n  API_TOKEN: ${{ secrets.ONE_API_TOKEN }}\n"
+	if environmentView.Workflow != wantWorkflow {
+		t.Fatalf("environment workflow = %q, want %q", environmentView.Workflow, wantWorkflow)
 	}
 }
 

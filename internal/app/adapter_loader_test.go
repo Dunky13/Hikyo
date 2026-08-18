@@ -35,7 +35,7 @@ func TestAdapterLoaderGatesBeforeLoadAndEveryPlaintextOpen(t *testing.T) {
 				t.Fatalf("LoadExecution ran after %d gates, want exactly the manifest gate", journal.calls)
 			}
 			return store.AdapterExecution{
-				Origin: "https://git.example", CredentialOwnerID: "adapter_1", CredentialCiphertext: []byte("sealed-credential"),
+				Provider: "forgejo", Origin: "https://git.example", CredentialOwnerID: "adapter_1", CredentialCiphertext: []byte("sealed-credential"),
 				Target: adapter.Target{ID: "target_1", Environment: "env_1", Destination: adapter.Destination{Kind: adapter.Repository, Owner: "acme", Name: "app", NumericID: 42}},
 				Entries: []store.AdapterSnapshotEntry{
 					{ID: "entry_1", SnapshotID: "snapshot_1", KeyID: "key_1", KeyName: "FIRST", Classification: string(adapter.SecretClassification), Ciphertext: []byte("sealed-first")},
@@ -90,7 +90,7 @@ func TestAdapterActivationLoaderRefusesBeforePendingCredentialOpen(t *testing.T)
 				t.Fatalf("LoadActivation ran after %d gates, want route-material gate", journal.calls)
 			}
 			return store.AdapterActivation{
-				Origin: "https://git.next.example", CredentialOwnerID: "adapter_1", CredentialCiphertext: []byte("sealed-pending-credential"),
+				Provider: "forgejo", Origin: "https://git.next.example", CredentialOwnerID: "adapter_1", CredentialCiphertext: []byte("sealed-pending-credential"),
 				Target: adapter.Target{ID: "target_1", Environment: "env_1", Destination: adapter.Destination{Kind: adapter.Repository, Owner: "acme", Name: "app"}},
 			}, nil
 		},

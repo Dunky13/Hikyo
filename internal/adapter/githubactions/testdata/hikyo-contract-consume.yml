@@ -1,0 +1,80 @@
+name: Hikyo GitHub adapter contract
+run-name: hikyo-contract-${{ inputs.nonce }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      nonce:
+        required: true
+        type: string
+      secret_name:
+        required: true
+        type: string
+      variable_name:
+        required: true
+        type: string
+      environment_name:
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  consume-unscoped:
+    if: inputs.environment_name == ''
+    runs-on: ubuntu-latest
+    env:
+      HIKYO_CONTRACT_SECRET: ${{ secrets[inputs.secret_name] }}
+      HIKYO_CONTRACT_VARIABLE: ${{ vars[inputs.variable_name] }}
+    steps:
+      - name: Hash consumed bytes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+
+          result = {
+              "secret": hashlib.sha256(os.environ["HIKYO_CONTRACT_SECRET"].encode("utf-8")).hexdigest(),
+              "variable": hashlib.sha256(os.environ["HIKYO_CONTRACT_VARIABLE"].encode("utf-8")).hexdigest(),
+          }
+          with open("hashes.json", "w", encoding="ascii") as output:
+              json.dump(result, output, sort_keys=True)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hikyo-contract-${{ inputs.nonce }}
+          path: hashes.json
+          if-no-files-found: error
+
+  consume-environment:
+    if: inputs.environment_name != ''
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    env:
+      HIKYO_CONTRACT_SECRET: ${{ secrets[inputs.secret_name] }}
+      HIKYO_CONTRACT_VARIABLE: ${{ vars[inputs.variable_name] }}
+    steps:
+      - name: Hash consumed bytes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+
+          result = {
+              "secret": hashlib.sha256(os.environ["HIKYO_CONTRACT_SECRET"].encode("utf-8")).hexdigest(),
+              "variable": hashlib.sha256(os.environ["HIKYO_CONTRACT_VARIABLE"].encode("utf-8")).hexdigest(),
+          }
+          with open("hashes.json", "w", encoding="ascii") as output:
+              json.dump(result, output, sort_keys=True)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hikyo-contract-${{ inputs.nonce }}
+          path: hashes.json
+          if-no-files-found: error

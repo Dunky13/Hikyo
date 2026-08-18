@@ -20,13 +20,13 @@ func targetInput(in apigen.AdapterTargetInput) service.AdapterTargetInput {
 	for i := range in.KeyIds {
 		keys[i] = string(in.KeyIds[i])
 	}
-	return service.AdapterTargetInput{EnvironmentID: string(in.EnvironmentId), DestinationKind: string(in.DestinationKind), DestinationOwner: in.DestinationOwner, DestinationName: in.DestinationName, NamePrefix: in.NamePrefix, KeyIDs: keys}
+	return service.AdapterTargetInput{EnvironmentID: string(in.EnvironmentId), DestinationKind: string(in.DestinationKind), DestinationOwner: in.DestinationOwner, DestinationName: in.DestinationName, DestinationEnvironment: in.DestinationEnvironment, Visibility: string(in.Visibility), SelectedRepositoryIDs: append([]int64(nil), in.SelectedRepositoryIds...), NamePrefix: in.NamePrefix, KeyIDs: keys}
 }
 
 func adapterConflictResponses(in []service.AdapterConflictArtifact) []apigen.AdapterConflictArtifact {
 	out := make([]apigen.AdapterConflictArtifact, 0, len(in))
 	for _, artifact := range in {
-		row := apigen.AdapterConflictArtifact{Id: apigen.ID(artifact.ID), DestinationId: artifact.DestinationID, TargetGeneration: artifact.TargetGeneration, CreatedAt: artifact.CreatedAt, Entries: []apigen.AdapterConflictEntry{}}
+		row := apigen.AdapterConflictArtifact{Id: apigen.ID(artifact.ID), DestinationId: artifact.DestinationID, RepositoryId: artifact.RepositoryID, TargetGeneration: artifact.TargetGeneration, CreatedAt: artifact.CreatedAt, Entries: []apigen.AdapterConflictEntry{}}
 		for _, entry := range artifact.Entries {
 			row.Entries = append(row.Entries, apigen.AdapterConflictEntry{Surface: apigen.AdapterConflictEntrySurface(entry.Surface), EffectiveName: entry.EffectiveName})
 		}
@@ -36,7 +36,7 @@ func adapterConflictResponses(in []service.AdapterConflictArtifact) []apigen.Ada
 }
 
 func adapterTargetResponse(in service.AdapterTarget, conflicts ...service.AdapterConflictArtifact) apigen.AdapterTarget {
-	return apigen.AdapterTarget{Id: apigen.ID(in.ID), AdapterId: apigen.ID(in.AdapterID), EnvironmentId: apigen.ID(in.EnvironmentID), DestinationKind: apigen.AdapterDestinationKind(in.DestinationKind), DestinationOwner: in.DestinationOwner, DestinationName: in.DestinationName, DestinationId: in.DestinationID, NamePrefix: in.NamePrefix, Generation: in.Generation, State: apigen.AdapterTargetState(in.State), SyncStatus: apigen.AdapterTargetSyncStatus(in.SyncStatus), ConvergedRevision: in.ConvergedRevision, FailureNames: append([]string{}, in.FailureNames...), Conflicts: adapterConflictResponses(conflicts)}
+	return apigen.AdapterTarget{Id: apigen.ID(in.ID), AdapterId: apigen.ID(in.AdapterID), EnvironmentId: apigen.ID(in.EnvironmentID), DestinationKind: apigen.AdapterDestinationKind(in.DestinationKind), DestinationOwner: in.DestinationOwner, DestinationName: in.DestinationName, DestinationEnvironment: in.DestinationEnvironment, DestinationId: in.DestinationID, RepositoryId: in.RepositoryID, Visibility: apigen.AdapterTargetVisibility(in.Visibility), SelectedRepositoryIds: append([]int64(nil), in.SelectedRepositoryIDs...), NamePrefix: in.NamePrefix, Generation: in.Generation, State: apigen.AdapterTargetState(in.State), SyncStatus: apigen.AdapterTargetSyncStatus(in.SyncStatus), ConvergedRevision: in.ConvergedRevision, FailureNames: append([]string{}, in.FailureNames...), Warnings: append([]string{}, in.Warnings...), Conflicts: adapterConflictResponses(conflicts)}
 }
 
 func adapterResponse(in service.AdapterView) (apigen.Adapter, error) {
@@ -56,7 +56,15 @@ func adapterResponse(in service.AdapterView) (apigen.Adapter, error) {
 		}
 		credentialSet = &parsed
 	}
-	return apigen.Adapter{Id: apigen.ID(in.Adapter.ID), Provider: apigen.AdapterProvider(in.Adapter.Provider), Origin: in.Adapter.Origin, CredentialPresent: in.Adapter.CredentialPresent, CredentialSetAt: credentialSet, AuthorityPrincipalId: apigen.ID(in.Adapter.AuthorityPrincipalID), State: apigen.AdapterState(in.Adapter.State), CreatedAt: created, Targets: targets}, nil
+	var credentialExpires *time.Time
+	if in.Adapter.CredentialExpiresAt != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, in.Adapter.CredentialExpiresAt)
+		if err != nil {
+			return apigen.Adapter{}, fmt.Errorf("server: parse adapter credential_expires_at: %w", err)
+		}
+		credentialExpires = &parsed
+	}
+	return apigen.Adapter{Id: apigen.ID(in.Adapter.ID), Provider: apigen.AdapterProvider(in.Adapter.Provider), Origin: in.Adapter.Origin, CredentialPresent: in.Adapter.CredentialPresent, CredentialSetAt: credentialSet, CredentialExpiresAt: credentialExpires, AuthorityPrincipalId: apigen.ID(in.Adapter.AuthorityPrincipalID), State: apigen.AdapterState(in.Adapter.State), CreatedAt: created, Targets: targets}, nil
 }
 
 func teardownResponse(in service.AdapterTeardownResult) apigen.AdapterTeardown {
@@ -76,7 +84,7 @@ func adapterMoveResponse(in service.AdapterMove) (apigen.AdapterMove, error) {
 	}
 	out := apigen.AdapterMove{Id: apigen.ID(in.ID), AdapterId: apigen.ID(in.AdapterID), Kind: apigen.AdapterMoveKind(in.Kind), State: apigen.AdapterMoveState(in.State), KeepRemote: in.KeepRemote, PendingOrigin: in.PendingOrigin, CreatedAt: created, Targets: []apigen.AdapterMoveTarget{}}
 	for _, target := range in.Targets {
-		row := apigen.AdapterMoveTarget{TargetId: apigen.ID(target.TargetID), EnvironmentId: apigen.ID(target.EnvironmentID), DestinationKind: apigen.AdapterDestinationKind(target.DestinationKind), DestinationOwner: target.DestinationOwner, DestinationName: target.DestinationName, DestinationId: target.DestinationID, NamePrefix: target.NamePrefix, OrphanedNames: append([]string{}, target.Orphaned...), Jobs: []apigen.AdapterMoveJob{}}
+		row := apigen.AdapterMoveTarget{TargetId: apigen.ID(target.TargetID), EnvironmentId: apigen.ID(target.EnvironmentID), DestinationKind: apigen.AdapterDestinationKind(target.DestinationKind), DestinationOwner: target.DestinationOwner, DestinationName: target.DestinationName, DestinationEnvironment: target.DestinationEnvironment, DestinationId: target.DestinationID, RepositoryId: target.RepositoryID, Visibility: apigen.AdapterMoveTargetVisibility(target.Visibility), SelectedRepositoryIds: append([]int64(nil), target.SelectedRepositoryIDs...), NamePrefix: target.NamePrefix, OrphanedNames: append([]string{}, target.Orphaned...), Jobs: []apigen.AdapterMoveJob{}}
 		for _, job := range target.Jobs {
 			row.Jobs = append(row.Jobs, apigen.AdapterMoveJob{Id: apigen.ID(job.ID), TargetId: apigen.ID(job.TargetID), Kind: apigen.AdapterMoveJobKind(job.Kind), State: apigen.AdapterMoveJobState(job.State)})
 		}
@@ -102,7 +110,7 @@ func (a *API) ListAdapters(ctx context.Context, req apigen.ListAdaptersRequestOb
 }
 
 func (a *API) CreateAdapter(ctx context.Context, req apigen.CreateAdapterRequestObject) (apigen.CreateAdapterResponseObject, error) {
-	view, err := a.Adapters.Create(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), service.CreateAdapterRequest{Origin: req.Body.Origin, Credential: []byte(req.Body.Credential), Target: targetInput(req.Body.Target)})
+	view, err := a.Adapters.Create(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), service.CreateAdapterRequest{Provider: string(req.Body.Provider), Origin: req.Body.Origin, Credential: []byte(req.Body.Credential), Target: targetInput(req.Body.Target)})
 	if err != nil {
 		return nil, err
 	}
@@ -182,11 +190,14 @@ func (a *API) ResumeAdapterMove(ctx context.Context, req apigen.ResumeAdapterMov
 		move, err = a.Adapters.ResumeOriginMove(ctx, service.Bearer(bearer(ctx)), scope, string(req.Move), origin.Origin, credential)
 	} else {
 		input := service.AdapterTargetInput{
-			EnvironmentID:    string(target.EnvironmentId),
-			DestinationKind:  string(target.DestinationKind),
-			DestinationOwner: target.DestinationOwner,
-			DestinationName:  target.DestinationName,
-			NamePrefix:       target.NamePrefix,
+			EnvironmentID:          string(target.EnvironmentId),
+			DestinationKind:        string(target.DestinationKind),
+			DestinationOwner:       target.DestinationOwner,
+			DestinationName:        target.DestinationName,
+			DestinationEnvironment: target.DestinationEnvironment,
+			Visibility:             string(target.Visibility),
+			SelectedRepositoryIDs:  append([]int64(nil), target.SelectedRepositoryIds...),
+			NamePrefix:             target.NamePrefix,
 		}
 		for _, id := range target.KeyIds {
 			input.KeyIDs = append(input.KeyIDs, string(id))
@@ -280,7 +291,7 @@ func (a *API) ShowAdapterTarget(ctx context.Context, req apigen.ShowAdapterTarge
 }
 
 func (a *API) UpdateAdapterTarget(ctx context.Context, req apigen.UpdateAdapterTargetRequestObject) (apigen.UpdateAdapterTargetResponseObject, error) {
-	input := service.AdapterTargetInput{EnvironmentID: string(req.Body.EnvironmentId), DestinationKind: string(req.Body.DestinationKind), DestinationOwner: req.Body.DestinationOwner, DestinationName: req.Body.DestinationName, NamePrefix: req.Body.NamePrefix}
+	input := service.AdapterTargetInput{EnvironmentID: string(req.Body.EnvironmentId), DestinationKind: string(req.Body.DestinationKind), DestinationOwner: req.Body.DestinationOwner, DestinationName: req.Body.DestinationName, DestinationEnvironment: req.Body.DestinationEnvironment, Visibility: string(req.Body.Visibility), SelectedRepositoryIDs: append([]int64(nil), req.Body.SelectedRepositoryIds...), NamePrefix: req.Body.NamePrefix}
 	for _, id := range req.Body.KeyIds {
 		input.KeyIDs = append(input.KeyIDs, string(id))
 	}
@@ -293,7 +304,7 @@ func (a *API) UpdateAdapterTarget(ctx context.Context, req apigen.UpdateAdapterT
 		return nil, fmt.Errorf("%w: target environment is immutable; remove and add the target", domain.ErrConflict)
 	}
 	sameDestination := input.DestinationKind == current.Target.DestinationKind &&
-		input.DestinationOwner == current.Target.DestinationOwner && input.DestinationName == current.Target.DestinationName
+		input.DestinationOwner == current.Target.DestinationOwner && input.DestinationName == current.Target.DestinationName && input.DestinationEnvironment == current.Target.DestinationEnvironment
 	if sameDestination {
 		if req.Body.KeepRemote != nil && *req.Body.KeepRemote {
 			return nil, fmt.Errorf("%w: keep_remote applies only to a destination move", domain.ErrInvalid)
@@ -333,7 +344,7 @@ func (a *API) PlanAdapterTarget(ctx context.Context, req apigen.PlanAdapterTarge
 	if err != nil {
 		return nil, err
 	}
-	out := apigen.AdapterPlan{ArtifactId: apigen.ID(plan.ArtifactID), Changes: []apigen.AdapterChange{}}
+	out := apigen.AdapterPlan{ArtifactId: apigen.ID(plan.ArtifactID), Changes: []apigen.AdapterChange{}, Warnings: append([]string(nil), plan.Plan.Warnings...)}
 	for _, change := range plan.Plan.Changes {
 		row := apigen.AdapterChange{Surface: apigen.AdapterChangeSurface(change.Surface), EffectiveName: change.EffectiveName, Disposition: apigen.AdapterChangeDisposition(change.Disposition)}
 		out.Changes = append(out.Changes, row)
@@ -354,7 +365,12 @@ func (a *API) TestAdapterTarget(ctx context.Context, req apigen.TestAdapterTarge
 	if err != nil {
 		return nil, err
 	}
-	return apigen.TestAdapterTarget200JSONResponse{Version: connection.Version, DestinationId: connection.DestinationID}, nil
+	response := apigen.TestAdapterTarget200JSONResponse{Version: connection.Version, DestinationId: connection.DestinationID, RepositoryId: connection.RepositoryID}
+	if !connection.CredentialExpiresAt.IsZero() {
+		expires := connection.CredentialExpiresAt
+		response.CredentialExpiresAt = &expires
+	}
+	return response, nil
 }
 
 func (a *API) AdoptAdapterTargetNames(ctx context.Context, req apigen.AdoptAdapterTargetNamesRequestObject) (apigen.AdoptAdapterTargetNamesResponseObject, error) {
@@ -362,7 +378,7 @@ func (a *API) AdoptAdapterTargetNames(ctx context.Context, req apigen.AdoptAdapt
 	for _, entry := range req.Body.Entries {
 		entries = append(entries, service.AdapterConflictEntry{Surface: string(entry.Surface), EffectiveName: entry.EffectiveName})
 	}
-	result, err := a.Adapters.Adopt(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), service.AdoptAdapterRequest{TargetID: string(req.Target), ArtifactID: string(req.Body.ArtifactId), ExpectedGeneration: req.Body.TargetGeneration, ExpectedDestinationID: req.Body.DestinationId, Entries: entries})
+	result, err := a.Adapters.Adopt(ctx, service.Bearer(bearer(ctx)), adapterScope(req.Org, req.Project), service.AdoptAdapterRequest{TargetID: string(req.Target), ArtifactID: string(req.Body.ArtifactId), ExpectedGeneration: req.Body.TargetGeneration, ExpectedDestinationID: req.Body.DestinationId, ExpectedRepositoryID: req.Body.RepositoryId, Entries: entries})
 	if err != nil {
 		return nil, err
 	}

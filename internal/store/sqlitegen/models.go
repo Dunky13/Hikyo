@@ -25,9 +25,27 @@ type Adapter struct {
 	Origin               string
 	CredentialCiphertext []byte
 	CredentialSetAt      sql.NullString
+	CredentialExpiresAt  sql.NullString
 	AuthorityPrincipalID string
 	State                string
 	CreatedAt            string
+}
+
+type AdapterConfigureFence struct {
+	TargetID               string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	Generation             int64
+	EffectID               string
+	LeaseExpiresAt         string
+	State                  string
+	CreatedAt              string
+	CompletedAt            sql.NullString
 }
 
 type AdapterConflict struct {
@@ -44,6 +62,7 @@ type AdapterConflict struct {
 	EffectiveName    string
 	CreatedAt        string
 	AdoptedAt        sql.NullString
+	RepositoryID     int64
 }
 
 type AdapterEffect struct {
@@ -64,18 +83,21 @@ type AdapterEffect struct {
 }
 
 type AdapterLedger struct {
-	ID             string
-	OrgID          string
-	ProjectID      string
-	EnvironmentID  string
-	TargetID       string
-	ProviderOrigin string
-	DestinationID  int64
-	Surface        string
-	EffectiveName  string
-	NormalizedName string
-	State          string
-	UpdatedAt      string
+	ID              string
+	OrgID           string
+	ProjectID       string
+	EnvironmentID   string
+	TargetID        string
+	ProviderOrigin  string
+	DestinationID   int64
+	Surface         string
+	EffectiveName   string
+	NormalizedName  string
+	State           string
+	UpdatedAt       string
+	DestinationKind string
+	RepositoryID    int64
+	Missing         int64
 }
 
 type AdapterOutbox struct {
@@ -114,19 +136,20 @@ type AdapterRouteMove struct {
 }
 
 type AdapterRouteMoveClaim struct {
-	MoveID           string
-	OrgID            string
-	ProjectID        string
-	EnvironmentID    string
-	TargetID         string
-	KeyID            sql.NullString
-	ProviderOrigin   string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	Surface          string
-	EffectiveName    string
-	NormalizedName   string
+	MoveID                 string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	TargetID               string
+	KeyID                  sql.NullString
+	ProviderOrigin         string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	Surface                string
+	EffectiveName          string
+	NormalizedName         string
 }
 
 type AdapterRouteMoveKey struct {
@@ -139,17 +162,21 @@ type AdapterRouteMoveKey struct {
 }
 
 type AdapterRouteMoveTarget struct {
-	MoveID           string
-	OrgID            string
-	ProjectID        string
-	EnvironmentID    string
-	TargetID         string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	DestinationID    int64
-	NamePrefix       string
-	OrphanedNames    string
+	MoveID                 string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	TargetID               string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	DestinationID          int64
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIds  string
+	NamePrefix             string
+	OrphanedNames          string
 }
 
 type AdapterTarget struct {
@@ -161,12 +188,17 @@ type AdapterTarget struct {
 	DestinationKind        string
 	DestinationOwner       string
 	DestinationName        string
+	DestinationEnvironment string
 	DestinationID          int64
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIds  string
 	NamePrefix             string
 	Generation             int64
 	State                  string
 	SyncStatus             string
 	FailureNames           string
+	Warnings               string
 	ConvergedRevision      sql.NullInt64
 	ActiveJobID            sql.NullString
 	ProviderLeaseJobID     sql.NullString

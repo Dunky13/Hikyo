@@ -40,8 +40,8 @@ type Job struct {
 type JobStore interface {
 	ClaimDue(context.Context, string, time.Time, time.Time) (Job, bool, error)
 	Journal(Job) Journal
-	Retry(context.Context, Job, time.Time, []Change, error) error
-	Succeed(context.Context, Job, int64, time.Time) error
+	Retry(context.Context, Job, time.Time, []Change, []string, error) error
+	Succeed(context.Context, Job, int64, []string, time.Time) error
 	Fail(context.Context, Job, time.Time, error) error
 }
 
@@ -81,6 +81,21 @@ type Worker struct {
 	Now    func() time.Time
 	Log    *slog.Logger
 	Jitter func(time.Duration) time.Duration
+	Wait   func(context.Context, time.Duration) error
+}
+
+func (w *Worker) wait(ctx context.Context, delay time.Duration) error {
+	if w.Wait != nil {
+		return w.Wait(ctx, delay)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (w *Worker) now() time.Time {
@@ -104,12 +119,21 @@ func RetryDelay(attempt int, jitter func(time.Duration) time.Duration) time.Dura
 	return jitter(delay)
 }
 
+func retryDue(now time.Time, attempt int, jitter func(time.Duration) time.Duration, err error) time.Time {
+	if at, ok := ProviderRetryAt(err); ok && at.After(now) {
+		return at
+	}
+	return now.Add(RetryDelay(attempt, jitter))
+}
+
 func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	if w.Store == nil || w.Loader == nil || w.ID == "" {
 		return false, errors.New("adapter: worker requires store, loader, and id")
 	}
 	now := w.now()
-	job, ok, err := w.Store.ClaimDue(ctx, w.ID, now, now.Add(LeaseTime))
+	leaseDeadline := now.Add(LeaseTime)
+	leaseSafeDeadline := leaseDeadline.Add(-5 * time.Second)
+	job, ok, err := w.Store.ClaimDue(ctx, w.ID, now, leaseDeadline)
 	if err != nil || !ok {
 		return ok, err
 	}
@@ -118,8 +142,8 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSuperseded) {
 			return true, w.Store.Fail(ctx, job, w.now(), err)
 		}
-		due := w.now().Add(RetryDelay(job.Attempt, w.Jitter))
-		return true, w.Store.Retry(ctx, job, due, nil, err)
+		due := retryDue(w.now(), job.Attempt, w.Jitter, err)
+		return true, w.Store.Retry(ctx, job, due, nil, nil, err)
 	}
 	if job.Kind == Activate {
 		loader, ok := w.Loader.(ActivationLoader)
@@ -130,18 +154,29 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		if !ok {
 			return true, w.Store.Fail(ctx, job, w.now(), errors.New("adapter: activation store is not configured"))
 		}
-		loaded, err := loader.LoadActivation(ctx, job, journal)
-		if err == nil {
-			if loaded.Release != nil {
-				defer loaded.Release()
-			}
-			var connection Connection
-			connection, err = loaded.Module.TestConnection(ctx, loaded.Request)
+		for {
+			loaded, loadErr := loader.LoadActivation(ctx, job, journal)
+			err = loadErr
 			if err == nil {
-				err = activationStore.Activate(ctx, job, connection, w.now())
-				if err == nil {
-					return true, nil
+				var connection Connection
+				connection, err = loaded.Module.TestConnection(ctx, loaded.Request)
+				if loaded.Release != nil {
+					loaded.Release()
 				}
+				if err == nil {
+					err = activationStore.Activate(ctx, job, connection, w.now())
+					if err == nil {
+						return true, nil
+					}
+				}
+			}
+			retryAt, rateLimited := ProviderRetryAt(err)
+			if !rateLimited || !retryAt.After(w.now()) || retryAt.After(leaseSafeDeadline) {
+				break
+			}
+			if waitErr := w.wait(ctx, retryAt.Sub(w.now())); waitErr != nil {
+				err = waitErr
+				break
 			}
 		}
 		if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSuperseded) {
@@ -150,27 +185,52 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		if errors.Is(err, ErrProviderAuth) || errors.Is(err, ErrConflict) {
 			return true, w.Store.Fail(ctx, job, w.now(), err)
 		}
-		due := w.now().Add(RetryDelay(job.Attempt, w.Jitter))
-		return true, w.Store.Retry(ctx, job, due, nil, err)
+		due := retryDue(w.now(), job.Attempt, w.Jitter, err)
+		return true, w.Store.Retry(ctx, job, due, nil, nil, err)
 	}
-	loaded, err := w.Loader.Load(ctx, job, journal)
-	if err != nil {
-		if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSuperseded) {
-			return true, w.Store.Fail(ctx, job, w.now(), err)
+	completed := []Change{}
+	var result SyncResult
+	var revision int64
+	for {
+		loaded, loadErr := w.Loader.Load(ctx, job, journal)
+		if loadErr != nil {
+			err = loadErr
+			if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSuperseded) || errors.Is(err, ErrProviderAuth) {
+				return true, w.Store.Fail(ctx, job, w.now(), err)
+			}
+			due := retryDue(w.now(), job.Attempt, w.Jitter, err)
+			return true, w.Store.Retry(ctx, job, due, nil, nil, err)
 		}
-		if errors.Is(err, ErrProviderAuth) {
-			return true, w.Store.Fail(ctx, job, w.now(), err)
+		revision = loaded.Revision
+		loaded.Request.Teardown = job.Kind == Scrub
+		loaded.Request.Completed = append([]Change(nil), completed...)
+		result, err = loaded.Module.Sync(ctx, loaded.Request, journal)
+		if loaded.Release != nil {
+			loaded.Release()
 		}
-		due := w.now().Add(RetryDelay(job.Attempt, w.Jitter))
-		return true, w.Store.Retry(ctx, job, due, nil, err)
-	}
-	if loaded.Release != nil {
-		defer loaded.Release()
-	}
-	loaded.Request.Teardown = job.Kind == Scrub
-	result, err := loaded.Module.Sync(ctx, loaded.Request, journal)
-	if err == nil {
-		return true, w.Store.Succeed(ctx, job, loaded.Revision, w.now())
+		if err == nil {
+			return true, w.Store.Succeed(ctx, job, revision, result.Warnings, w.now())
+		}
+		retryAt, rateLimited := ProviderRetryAt(err)
+		if !rateLimited || !retryAt.After(w.now()) || retryAt.After(leaseSafeDeadline) {
+			break
+		}
+		for _, change := range result.Changes {
+			found := false
+			for _, prior := range completed {
+				if prior.Surface == change.Surface && prior.EffectiveName == change.EffectiveName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				completed = append(completed, change)
+			}
+		}
+		if waitErr := w.wait(ctx, retryAt.Sub(w.now())); waitErr != nil {
+			err = waitErr
+			break
+		}
 	}
 	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSuperseded) {
 		return true, w.Store.Fail(ctx, job, w.now(), err)
@@ -178,7 +238,7 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	if errors.Is(err, ErrProviderAuth) {
 		return true, w.Store.Fail(ctx, job, w.now(), err)
 	}
-	due := w.now().Add(RetryDelay(job.Attempt, w.Jitter))
+	due := retryDue(w.now(), job.Attempt, w.Jitter, err)
 	if !job.CreatedAt.IsZero() && w.now().Sub(job.CreatedAt) > time.Hour {
 		log := w.Log
 		if log == nil {
@@ -187,7 +247,7 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		log.Error("adapter target has failed for more than one hour", "target_id", job.TargetID, "job_id", job.ID)
 	}
 	failures := append(append([]Change{}, result.Failed...), result.Conflicts...)
-	return true, w.Store.Retry(ctx, job, due, failures, err)
+	return true, w.Store.Retry(ctx, job, due, failures, result.Warnings, err)
 }
 
 func (w *Worker) Run(ctx context.Context) {

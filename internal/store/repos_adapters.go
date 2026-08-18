@@ -33,12 +33,13 @@ func (r pgRepos) Adapters() AdapterRepo     { return pgAdapters{db: r.db, tok: r
 
 func scanAdapterTarget(row interface{ Scan(...any) error }) (AdapterTarget, error) {
 	var target AdapterTarget
-	var failureRaw []byte
+	var failureRaw, warningRaw, selectedRaw []byte
 	err := row.Scan(
-		&target.ID, &target.AdapterID, &target.EnvironmentID, &target.Origin,
-		&target.DestinationKind, &target.DestinationOwner, &target.DestinationName,
-		&target.DestinationID, &target.NamePrefix, &target.Generation, &target.State,
-		&target.SyncStatus, &target.ConvergedRevision, &failureRaw, &target.AuthorityPrincipalID,
+		&target.ID, &target.AdapterID, &target.EnvironmentID, &target.Provider, &target.Origin,
+		&target.DestinationKind, &target.DestinationOwner, &target.DestinationName, &target.DestinationEnvironment,
+		&target.DestinationID, &target.RepositoryID, &target.Visibility, &selectedRaw,
+		&target.NamePrefix, &target.Generation, &target.State,
+		&target.SyncStatus, &target.ConvergedRevision, &failureRaw, &warningRaw, &target.AuthorityPrincipalID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
@@ -49,6 +50,16 @@ func scanAdapterTarget(row interface{ Scan(...any) error }) (AdapterTarget, erro
 	if len(failureRaw) != 0 {
 		if err := json.Unmarshal(failureRaw, &target.FailureNames); err != nil {
 			return AdapterTarget{}, fmt.Errorf("store: adapter target failure names: %w", err)
+		}
+	}
+	if len(warningRaw) != 0 {
+		if err := json.Unmarshal(warningRaw, &target.Warnings); err != nil {
+			return AdapterTarget{}, fmt.Errorf("store: adapter target warning names: %w", err)
+		}
+	}
+	if len(selectedRaw) != 0 {
+		if err := json.Unmarshal(selectedRaw, &target.SelectedRepositoryIDs); err != nil {
+			return AdapterTarget{}, fmt.Errorf("store: adapter target selected repository ids: %w", err)
 		}
 	}
 	return target, nil
@@ -143,7 +154,7 @@ func (r sqliteAdapters) PlanMaterial(ctx context.Context, p authz.Proof, targetI
 	if err := manifestRows.Close(); err != nil {
 		return AdapterPlanMaterial{}, err
 	}
-	ledgerRows, err := r.db.QueryContext(ctx, `SELECT surface,effective_name,state FROM adapter_ledger WHERE target_id=? AND org_id=? AND project_id=? AND environment_id=? AND state<>'released' ORDER BY surface,effective_name`, targetID, chain.Org, chain.Project, target.EnvironmentID)
+	ledgerRows, err := r.db.QueryContext(ctx, `SELECT surface,effective_name,state,missing FROM adapter_ledger WHERE target_id=? AND org_id=? AND project_id=? AND environment_id=? AND state<>'released' ORDER BY surface,effective_name`, targetID, chain.Org, chain.Project, target.EnvironmentID)
 	if err != nil {
 		return AdapterPlanMaterial{}, err
 	}
@@ -151,9 +162,11 @@ func (r sqliteAdapters) PlanMaterial(ctx context.Context, p authz.Proof, targetI
 	for ledgerRows.Next() {
 		var surface, state string
 		var row adapter.LedgerEntry
-		if err := ledgerRows.Scan(&surface, &row.EffectiveName, &state); err != nil {
+		var missing int
+		if err := ledgerRows.Scan(&surface, &row.EffectiveName, &state, &missing); err != nil {
 			return AdapterPlanMaterial{}, err
 		}
+		row.Missing = missing != 0
 		row.Surface, row.State = adapter.Surface(surface), adapter.LedgerState(state)
 		out.Ledger = append(out.Ledger, row)
 	}
@@ -192,7 +205,7 @@ func (r pgAdapters) PlanMaterial(ctx context.Context, p authz.Proof, targetID st
 	if err := manifestRows.Err(); err != nil {
 		return AdapterPlanMaterial{}, err
 	}
-	ledgerRows, err := r.db.Query(ctx, `SELECT surface,effective_name,state FROM adapter_ledger WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND environment_id=$4 AND state<>'released' ORDER BY surface,effective_name`, targetID, chain.Org, chain.Project, target.EnvironmentID)
+	ledgerRows, err := r.db.Query(ctx, `SELECT surface,effective_name,state,missing FROM adapter_ledger WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND environment_id=$4 AND state<>'released' ORDER BY surface,effective_name`, targetID, chain.Org, chain.Project, target.EnvironmentID)
 	if err != nil {
 		return AdapterPlanMaterial{}, err
 	}
@@ -200,7 +213,7 @@ func (r pgAdapters) PlanMaterial(ctx context.Context, p authz.Proof, targetID st
 	for ledgerRows.Next() {
 		var surface, state string
 		var row adapter.LedgerEntry
-		if err := ledgerRows.Scan(&surface, &row.EffectiveName, &state); err != nil {
+		if err := ledgerRows.Scan(&surface, &row.EffectiveName, &state, &row.Missing); err != nil {
 			return AdapterPlanMaterial{}, err
 		}
 		row.Surface, row.State = adapter.Surface(surface), adapter.LedgerState(state)
@@ -307,7 +320,7 @@ func collectAdapterConflicts(rows conflictScanner) ([]AdapterConflictArtifact, e
 		var entry AdapterConflictEntry
 		var jobID sql.NullString
 		var createdRaw any
-		if err := rows.Scan(&artifact.ID, &artifact.TargetID, &jobID, &artifact.DestinationID, &artifact.TargetGeneration, &entry.Surface, &entry.EffectiveName, &createdRaw); err != nil {
+		if err := rows.Scan(&artifact.ID, &artifact.TargetID, &jobID, &artifact.DestinationID, &artifact.RepositoryID, &artifact.TargetGeneration, &entry.Surface, &entry.EffectiveName, &createdRaw); err != nil {
 			return nil, err
 		}
 		artifact.JobID = jobID.String
@@ -344,7 +357,7 @@ func (r sqliteAdapters) Conflicts(ctx context.Context, p authz.Proof, targetID s
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT artifact_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at FROM adapter_conflicts WHERE target_id=? AND org_id=? AND project_id=? AND adopted_at IS NULL ORDER BY created_at,artifact_id,surface,effective_name`, targetID, chain.Org, chain.Project)
+	rows, err := r.db.QueryContext(ctx, `SELECT artifact_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at FROM adapter_conflicts WHERE target_id=? AND org_id=? AND project_id=? AND adopted_at IS NULL ORDER BY created_at,artifact_id,surface,effective_name`, targetID, chain.Org, chain.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +370,7 @@ func (r pgAdapters) Conflicts(ctx context.Context, p authz.Proof, targetID strin
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Query(ctx, `SELECT artifact_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at FROM adapter_conflicts WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND adopted_at IS NULL ORDER BY created_at,artifact_id,surface,effective_name`, targetID, chain.Org, chain.Project)
+	rows, err := r.db.Query(ctx, `SELECT artifact_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at FROM adapter_conflicts WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND adopted_at IS NULL ORDER BY created_at,artifact_id,surface,effective_name`, targetID, chain.Org, chain.Project)
 	if err != nil {
 		return nil, err
 	}
@@ -365,38 +378,38 @@ func (r pgAdapters) Conflicts(ctx context.Context, p authz.Proof, targetID strin
 	return collectAdapterConflicts(rows)
 }
 
-func (r sqliteAdapters) RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
+func (r sqliteAdapters) RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedRepositoryID, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
 	chain, err := authz.Verify(p, authz.StoreAdaptersRecordPlan, r.tok)
 	if err != nil {
 		return err
 	}
-	return recordAdapterPlan(ctx, sqliteAdoptDB{db: r.db}, chain, targetID, artifactID, expectedGeneration, expectedDestinationID, entries, at)
+	return recordAdapterPlan(ctx, sqliteAdoptDB{db: r.db}, chain, targetID, artifactID, expectedGeneration, expectedRepositoryID, expectedDestinationID, entries, at)
 }
 
-func (r pgAdapters) RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
+func (r pgAdapters) RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedRepositoryID, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
 	chain, err := authz.Verify(p, authz.StoreAdaptersRecordPlan, r.tok)
 	if err != nil {
 		return err
 	}
-	return recordAdapterPlan(ctx, pgAdoptDB{db: r.db}, chain, targetID, artifactID, expectedGeneration, expectedDestinationID, entries, at)
+	return recordAdapterPlan(ctx, pgAdoptDB{db: r.db}, chain, targetID, artifactID, expectedGeneration, expectedRepositoryID, expectedDestinationID, entries, at)
 }
 
-func recordAdapterPlan(ctx context.Context, db adoptDB, chain domain.Scope, targetID, artifactID string, expectedGeneration, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
+func recordAdapterPlan(ctx context.Context, db adoptDB, chain domain.Scope, targetID, artifactID string, expectedGeneration, expectedRepositoryID, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error {
 	if targetID == "" || artifactID == "" || expectedGeneration <= 0 || expectedDestinationID <= 0 || at.IsZero() {
 		return fmt.Errorf("%w: incomplete adapter plan artifact", ErrConflict)
 	}
 	var environmentID string
-	var destinationID, generation int64
+	var destinationID, repositoryID, generation int64
 	lookup := db.SQL(
-		`SELECT environment_id,destination_id,generation FROM adapter_targets WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
-		`SELECT environment_id,destination_id,generation FROM adapter_targets WHERE id=$1 AND org_id=$2 AND project_id=$3 AND state='active' FOR SHARE`)
-	if err := db.QueryRow(ctx, lookup, targetID, chain.Org, chain.Project).Scan(&environmentID, &destinationID, &generation); err != nil {
+		`SELECT environment_id,destination_id,repository_id,generation FROM adapter_targets WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
+		`SELECT environment_id,destination_id,repository_id,generation FROM adapter_targets WHERE id=$1 AND org_id=$2 AND project_id=$3 AND state='active' FOR SHARE`)
+	if err := db.QueryRow(ctx, lookup, targetID, chain.Org, chain.Project).Scan(&environmentID, &destinationID, &repositoryID, &generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	if generation != expectedGeneration || destinationID != expectedDestinationID {
+	if generation != expectedGeneration || repositoryID != expectedRepositoryID || destinationID != expectedDestinationID {
 		return fmt.Errorf("%w: adapter target changed while planning", ErrConflict)
 	}
 	seen := make(map[string]bool, len(entries))
@@ -407,9 +420,9 @@ func recordAdapterPlan(ctx context.Context, db adoptDB, chain domain.Scope, targ
 		}
 		seen[key] = true
 		insert := db.SQL(
-			`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at) VALUES (?,?,?,?,?,?,NULL,?,?,?,?,?)`,
-			`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,$9,$10,$11)`)
-		if rows, err := db.Exec(ctx, insert, newAdapterID("acn"), artifactID, chain.Org, chain.Project, environmentID, targetID, destinationID, generation, entry.Surface, entry.EffectiveName, db.Stamp(at)); err != nil || rows != 1 {
+			`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at) VALUES (?,?,?,?,?,?,NULL,?,?,?,?,?,?)`,
+			`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,$9,$10,$11,$12)`)
+		if rows, err := db.Exec(ctx, insert, newAdapterID("acn"), artifactID, chain.Org, chain.Project, environmentID, targetID, destinationID, repositoryID, generation, entry.Surface, entry.EffectiveName, db.Stamp(at)); err != nil || rows != 1 {
 			if err != nil {
 				return err
 			}
@@ -501,13 +514,13 @@ func (pgAdoptDB) SQL(_, postgresQuery string) string { return postgresQuery }
 func (pgAdoptDB) Stamp(value time.Time) any          { return CanonTime(value) }
 
 func adoptAdapter(ctx context.Context, db adoptDB, chain domain.Scope, adoption AdapterAdoption) (AdapterAdoptionResult, error) {
-	var adapterID, environmentID, origin, priorJob string
-	var destinationID, generation int64
+	var adapterID, environmentID, origin, destinationKind, priorJob string
+	var destinationID, repositoryID, generation int64
 	var providerBusy int
 	lookup := db.SQL(
-		`SELECT t.adapter_id,t.environment_id,a.origin,t.destination_id,t.generation,CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>? THEN 1 ELSE 0 END,COALESCE(t.active_job_id,'') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.state='active'`,
-		`SELECT t.adapter_id,t.environment_id,a.origin,t.destination_id,t.generation,CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>$1 THEN 1 ELSE 0 END,COALESCE(t.active_job_id,'') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.state='active' FOR UPDATE`)
-	err := db.QueryRow(ctx, lookup, db.Stamp(adoption.AuditAt), adoption.TargetID, chain.Org, chain.Project).Scan(&adapterID, &environmentID, &origin, &destinationID, &generation, &providerBusy, &priorJob)
+		`SELECT t.adapter_id,t.environment_id,a.origin,t.destination_kind,t.repository_id,t.destination_id,t.generation,CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>? THEN 1 ELSE 0 END,COALESCE(t.active_job_id,'') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.state='active'`,
+		`SELECT t.adapter_id,t.environment_id,a.origin,t.destination_kind,t.repository_id,t.destination_id,t.generation,CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>$1 THEN 1 ELSE 0 END,COALESCE(t.active_job_id,'') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.state='active' FOR UPDATE`)
+	err := db.QueryRow(ctx, lookup, db.Stamp(adoption.AuditAt), adoption.TargetID, chain.Org, chain.Project).Scan(&adapterID, &environmentID, &origin, &destinationKind, &repositoryID, &destinationID, &generation, &providerBusy, &priorJob)
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 		return AdapterAdoptionResult{}, ErrNotFound
 	}
@@ -521,18 +534,18 @@ func adoptAdapter(ctx context.Context, db adoptDB, chain domain.Scope, adoption 
 	for i, entry := range adoption.Entries {
 		var conflictRows int
 		conflict := db.SQL(
-			`SELECT COUNT(*) FROM adapter_conflicts WHERE artifact_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=? AND destination_id=? AND target_generation=? AND surface=? AND effective_name=? AND adopted_at IS NULL`,
-			`SELECT COUNT(*) FROM adapter_conflicts WHERE artifact_id=$1 AND target_id=$2 AND org_id=$3 AND project_id=$4 AND environment_id=$5 AND destination_id=$6 AND target_generation=$7 AND surface=$8 AND effective_name=$9 AND adopted_at IS NULL`)
-		if err := db.QueryRow(ctx, conflict, adoption.ArtifactID, adoption.TargetID, chain.Org, chain.Project, environmentID, destinationID, generation, entry.Surface, entry.EffectiveName).Scan(&conflictRows); err != nil {
+			`SELECT COUNT(*) FROM adapter_conflicts WHERE artifact_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=? AND repository_id=? AND destination_id=? AND target_generation=? AND surface=? AND effective_name=? AND adopted_at IS NULL`,
+			`SELECT COUNT(*) FROM adapter_conflicts WHERE artifact_id=$1 AND target_id=$2 AND org_id=$3 AND project_id=$4 AND environment_id=$5 AND repository_id=$6 AND destination_id=$7 AND target_generation=$8 AND surface=$9 AND effective_name=$10 AND adopted_at IS NULL`)
+		if err := db.QueryRow(ctx, conflict, adoption.ArtifactID, adoption.TargetID, chain.Org, chain.Project, environmentID, repositoryID, destinationID, generation, entry.Surface, entry.EffectiveName).Scan(&conflictRows); err != nil {
 			return AdapterAdoptionResult{}, err
 		}
 		if conflictRows != 1 {
 			return AdapterAdoptionResult{}, fmt.Errorf("%w: stale or mismatched adapter conflict artifact", ErrConflict)
 		}
 		insert := db.SQL(
-			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'owned',?)`,
-			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'owned',$11)`)
-		if rows, err := db.Exec(ctx, insert, adoption.LedgerIDs[i], chain.Org, chain.Project, environmentID, adoption.TargetID, origin, destinationID, entry.Surface, entry.EffectiveName, strings.ToUpper(entry.EffectiveName), stamp); err != nil || rows != 1 {
+			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'owned',?)`,
+			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'owned',$13)`)
+		if rows, err := db.Exec(ctx, insert, adoption.LedgerIDs[i], chain.Org, chain.Project, environmentID, adoption.TargetID, origin, destinationKind, repositoryID, destinationID, entry.Surface, entry.EffectiveName, strings.ToUpper(entry.EffectiveName), stamp); err != nil || rows != 1 {
 			if err != nil {
 				return AdapterAdoptionResult{}, err
 			}
@@ -969,8 +982,8 @@ func teardownWholeAdapter(ctx context.Context, db adoptDB, chain domain.Scope, a
 		return AdapterTeardownBatch{}, ErrNotFound
 	}
 	erase := db.SQL(
-		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL WHERE id=? AND org_id=? AND project_id=? AND NOT EXISTS (SELECT 1 FROM adapter_targets WHERE adapter_id=? AND state<>'tombstoned') AND NOT EXISTS (SELECT 1 FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id WHERE t.adapter_id=? AND j.kind='scrub' AND j.state IN ('queued','running'))`,
-		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL WHERE id=$1 AND org_id=$2 AND project_id=$3 AND NOT EXISTS (SELECT 1 FROM adapter_targets WHERE adapter_id=$4 AND state<>'tombstoned') AND NOT EXISTS (SELECT 1 FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id WHERE t.adapter_id=$5 AND j.kind='scrub' AND j.state IN ('queued','running'))`)
+		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL,credential_expires_at=NULL WHERE id=? AND org_id=? AND project_id=? AND NOT EXISTS (SELECT 1 FROM adapter_targets WHERE adapter_id=? AND state<>'tombstoned') AND NOT EXISTS (SELECT 1 FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id WHERE t.adapter_id=? AND j.kind='scrub' AND j.state IN ('queued','running'))`,
+		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL,credential_expires_at=NULL WHERE id=$1 AND org_id=$2 AND project_id=$3 AND NOT EXISTS (SELECT 1 FROM adapter_targets WHERE adapter_id=$4 AND state<>'tombstoned') AND NOT EXISTS (SELECT 1 FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id WHERE t.adapter_id=$5 AND j.kind='scrub' AND j.state IN ('queued','running'))`)
 	if _, err := db.Exec(ctx, erase, adapterID, chain.Org, chain.Project, adapterID, adapterID); err != nil {
 		return AdapterTeardownBatch{}, err
 	}
@@ -1017,8 +1030,8 @@ func replaceAdapterCredential(ctx context.Context, db adoptDB, chain domain.Scop
 		return AdapterCredentialResult{}, adapter.ErrProviderBusy
 	}
 	update := db.SQL(
-		`UPDATE adapters SET credential_ciphertext=?,credential_set_at=?,authority_principal_id=? WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
-		`UPDATE adapters SET credential_ciphertext=$1,credential_set_at=$2,authority_principal_id=$3 WHERE id=$4 AND org_id=$5 AND project_id=$6 AND state='active'`)
+		`UPDATE adapters SET credential_ciphertext=?,credential_set_at=?,credential_expires_at=NULL,authority_principal_id=? WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
+		`UPDATE adapters SET credential_ciphertext=$1,credential_set_at=$2,credential_expires_at=NULL,authority_principal_id=$3 WHERE id=$4 AND org_id=$5 AND project_id=$6 AND state='active'`)
 	rows, err := db.Exec(ctx, update, mutation.CredentialCiphertext, stamp, mutation.AuthorityPrincipalID, mutation.AdapterID, chain.Org, chain.Project)
 	if err != nil {
 		return AdapterCredentialResult{}, err
@@ -1072,8 +1085,8 @@ func revokeAdapterCredential(ctx context.Context, db adoptDB, chain domain.Scope
 		return AdapterCredentialResult{}, err
 	}
 	clearCredential := db.SQL(
-		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
-		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL WHERE id=$1 AND org_id=$2 AND project_id=$3 AND state='active'`)
+		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL,credential_expires_at=NULL WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
+		`UPDATE adapters SET credential_ciphertext=NULL,credential_set_at=NULL,credential_expires_at=NULL WHERE id=$1 AND org_id=$2 AND project_id=$3 AND state='active'`)
 	rows, err := db.Exec(ctx, clearCredential, adapterID, chain.Org, chain.Project)
 	if err != nil {
 		return AdapterCredentialResult{}, err
