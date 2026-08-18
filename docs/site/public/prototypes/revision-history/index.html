@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Version history &amp; rollback — iterations</title>
+<style>
+  :root{
+    --bg:oklch(0.19 0.012 220);--bg2:oklch(0.225 0.014 220);--line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);--tx-dim:oklch(0.76 0.01 210);--tx-faint:oklch(0.6 0.012 215);
+    --accent:oklch(0.82 0.09 195);--mono:ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;
+    min-height:100vh;padding:clamp(24px,6vw,72px) clamp(18px,6vw,72px)}
+  h1{font-size:clamp(20px,4vw,28px);font-weight:700}
+  h1 span{color:var(--accent)}
+  .lede{font-size:13px;color:var(--tx-dim);margin:10px 0 30px;max-width:58ch;line-height:1.6}
+  ul{list-style:none;display:grid;gap:10px;max-width:680px}
+  li a{display:block;text-decoration:none;color:inherit;padding:16px 18px;
+    border:1px solid var(--line);border-radius:10px;background:var(--bg2)}
+  li a:hover{border-color:var(--accent)}
+  .name{font-size:15px;font-weight:600;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .name .n{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .latest{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:oklch(0.2 0.02 220);
+    background:var(--accent);border-radius:999px;padding:2px 9px}
+  .desc{font-size:12.5px;color:var(--tx-dim);margin-top:5px;line-height:1.55}
+  footer{margin-top:36px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
+</style>
+</head>
+<body>
+  <h1>version history <span>&amp;</span> rollback</h1>
+  <p class="lede">Wayfinder ticket #30 — per-env revision timeline, secret-safe diffs (write-presence vs reveal-history), pins as durable resources, least-blast restore through the normal publish pipeline. Every change is a new numbered iteration; published ones never mutate.</p>
+  <ul>
+    <li><a href="6/">
+      <div class="name"><span class="n">6</span>Retention moves out<span class="latest">LOCKED</span></div>
+      <div class="desc">Alex's it-5 verdict: retention settings belong in the settings surfaces, not the history drawer. Editing moved to app-chrome iteration 16 (project settings › Policy + org settings › Policy); the drawer keeps a read-only line — effective window, inherits-org/custom badge, "→ project settings" pointer. Semantics unchanged.</div>
+    </a></li>
+    <li><a href="5/">
+      <div class="name"><span class="n">5</span>Retention inheritance</div>
+      <div class="desc">Revision retention per org + per project: new projects inherit the org default, an override detaches (org changes no longer touch it), inheriting projects follow, and a project may never exceed the org value — refused at set time, capped loudly when the org lowers. ⚙ retention sheet from the drawer head; timeline "collected" tags move live on apply; changes audited.</div>
+    </a></li>
+    <li><a href="4/">
+      <div class="name"><span class="n">4</span>Pin = workload binding</div>
+      <div class="desc">It-3 findings fixed: "holds payload" jargon → "sole keeper" with plain consequence text, and releasing such a pin now confirms with "this permanently deletes rN's values". Pin model made explicit: one pin per (workload, environment) — the sheet gains a workload picker, re-pinning a bound workload becomes a move (r27 → r25), pinning the same rev twice is a refused no-op.</div>
+    </a></li>
+    <li><a href="3/">
+      <div class="name"><span class="n">3</span>Panes + pin clarity</div>
+      <div class="desc">Verdict on it-2: view b (list + detail panes) wins — now the single surface, switcher retired. Pinning explained in visible plain language: pins-section definition line, per-pin gap sentence ("still runs on r27's values — 2 publishes behind latest"), pinned-rev callout in the detail pane, and a pin-create sheet leading with "what pinning does" + a vs-latest value summary under the disclosure rules.</div>
+    </a></li>
+    <li><a href="2/">
+      <div class="name"><span class="n">2</span>History approaches — four structural takes</div>
+      <div class="desc">Alex's it-1 verdict: too dense. Four structurally different presentations of the same history, switchable via ?view= + floating bar (arrow keys): a collapsed timeline (expand per row) · b list + detail panes · c activity story (plain-language sentences) · d full-page history table. ADR prose demoted to (?) tooltips in all four.</div>
+    </a></li>
+    <li><a href="1/">
+      <div class="name"><span class="n">1</span>History drawer</div>
+      <div class="desc">Right-side per-env timeline drawer (entry: env-header rev badge, key names filter per key). Diff + restore preview + pin as centered modals; restore stages drafts, publish runs the #21 ceremony. Retention: lineage permanent, payloads last 6 + pinned; auditor role shows the reveal/reveal-history split.</div>
+    </a></li>
+  </ul>
+  <footer><a href="/prototypes/">all prototypes</a></footer>
+</body>
+</html>

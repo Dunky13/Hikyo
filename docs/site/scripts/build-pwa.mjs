@@ -6,7 +6,7 @@ const { count, size, warnings } = await generateSW({
   cleanupOutdatedCaches: true,
   clientsClaim: true,
   globDirectory: dist,
-  globIgnores: ['sw.js'],
+  globIgnores: ['sw.js', 'prototypes/**/*'],
   globPatterns: ['**/*.{css,html,js,json,png,svg,txt,webmanifest,woff,woff2}'],
   ignoreURLParametersMatching: [/^deployment$/, /^utm_/, /^fbclid$/],
   inlineWorkboxRuntime: true,

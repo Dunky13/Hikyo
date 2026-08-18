@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hikyo — landing prototype</title>
+<!--
+  PROTOTYPE — throwaway. prototype/hikyo-landing/1/index.html
+  Question: what should the hikyo (self-hostable secrets/env manager) landing page look like?
+  3 structurally-different variants, switch via #A / #B / #C or the floating bar / arrow keys.
+  A — Kaneo/Plane: clean white surface, centered value prop, product UI as hero.
+  B — SYNTHESIS: Kaneo/Plane structure + Linear finish + Resend technical clarity (dark).
+  C — Unkey/Better Auth: demo-led, the product explains itself through small UI/code blocks.
+  State lives in location.hash (works on file://). Open directly in a browser.
+-->
+<style>
+  :root {
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: var(--sans); line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  a { color: inherit; text-decoration: none; }
+  img, svg { display: block; }
+  code, kbd, pre { font-family: var(--mono); }
+  .stage { display: none; }
+  .stage.active { display: block; }
+  ::selection { background: #3b82f6; color: #fff; }
+
+  /* ---------- floating prototype switcher (shared) ---------- */
+  #switcher {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    z-index: 9999; display: flex; align-items: center; gap: 4px;
+    background: #0b0d12; color: #fff; border: 1px solid #2a2f3a;
+    border-radius: 999px; padding: 5px 6px; box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    font-family: var(--sans); font-size: 13px; user-select: none;
+  }
+  #switcher button {
+    all: unset; cursor: pointer; width: 30px; height: 30px; border-radius: 999px;
+    display: grid; place-items: center; color: #cbd3e1;
+  }
+  #switcher button:hover { background: #1a1e27; color: #fff; }
+  #switcher .label { padding: 0 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #switcher .label b { color: #fff; }
+  #switcher .label span { color: #7c8698; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ VARIANT A -->
+<!-- Kaneo / Plane: clean white surface, big restrained headline, product UI as hero -->
+<section class="stage" id="stage-A">
+  <style>
+    #stage-A {
+      --bg:#ffffff; --fg:#0d1117; --muted:#5b6472; --line:#e8ebef; --soft:#f6f7f9;
+      --accent:#0d1117; --brand:#2563eb;
+      background:var(--bg); color:var(--fg);
+      font-size:16px; letter-spacing:-.011em;
+    }
+    #stage-A .wrap { max-width:1080px; margin:0 auto; padding:0 24px; }
+    #stage-A nav { display:flex; align-items:center; justify-content:space-between; height:64px; }
+    #stage-A .logo { display:flex; align-items:center; gap:9px; font-weight:640; font-size:17px; letter-spacing:-.02em; }
+    #stage-A .logo .mark { width:22px; height:22px; border-radius:6px; background:var(--fg); color:#fff; display:grid; place-items:center; font-size:13px; font-weight:800; }
+    #stage-A .navlinks { display:flex; gap:28px; color:var(--muted); font-size:14.5px; font-weight:500; }
+    #stage-A .navlinks a:hover { color:var(--fg); }
+    #stage-A .navright { display:flex; align-items:center; gap:18px; font-size:14.5px; font-weight:540; }
+    #stage-A .btn { background:var(--fg); color:#fff; padding:8px 15px; border-radius:8px; font-weight:560; }
+    #stage-A .btn:hover { opacity:.88; }
+    #stage-A .btn-ghost { color:var(--muted); }
+    #stage-A .btn-ghost:hover { color:var(--fg); }
+
+    #stage-A .hero { text-align:center; padding:76px 0 48px; }
+    #stage-A .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:13px; font-weight:520; padding:5px 12px 5px 8px; border-radius:999px; margin-bottom:30px; }
+    #stage-A .pill b { color:var(--fg); font-weight:620; }
+    #stage-A .dot { width:7px; height:7px; border-radius:999px; background:#16a34a; box-shadow:0 0 0 3px rgba(22,163,74,.16); }
+    #stage-A h1 { font-size:clamp(38px, 6.2vw, 66px); line-height:1.02; letter-spacing:-.035em; font-weight:680; max-width:16ch; margin:0 auto; }
+    #stage-A h1 em { font-style:normal; color:var(--muted); }
+    #stage-A .sub { margin:24px auto 0; max-width:52ch; font-size:clamp(16px,2vw,19px); color:var(--muted); font-weight:440; letter-spacing:-.01em; }
+    #stage-A .cta { display:flex; gap:12px; justify-content:center; margin-top:34px; }
+    #stage-A .cta .btn { padding:11px 20px; font-size:15px; border-radius:9px; }
+    #stage-A .cta .btn-line { background:#fff; border:1px solid var(--line); color:var(--fg); }
+    #stage-A .cta .btn-line:hover { border-color:#cfd5dd; opacity:1; }
+    #stage-A .cta .btn-line code { font-size:13.5px; color:var(--muted); }
+    #stage-A .trust { margin-top:22px; color:#8b94a3; font-size:13px; }
+    #stage-A .trust b { color:var(--muted); font-weight:600; }
+
+    /* product UI hero */
+    #stage-A .shot { margin:20px auto 0; max-width:1000px; border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 24px 60px -30px rgba(13,17,23,.28); background:#fff; }
+    #stage-A .shot-bar { display:flex; align-items:center; gap:8px; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--soft); }
+    #stage-A .tl { width:11px; height:11px; border-radius:999px; background:#dfe3e9; }
+    #stage-A .shot-path { margin-left:8px; color:#9aa3b2; font-size:12.5px; font-family:var(--mono); }
+    #stage-A .shot-badge { margin-left:auto; display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; font-weight:560; }
+    #stage-A .matrix { width:100%; border-collapse:collapse; font-size:13.5px; }
+    #stage-A .matrix th { text-align:left; padding:11px 16px; color:var(--muted); font-weight:600; border-bottom:1px solid var(--line); background:#fcfcfd; font-size:12px; letter-spacing:.02em; text-transform:uppercase; }
+    #stage-A .matrix th.env { text-align:center; }
+    #stage-A .matrix td { padding:11px 16px; border-bottom:1px solid var(--line); white-space:nowrap; }
+    #stage-A .matrix td.k { font-family:var(--mono); color:var(--fg); font-size:13px; }
+    #stage-A .matrix td.v { text-align:center; }
+    #stage-A .matrix tr:last-child td { border-bottom:0; }
+    #stage-A .cell { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:6px; font-family:var(--mono); font-size:12px; }
+    #stage-A .cell.set { background:#eef2ff; color:#3b4ba8; }
+    #stage-A .cell.inh { background:var(--soft); color:#9aa3b2; }
+    #stage-A .cell.miss { color:#c2492f; background:#fdecea; }
+    #stage-A .mtag { font-size:11px; }
+    #stage-A .logos { margin:56px 0 0; padding:34px 0 8px; border-top:1px solid var(--line); text-align:center; }
+    #stage-A .logos p { color:#98a1b0; font-size:12.5px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; margin-bottom:20px; }
+    #stage-A .logos .row { display:flex; flex-wrap:wrap; gap:14px; justify-content:center; }
+    #stage-A .logos .row span { color:#aeb6c2; font-weight:640; font-size:15px; padding:6px 14px; border:1px solid var(--line); border-radius:8px; }
+
+    /* three plain feature columns — no bento */
+    #stage-A .feat { display:grid; grid-template-columns:repeat(3,1fr); gap:40px; padding:72px 0 88px; }
+    #stage-A .feat h3 { font-size:16px; letter-spacing:-.02em; margin-bottom:9px; display:flex; align-items:center; gap:9px; }
+    #stage-A .feat h3 .fi { width:26px; height:26px; border-radius:7px; background:var(--soft); display:grid; place-items:center; }
+    #stage-A .feat p { color:var(--muted); font-size:14.5px; }
+    #stage-A .feat code { font-size:13px; color:var(--brand); background:#eef2ff; padding:1px 6px; border-radius:5px; }
+    #stage-A footer { border-top:1px solid var(--line); padding:28px 0; color:#98a1b0; font-size:13px; display:flex; justify-content:space-between; }
+    @media (max-width:760px){
+      #stage-A .navlinks{display:none;}
+      #stage-A .hero{padding:44px 0 30px;}
+      #stage-A .cta{flex-direction:column;}
+      #stage-A .cta .btn{justify-content:center;}
+      #stage-A .feat{grid-template-columns:1fr;gap:34px;padding:52px 0 68px;}
+      #stage-A .shot{border-radius:12px;}
+      #stage-A .matrix .opt{display:none;}
+      #stage-A footer{flex-direction:column;gap:10px;}
+    }
+  </style>
+  <div class="wrap">
+    <nav>
+      <div class="logo"><span class="mark">h</span> hikyo</div>
+      <div class="navlinks"><a>Product</a><a>Self-hosting</a><a>Docs</a><a>Pricing</a><a>Changelog</a></div>
+      <div class="navright"><a class="btn-ghost">Sign in</a><a class="btn">Get started</a></div>
+    </nav>
+  </div>
+
+  <div class="wrap">
+    <div class="hero">
+      <span class="pill"><span class="dot"></span> <b>v0.4</b> &nbsp;·&nbsp; single signed binary, self-hosted</span>
+      <h1>All your secrets. <em>None of your trust.</em></h1>
+      <p class="sub">hikyo is an open-source environment &amp; secrets manager you run yourself. Envelope-encrypted at rest, proof-carrying access on every read, one Go binary from laptop to production.</p>
+      <div class="cta">
+        <a class="btn">Start self-hosting →</a>
+        <a class="btn btn-line"><code>$ curl -fsSL hikyo.dev/install | sh</code></a>
+      </div>
+      <p class="trust"><b>MIT-licensed.</b> No account required. sqlite for dev, postgres for prod — same binary.</p>
+    </div>
+
+    <div class="shot">
+      <div class="shot-bar">
+        <span class="tl"></span><span class="tl"></span><span class="tl"></span>
+        <span class="shot-path">acme / payments-api</span>
+        <span class="shot-badge">🔒 42 keys · envelope-sealed</span>
+      </div>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th class="env">dev</th>
+            <th class="env">staging</th>
+            <th class="env">prod</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">DATABASE_URL</td><td class="v"><span class="cell set">postgres://…</span></td><td class="v"><span class="cell set">postgres://…</span></td><td class="v"><span class="cell set">postgres://…</span></td></tr>
+          <tr><td class="k">STRIPE_SECRET_KEY</td><td class="v"><span class="cell set">sk_test_…</span></td><td class="v"><span class="cell set">sk_test_…</span></td><td class="v"><span class="cell set">sk_live_…</span></td></tr>
+          <tr><td class="k">LOG_LEVEL</td><td class="v"><span class="cell set">debug</span></td><td class="v"><span class="cell inh">↑ inherited</span></td><td class="v"><span class="cell set">info</span></td></tr>
+          <tr><td class="k">SENTRY_DSN</td><td class="v"><span class="cell inh">—</span></td><td class="v"><span class="cell set">https://…</span></td><td class="v"><span class="cell set">https://…</span></td></tr>
+          <tr><td class="k">SESSION_SIGNING_KEY</td><td class="v"><span class="cell set">•••••••</span></td><td class="v"><span class="cell set">•••••••</span></td><td class="v"><span class="cell miss">⚠ unset</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="logos">
+      <p>Runs on the boring stack you already trust</p>
+      <div class="row"><span>Go 1.26</span><span>SQLite</span><span>Postgres</span><span>OpenAPI 3.1</span><span>cosign</span><span>OIDC</span></div>
+    </div>
+
+    <div class="feat">
+      <div>
+        <h3><span class="fi">🔐</span> Encrypted, not hosted</h3>
+        <p>Every value is envelope-encrypted with a per-tenant data key. hikyo never stores a plaintext secret and neither does your database backup.</p>
+      </div>
+      <div>
+        <h3><span class="fi">✅</span> Proof on every read</h3>
+        <p>Access is proof-carrying: unauthorized is indistinguishable from nonexistent. No accidental enumeration, no leaky 403s. <code>authorize()</code> is the only door.</p>
+      </div>
+      <div>
+        <h3><span class="fi">⚡</span> One binary, everywhere</h3>
+        <p>Point your app at hikyo and run. <code>hikyo run -- ./server</code> injects the right env, <code>hikyo render</code> writes a file, <code>hikyo doctor</code> tells you what's missing.</p>
+      </div>
+    </div>
+
+    <footer><span>© 2026 hikyo · MIT</span><span>Self-host · Docs · GitHub</span></footer>
+  </div>
+</section>
+
+<!-- ============================================================ VARIANT B -->
+<!-- SYNTHESIS: Kaneo/Plane structure + Linear finish + Resend technical clarity (dark, premium) -->
+<section class="stage" id="stage-B">
+  <style>
+    #stage-B {
+      --bg:#08090c; --panel:#0e1017; --panel2:#12141d; --fg:#f3f5f9; --muted:#8b93a7;
+      --dim:#5a6274; --line:#1c1f2b; --brand:#6d8bff; --brand2:#a78bfa; --green:#3ecf8e;
+      background:
+        radial-gradient(1200px 520px at 50% -8%, rgba(109,139,255,.16), transparent 60%),
+        radial-gradient(900px 500px at 88% 8%, rgba(167,139,250,.10), transparent 55%),
+        var(--bg);
+      color:var(--fg); font-size:16px; letter-spacing:-.012em; min-height:100vh;
+    }
+    #stage-B .wrap { max-width:1120px; margin:0 auto; padding:0 24px; }
+    #stage-B nav { display:flex; align-items:center; justify-content:space-between; height:66px; }
+    #stage-B .logo { display:flex; align-items:center; gap:9px; font-weight:600; font-size:16.5px; letter-spacing:-.02em; }
+    #stage-B .logo .mark { width:23px; height:23px; border-radius:7px; background:linear-gradient(150deg,var(--brand),var(--brand2)); display:grid; place-items:center; font-size:13px; font-weight:800; color:#0a0a10; }
+    #stage-B .navlinks { display:flex; gap:26px; color:var(--muted); font-size:14px; font-weight:500; }
+    #stage-B .navlinks a:hover{color:var(--fg);}
+    #stage-B .navright{display:flex;align-items:center;gap:16px;font-size:14px;}
+    #stage-B .navright .gh{color:var(--muted);display:flex;align-items:center;gap:7px;}
+    #stage-B .navright .gh b{color:var(--fg);font-variant-numeric:tabular-nums;}
+    #stage-B .btn{background:var(--fg);color:#0a0b0f;padding:8px 15px;border-radius:8px;font-weight:600;font-size:14px;}
+    #stage-B .btn:hover{opacity:.9;}
+
+    #stage-B .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center;padding:70px 0 40px;}
+    #stage-B .tagline{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);border:1px solid var(--line);background:rgba(255,255,255,.02);padding:5px 12px;border-radius:999px;margin-bottom:26px;font-weight:520;}
+    #stage-B .tagline b{color:var(--brand);}
+    #stage-B h1{font-size:clamp(40px,5.4vw,60px);line-height:1.03;letter-spacing:-.038em;font-weight:600;}
+    #stage-B h1 .g{background:linear-gradient(100deg,#fff,#9fb0ff 60%,#c4b5fd);-webkit-background-clip:text;background-clip:text;color:transparent;}
+    #stage-B .sub{margin-top:22px;font-size:18px;color:var(--muted);max-width:44ch;font-weight:420;letter-spacing:-.008em;}
+    #stage-B .cta{display:flex;gap:12px;margin-top:32px;align-items:center;}
+    #stage-B .cta .btn{padding:11px 20px;font-size:15px;}
+    #stage-B .cta .ghost{color:var(--fg);font-weight:540;font-size:15px;display:flex;align-items:center;gap:7px;}
+    #stage-B .cta .ghost:hover{color:var(--brand);}
+    #stage-B .metrics{display:flex;gap:30px;margin-top:40px;padding-top:26px;border-top:1px solid var(--line);}
+    #stage-B .metrics div b{display:block;font-size:22px;font-weight:640;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+    #stage-B .metrics div span{font-size:12.5px;color:var(--dim);}
+
+    /* right: the CLI/product is the visual language (Resend) */
+    #stage-B .term{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 30px 80px -40px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.03);}
+    #stage-B .term-bar{display:flex;align-items:center;gap:7px;padding:11px 14px;border-bottom:1px solid var(--line);}
+    #stage-B .term-bar .tl{width:11px;height:11px;border-radius:999px;background:#242835;}
+    #stage-B .term-bar .t{margin-left:8px;color:var(--dim);font-size:12px;font-family:var(--mono);}
+    #stage-B pre{padding:18px 18px 20px;font-size:13px;line-height:1.85;color:#cdd4e2;overflow:auto;}
+    #stage-B .c-dim{color:var(--dim);}
+    #stage-B .c-p{color:var(--green);}
+    #stage-B .c-cmd{color:#fff;}
+    #stage-B .c-flag{color:var(--brand);}
+    #stage-B .c-ok{color:var(--green);}
+    #stage-B .c-key{color:var(--brand2);}
+    #stage-B .c-warn{color:#f0a020;}
+
+    #stage-B .strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:48px 0 0;}
+    #stage-B .strip > div{background:var(--panel);padding:26px 24px;}
+    #stage-B .strip h3{font-size:15px;font-weight:600;letter-spacing:-.02em;margin-bottom:8px;display:flex;align-items:center;gap:8px;}
+    #stage-B .strip h3 .fi{color:var(--brand);}
+    #stage-B .strip p{color:var(--muted);font-size:13.5px;font-weight:420;}
+    #stage-B .strip code{font-family:var(--mono);font-size:12.5px;color:var(--brand2);}
+
+    #stage-B .os{margin:64px 0 20px;padding:30px 32px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(120deg,var(--panel2),var(--panel));display:flex;align-items:center;justify-content:space-between;gap:24px;}
+    #stage-B .os h4{font-size:20px;letter-spacing:-.02em;font-weight:600;}
+    #stage-B .os p{color:var(--muted);font-size:14px;margin-top:6px;max-width:52ch;}
+    #stage-B .os .btn{white-space:nowrap;}
+    #stage-B footer{border-top:1px solid var(--line);margin-top:40px;padding:26px 0;color:var(--dim);font-size:13px;display:flex;justify-content:space-between;}
+    @media (max-width:860px){
+      #stage-B .navlinks{display:none;}
+      #stage-B .hero{grid-template-columns:1fr;gap:34px;padding:40px 0 26px;}
+      #stage-B .metrics{gap:20px;flex-wrap:wrap;}
+      #stage-B .strip{grid-template-columns:1fr;}
+      #stage-B .os{flex-direction:column;align-items:flex-start;}
+      #stage-B pre{font-size:12px;}
+      #stage-B footer{flex-direction:column;gap:10px;}
+    }
+  </style>
+  <div class="wrap">
+    <nav>
+      <div class="logo"><span class="mark">h</span> hikyo</div>
+      <div class="navlinks"><a>Product</a><a>Self-hosting</a><a>Security</a><a>Docs</a><a>Changelog</a></div>
+      <div class="navright"><a class="gh">★ <b>4.2k</b></a><a class="btn">Get started</a></div>
+    </nav>
+
+    <div class="hero">
+      <div>
+        <span class="tagline"><b>●</b> Open source · self-hosted · zero plaintext at rest</span>
+        <h1>Secrets that <span class="g">stay yours</span>, from laptop to prod.</h1>
+        <p class="sub">One signed Go binary. Envelope-encrypted storage, proof-carrying access, and an env matrix your whole team can read. Own the keys, own the data.</p>
+        <div class="cta">
+          <a class="btn">Deploy hikyo →</a>
+          <a class="ghost">Read the docs ↗</a>
+        </div>
+        <div class="metrics">
+          <div><b>1</b><span>static binary</span></div>
+          <div><b>0</b><span>plaintext secrets stored</span></div>
+          <div><b>&lt;5&nbsp;min</b><span>to self-host</span></div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="term-bar"><span class="tl"></span><span class="tl"></span><span class="tl"></span><span class="t">~/payments-api</span></div>
+<pre><span class="c-dim"># adopt an existing .env — encrypted on the way in</span>
+<span class="c-p">$</span> <span class="c-cmd">hikyo adopt</span> <span class="c-flag">--env</span> prod .env
+  <span class="c-ok">✓</span> sealed 42 secrets <span class="c-dim">(envelope, per-tenant DEK)</span>
+
+<span class="c-dim"># run your app with the right env injected</span>
+<span class="c-p">$</span> <span class="c-cmd">hikyo run</span> <span class="c-flag">--env</span> prod <span class="c-dim">--</span> ./server
+  <span class="c-ok">✓</span> authorize() ok <span class="c-dim">·</span> <span class="c-key">18</span> keys resolved
+  <span class="c-dim">→ cascade: prod ▸ default</span>
+  <span class="c-warn">⚠</span> SENTRY_DSN unset in prod <span class="c-dim">(hikyo doctor)</span>
+
+<span class="c-p">$</span> <span class="c-cmd">hikyo render</span> <span class="c-flag">--format</span> dotenv <span class="c-flag">&gt;</span> .env.prod
+  <span class="c-ok">✓</span> wrote 18 vars <span class="c-dim">· 0 plaintext left on disk after run</span></pre>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div><h3><span class="fi">◆</span> Envelope encryption</h3><p>Per-tenant data keys wrap every value. Your DB never sees a plaintext secret — <code>render</code>/<code>run</code> decrypt only in memory, only after authorize.</p></div>
+      <div><h3><span class="fi">◆</span> Proof-carrying access</h3><p>Unauthorized ≡ nonexistent. Every read carries a proof through one chokepoint — no enumeration, no leaky errors, no bypass path.</p></div>
+      <div><h3><span class="fi">◆</span> Reproducible &amp; signed</h3><p>Releases are cosign-signed with an SBOM and offline trust. <code>hikyo doctor</code> verifies the binary you're running is the one that was built.</p></div>
+    </div>
+
+    <div class="os">
+      <div>
+        <h4>Self-host it in the time it takes to read this.</h4>
+        <p>sqlite for dev, postgres for prod, same binary. Refuses a non-TLS postgres by design. No SaaS tier to age out of, no seat you can't afford.</p>
+      </div>
+      <a class="btn">Start self-hosting →</a>
+    </div>
+
+    <footer><span>© 2026 hikyo · MIT-licensed · self-hostable</span><span>Docs · Security · GitHub</span></footer>
+  </div>
+</section>
+
+<!-- ============================================================ VARIANT C -->
+<!-- Unkey / Better Auth: demo-led. The product explains itself through small live UI/code blocks. -->
+<section class="stage" id="stage-C">
+  <style>
+    #stage-C {
+      --bg:#0a0b0e; --card:#111318; --card2:#15171e; --fg:#eef1f6; --muted:#949cad;
+      --dim:#616a7c; --line:#20232d; --brand:#4ade80; --blue:#5b8bff; --purple:#c084fc;
+      background:var(--bg); color:var(--fg); font-size:16px; letter-spacing:-.011em;
+    }
+    #stage-C .wrap{max-width:960px;margin:0 auto;padding:0 22px;}
+    #stage-C nav{display:flex;align-items:center;justify-content:space-between;height:62px;}
+    #stage-C .logo{display:flex;align-items:center;gap:9px;font-weight:600;font-size:16px;}
+    #stage-C .logo .mark{width:22px;height:22px;border-radius:6px;background:var(--brand);color:#06210f;display:grid;place-items:center;font-size:12px;font-weight:800;}
+    #stage-C .navlinks{display:flex;gap:22px;color:var(--muted);font-size:13.5px;}
+    #stage-C .navlinks a:hover{color:var(--fg);}
+    #stage-C .navright .btn{background:var(--brand);color:#06210f;padding:7px 14px;border-radius:7px;font-weight:640;font-size:13.5px;}
+
+    #stage-C .hero{padding:56px 0 20px;}
+    #stage-C .eyebrow{color:var(--brand);font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;margin-bottom:16px;}
+    #stage-C h1{font-size:clamp(32px,5vw,50px);line-height:1.06;letter-spacing:-.032em;font-weight:640;max-width:20ch;}
+    #stage-C .sub{margin-top:18px;font-size:17px;color:var(--muted);max-width:56ch;}
+    #stage-C .install{margin-top:26px;display:inline-flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px 10px 16px;font-family:var(--mono);font-size:13.5px;}
+    #stage-C .install .p{color:var(--dim);}
+    #stage-C .install .cp{margin-left:6px;background:var(--card2);border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:4px 9px;font-size:11px;font-family:var(--sans);cursor:pointer;}
+    #stage-C .install .cp:hover{color:var(--fg);}
+
+    /* demo blocks — functionality is the content */
+    #stage-C .demos{display:flex;flex-direction:column;gap:18px;padding:44px 0 20px;}
+    #stage-C .demo{border:1px solid var(--line);border-radius:14px;background:var(--card);overflow:hidden;}
+    #stage-C .demo-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);}
+    #stage-C .demo-head .n{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:2px 7px;}
+    #stage-C .demo-head h3{font-size:14.5px;font-weight:580;letter-spacing:-.015em;}
+    #stage-C .demo-head p{margin-left:auto;color:var(--dim);font-size:12.5px;}
+    #stage-C .demo-body{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);}
+    #stage-C .demo-body > div{background:var(--card);padding:16px 18px;}
+    #stage-C .demo-body .cap{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;font-weight:640;}
+    #stage-C pre{font-family:var(--mono);font-size:12.5px;line-height:1.8;color:#cbd2e0;overflow:auto;}
+    #stage-C .g{color:var(--dim);} #stage-C .p{color:var(--brand);} #stage-C .cmd{color:#fff;}
+    #stage-C .fl{color:var(--blue);} #stage-C .ok{color:var(--brand);} #stage-C .ky{color:var(--purple);} #stage-C .wn{color:#f0a83a;}
+
+    /* mini env matrix inside a demo */
+    #stage-C .mini{width:100%;border-collapse:collapse;font-size:12px;}
+    #stage-C .mini th{color:var(--dim);font-weight:600;text-align:center;padding:6px 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;}
+    #stage-C .mini th:first-child{text-align:left;}
+    #stage-C .mini td{padding:6px 8px;border-top:1px solid var(--line);text-align:center;font-family:var(--mono);}
+    #stage-C .mini td:first-child{text-align:left;color:var(--fg);}
+    #stage-C .b{display:inline-block;padding:2px 7px;border-radius:5px;font-size:11px;}
+    #stage-C .b.s{background:rgba(91,139,255,.14);color:#9db4ff;}
+    #stage-C .b.i{color:var(--dim);}
+    #stage-C .b.w{background:rgba(240,168,58,.14);color:#f0a83a;}
+
+    #stage-C .why{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:36px 0 8px;}
+    #stage-C .why > div{border:1px solid var(--line);border-radius:12px;padding:18px;background:var(--card);}
+    #stage-C .why b{display:block;font-size:14px;letter-spacing:-.015em;margin-bottom:6px;}
+    #stage-C .why span{color:var(--muted);font-size:13px;}
+    #stage-C .close{text-align:center;padding:64px 0 40px;}
+    #stage-C .close h2{font-size:30px;letter-spacing:-.03em;font-weight:640;}
+    #stage-C .close p{color:var(--muted);margin-top:12px;}
+    #stage-C .close .btn{display:inline-block;margin-top:22px;background:var(--fg);color:#0a0b0e;padding:11px 22px;border-radius:9px;font-weight:620;}
+    #stage-C footer{border-top:1px solid var(--line);padding:24px 0;color:var(--dim);font-size:12.5px;text-align:center;}
+    @media (max-width:760px){
+      #stage-C .navlinks{display:none;}
+      #stage-C .demo-body{grid-template-columns:1fr;}
+      #stage-C .why{grid-template-columns:1fr;}
+      #stage-C .demo-head p{display:none;}
+    }
+  </style>
+  <div class="wrap">
+    <nav>
+      <div class="logo"><span class="mark">h</span> hikyo</div>
+      <div class="navlinks"><a>Docs</a><a>Self-hosting</a><a>Security model</a><a>GitHub</a></div>
+      <div class="navright"><a class="btn">Get started</a></div>
+    </nav>
+
+    <div class="hero">
+      <div class="eyebrow">// open-source secrets manager you run yourself</div>
+      <h1>Understand your environments by reading them.</h1>
+      <p class="sub">hikyo doesn't hide your config behind a dashboard. Here's exactly what it does — no marketing screenshots, just the four things you'll actually run.</p>
+      <div class="install"><span class="p">$</span> curl -fsSL hikyo.dev/install | sh <span class="cp">copy</span></div>
+    </div>
+
+    <div class="demos">
+      <!-- demo 1: adopt -->
+      <div class="demo">
+        <div class="demo-head"><span class="n">01</span><h3>Adopt an existing .env — it's encrypted before it lands</h3><p>hikyo adopt</p></div>
+        <div class="demo-body">
+          <div><div class="cap">you run</div>
+<pre><span class="p">$</span> <span class="cmd">hikyo adopt</span> <span class="fl">--env</span> prod .env</pre></div>
+          <div><div class="cap">hikyo does</div>
+<pre><span class="ok">✓</span> 42 secrets <span class="ky">envelope-sealed</span>
+<span class="g">  per-tenant DEK · no plaintext</span>
+<span class="g">  stored in postgres/sqlite</span></pre></div>
+        </div>
+      </div>
+
+      <!-- demo 2: env matrix / cascade -->
+      <div class="demo">
+        <div class="demo-head"><span class="n">02</span><h3>See every env at once — inheritance made obvious</h3><p>hikyo definitions</p></div>
+        <div class="demo-body">
+          <div><div class="cap">the matrix</div>
+            <table class="mini">
+              <thead><tr><th>key</th><th>dev</th><th>stg</th><th>prod</th></tr></thead>
+              <tbody>
+                <tr><td>DATABASE_URL</td><td><span class="b s">set</span></td><td><span class="b s">set</span></td><td><span class="b s">set</span></td></tr>
+                <tr><td>LOG_LEVEL</td><td><span class="b s">debug</span></td><td><span class="b i">↑</span></td><td><span class="b s">info</span></td></tr>
+                <tr><td>SENTRY_DSN</td><td><span class="b i">—</span></td><td><span class="b s">set</span></td><td><span class="b w">unset</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div><div class="cap">what ↑ means</div>
+<pre><span class="g"># prod inherits from default</span>
+<span class="p">$</span> <span class="cmd">hikyo render</span> <span class="fl">--env</span> stg
+LOG_LEVEL=<span class="ky">debug</span> <span class="g">← from default</span>
+<span class="g"># cascade: env ▸ default,</span>
+<span class="g"># resolved left-to-right.</span></pre></div>
+        </div>
+      </div>
+
+      <!-- demo 3: run with proof -->
+      <div class="demo">
+        <div class="demo-head"><span class="n">03</span><h3>Run your app — access is proof-carrying</h3><p>hikyo run</p></div>
+        <div class="demo-body">
+          <div><div class="cap">you run</div>
+<pre><span class="p">$</span> <span class="cmd">hikyo run</span> <span class="fl">--env</span> prod \
+    <span class="g">--</span> ./server</pre></div>
+          <div><div class="cap">hikyo does</div>
+<pre><span class="ok">✓</span> <span class="ky">authorize()</span> ok <span class="g">· 18 keys</span>
+<span class="g">  unauthorized ≡ nonexistent</span>
+<span class="g">  → injected into child env</span>
+<span class="g">  → 0 plaintext on disk</span></pre></div>
+        </div>
+      </div>
+
+      <!-- demo 4: doctor -->
+      <div class="demo">
+        <div class="demo-head"><span class="n">04</span><h3>Ship with confidence — doctor catches the gaps</h3><p>hikyo doctor</p></div>
+        <div class="demo-body">
+          <div><div class="cap">you run</div>
+<pre><span class="p">$</span> <span class="cmd">hikyo doctor</span> <span class="fl">--env</span> prod</pre></div>
+          <div><div class="cap">hikyo does</div>
+<pre><span class="ok">✓</span> 17/18 resolved
+<span class="wn">⚠</span> <span class="ky">SENTRY_DSN</span> unset in prod
+<span class="ok">✓</span> release cosign-verified
+<span class="g">  exit 1 → your CI fails loud</span></pre></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="why">
+      <div><b>Own the keys</b><span>Envelope encryption with per-tenant data keys. Your backups are ciphertext.</span></div>
+      <div><b>One binary</b><span>sqlite → postgres on the same build. Deploy in minutes, no SaaS lock-in.</span></div>
+      <div><b>Signed &amp; reproducible</b><span>cosign + SBOM + offline trust. Verify what you run.</span></div>
+    </div>
+
+    <div class="close">
+      <h2>Config you can actually reason about.</h2>
+      <p>Self-hosted, MIT-licensed, and boring on purpose.</p>
+      <a class="btn">Read the docs →</a>
+    </div>
+    <footer>© 2026 hikyo · MIT · self-hostable</footer>
+  </div>
+</section>
+
+<!-- ============================================================ SWITCHER -->
+<div id="switcher" role="group" aria-label="Prototype variant switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="label"><b id="vkey">A</b> <span id="vname">— Kaneo / Plane</span></span>
+  <button id="next" aria-label="Next variant">›</button>
+</div>
+
+<script>
+  const VARIANTS = [
+    { key: 'A', name: '— Kaneo / Plane (clean white)' },
+    { key: 'B', name: '— Synthesis: Kaneo + Linear + Resend (dark)' },
+    { key: 'C', name: '— Unkey / Better Auth (demo-led)' },
+  ];
+  const keys = VARIANTS.map(v => v.key);
+
+  function current() {
+    const h = (location.hash || '').replace('#', '').toUpperCase();
+    return keys.includes(h) ? h : 'A';
+  }
+  function show(k) {
+    for (const v of VARIANTS) {
+      document.getElementById('stage-' + v.key).classList.toggle('active', v.key === k);
+    }
+    const meta = VARIANTS.find(v => v.key === k);
+    document.getElementById('vkey').textContent = k;
+    document.getElementById('vname').textContent = meta.name;
+    if ((location.hash || '').replace('#', '').toUpperCase() !== k) location.hash = k;
+    window.scrollTo(0, 0);
+    document.title = 'hikyo — landing prototype ' + k;
+  }
+  function step(d) {
+    const i = keys.indexOf(current());
+    show(keys[(i + d + keys.length) % keys.length]);
+  }
+  document.getElementById('prev').onclick = () => step(-1);
+  document.getElementById('next').onclick = () => step(1);
+  window.addEventListener('hashchange', () => show(current()));
+  document.addEventListener('keydown', e => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+  });
+  show(current());
+</script>
+</body>
+</html>

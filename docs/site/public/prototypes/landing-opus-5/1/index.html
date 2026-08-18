@@ -1,0 +1,1381 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE — hikyo landing page (iteration 1)</title>
+<!--
+  THROWAWAY PROTOTYPE — marketing landing page, iteration 1.
+
+  Plan: three structurally different landing pages for the product under the
+  name "hikyo", switchable via ?variant=a|b|c and a floating bottom bar.
+
+  The design language is NOT the question here — it is the locked one from
+  DESIGN.md (system-ui / ui-monospace, OKLCH graphite + teal, dark default,
+  radius by role 6/4/3px, 999px pill reserved for the matrix cell-state
+  vocabulary and count badges). What varies is the page architecture:
+
+    ?variant=a  PRODUCT FIRST (Kaneo / Plane / Dub)
+                Short headline, install line, then the environment matrix at
+                full width immediately underneath. Everything below the fold
+                is a caption for that one screenshot.
+
+    ?variant=b  TYPOGRAPHIC ARGUMENT (Resend / Linear)
+                No product shot in the hero. The page is a sequence of
+                numbered claims set in large type; each claim carries exactly
+                one technical artifact (a provenance chain, a validation
+                failure, a CLI transcript, a CR condition) instead of a
+                screenshot or an illustration.
+
+    ?variant=c  LIVE CONSOLE (Better Auth / Unkey)
+                The hero is the product, running. Pick an environment, pick a
+                key, watch the value resolve and the provenance chain redraw;
+                the CLI pane mirrors every click. The sections below are more
+                working demos, not descriptions of them.
+
+  Shared, deliberately: the same tokens, the same matrix cell vocabulary, the
+  same copy discipline (no gradients, no glow, no shield icons, no logo soup,
+  no bento grid, no fear copy). Mobile-first — every variant is built at
+  375px first and widened.
+
+  Numbers, orgs and URLs are invented. Nothing here talks to a backend.
+  Design context: PRODUCT.md / DESIGN.md at repo root.
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d2b33'/%3E%3Cpath d='M8 12h16M8 16h16M8 20h10' stroke='%237fd0cd' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+/* ============================ tokens (DESIGN.md) ============================ */
+:root{
+  --mono:ui-monospace,monospace;
+  --sans:system-ui,sans-serif;
+  --bg:oklch(0.19 0.012 220);
+  --bg2:oklch(0.225 0.014 220);
+  --bg3:oklch(0.27 0.016 220);
+  --line:oklch(0.34 0.016 220);
+  --tx:oklch(0.93 0.008 200);
+  --tx-dim:oklch(0.76 0.01 210);
+  --tx-faint:oklch(0.60 0.012 215);
+  --accent:oklch(0.82 0.09 195);
+  --on-accent:oklch(0.2 0.02 220);
+  --accent-soft:oklch(0.82 0.09 195/.14);
+  --bad:oklch(0.74 0.13 25);
+  --bad-soft:oklch(0.74 0.13 25/.14);
+  --chg:oklch(0.8 0.06 250);
+  --rowalt:oklch(0.93 0.008 200/.045);
+  /* radius carries a role — app-chrome it8, DESIGN.md */
+  --r-container:6px;
+  --r-control:4px;
+  --r-badge:3px;
+  --shadow:0 18px 50px oklch(0 0 0/.45);
+}
+[data-theme=light]{
+  --bg:oklch(0.965 0.008 200);
+  --bg2:oklch(0.935 0.01 200);
+  --bg3:oklch(0.895 0.012 200);
+  --line:oklch(0.82 0.014 210);
+  --tx:oklch(0.25 0.03 225);
+  --tx-dim:oklch(0.4 0.025 220);
+  --tx-faint:oklch(0.52 0.02 218);
+  --accent:oklch(0.45 0.085 210);
+  --on-accent:oklch(0.97 0.008 200);
+  --accent-soft:oklch(0.45 0.085 210/.1);
+  --bad:oklch(0.48 0.14 30);
+  --bad-soft:oklch(0.48 0.14 30/.1);
+  --chg:oklch(0.45 0.08 255);
+  --rowalt:oklch(0.25 0.03 225/.06);
+  --shadow:0 18px 50px oklch(0.3 0.02 220/.18);
+}
+
+/* ============================ base ============================ */
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg);scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:15px;
+  -webkit-font-smoothing:antialiased;line-height:1.55;
+  padding-bottom:calc(84px + env(safe-area-inset-bottom));
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+input,select{font:inherit}
+a{color:inherit}
+:is(a,button,input,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-control)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto}}
+.mono{font-family:var(--mono)}
+.shell{width:100%;max-width:1140px;margin:0 auto;padding:0 20px}
+@media (min-width:760px){.shell{padding:0 40px}}
+.variant[hidden]{display:none}
+/* grid/flex children default to min-content width — a <pre> inside one blows the
+   page out sideways on a phone. Everything here scrolls internally instead. */
+.grid>*,.g>*{min-width:0}
+
+/* ---- shared: site nav ---- */
+.nav{
+  display:flex;align-items:center;gap:18px;
+  padding:18px 0;border-bottom:1px solid var(--line);
+}
+.brand{display:inline-flex;align-items:center;gap:9px;text-decoration:none;font-weight:700;font-size:17px;letter-spacing:-.01em}
+.brand svg{display:block;border-radius:var(--r-badge)}
+.nav .grow{flex:1}
+.nav a.lnk{font-size:13.5px;color:var(--tx-dim);text-decoration:none}
+.nav a.lnk:hover{color:var(--tx)}
+.nav .hide-s{display:none}
+@media (min-width:700px){.nav .hide-s{display:inline}}
+
+/* ---- shared: buttons (controls = 4px, never pills) ---- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  min-height:44px;padding:0 18px;border-radius:var(--r-control);
+  border:1px solid var(--line);color:var(--tx);font-size:14px;font-weight:500;
+  text-decoration:none;transition:border-color .15s,color .15s;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.primary:hover{filter:brightness(1.07);color:var(--on-accent)}
+
+/* ---- shared: install line ---- */
+.install{
+  display:flex;align-items:center;gap:10px;
+  border:1px solid var(--line);border-radius:var(--r-control);background:var(--bg2);
+  padding:0 6px 0 14px;min-height:44px;max-width:100%;overflow:hidden;
+}
+.install code{font-family:var(--mono);font-size:12.5px;color:var(--tx-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.install code b{color:var(--tx);font-weight:500}
+.install .cp{
+  flex:none;font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--tx-faint);
+  border:1px solid var(--line);border-radius:var(--r-badge);padding:0 10px;min-height:30px;
+}
+.install .cp:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ---- shared: eyebrow / section label ---- */
+.eyebrow{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--tx-faint);
+}
+
+/* ---- shared: matrix (cell vocabulary lifted from env-matrix/31) ---- */
+.mx{border-collapse:separate;border-spacing:0;min-width:100%;font-size:13px}
+.mx thead th{
+  text-align:left;padding:11px 12px 9px;border-bottom:1px solid var(--line);
+  font-size:12px;font-weight:600;white-space:nowrap;background:var(--bg);
+  position:sticky;top:0;z-index:2;
+}
+.mx thead th.keyh{
+  font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--tx-faint);min-width:170px;position:sticky;left:0;z-index:3;
+}
+.mx thead th .base{display:block;font-weight:400;font-size:10.5px;color:var(--tx-faint);font-family:var(--mono);letter-spacing:0}
+.mx tbody td{padding:4px 12px;border-bottom:1px solid oklch(from var(--line) l c h/.45)}
+.mx td.key{
+  position:sticky;left:0;background:var(--bg);z-index:1;
+  font-family:var(--mono);font-size:12px;white-space:nowrap;
+}
+.mx td.key .lock{color:var(--bad);margin-right:5px}
+.mx tr.alt td{background:var(--rowalt)}
+.mx tr.alt td.key{background:color-mix(in oklch,var(--tx) 4%,var(--bg))}
+.mx tr.grp td{
+  padding:0;background:var(--bg);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+}
+.mx tr.grp .g{
+  display:flex;align-items:center;gap:10px;position:sticky;left:0;
+  padding:11px 12px;font-size:11px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);
+}
+.mx tr.grp .gcnt{font-weight:400;letter-spacing:0;color:var(--tx-faint);font-size:11px;text-transform:none;font-family:var(--mono)}
+/* cell states — a glyph always rides along with the colour */
+.cellv{
+  display:inline-flex;align-items:center;gap:6px;max-width:240px;
+  font-family:var(--mono);font-size:11.5px;line-height:1;
+  padding:7px 9px;min-height:30px;border-radius:var(--r-control);
+}
+.cellv .tx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cellv.dim{color:var(--tx-dim)}
+.cellv.absent{color:var(--tx-faint)}
+.cellv .inh{color:var(--tx-faint);font-size:10px}
+.cellv .d{color:var(--chg);font-weight:700}
+.pill{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:11.5px;line-height:1;
+  padding:7px 12px;border-radius:999px;min-height:30px;white-space:nowrap;
+  border:1px solid transparent;
+}
+.pill.missing{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:500}
+.pill.invalid{border:1.5px solid var(--bad);color:var(--bad)}
+
+/* ---- shared: legend ---- */
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12px;color:var(--tx-dim)}
+.legend span.k{display:inline-flex;align-items:center;gap:7px}
+
+/* ---- shared: terminal block ---- */
+.term{
+  border:1px solid var(--line);border-radius:var(--r-container);background:var(--bg2);
+  font-family:var(--mono);font-size:12.5px;line-height:1.75;overflow-x:auto;
+}
+.term .bar{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);
+  font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--tx-faint);
+}
+.term pre{padding:14px 16px;white-space:pre;color:var(--tx-dim)}
+.term .p{color:var(--accent)}
+.term .ok{color:var(--accent)}
+.term .er{color:var(--bad)}
+.term .c{color:var(--tx-faint)}
+.term b{color:var(--tx);font-weight:500}
+
+/* ---- shared: footer ---- */
+.foot{border-top:1px solid var(--line);margin-top:72px;padding:34px 0 20px}
+.foot .row{display:flex;flex-wrap:wrap;gap:16px 34px;align-items:baseline}
+.foot a{font-size:13px;color:var(--tx-dim);text-decoration:none}
+.foot a:hover{color:var(--tx)}
+.foot .fine{width:100%;font-family:var(--mono);font-size:11px;color:var(--tx-faint);margin-top:22px;line-height:1.8}
+
+/* ======================================================================== */
+/* VARIANT A — product first                                                */
+/* ======================================================================== */
+#v-a .hero{padding:clamp(48px,9vw,96px) 0 clamp(28px,4vw,40px)}
+#v-a h1{
+  font-size:clamp(33px,7.2vw,60px);line-height:1.04;letter-spacing:-.03em;font-weight:700;
+  max-width:15ch;
+}
+#v-a h1 em{font-style:normal;color:var(--accent)}
+#v-a .sub{margin-top:20px;font-size:clamp(15px,2.1vw,18px);color:var(--tx-dim);max-width:56ch;line-height:1.6}
+#v-a .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px;align-items:center}
+#v-a .cta .install{flex:1 1 320px;min-width:0}
+#v-a .facts{
+  display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:22px;
+  font-family:var(--mono);font-size:11.5px;color:var(--tx-faint);
+}
+#v-a .facts b{color:var(--tx-dim);font-weight:400}
+
+/* the screenshot frame */
+#v-a .frame{
+  border:1px solid var(--line);border-radius:var(--r-container);background:var(--bg);
+  box-shadow:var(--shadow);overflow:hidden;
+}
+#v-a .frame .chrome{
+  display:flex;align-items:center;gap:10px;padding:9px 12px;
+  border-bottom:1px solid var(--line);background:var(--bg2);
+}
+#v-a .frame .chrome .dot{width:9px;height:9px;border-radius:999px;background:var(--line);flex:none}
+#v-a .frame .chrome .url{
+  flex:1;font-family:var(--mono);font-size:11px;color:var(--tx-faint);
+  text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+#v-a .frame .app{display:flex;min-height:0}
+#v-a .frame .rail{
+  display:none;flex:none;width:190px;border-right:1px solid var(--line);padding:14px 0;background:var(--bg2);
+}
+@media (min-width:900px){#v-a .frame .rail{display:block}}
+#v-a .rail .rt{padding:0 16px 8px;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx-faint)}
+#v-a .rail .ri{display:flex;align-items:center;gap:9px;padding:8px 16px;font-size:13px;color:var(--tx-dim)}
+#v-a .rail .ri.on{color:var(--tx);background:var(--accent-soft);border-left:2px solid var(--accent);padding-left:14px}
+#v-a .rail .ri .n{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+#v-a .rail .ri .n.bad{color:var(--bad);background:var(--bad-soft);border-radius:999px;padding:2px 7px}
+#v-a .rail hr{border:none;border-top:1px solid var(--line);margin:12px 0}
+#v-a .frame .pane{flex:1;min-width:0}
+#v-a .frame .top{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:11px 14px;border-bottom:1px solid var(--line);
+}
+#v-a .frame .top .crumb{font-weight:600;font-size:14px}
+#v-a .frame .top .crumb i{font-style:normal;color:var(--tx-faint);font-weight:400;margin:0 6px}
+#v-a .frame .top .chip{
+  font-family:var(--mono);font-size:10.5px;color:var(--tx-dim);
+  border:1px solid var(--line);border-radius:var(--r-badge);padding:4px 9px;
+}
+#v-a .frame .top .chip.warn{color:var(--bad);border-color:var(--bad);background:var(--bad-soft)}
+#v-a .frame .scroll{overflow-x:auto;max-height:min(78vh,660px);overflow-y:auto}
+#v-a .capbar{
+  display:flex;flex-wrap:wrap;gap:14px 26px;align-items:baseline;
+  margin-top:16px;padding-bottom:6px;
+}
+#v-a .capbar .legend{flex:1 1 320px}
+#v-a .capbar .note{font-size:12px;color:var(--tx-faint);font-family:var(--mono)}
+
+/* three statements, hairline-separated, no cards */
+#v-a .three{
+  display:grid;gap:0;margin-top:clamp(56px,8vw,96px);
+  border-top:1px solid var(--line);
+}
+@media (min-width:820px){#v-a .three{grid-template-columns:repeat(3,1fr)}}
+#v-a .three .col{padding:26px 0;border-bottom:1px solid var(--line)}
+@media (min-width:820px){
+  #v-a .three .col{padding:30px 28px 34px;border-bottom:none;border-right:1px solid var(--line)}
+  #v-a .three .col:first-child{padding-left:0}
+  #v-a .three .col:last-child{border-right:none;padding-right:0}
+}
+#v-a .three h3{font-size:17px;font-weight:600;margin:12px 0 8px;letter-spacing:-.01em}
+#v-a .three p{font-size:13.5px;color:var(--tx-dim);line-height:1.65;max-width:40ch}
+#v-a .three .art{margin-top:16px}
+
+/* provenance strip */
+#v-a .prov{margin-top:clamp(56px,8vw,96px)}
+#v-a .prov .grid{display:grid;gap:26px;margin-top:22px}
+@media (min-width:880px){#v-a .prov .grid{grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}}
+#v-a .prov h2,#v-a .self h2{font-size:clamp(23px,3.6vw,32px);font-weight:700;letter-spacing:-.02em;margin-top:10px;max-width:20ch}
+#v-a .prov p,#v-a .self p{font-size:14.5px;color:var(--tx-dim);margin-top:14px;max-width:52ch;line-height:1.65}
+#v-a .self{margin-top:clamp(56px,8vw,96px)}
+#v-a .self .grid{display:grid;gap:26px;margin-top:22px}
+@media (min-width:880px){#v-a .self .grid{grid-template-columns:.95fr 1.05fr;gap:44px;align-items:center}}
+
+/* chain component (shared by a and c) */
+.chain{
+  border:1px solid var(--line);border-radius:var(--r-container);background:var(--bg2);
+  padding:16px;font-family:var(--mono);font-size:12px;
+}
+.chain .ct{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx-faint);margin-bottom:12px}
+.chain .lnk2{display:flex;align-items:flex-start;gap:10px;padding:8px 0}
+.chain .lnk2+.lnk2{border-top:1px dashed oklch(from var(--line) l c h/.7)}
+.chain .lnk2 .src{flex:none;width:88px;color:var(--tx-faint)}
+.chain .lnk2 .val{flex:1;min-width:0;color:var(--tx-dim);word-break:break-all}
+.chain .lnk2 .mark{flex:none;font-size:10px;color:var(--tx-faint)}
+.chain .lnk2.win .val{color:var(--tx)}
+.chain .lnk2.win .src{color:var(--accent)}
+.chain .lnk2.win .mark{color:var(--accent)}
+.chain .lnk2.dead .val{text-decoration:line-through;opacity:.55}
+.chain .out{
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--line);
+  display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+}
+.chain .out .lbl{color:var(--tx-faint);font-size:10px;letter-spacing:.16em;text-transform:uppercase}
+.chain .out .v{color:var(--tx);word-break:break-all}
+
+/* ======================================================================== */
+/* VARIANT B — typographic argument                                         */
+/* ======================================================================== */
+#v-b .hero{padding:clamp(64px,14vw,150px) 0 clamp(40px,7vw,80px)}
+#v-b h1{
+  font-size:clamp(36px,8.4vw,82px);line-height:1.0;letter-spacing:-.04em;font-weight:700;
+  max-width:13ch;text-wrap:balance;
+}
+#v-b h1 .q{color:var(--tx-faint);font-weight:400}
+#v-b .hero .sub{
+  margin-top:clamp(24px,4vw,38px);font-size:clamp(15px,2.2vw,19px);color:var(--tx-dim);
+  max-width:50ch;line-height:1.55;
+}
+#v-b .hero .meta{
+  display:flex;flex-wrap:wrap;gap:10px 24px;margin-top:clamp(26px,4vw,40px);
+  font-family:var(--mono);font-size:12px;color:var(--tx-faint);align-items:center;
+}
+#v-b .hero .meta a{color:var(--tx-dim);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:2px}
+#v-b .hero .meta a:hover{color:var(--accent);border-color:var(--accent)}
+
+#v-b .claim{border-top:1px solid var(--line);padding:clamp(38px,6vw,64px) 0}
+#v-b .claim .g{display:grid;gap:22px}
+@media (min-width:900px){
+  #v-b .claim .g{grid-template-columns:112px minmax(0,1fr) minmax(0,1.05fr);gap:36px;align-items:start}
+}
+#v-b .claim .n{font-family:var(--mono);font-size:11px;letter-spacing:.2em;color:var(--tx-faint);padding-top:8px}
+#v-b .claim h2{
+  font-size:clamp(22px,3.6vw,34px);line-height:1.16;letter-spacing:-.025em;font-weight:600;
+  max-width:22ch;text-wrap:balance;
+}
+#v-b .claim h2 em{font-style:normal;color:var(--accent)}
+#v-b .claim p{margin-top:16px;font-size:14.5px;color:var(--tx-dim);line-height:1.7;max-width:46ch}
+#v-b .claim .art{min-width:0}
+/* claim 05 carries a wide artifact — it gets the full measure under the prose */
+@media (min-width:900px){
+  #v-b .claim.wide .g{grid-template-columns:112px minmax(0,1fr)}
+  #v-b .claim.wide .art{grid-column:1 / -1;margin-top:8px}
+}
+#v-b .closing{border-top:1px solid var(--line);padding:clamp(56px,9vw,110px) 0 0}
+#v-b .closing h2{font-size:clamp(28px,5.4vw,52px);letter-spacing:-.03em;line-height:1.06;font-weight:700;max-width:16ch}
+#v-b .closing .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px;align-items:center}
+#v-b .closing .cta .install{flex:1 1 340px;min-width:0}
+
+/* inline artifacts for b */
+.viol{
+  border:1px solid var(--bad);border-left-width:3px;border-radius:var(--r-container);
+  background:var(--bad-soft);padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.7;
+}
+.viol .h{color:var(--bad);font-weight:500}
+.viol .l{color:var(--tx-dim)}
+.viol .l b{color:var(--tx);font-weight:500}
+.cond{
+  border:1px solid var(--line);border-radius:var(--r-container);background:var(--bg2);
+  font-family:var(--mono);font-size:12px;overflow:hidden;
+}
+.cond .r{display:flex;gap:12px;padding:11px 14px;align-items:baseline}
+.cond .r+.r{border-top:1px solid oklch(from var(--line) l c h/.6)}
+.cond .r .t{flex:none;width:96px;color:var(--tx-faint)}
+.cond .r .s{flex:none;width:56px;color:var(--accent);font-weight:500}
+.cond .r .s.no{color:var(--bad)}
+.cond .r .m{flex:1;min-width:0;color:var(--tx-dim)}
+.strip{
+  border:1px solid var(--line);border-radius:var(--r-container);overflow:hidden;background:var(--bg2);
+}
+.strip .sh{
+  padding:9px 14px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx-faint);
+}
+.strip .sb{overflow-x:auto}
+.strip .mx{font-size:12.5px}
+.strip .mx thead th{background:var(--bg2)}
+.strip .mx td.key{background:var(--bg2)}
+.strip .mx tr.alt td.key{background:color-mix(in oklch,var(--tx) 4%,var(--bg2))}
+
+/* ======================================================================== */
+/* VARIANT C — live console                                                 */
+/* ======================================================================== */
+#v-c .hero{padding:clamp(40px,6.5vw,66px) 0 0}
+#v-c h1{font-size:clamp(29px,5.6vw,46px);line-height:1.08;letter-spacing:-.03em;font-weight:700;max-width:18ch}
+#v-c h1 em{font-style:normal;color:var(--accent)}
+#v-c .hero .sub{margin-top:16px;font-size:15px;color:var(--tx-dim);max-width:54ch;line-height:1.6}
+#v-c .hero .hint{
+  margin-top:14px;font-family:var(--mono);font-size:11.5px;color:var(--tx-faint);
+  display:inline-flex;align-items:center;gap:8px;
+}
+#v-c .hero .hint::before{content:'▾';color:var(--accent)}
+#v-c .hero .heroLinks{
+  display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:16px;align-items:center;
+  font-family:var(--mono);font-size:12px;color:var(--tx-faint);
+}
+#v-c .hero .heroLinks a{color:var(--tx-dim);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:2px}
+#v-c .hero .heroLinks a:hover{color:var(--accent);border-color:var(--accent)}
+
+.console{
+  margin-top:26px;border:1px solid var(--line);border-radius:var(--r-container);
+  background:var(--bg2);overflow:hidden;box-shadow:var(--shadow);
+}
+.console .envs{display:flex;gap:0;border-bottom:1px solid var(--line);overflow-x:auto}
+.console .envs button{
+  flex:none;padding:13px 16px;font-size:13px;color:var(--tx-dim);min-height:46px;
+  border-bottom:2px solid transparent;white-space:nowrap;display:inline-flex;align-items:center;gap:8px;
+}
+.console .envs button .lk{font-size:11px;color:var(--tx-faint)}
+.console .envs button[aria-selected=true]{color:var(--tx);border-bottom-color:var(--accent);font-weight:600}
+.console .envs button[aria-selected=true] .lk{color:var(--accent)}
+.console .envs .prot{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--bad);
+  border:1px solid var(--bad);border-radius:var(--r-badge);padding:2px 6px;
+}
+.console .body{display:grid}
+@media (min-width:880px){.console .body{grid-template-columns:290px minmax(0,1fr)}}
+.console .keys{border-bottom:1px solid var(--line);max-height:280px;overflow-y:auto}
+@media (min-width:880px){.console .keys{border-bottom:none;border-right:1px solid var(--line);max-height:none}}
+.console .keys .kg{
+  padding:10px 14px 6px;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--tx-faint);
+}
+.console .keys button{
+  display:flex;width:100%;align-items:center;gap:10px;text-align:left;
+  padding:10px 14px;min-height:44px;font-family:var(--mono);font-size:12px;color:var(--tx-dim);
+  border-left:2px solid transparent;
+}
+.console .keys button:hover{background:oklch(from var(--tx) l c h/.05)}
+.console .keys button[aria-current=true]{
+  background:var(--accent-soft);border-left-color:var(--accent);color:var(--tx);
+}
+.console .keys button .lock{color:var(--bad)}
+.console .keys button .st{margin-left:auto;font-size:10px;color:var(--tx-faint)}
+.console .keys button .st.bad{color:var(--bad)}
+.console .detail{padding:18px 16px 20px;min-width:0}
+@media (min-width:880px){.console .detail{padding:22px 24px 26px}}
+.console .detail .kn{
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  font-family:var(--mono);font-size:15px;color:var(--tx);
+}
+.console .detail .kn .type{
+  font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-faint);
+  border:1px solid var(--line);border-radius:var(--r-badge);padding:2px 7px;
+}
+.console .detail .desc{margin-top:8px;font-size:13px;color:var(--tx-dim);max-width:52ch;line-height:1.6}
+.console .detail .resolved{
+  margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  border:1px solid var(--line);border-radius:var(--r-control);background:var(--bg);padding:12px 14px;
+}
+.console .detail .resolved .rl{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx-faint)}
+.console .detail .resolved .rv{font-family:var(--mono);font-size:13.5px;flex:1;min-width:120px;word-break:break-all}
+.console .detail .chain{margin-top:16px;background:var(--bg)}
+.console .detail .acts{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.console .detail .acts .btn{min-height:38px;font-size:13px;padding:0 14px}
+.console .detail .refusal{
+  margin-top:14px;border:1px solid var(--bad);border-left-width:3px;border-radius:var(--r-container);
+  background:var(--bad-soft);padding:13px 15px;font-size:12.5px;color:var(--tx-dim);line-height:1.65;
+}
+.console .detail .refusal b{color:var(--bad);font-family:var(--mono);font-size:12px;display:block;margin-bottom:5px}
+.console .detail .challenge{
+  margin-top:14px;border:1px solid var(--accent);border-left-width:3px;border-radius:var(--r-container);
+  background:var(--accent-soft);padding:13px 15px;font-size:12.5px;color:var(--tx-dim);line-height:1.65;
+}
+.console .detail .challenge b{color:var(--accent);font-family:var(--mono);font-size:11px;
+  letter-spacing:.14em;text-transform:uppercase;display:block;margin-bottom:6px}
+.console .detail .challenge .mono{font-family:var(--mono);color:var(--tx)}
+.console .detail .revealed{
+  margin-top:14px;border:1px solid var(--accent);border-radius:var(--r-container);
+  background:var(--accent-soft);padding:13px 15px;font-family:var(--mono);font-size:12.5px;
+  display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;
+}
+.console .detail .revealed .cd{margin-left:auto;color:var(--tx-faint);font-size:11px}
+.console .cli{border-top:1px solid var(--line);background:var(--bg)}
+.console .cli .bar{
+  padding:8px 14px;font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--tx-faint);border-bottom:1px solid var(--line);
+  display:flex;gap:10px;align-items:center;
+}
+.console .cli pre{padding:13px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:var(--tx-dim);overflow-x:auto;white-space:pre}
+.console .cli .p{color:var(--accent)}
+.console .cli b{color:var(--tx);font-weight:500}
+
+#v-c .demos{margin-top:clamp(56px,8vw,92px);display:grid;gap:clamp(38px,6vw,60px)}
+#v-c .demo h2{font-size:clamp(20px,3vw,27px);font-weight:600;letter-spacing:-.02em;margin-top:10px}
+#v-c .demo p{margin-top:10px;font-size:14px;color:var(--tx-dim);max-width:52ch;line-height:1.65}
+#v-c .demo .box{margin-top:18px}
+.vform{
+  border:1px solid var(--line);border-radius:var(--r-container);background:var(--bg2);padding:16px;
+}
+.vform label{display:block;font-family:var(--mono);font-size:11px;color:var(--tx-faint);margin-bottom:8px}
+.vform .in{display:flex;gap:10px;flex-wrap:wrap}
+.vform input{
+  flex:1 1 200px;min-width:0;min-height:44px;padding:0 12px;
+  background:var(--bg);border:1px solid var(--line);border-radius:var(--r-control);
+  color:var(--tx);font-family:var(--mono);font-size:13px;
+}
+.vform input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.vform .verdict{margin-top:12px;font-family:var(--mono);font-size:12.5px;line-height:1.6;display:flex;gap:9px;align-items:flex-start}
+.vform .verdict.ok{color:var(--accent)}
+.vform .verdict.no{color:var(--bad)}
+.vform .rules{margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.7}
+#v-c .self{margin-top:clamp(56px,8vw,92px)}
+#v-c .self h2{font-size:clamp(23px,3.6vw,32px);font-weight:700;letter-spacing:-.02em;max-width:20ch}
+#v-c .self p{margin-top:14px;font-size:14.5px;color:var(--tx-dim);max-width:52ch;line-height:1.65}
+#v-c .self .grid{display:grid;gap:24px;margin-top:24px}
+@media (min-width:880px){#v-c .self .grid{grid-template-columns:.9fr 1.1fr;gap:44px;align-items:start}}
+
+/* ======================================================================== */
+/* prototype switcher — deliberately not part of the design being judged    */
+/* ======================================================================== */
+#switcher{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(14px + env(safe-area-inset-bottom));z-index:9999;
+  display:flex;align-items:stretch;gap:2px;
+  background:oklch(0.12 0.01 260);border:1px solid oklch(0.45 0.02 260);
+  border-radius:10px;padding:4px;box-shadow:0 10px 34px oklch(0 0 0/.55);
+  font-family:var(--mono);max-width:calc(100vw - 20px);
+}
+#switcher button{
+  color:oklch(0.95 0 0);border-radius:7px;min-height:38px;padding:0 12px;
+  display:inline-flex;align-items:center;justify-content:center;font-size:14px;
+}
+#switcher button:hover{background:oklch(0.24 0.02 260)}
+#switcher .lab{
+  color:oklch(0.95 0 0);font-size:11.5px;letter-spacing:.02em;
+  display:flex;align-items:center;gap:8px;padding:0 8px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+#switcher .lab .kk{
+  color:oklch(0.12 0.01 260);background:oklch(0.82 0.09 195);
+  border-radius:3px;padding:2px 6px;font-weight:700;font-size:10.5px;
+}
+#switcher .sep{width:1px;background:oklch(0.35 0.02 260);margin:6px 2px}
+#switcher .lab .nm{overflow:hidden;text-overflow:ellipsis}
+@media (max-width:480px){#switcher .lab .nm{display:none}}
+</style>
+</head>
+<body>
+
+<!-- ==================================================================== -->
+<!-- VARIANT A — product first                                            -->
+<!-- ==================================================================== -->
+<main class="variant" id="v-a" hidden>
+  <div class="shell">
+    <nav class="nav">
+      <a class="brand" href="#"><svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="var(--bg3)"/><path d="M8 12h16M8 16h16M8 20h10" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round"/></svg>hikyo</a>
+      <span class="grow"></span>
+      <a class="lnk hide-s" href="#">Docs</a>
+      <a class="lnk hide-s" href="#">Self-hosting</a>
+      <a class="lnk" href="#">Changelog</a>
+      <a class="lnk" href="#">GitHub</a>
+    </nav>
+
+    <header class="hero">
+      <h1>Every environment. <em>One screen.</em></h1>
+      <p class="sub">hikyo is a self-hosted control plane for secrets and configuration.
+        Values inherit, get validated before they ship, and always say where they came from.</p>
+      <div class="cta">
+        <a class="btn primary" href="#">Read the docs</a>
+        <div class="install">
+          <code><span class="c">$</span> curl -fsSL https://get.hikyo.dev | <b>sh</b></code>
+          <button class="cp" data-copy="curl -fsSL https://get.hikyo.dev | sh">copy</button>
+        </div>
+      </div>
+      <p class="facts">
+        <span><b>MPL-2.0</b> · fully open source</span>
+        <span><b>Single binary</b> · Postgres or SQLite</span>
+        <span><b>Compose &amp; Kubernetes</b> first-class</span>
+      </p>
+    </header>
+  </div>
+
+  <div class="shell">
+    <div class="frame">
+      <div class="chrome">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="url">hikyo.internal / acme / checkout-api</span>
+      </div>
+      <div class="app">
+        <aside class="rail">
+          <div class="rt">acme</div>
+          <div class="ri on">checkout-api <span class="n bad">2</span></div>
+          <div class="ri">ledger <span class="n">61</span></div>
+          <div class="ri">notifier <span class="n">28</span></div>
+          <div class="ri">edge-proxy <span class="n">17</span></div>
+          <hr>
+          <div class="rt">this project</div>
+          <div class="ri">Matrix</div>
+          <div class="ri">History</div>
+          <div class="ri">Workloads</div>
+          <div class="ri">Settings</div>
+        </aside>
+        <div class="pane">
+          <div class="top">
+            <span class="crumb">checkout-api<i>/</i>matrix</span>
+            <span class="chip">4 environments</span>
+            <span class="chip">86 keys</span>
+            <span class="chip warn">! 2 block publish</span>
+          </div>
+          <div class="scroll"><table class="mx" id="mx-a"></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="capbar">
+      <div class="legend" id="legend-a"></div>
+      <div class="note">real product surface — not a mockup of one</div>
+    </div>
+
+    <!-- three statements, no cards, no icons -->
+    <section class="three">
+      <div class="col">
+        <span class="eyebrow">Inheritance</span>
+        <h3>A value written once, everywhere it belongs</h3>
+        <p>Environments inherit from a base. Overriding is explicit and visible in the same row —
+          you never have to diff two files to find out which one wins.</p>
+        <div class="art"><div class="cellv dim"><span class="tx">info</span><span class="inh">◂ base</span></div></div>
+      </div>
+      <div class="col">
+        <span class="eyebrow">Validation</span>
+        <h3>Broken config fails here, not at 3am</h3>
+        <p>Every key carries a type, constraints and an optional JSON Schema. Required-but-unset and
+          schema violations block the publish instead of the deploy.</p>
+        <div class="art"><span class="pill missing">! required · unset</span></div>
+      </div>
+      <div class="col">
+        <span class="eyebrow">Disclosure</span>
+        <h3>Reading a secret is an event</h3>
+        <p>Secrets are write-only by default. Revealing one is permission-gated, time-boxed,
+          auto-remasked and written to the audit log — including the copy to your clipboard.</p>
+        <div class="art"><div class="cellv dim"><span class="tx">••••••••</span></div></div>
+      </div>
+    </section>
+
+    <!-- provenance -->
+    <section class="prov">
+      <span class="eyebrow">Provenance</span>
+      <div class="grid">
+        <div>
+          <h2>Every resolved value can explain itself.</h2>
+          <p>Tap a cell and hikyo shows the whole chain: the schema default, the base value, the
+            environment override, and which one actually won. No tribal knowledge, no reading the
+            deployment repo to find out why staging is different.</p>
+          <p class="mono" style="font-size:12.5px;color:var(--tx-faint)">Same panel on desktop and on a phone.</p>
+        </div>
+        <div class="chain">
+          <div class="ct">LOG_LEVEL · staging</div>
+          <div class="lnk2 dead"><span class="src">defaults</span><span class="val">warn</span><span class="mark">schema</span></div>
+          <div class="lnk2 dead"><span class="src">base</span><span class="val">info</span><span class="mark">◂ inherited</span></div>
+          <div class="lnk2 win"><span class="src">staging</span><span class="val">debug</span><span class="mark">set here</span></div>
+          <div class="out"><span class="lbl">resolved</span><span class="v">debug</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- self-hosting -->
+    <section class="self">
+      <span class="eyebrow">Self-hosted</span>
+      <div class="grid">
+        <div>
+          <h2>Runs on your box. Only on your box.</h2>
+          <p>One container, one database, one signed release. No control-plane callback, no telemetry,
+            no seat count. Bring your own KMS or let hikyo hold the keyring — either way the ciphertext
+            never leaves the machine you put it on.</p>
+          <a class="btn" href="#" style="margin-top:22px">Self-hosting guide →</a>
+        </div>
+        <div class="term">
+          <div class="bar">docker-compose.yml</div>
+<pre><span class="c">services:</span>
+  <b>hikyo:</b>
+    image: ghcr.io/hikyo/hikyo:<b>1.4.0</b>
+    ports: [<b>"8080:8080"</b>]
+    environment:
+      HIKYO_DB: <b>postgres://hikyo@db/hikyo</b>
+      HIKYO_KEYRING: <b>file:///keys/root.age</b>
+    volumes: [<b>./keys:/keys:ro</b>]
+</pre>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <div class="row">
+        <a href="#">Docs</a><a href="#">Self-hosting</a><a href="#">CLI reference</a>
+        <a href="#">Changelog</a><a href="#">GitHub</a><a href="#">Security</a>
+        <span class="grow"></span>
+      </div>
+      <div class="fine">hikyo · MPL-2.0 · no analytics on this page<br>prototype — every number, org and URL on this page is invented</div>
+    </footer>
+  </div>
+</main>
+
+<!-- ==================================================================== -->
+<!-- VARIANT B — typographic argument                                      -->
+<!-- ==================================================================== -->
+<main class="variant" id="v-b" hidden>
+  <div class="shell">
+    <nav class="nav">
+      <a class="brand" href="#"><svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="var(--bg3)"/><path d="M8 12h16M8 16h16M8 20h10" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round"/></svg>hikyo</a>
+      <span class="grow"></span>
+      <a class="lnk hide-s" href="#">Docs</a>
+      <a class="lnk" href="#">Changelog</a>
+      <a class="lnk" href="#">GitHub</a>
+    </nav>
+
+    <header class="hero">
+      <h1>The value that ships <span class="q">is not</span> the value you wrote.</h1>
+      <p class="sub">Config inherits, gets overridden, drifts, and then explains none of it.
+        hikyo is a self-hosted control plane that makes the whole chain visible — and refuses to
+        publish it when it is wrong.</p>
+      <p class="meta">
+        <a href="#">Read the docs</a>
+        <a href="#">Self-host in 4 minutes</a>
+        <span>MPL-2.0</span>
+        <span>single binary</span>
+        <span>no telemetry</span>
+      </p>
+    </header>
+  </div>
+
+  <div class="shell">
+    <section class="claim">
+      <div class="g">
+        <div class="n">01 / ORIGIN</div>
+        <div>
+          <h2>Four environments, one row, <em>no diffing</em>.</h2>
+          <p>Base holds what is true everywhere. Each environment states only its disagreements.
+            The row shows which of them won, and the arrow says where the rest came from —
+            so an override is a decision you can see, not one you discover.</p>
+        </div>
+        <div class="art">
+          <div class="chain">
+            <div class="ct">LOG_LEVEL</div>
+            <div class="lnk2 dead"><span class="src">defaults</span><span class="val">warn</span><span class="mark">schema</span></div>
+            <div class="lnk2 dead"><span class="src">base</span><span class="val">info</span><span class="mark">◂ inherited</span></div>
+            <div class="lnk2 win"><span class="src">staging</span><span class="val">debug</span><span class="mark">set here</span></div>
+            <div class="out"><span class="lbl">resolved · staging</span><span class="v">debug</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="claim">
+      <div class="g">
+        <div class="n">02 / VALIDATION</div>
+        <div>
+          <h2>The bad value never reaches the deploy.</h2>
+          <p>Keys are declared before they are filled: type, constraints, required-in-which-environments,
+            and JSON Schema when the shape matters. Publishing runs the whole set — a violation stops
+            the publish, not the pod.</p>
+        </div>
+        <div class="art">
+          <div class="viol">
+            <div class="h">✕ publish refused · production</div>
+            <div class="l"><b>SMTP_PORT</b> = "587 " — expected <b>int</b>, got string</div>
+            <div class="l"><b>STRIPE_WEBHOOK_SECRET</b> — required in production, unset</div>
+            <div class="l" style="color:var(--tx-faint);margin-top:6px">2 violations · 84 keys checked · nothing was written</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="claim">
+      <div class="g">
+        <div class="n">03 / DISCLOSURE</div>
+        <div>
+          <h2>Writing a secret does not require <em>reading</em> it.</h2>
+          <p>Rotation, seeding and correction all work write-only. Reveal is a separate, gated act:
+            reauth, a fixed window, an automatic remask, and a line in the audit log — the clipboard
+            counts as a disclosure too.</p>
+        </div>
+        <div class="art">
+          <div class="term">
+            <div class="bar">terminal</div>
+<pre><span class="p">$</span> hikyo set <b>DATABASE_URL</b> --env prod --stdin
+<span class="c">reading value from stdin, not echoed…</span>
+<span class="ok">✓</span> wrote prod/DATABASE_URL <span class="c">(rev 30, write-only)</span>
+
+<span class="p">$</span> hikyo get <b>DATABASE_URL</b> --env prod
+<span class="er">✕</span> refused: reveal in <b>production</b> requires reauth
+  <span class="c">run: hikyo auth reveal --env prod   (window 60s)</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="claim">
+      <div class="g">
+        <div class="n">04 / DELIVERY</div>
+        <div>
+          <h2>Compose and Kubernetes are not an afterthought.</h2>
+          <p>A workload gets a machine identity, not a copy of your .env. The operator reconciles a
+            pinned revision into a Secret and reports what it did in conditions you can read with
+            kubectl — no sidecar, no init-container hack.</p>
+        </div>
+        <div class="art">
+          <div class="cond">
+            <div class="r"><span class="t">Ready</span><span class="s">✓ True</span><span class="m">Synced revision 41 to secret/checkout-api-env</span></div>
+            <div class="r"><span class="t">Validated</span><span class="s">✓ True</span><span class="m">84 keys, 0 violations</span></div>
+            <div class="r"><span class="t">Drifted</span><span class="s no">! True</span><span class="m">secret edited outside hikyo — restored, 1 key</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="claim wide">
+      <div class="g">
+        <div class="n">05 / THE SURFACE</div>
+        <div>
+          <h2>And it stays readable at eighty keys.</h2>
+          <p>Grouping, collapsing and per-environment visibility are how the matrix earns its room —
+            on a 27-inch display and on the phone you are holding in the server closet. State is
+            never carried by colour alone.</p>
+        </div>
+        <div class="art">
+          <div class="strip">
+            <div class="sh">checkout-api · matrix</div>
+            <div class="sb"><table class="mx" id="mx-b"></table></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <h2>Take the whole thing home.</h2>
+      <div class="cta">
+        <a class="btn primary" href="#">Read the docs</a>
+        <div class="install">
+          <code><span class="c">$</span> curl -fsSL https://get.hikyo.dev | <b>sh</b></code>
+          <button class="cp" data-copy="curl -fsSL https://get.hikyo.dev | sh">copy</button>
+        </div>
+      </div>
+      <footer class="foot">
+        <div class="row">
+          <a href="#">Docs</a><a href="#">Self-hosting</a><a href="#">CLI reference</a>
+          <a href="#">Changelog</a><a href="#">GitHub</a><a href="#">Security</a>
+        </div>
+        <div class="fine">hikyo · MPL-2.0 · no analytics on this page<br>prototype — every number, org and URL on this page is invented</div>
+      </footer>
+    </section>
+  </div>
+</main>
+
+<!-- ==================================================================== -->
+<!-- VARIANT C — live console                                              -->
+<!-- ==================================================================== -->
+<main class="variant" id="v-c" hidden>
+  <div class="shell">
+    <nav class="nav">
+      <a class="brand" href="#"><svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="var(--bg3)"/><path d="M8 12h16M8 16h16M8 20h10" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round"/></svg>hikyo</a>
+      <span class="grow"></span>
+      <a class="lnk hide-s" href="#">Docs</a>
+      <a class="lnk hide-s" href="#">Self-hosting</a>
+      <a class="lnk" href="#">GitHub</a>
+    </nav>
+
+    <header class="hero">
+      <h1>Watch a value <em>resolve</em>.</h1>
+      <p class="sub">hikyo is a self-hosted control plane for inherited, validated secrets and
+        configuration. This is the real thing, running on sample data — click around.</p>
+      <p class="hint">pick an environment, then a key</p>
+      <p class="heroLinks"><a href="#">Read the docs</a><a href="#">Self-host in 4 minutes</a><span>MPL-2.0 · no hosted tier</span></p>
+    </header>
+
+    <div class="console">
+      <div class="envs" role="tablist" aria-label="environment" id="c-envs"></div>
+      <div class="body">
+        <div class="keys" id="c-keys"></div>
+        <div class="detail" id="c-detail"></div>
+      </div>
+      <div class="cli">
+        <div class="bar">the same thing, from the terminal</div>
+        <pre id="c-cli"></pre>
+      </div>
+    </div>
+
+    <div class="demos">
+      <section class="demo">
+        <span class="eyebrow">Validation</span>
+        <h2>Type a bad port. See what the publish would do.</h2>
+        <p>Every key is declared before it is filled. <span class="mono">SMTP_PORT</span> is an
+          <span class="mono">int</span> with range <span class="mono">1–65535</span> and is required in
+          production — so a stray space is a refused publish, not a paged engineer.</p>
+        <div class="box">
+          <div class="vform">
+            <label for="c-val">SMTP_PORT · production</label>
+            <div class="in">
+              <input id="c-val" value="587 " autocomplete="off" spellcheck="false" aria-describedby="c-verdict">
+            </div>
+            <div class="verdict" id="c-verdict"></div>
+            <div class="rules">declared: int · min 1 · max 65535 · required in [staging, production]</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="demo">
+        <span class="eyebrow">Blast radius</span>
+        <h2>Change the base value. Watch who follows.</h2>
+        <p>Overrides are the only thing that stays put. Everything inheriting from base moves with it,
+          and hikyo tells you how many environments that is <em>before</em> you publish.</p>
+        <div class="box">
+          <div class="vform">
+            <label for="c-base">base · LOG_LEVEL</label>
+            <div class="in">
+              <input id="c-base" value="info" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="verdict" id="c-blast" style="color:var(--tx-dim)"></div>
+            <div class="rules" id="c-blastrows"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="self">
+      <span class="eyebrow">Self-hosted</span>
+      <h2>One container. Your keys. No callback home.</h2>
+      <div class="grid">
+        <div>
+          <p>Signed releases, SBOM in the box, Postgres or SQLite, and a keyring you can point at your
+            own KMS. hikyo has no hosted tier to upsell you into — the whole thing is MPL-2.0.</p>
+          <div class="install" style="margin-top:20px">
+            <code><span class="c">$</span> curl -fsSL https://get.hikyo.dev | <b>sh</b></code>
+            <button class="cp" data-copy="curl -fsSL https://get.hikyo.dev | sh">copy</button>
+          </div>
+        </div>
+        <div class="term">
+          <div class="bar">first five minutes</div>
+<pre><span class="p">$</span> hikyo serve --db sqlite:///var/hikyo.db
+<span class="ok">✓</span> listening on <b>:8080</b> · keyring unlocked · 0 projects
+
+<span class="p">$</span> hikyo scaffold --from .env --project checkout-api
+<span class="c">wrote 84 key definitions — review before applying</span>
+
+<span class="p">$</span> hikyo publish --env staging
+<span class="ok">✓</span> revision <b>41</b> · 84 keys · 0 violations</pre>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <div class="row">
+        <a href="#">Docs</a><a href="#">Self-hosting</a><a href="#">CLI reference</a>
+        <a href="#">Changelog</a><a href="#">GitHub</a><a href="#">Security</a>
+      </div>
+      <div class="fine">hikyo · MPL-2.0 · no analytics on this page<br>prototype — every number, org and URL on this page is invented</div>
+    </footer>
+  </div>
+</main>
+
+<!-- floating variant switcher -->
+<div id="switcher" role="group" aria-label="prototype variant switcher">
+  <button id="sw-prev" title="previous variant (←)" aria-label="previous variant">‹</button>
+  <span class="sep"></span>
+  <span class="lab"><span class="kk" id="sw-key">A</span><span class="nm" id="sw-name"></span></span>
+  <span class="sep"></span>
+  <button id="sw-next" title="next variant (→)" aria-label="next variant">›</button>
+  <span class="sep"></span>
+  <button id="sw-theme" title="light / dark" aria-label="switch light or dark theme">◐</button>
+</div>
+
+<script>
+/* ===================== shared sample data ===================== */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const ENVS = [
+  {id:'dev',  name:'development', base:null,  protected:false},
+  {id:'stg',  name:'staging',     base:'base',protected:false},
+  {id:'pre',  name:'preview',     base:'base',protected:false},
+  {id:'prd',  name:'production',  base:'base',protected:true},
+];
+
+// value shapes: {v:'x'} set here · {inh:'base'} inherited · {def:true} from defaults
+// null = not set · {missing:true} required+unset · {invalid:'reason', v:'x'}
+const GROUPS = [
+  {name:'app', keys:[
+    {k:'APP_ENV',    secret:false, cells:{dev:{v:'development'}, stg:{v:'staging'}, pre:{v:'preview'}, prd:{v:'production'}}},
+    {k:'LOG_LEVEL',  secret:false, cells:{dev:{v:'debug'}, stg:{v:'debug', changed:true}, pre:{inh:'base', v:'info'}, prd:{inh:'base', v:'info'}}},
+    {k:'PORT',       secret:false, cells:{dev:{inh:'base', v:'8080'}, stg:{inh:'base', v:'8080'}, pre:{inh:'base', v:'8080'}, prd:{inh:'base', v:'8080'}}},
+    {k:'FEATURE_FLAGS', secret:false, cells:{dev:{v:'{"beta":true}'}, stg:{v:'{"beta":true}'}, pre:{v:'{"beta":true}'}, prd:{v:'{"beta":false}'}}},
+  ]},
+  {name:'database', keys:[
+    {k:'DATABASE_URL', secret:true, cells:{dev:{v:'••••••••'}, stg:{v:'••••••••'}, pre:{v:'••••••••'}, prd:{v:'••••••••'}}},
+    {k:'DB_POOL_MAX',  secret:false, cells:{dev:{inh:'base', v:'10'}, stg:{inh:'base', v:'10'}, pre:{inh:'base', v:'10'}, prd:{v:'60'}}},
+    {k:'DB_SSLMODE',   secret:false, cells:{dev:{def:true, v:'prefer'}, stg:{def:true, v:'prefer'}, pre:{def:true, v:'prefer'}, prd:{v:'verify-full'}}},
+  ]},
+  {name:'mail & billing', keys:[
+    {k:'SMTP_HOST',   secret:false, cells:{dev:{v:'mailpit:1025'}, stg:{inh:'base', v:'smtp.eu.example'}, pre:{inh:'base', v:'smtp.eu.example'}, prd:{inh:'base', v:'smtp.eu.example'}}},
+    {k:'SMTP_PORT',   secret:false, cells:{dev:{v:'1025'}, stg:{inh:'base', v:'587'}, pre:{inh:'base', v:'587'}, prd:{invalid:'expected int', v:'587 '}}},
+    {k:'STRIPE_WEBHOOK_SECRET', secret:true, cells:{dev:{v:'••••••••'}, stg:{v:'••••••••'}, pre:null, prd:{missing:true}}},
+  ]},
+];
+
+function cellHTML(cell){
+  if(!cell) return `<span class="cellv absent"><span class="tx">·</span></span>`;
+  if(cell.missing) return `<span class="pill missing">! required · unset</span>`;
+  if(cell.invalid) return `<span class="pill invalid" title="${esc(cell.invalid)}">✕ ${esc(cell.v)}</span>`;
+  const cls = ['cellv'];
+  if(cell.inh || cell.def) cls.push('dim');
+  const inh = cell.inh ? `<span class="inh">◂ ${esc(cell.inh)}</span>`
+            : cell.def ? `<span class="inh">◂ def</span>` : '';
+  const d = cell.changed ? `<span class="d" title="changed since last publish">Δ</span>` : '';
+  return `<span class="${cls.join(' ')}"><span class="tx">${esc(cell.v)}</span>${inh}${d}</span>`;
+}
+
+function renderMatrix(tableId, envIds){
+  const table = document.getElementById(tableId);
+  if(!table) return;
+  const envs = ENVS.filter(e => envIds.includes(e.id));
+  let html = `<thead><tr><th class="keyh">key</th>` + envs.map(e =>
+    `<th>${esc(e.name)}${e.base ? `<span class="base">◂ ${esc(e.base)}</span>` : `<span class="base">standalone</span>`}</th>`
+  ).join('') + `</tr></thead><tbody>`;
+  for(const g of GROUPS){
+    html += `<tr class="grp"><td colspan="${envs.length+1}"><div class="g">▾ ${esc(g.name)}<span class="gcnt">${g.keys.length} keys</span></div></td></tr>`;
+    g.keys.forEach((k, i) => {
+      html += `<tr class="${i%2 ? 'alt' : ''}"><td class="key">${k.secret ? '<span class="lock" title="secret">🔒</span>' : ''}${esc(k.k)}</td>`;
+      html += envs.map(e => `<td>${cellHTML(k.cells[e.id])}</td>`).join('');
+      html += `</tr>`;
+    });
+  }
+  return table.innerHTML = html + `</tbody>`;
+}
+
+function renderLegend(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.innerHTML = [
+    `<span class="k"><span class="cellv"><span class="tx">value</span></span> set here</span>`,
+    `<span class="k"><span class="cellv dim"><span class="tx">value</span><span class="inh">◂ base</span></span> inherited</span>`,
+    `<span class="k"><span class="cellv absent"><span class="tx">·</span></span> not set</span>`,
+    `<span class="k"><span class="pill missing">! required · unset</span></span>`,
+    `<span class="k"><span class="pill invalid">✕ value</span> schema violation</span>`,
+  ].join('');
+}
+
+/* ===================== variant C — live console ===================== */
+const C = {
+  env: 'stg',
+  key: 'LOG_LEVEL',
+  revealed: false,
+  reauth: false,
+  timer: null,
+  left: 0,
+};
+
+// resolution model: defaults ← base ← environment
+const C_KEYS = [
+  {g:'app', k:'LOG_LEVEL', type:'string', secret:false,
+   desc:'How chatty the service is. Staging overrides base so we can follow a request end to end.',
+   def:'warn', base:'info', over:{dev:'debug', stg:'debug'}},
+  {g:'app', k:'PORT', type:'int', secret:false,
+   desc:'Listen port. Nobody has ever needed to override this — so nobody has.',
+   def:'8080', base:'8080', over:{}},
+  {g:'database', k:'DATABASE_URL', type:'url', secret:true,
+   desc:'Written per environment, never inherited. Production is protected: revealing it needs reauth.',
+   def:null, base:null, over:{dev:'postgres://app:devpw@localhost:5432/app',
+                              stg:'postgres://app:s3cr3t@db.stg.internal:5432/app',
+                              prd:'postgres://app:hunter2@db.prd.internal:5432/app'}},
+  {g:'database', k:'DB_SSLMODE', type:'string', secret:false,
+   desc:'Nobody set this outside production — the rest ride the schema default, and the cell says so.',
+   def:'prefer', base:null, over:{prd:'verify-full'}},
+  {g:'mail & billing', k:'SMTP_PORT', type:'int', secret:false,
+   desc:'Declared int, range 1–65535, required in staging and production.',
+   def:null, base:'587', over:{dev:'1025'}, invalid:{prd:'587 '}},
+  {g:'mail & billing', k:'STRIPE_WEBHOOK_SECRET', type:'string', secret:true,
+   desc:'Required in production and not there yet — which is why production cannot publish.',
+   def:null, base:null, over:{dev:'whsec_dev_9f2c', stg:'whsec_stg_41ab'}, required:['prd']},
+];
+
+const cKey = () => C_KEYS.find(k => k.k === C.key);
+const cEnv = () => ENVS.find(e => e.id === C.env);
+
+function resolve(k, envId){
+  const chain = [];
+  if(k.invalid && k.invalid[envId] !== undefined){
+    return {invalid:k.invalid[envId], chain:[
+      {src:'defaults', val:k.def, state:'dead'},
+      {src:'base', val:k.base, state:'dead'},
+      {src:envId, val:k.invalid[envId], state:'invalid'},
+    ].filter(l => l.val !== null && l.val !== undefined)};
+  }
+  if(k.def !== null && k.def !== undefined) chain.push({src:'defaults', val:k.def, mark:'schema'});
+  if(k.base !== null && k.base !== undefined) chain.push({src:'base', val:k.base, mark:'◂ inherited'});
+  const o = k.over[envId];
+  if(o !== undefined) chain.push({src:envId, val:o, mark:'set here'});
+  if(!chain.length){
+    const required = (k.required || []).includes(envId);
+    return {missing:required, chain:[], value:null};
+  }
+  const winner = chain.length - 1;
+  chain.forEach((l, i) => l.state = i === winner ? 'win' : 'dead');
+  return {value:chain[winner].val, origin:chain[winner].src, chain};
+}
+
+function renderConsoleEnvs(){
+  document.getElementById('c-envs').innerHTML = ENVS.map(e => `
+    <button role="tab" aria-selected="${e.id === C.env}" data-env="${e.id}">
+      ${esc(e.name)}
+      ${e.base ? `<span class="lk">◂ ${esc(e.base)}</span>` : `<span class="lk">standalone</span>`}
+      ${e.protected ? `<span class="prot">PROTECTED</span>` : ''}
+    </button>`).join('');
+}
+
+function renderConsoleKeys(){
+  let html = '';
+  let group = null;
+  for(const k of C_KEYS){
+    if(k.g !== group){ group = k.g; html += `<div class="kg">${esc(group)}</div>`; }
+    const r = resolve(k, C.env);
+    const st = r.invalid ? `<span class="st bad">✕ invalid</span>`
+             : r.missing ? `<span class="st bad">! unset</span>`
+             : r.origin === C.env ? `<span class="st">set here</span>`
+             : r.value === null ? `<span class="st">·</span>`
+             : `<span class="st">◂ ${esc(r.origin)}</span>`;
+    html += `<button data-key="${esc(k.k)}" aria-current="${k.k === C.key}">
+      ${k.secret ? '<span class="lock" title="secret">🔒</span>' : ''}<span>${esc(k.k)}</span>${st}
+    </button>`;
+  }
+  document.getElementById('c-keys').innerHTML = html;
+}
+
+function renderConsoleDetail(){
+  const k = cKey(), e = cEnv(), r = resolve(k, C.env);
+  const masked = k.secret && !C.revealed;
+  let value;
+  if(r.invalid) value = `<span style="color:var(--bad)">✕ ${esc(r.invalid)}</span>`;
+  else if(r.missing) value = `<span style="color:var(--bad)">! required in ${esc(e.name)} · unset</span>`;
+  else if(r.value === null || r.value === undefined) value = `<span style="color:var(--tx-faint)">· not set anywhere</span>`;
+  else value = masked ? '••••••••••••••••' : esc(r.value);
+
+  const chain = r.chain.length ? `
+    <div class="chain">
+      <div class="ct">${esc(k.k)} · ${esc(e.name)}</div>
+      ${r.chain.map(l => `
+        <div class="lnk2 ${l.state === 'win' ? 'win' : l.state === 'invalid' ? 'win' : 'dead'}">
+          <span class="src">${esc(l.src === C.env ? e.name : l.src)}</span>
+          <span class="val">${k.secret && !C.revealed ? '••••••••' : esc(l.val)}</span>
+          <span class="mark">${l.state === 'invalid' ? '✕ rejected' : esc(l.mark || '')}</span>
+        </div>`).join('')}
+    </div>` : `
+    <div class="chain">
+      <div class="ct">${esc(k.k)} · ${esc(e.name)}</div>
+      <div class="lnk2"><span class="src">—</span><span class="val" style="color:var(--tx-faint)">nothing declares a value for this environment</span><span class="mark"></span></div>
+    </div>`;
+
+  let ceremony = '';
+  if(k.secret){
+    if(C.revealed){
+      ceremony = `<div class="revealed">
+        <span>revealed for this session</span>
+        <span class="cd">remasks in ${C.left}s</span>
+      </div>`;
+    } else if(e.protected && C.reauth){
+      ceremony = `<div class="challenge">
+        <b>reauth · ${esc(e.name)}</b>
+        <span>Disclosing <span class="mono">${esc(k.k)}</span> only. The window closes after 60 seconds
+        and the reveal is written to the audit log.</span>
+      </div>`;
+    } else if(e.protected){
+      ceremony = `<div class="refusal">
+        <b>✕ reveal refused · ${esc(e.name)}</b>
+        This environment is protected. Reveal needs a fresh passkey or TOTP challenge, is capped at a
+        60-second window, remasks itself, and lands in the audit log — copying to the clipboard counts
+        as a disclosure too. Writing a new value needs none of that.
+      </div>`;
+    }
+  }
+
+  const revealLabel = C.revealed ? 'remask now'
+    : e.protected ? (C.reauth ? 'confirm with passkey' : 'reveal (needs reauth)')
+    : 'reveal for 60s';
+  const acts = k.secret ? `
+    <div class="acts">
+      <button class="btn${e.protected && C.reauth && !C.revealed ? ' primary' : ''}" id="c-reveal">${revealLabel}</button>
+      ${e.protected && C.reauth && !C.revealed ? `<button class="btn" id="c-cancel">cancel</button>` : ''}
+      <button class="btn">set new value (write-only)</button>
+    </div>` : `
+    <div class="acts">
+      <button class="btn">override in ${esc(e.name)}</button>
+      <button class="btn">edit base</button>
+    </div>`;
+
+  document.getElementById('c-detail').innerHTML = `
+    <div class="kn">${k.secret ? '<span style="color:var(--bad)">🔒</span>' : ''}${esc(k.k)}<span class="type">${esc(k.type)}</span></div>
+    <p class="desc">${esc(k.desc)}</p>
+    <div class="resolved"><span class="rl">resolved</span><span class="rv">${value}</span></div>
+    ${chain}
+    ${ceremony}
+    ${acts}`;
+
+  const rev = document.getElementById('c-reveal');
+  if(rev) rev.onclick = toggleReveal;
+  const cancel = document.getElementById('c-cancel');
+  if(cancel) cancel.onclick = () => { C.reauth = false; renderConsole(); };
+}
+
+function renderConsoleCLI(){
+  const k = cKey(), e = cEnv(), r = resolve(k, C.env);
+  let out;
+  if(r.invalid) out = `<span class="er">✕</span> ${esc(k.k)}: expected <b>${esc(k.type)}</b>, got "${esc(r.invalid)}" <span class="c">— publish would refuse</span>`;
+  else if(r.missing) out = `<span class="er">✕</span> ${esc(k.k)}: required in <b>${esc(e.name)}</b>, unset <span class="c">— publish would refuse</span>`;
+  else if(r.value === null) out = `<span class="c">(no value declared)</span>`;
+  else if(k.secret && !C.revealed) out = `<span class="er">✕</span> refused: value is <b>write-only</b> here${e.protected ? ' · reveal needs reauth' : ''}\n  <span class="c">hikyo auth reveal --env ${esc(e.id)}</span>`;
+  else out = `<b>${esc(r.value)}</b>\n<span class="c">  origin: ${esc(r.origin === C.env ? e.name : r.origin)}${r.chain.length > 1 ? ` (shadowed ${r.chain.length - 1})` : ''}</span>`;
+  document.getElementById('c-cli').innerHTML =
+    `<span class="p">$</span> hikyo get <b>${esc(k.k)}</b> --env ${esc(e.id)} --explain\n${out}`;
+}
+
+function renderConsole(){
+  renderConsoleEnvs();
+  renderConsoleKeys();
+  renderConsoleDetail();
+  renderConsoleCLI();
+}
+
+function toggleReveal(){
+  clearInterval(C.timer);
+  if(C.revealed){ C.revealed = false; C.reauth = false; renderConsole(); return; }
+  // protected environments take the challenge first — one click is never enough
+  if(cEnv().protected && !C.reauth){ C.reauth = true; renderConsole(); return; }
+  C.revealed = true;
+  C.reauth = false;
+  C.left = 60;
+  C.timer = setInterval(() => {
+    C.left--;
+    if(C.left <= 0){ clearInterval(C.timer); C.revealed = false; renderConsole(); return; }
+    const cd = document.querySelector('#c-detail .revealed .cd');
+    if(cd) cd.textContent = `remasks in ${C.left}s`;
+  }, 1000);
+  renderConsole();
+}
+
+/* validation demo */
+function runValidation(){
+  const el = document.getElementById('c-val');
+  const out = document.getElementById('c-verdict');
+  if(!el || !out) return;
+  const raw = el.value;
+  let msg, ok = false;
+  if(raw === ''){
+    msg = '! required in production · unset — publish refused';
+  } else if(raw !== raw.trim()){
+    msg = `✕ expected int, got string — "${raw}" has surrounding whitespace`;
+  } else if(!/^-?\d+$/.test(raw)){
+    msg = `✕ expected int, got string — "${raw}"`;
+  } else if(Number(raw) < 1 || Number(raw) > 65535){
+    msg = `✕ out of range — ${raw} is not within 1–65535`;
+  } else {
+    ok = true;
+    msg = `✓ valid — publish would write ${raw} to production`;
+  }
+  out.className = 'verdict ' + (ok ? 'ok' : 'no');
+  out.textContent = msg;
+}
+
+/* blast-radius demo */
+function runBlast(){
+  const el = document.getElementById('c-base');
+  const out = document.getElementById('c-blast');
+  const rows = document.getElementById('c-blastrows');
+  if(!el || !out || !rows) return;
+  const base = el.value;
+  const over = {dev:'debug', stg:'debug'};
+  const followers = ENVS.filter(e => over[e.id] === undefined);
+  out.textContent = followers.length
+    ? `${followers.length} of ${ENVS.length} environments follow base → they become "${base}". ${ENVS.length - followers.length} override and stay put.`
+    : `every environment overrides LOG_LEVEL — changing base moves nothing.`;
+  rows.innerHTML = ENVS.map(e => over[e.id] !== undefined
+    ? `<div>${esc(e.name)} — <span style="color:var(--tx-dim)">${esc(over[e.id])}</span> <span style="color:var(--tx-faint)">(set here, unaffected)</span></div>`
+    : `<div>${esc(e.name)} — <span style="color:var(--accent)">${esc(base)}</span> <span style="color:var(--tx-faint)">◂ base</span></div>`
+  ).join('');
+}
+
+/* ===================== variant switcher ===================== */
+const VARIANTS = [
+  {key:'a', name:'Product first'},
+  {key:'b', name:'Typographic argument'},
+  {key:'c', name:'Live console'},
+];
+let current = 'a';
+
+function showVariant(key, push){
+  if(!VARIANTS.some(v => v.key === key)) key = 'a';
+  current = key;
+  for(const v of VARIANTS) document.getElementById('v-' + v.key).hidden = v.key !== key;
+  const meta = VARIANTS.find(v => v.key === key);
+  document.getElementById('sw-key').textContent = key.toUpperCase();
+  document.getElementById('sw-name').textContent = meta.name;
+  document.title = `PROTOTYPE — hikyo landing · ${key.toUpperCase()} ${meta.name}`;
+  if(push){
+    const u = new URL(location.href);
+    u.searchParams.set('variant', key);
+    history.replaceState(null, '', u);
+  }
+  window.scrollTo({top:0, behavior:'auto'});
+}
+
+function cycle(step){
+  const i = VARIANTS.findIndex(v => v.key === current);
+  showVariant(VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length].key, true);
+}
+
+document.getElementById('sw-prev').onclick = () => cycle(-1);
+document.getElementById('sw-next').onclick = () => cycle(1);
+document.getElementById('sw-theme').onclick = () => {
+  const root = document.documentElement;
+  root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+};
+
+addEventListener('keydown', ev => {
+  const t = ev.target;
+  if(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if(ev.key === 'ArrowLeft') cycle(-1);
+  else if(ev.key === 'ArrowRight') cycle(1);
+});
+
+/* copy buttons */
+addEventListener('click', ev => {
+  const b = ev.target.closest('[data-copy]');
+  if(!b) return;
+  navigator.clipboard?.writeText(b.dataset.copy);
+  const was = b.textContent;
+  b.textContent = 'copied';
+  setTimeout(() => { b.textContent = was; }, 1200);
+});
+
+/* console delegation */
+addEventListener('click', ev => {
+  const envBtn = ev.target.closest('#c-envs button');
+  if(envBtn){ C.env = envBtn.dataset.env; C.revealed = false; C.reauth = false; clearInterval(C.timer); renderConsole(); return; }
+  const keyBtn = ev.target.closest('#c-keys button');
+  if(keyBtn){ C.key = keyBtn.dataset.key; C.revealed = false; C.reauth = false; clearInterval(C.timer); renderConsole(); }
+});
+
+/* ===================== boot ===================== */
+renderMatrix('mx-a', ['dev','stg','pre','prd']);
+renderMatrix('mx-b', ['dev','stg','pre','prd']);
+renderLegend('legend-a');
+renderConsole();
+document.getElementById('c-val').addEventListener('input', runValidation);
+document.getElementById('c-base').addEventListener('input', runBlast);
+runValidation();
+runBlast();
+showVariant(new URL(location.href).searchParams.get('variant') || 'a', false);
+</script>
+</body>
+</html>

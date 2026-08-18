@@ -66,4 +66,73 @@ for cached_path in \
 	require_text "$site_root/sw.js" "$cached_path"
 done
 
-printf 'docs PWA gate: manifest, registration, icons, and offline precache passed\n'
+for prototype_family in \
+	app-chrome \
+	env-matrix \
+	landing-opus-4.8 \
+	landing-opus-5 \
+	machine-access \
+	reveal-edit \
+	revision-history; do
+	require_file "$site_root/prototypes/$prototype_family/index.html"
+done
+require_file "$site_root/prototypes/index.html"
+
+prototype_pngs=$(find "$site_root/prototypes" -type f -name '*.png' -print)
+if [ -n "$prototype_pngs" ]; then
+	printf 'docs PWA gate: prototype screenshots must not be published\n%s\n' \
+		"$prototype_pngs" >&2
+	exit 1
+fi
+
+if grep -F -- 'prototypes/' "$site_root/sw.js" >/dev/null; then
+	printf 'docs PWA gate: prototype assets must not be precached\n' >&2
+	exit 1
+fi
+
+legacy_matches=$(grep -R -n -i -E --include='*.html' \
+	'wenv|(^|[^[:alnum:]])ew_' "$site_root/prototypes" 2>/dev/null |
+	grep -F -v -- 'wenv/change-token/v1' || true)
+if [ -n "$legacy_matches" ]; then
+	printf 'docs PWA gate: prototype HTML contains legacy product identity\n%s\n' \
+		"$legacy_matches" >&2
+	exit 1
+fi
+
+private_matches=$(grep -R -n -i -E --include='*.html' \
+	'(^|[^[:alnum:]_])marc([^[:alnum:]_]|$)|([[:alnum:]_-]+\.)*went\.io|went-io|projects/dbugit|dbugit|pi-cluster|tail-net|adhd-kanban|poketracker|initiative-tracker|dunky13|id:.homelab.' \
+	"$site_root/prototypes" 2>/dev/null || true)
+if [ -n "$private_matches" ]; then
+	printf 'docs PWA gate: prototype HTML contains personal or internal coordinates\n%s\n' \
+		"$private_matches" >&2
+	exit 1
+fi
+
+remote_font_matches=$(grep -R -n -E --include='*.html' \
+	'fonts\.googleapis\.com|fonts\.gstatic\.com' \
+	"$site_root/prototypes" 2>/dev/null || true)
+if [ -n "$remote_font_matches" ]; then
+	printf 'docs PWA gate: prototype HTML loads remote Google Fonts\n%s\n' \
+		"$remote_font_matches" >&2
+	exit 1
+fi
+
+unsafe_dom_matches=$(grep -R -n -E --include='*.html' \
+	"(blastsub|sidevarlabel)[^;]*\.innerHTML[[:space:]]*=" \
+	"$site_root/prototypes/app-chrome" 2>/dev/null || true)
+if [ -n "$unsafe_dom_matches" ]; then
+	printf 'docs PWA gate: prototype HTML reinterprets DOM-derived text as HTML\n%s\n' \
+		"$unsafe_dom_matches" >&2
+	exit 1
+fi
+
+stale_license_matches=$(grep -R -n -E --include='*.html' \
+	'AGPL|MIT licensed' \
+	"$site_root/prototypes" 2>/dev/null || true)
+if [ -n "$stale_license_matches" ]; then
+	printf 'docs PWA gate: prototype HTML contains stale license claims\n%s\n' \
+		"$stale_license_matches" >&2
+	exit 1
+fi
+
+printf 'docs PWA gate: manifest, sanitized prototypes, registration, icons, and offline precache passed\n'

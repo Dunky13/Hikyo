@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landing page (opus 4.8) — iterations</title>
+<style>
+  :root{
+    --bg:oklch(0.19 0.012 220);--bg2:oklch(0.225 0.014 220);--line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);--tx-dim:oklch(0.76 0.01 210);--tx-faint:oklch(0.6 0.012 215);
+    --accent:oklch(0.82 0.09 195);--on-accent:oklch(0.2 0.02 220);--mono:ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;
+    min-height:100vh;padding:clamp(24px,6vw,72px) clamp(18px,6vw,72px)}
+  .back{font-size:12px;color:var(--tx-dim);text-decoration:none;display:inline-block;margin-bottom:18px}
+  .back:hover{color:var(--tx)}
+  h1{font-size:clamp(20px,4vw,28px);font-weight:700}
+  h1 span{color:var(--accent)}
+  .q{font-size:13px;color:var(--tx-dim);margin:10px 0 30px;max-width:60ch;line-height:1.6}
+  ul{list-style:none;display:grid;gap:10px;max-width:680px}
+  li a{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;text-decoration:none;color:inherit;
+    padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--bg2)}
+  li a:hover{border-color:var(--accent)}
+  .num{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .name{font-size:15.5px;font-weight:600}
+  .latest{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--on-accent);
+    background:var(--accent);border-radius:999px;padding:2px 9px}
+  .desc{flex-basis:100%;font-size:12.5px;color:var(--tx-dim);line-height:1.5;margin-top:2px}
+  footer{margin-top:34px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
+</style>
+</head>
+<body>
+  <a class="back" href="../">‹ all prototypes</a>
+  <h1>landing page <span>·</span> opus 4.8</h1>
+  <p class="q">What should the public marketing landing page look like? Product-led, self-hosted/open-source angle in the spirit of Kaneo / Plane / Resend / Unkey — short value proposition immediately above a believable product surface, not a generic SaaS template. Three structurally-different variants inside one page, switchable via the floating bar, <kbd>←</kbd>/<kbd>→</kbd>, or the URL hash. (Uses the placeholder brand name "hikyo".)</p>
+  <ul>
+    <li><a href="2/">
+      <span class="num">2</span><span class="name">On-brand &amp; sellable — one committed design</span><span class="latest">LATEST</span>
+      <span class="desc">Rebuilt in the LOCKED Hikyo design language (DESIGN.md): dark-default graphite + teal, system-ui / ui-monospace, radius roles, 999px pill reserved for the matrix state vocabulary, AAA, prefers-color-scheme light. Structure borrows Kaneo's restraint + Plane's sellability: short value prop → the <em>env matrix as the hero</em> (set / inherited / from-defaults / masked / required-unset, each with a glyph) → four asymmetric feature rows (provenance chain, reveal ceremony, doctor/validate, Compose+K8s render) → self-hosted band → "why Hikyo" POV → final CTA → real footer. Fixes iteration 1's brand violations (purple-blue gradients + gradient text, both anti-referenced). No switcher: this pass commits.</span>
+    </a></li>
+    <li><a href="1/#B">
+      <span class="num">1</span><span class="name">Three variants — clean-white / dark synthesis / demo-led</span>
+      <span class="desc">Exploration: A — Kaneo/Plane clean white surface, centred value prop, env-matrix product UI as the hero. B — the synthesis (Kaneo structure + Linear finish + Resend technical clarity), dark, split hero with a live CLI transcript. C — Unkey/Better-Auth demo-led, four "you run → hikyo does" blocks. Off-brand (generic Inter + blue/purple, not the locked teal system) — superseded by iteration 2. Opens on B.</span>
+    </a></li>
+  </ul>
+  <footer>every change is a new numbered iteration — published ones never mutate · <a href="/prototypes/">all prototypes</a></footer>
+</body>
+</html>
