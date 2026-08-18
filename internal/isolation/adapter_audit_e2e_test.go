@@ -78,7 +78,10 @@ func (auditAdapterLoader) Load(context.Context, adapter.Job, adapter.Journal) (a
 func runAdapterAuditLifecycle(t *testing.T, db *store.DB) {
 	t.Helper()
 	ctx := tctx(t)
-	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	// AdapterRuntime.Gate checks the provider lease against the real clock.
+	// Keep this integration fixture on that clock too: a fixed timestamp turns
+	// the claimed lease stale as soon as wall time passes the fixture date.
+	now := store.CanonTime(time.Now().UTC())
 	scope := domain.Scope{Org: orgA, Project: prjA1}
 
 	// Fixture authority only. Every adapter mutation and every corresponding

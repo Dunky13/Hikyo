@@ -690,13 +690,19 @@ that leg when `CI` is set and the DSN is absent.
   They do not replace the separately gated real-Forgejo lifecycle proof above;
   that remains an external prerequisite requiring the Forgejo URL, scoped PAT,
   owner/repository, and any operator-approved private endpoint policy.
-- The worktree is intentionally uncommitted for the parent lifecycle owner.
+- PR #160 landed as signed-off squash `1dc7f3813e31f9317bbbe57ea74a13bbd8484779`.
+  Its post-merge run exposed a time-dependent audit fixture: the adapter worker
+  claimed a two-minute provider lease from a fixed timestamp, while the journal
+  correctly checked expiry against the real clock. Anchoring the integration
+  fixture to the canonical current time makes that lease live regardless of
+  calendar date. The regression passed ten SQLite repetitions, three combined
+  SQLite/Postgres repetitions, and the full 3,005-test/44-package Go suite.
 - Generated sqlc/OpenAPI output is included alongside source changes.
 - The public grammar, atomic first-target bootstrap, adoption selection,
   origin-scoped egress policy, scrub-first move semantics, and purpose-aware
   reauthentication semantics are resolved and implemented to the extent noted
   above. Do not restore the superseded routing/ceremony design questions.
-- The parent-owned final broad suite and release snapshot have run successfully;
-  do not rerun them before commit without a new code change.
+- The parent-owned final broad suite and release snapshot ran successfully; the
+  post-merge fixture correction repeated the full Go/Postgres suite.
 - Postgres acceptance is covered by the final parent-owned suite. Do not claim
   real-Forgejo acceptance until the external command above runs successfully.
