@@ -59,6 +59,7 @@ func (s sqliteReadRepos) Environments() EnvironmentReader { return s.r.Environme
 func (s sqliteReadRepos) Folders() FolderReader           { return s.r.Folders() }
 func (s sqliteReadRepos) Audit() AuditReader              { return s.r.Audit() }
 func (s sqliteReadRepos) Remotes() RemoteReader           { return s.r.Remotes() }
+func (s sqliteReadRepos) Adapters() AdapterReader         { return s.r.Adapters() }
 
 type pgReadRepos struct{ r pgRepos }
 
@@ -75,6 +76,7 @@ func (p pgReadRepos) Environments() EnvironmentReader { return p.r.Environments(
 func (p pgReadRepos) Folders() FolderReader           { return p.r.Folders() }
 func (p pgReadRepos) Audit() AuditReader              { return p.r.Audit() }
 func (p pgReadRepos) Remotes() RemoteReader           { return p.r.Remotes() }
+func (p pgReadRepos) Adapters() AdapterReader         { return p.r.Adapters() }
 
 // CanonTime fixes the canonical cross-engine timestamp semantics: UTC,
 // microsecond precision (postgres timestamptz cannot hold more; sqlite text

@@ -39,6 +39,282 @@ func (e ActiveSessionArtifact) Valid() bool {
 	}
 }
 
+// Defines values for AdapterProvider.
+const (
+	AdapterProviderForgejo AdapterProvider = "forgejo"
+)
+
+// Valid indicates whether the value is a known member of the AdapterProvider enum.
+func (e AdapterProvider) Valid() bool {
+	switch e {
+	case AdapterProviderForgejo:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterState.
+const (
+	AdapterStateActive     AdapterState = "active"
+	AdapterStateMoving     AdapterState = "moving"
+	AdapterStateTombstoned AdapterState = "tombstoned"
+)
+
+// Valid indicates whether the value is a known member of the AdapterState enum.
+func (e AdapterState) Valid() bool {
+	switch e {
+	case AdapterStateActive:
+		return true
+	case AdapterStateMoving:
+		return true
+	case AdapterStateTombstoned:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterChangeDisposition.
+const (
+	AdapterChangeDispositionConflict AdapterChangeDisposition = "conflict"
+	AdapterChangeDispositionCreate   AdapterChangeDisposition = "create"
+	AdapterChangeDispositionDelete   AdapterChangeDisposition = "delete"
+	AdapterChangeDispositionRefused  AdapterChangeDisposition = "refused"
+	AdapterChangeDispositionUpdate   AdapterChangeDisposition = "update"
+)
+
+// Valid indicates whether the value is a known member of the AdapterChangeDisposition enum.
+func (e AdapterChangeDisposition) Valid() bool {
+	switch e {
+	case AdapterChangeDispositionConflict:
+		return true
+	case AdapterChangeDispositionCreate:
+		return true
+	case AdapterChangeDispositionDelete:
+		return true
+	case AdapterChangeDispositionRefused:
+		return true
+	case AdapterChangeDispositionUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterChangeSurface.
+const (
+	AdapterChangeSurfaceSecret   AdapterChangeSurface = "secret"
+	AdapterChangeSurfaceVariable AdapterChangeSurface = "variable"
+)
+
+// Valid indicates whether the value is a known member of the AdapterChangeSurface enum.
+func (e AdapterChangeSurface) Valid() bool {
+	switch e {
+	case AdapterChangeSurfaceSecret:
+		return true
+	case AdapterChangeSurfaceVariable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterConflictEntrySurface.
+const (
+	AdapterConflictEntrySurfaceSecret   AdapterConflictEntrySurface = "secret"
+	AdapterConflictEntrySurfaceVariable AdapterConflictEntrySurface = "variable"
+)
+
+// Valid indicates whether the value is a known member of the AdapterConflictEntrySurface enum.
+func (e AdapterConflictEntrySurface) Valid() bool {
+	switch e {
+	case AdapterConflictEntrySurfaceSecret:
+		return true
+	case AdapterConflictEntrySurfaceVariable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterDestinationKind.
+const (
+	Organization AdapterDestinationKind = "organization"
+	Repository   AdapterDestinationKind = "repository"
+)
+
+// Valid indicates whether the value is a known member of the AdapterDestinationKind enum.
+func (e AdapterDestinationKind) Valid() bool {
+	switch e {
+	case Organization:
+		return true
+	case Repository:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterMappingEntrySurface.
+const (
+	AdapterMappingEntrySurfaceSecret   AdapterMappingEntrySurface = "secret"
+	AdapterMappingEntrySurfaceVariable AdapterMappingEntrySurface = "variable"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMappingEntrySurface enum.
+func (e AdapterMappingEntrySurface) Valid() bool {
+	switch e {
+	case AdapterMappingEntrySurfaceSecret:
+		return true
+	case AdapterMappingEntrySurfaceVariable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterMoveKind.
+const (
+	Origin AdapterMoveKind = "origin"
+	Target AdapterMoveKind = "target"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMoveKind enum.
+func (e AdapterMoveKind) Valid() bool {
+	switch e {
+	case Origin:
+		return true
+	case Target:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterMoveState.
+const (
+	Activating        AdapterMoveState = "activating"
+	AttentionRequired AdapterMoveState = "attention_required"
+	Canceled          AdapterMoveState = "canceled"
+	Completed         AdapterMoveState = "completed"
+	Scrubbing         AdapterMoveState = "scrubbing"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMoveState enum.
+func (e AdapterMoveState) Valid() bool {
+	switch e {
+	case Activating:
+		return true
+	case AttentionRequired:
+		return true
+	case Canceled:
+		return true
+	case Completed:
+		return true
+	case Scrubbing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterMoveJobKind.
+const (
+	Activate AdapterMoveJobKind = "activate"
+	Converge AdapterMoveJobKind = "converge"
+	Scrub    AdapterMoveJobKind = "scrub"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMoveJobKind enum.
+func (e AdapterMoveJobKind) Valid() bool {
+	switch e {
+	case Activate:
+		return true
+	case Converge:
+		return true
+	case Scrub:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterMoveJobState.
+const (
+	AdapterMoveJobStateFailed     AdapterMoveJobState = "failed"
+	AdapterMoveJobStateQueued     AdapterMoveJobState = "queued"
+	AdapterMoveJobStateRetry      AdapterMoveJobState = "retry"
+	AdapterMoveJobStateRunning    AdapterMoveJobState = "running"
+	AdapterMoveJobStateSucceeded  AdapterMoveJobState = "succeeded"
+	AdapterMoveJobStateSuperseded AdapterMoveJobState = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMoveJobState enum.
+func (e AdapterMoveJobState) Valid() bool {
+	switch e {
+	case AdapterMoveJobStateFailed:
+		return true
+	case AdapterMoveJobStateQueued:
+		return true
+	case AdapterMoveJobStateRetry:
+		return true
+	case AdapterMoveJobStateRunning:
+		return true
+	case AdapterMoveJobStateSucceeded:
+		return true
+	case AdapterMoveJobStateSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterTargetState.
+const (
+	AdapterTargetStateActive     AdapterTargetState = "active"
+	AdapterTargetStateMoving     AdapterTargetState = "moving"
+	AdapterTargetStateTombstoned AdapterTargetState = "tombstoned"
+)
+
+// Valid indicates whether the value is a known member of the AdapterTargetState enum.
+func (e AdapterTargetState) Valid() bool {
+	switch e {
+	case AdapterTargetStateActive:
+		return true
+	case AdapterTargetStateMoving:
+		return true
+	case AdapterTargetStateTombstoned:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterTargetSyncStatus.
+const (
+	AdapterTargetSyncStatusConverged  AdapterTargetSyncStatus = "converged"
+	AdapterTargetSyncStatusConverging AdapterTargetSyncStatus = "converging"
+	AdapterTargetSyncStatusFailed     AdapterTargetSyncStatus = "failed"
+	AdapterTargetSyncStatusNever      AdapterTargetSyncStatus = "never"
+)
+
+// Valid indicates whether the value is a known member of the AdapterTargetSyncStatus enum.
+func (e AdapterTargetSyncStatus) Valid() bool {
+	switch e {
+	case AdapterTargetSyncStatusConverged:
+		return true
+	case AdapterTargetSyncStatusConverging:
+		return true
+	case AdapterTargetSyncStatusFailed:
+		return true
+	case AdapterTargetSyncStatusNever:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AffectedCredentialReason.
 const (
 	Clamped             AffectedCredentialReason = "clamped"
@@ -51,6 +327,69 @@ func (e AffectedCredentialReason) Valid() bool {
 	case Clamped:
 		return true
 	case IndefiniteWithdrawn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CLIReauthStartRequestOperation.
+const (
+	CLIReauthStartRequestOperationAdapterAdopt         CLIReauthStartRequestOperation = "adapter.adopt"
+	CLIReauthStartRequestOperationAdapterConfigure     CLIReauthStartRequestOperation = "adapter.configure"
+	CLIReauthStartRequestOperationAdapterCredentialSet CLIReauthStartRequestOperation = "adapter.credential-set"
+	CLIReauthStartRequestOperationAdapterSync          CLIReauthStartRequestOperation = "adapter.sync"
+)
+
+// Valid indicates whether the value is a known member of the CLIReauthStartRequestOperation enum.
+func (e CLIReauthStartRequestOperation) Valid() bool {
+	switch e {
+	case CLIReauthStartRequestOperationAdapterAdopt:
+		return true
+	case CLIReauthStartRequestOperationAdapterConfigure:
+		return true
+	case CLIReauthStartRequestOperationAdapterCredentialSet:
+		return true
+	case CLIReauthStartRequestOperationAdapterSync:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CLIReauthStartRequestPurpose.
+const (
+	CLIReauthStartRequestPurposeAdapter CLIReauthStartRequestPurpose = "adapter"
+)
+
+// Valid indicates whether the value is a known member of the CLIReauthStartRequestPurpose enum.
+func (e CLIReauthStartRequestPurpose) Valid() bool {
+	switch e {
+	case CLIReauthStartRequestPurposeAdapter:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CLIReauthTransactionOperation.
+const (
+	CLIReauthTransactionOperationAdapterAdopt         CLIReauthTransactionOperation = "adapter.adopt"
+	CLIReauthTransactionOperationAdapterConfigure     CLIReauthTransactionOperation = "adapter.configure"
+	CLIReauthTransactionOperationAdapterCredentialSet CLIReauthTransactionOperation = "adapter.credential-set"
+	CLIReauthTransactionOperationAdapterSync          CLIReauthTransactionOperation = "adapter.sync"
+)
+
+// Valid indicates whether the value is a known member of the CLIReauthTransactionOperation enum.
+func (e CLIReauthTransactionOperation) Valid() bool {
+	switch e {
+	case CLIReauthTransactionOperationAdapterAdopt:
+		return true
+	case CLIReauthTransactionOperationAdapterConfigure:
+		return true
+	case CLIReauthTransactionOperationAdapterCredentialSet:
+		return true
+	case CLIReauthTransactionOperationAdapterSync:
 		return true
 	default:
 		return false
@@ -299,19 +638,19 @@ func (e ImpactChangeStatus) Valid() bool {
 
 // Defines values for IssuerType.
 const (
-	Forgejo       IssuerType = "forgejo"
-	GithubActions IssuerType = "github-actions"
-	Kubernetes    IssuerType = "kubernetes"
+	IssuerTypeForgejo       IssuerType = "forgejo"
+	IssuerTypeGithubActions IssuerType = "github-actions"
+	IssuerTypeKubernetes    IssuerType = "kubernetes"
 )
 
 // Valid indicates whether the value is a known member of the IssuerType enum.
 func (e IssuerType) Valid() bool {
 	switch e {
-	case Forgejo:
+	case IssuerTypeForgejo:
 		return true
-	case GithubActions:
+	case IssuerTypeGithubActions:
 		return true
-	case Kubernetes:
+	case IssuerTypeKubernetes:
 		return true
 	default:
 		return false
@@ -338,16 +677,16 @@ func (e JWKSMode) Valid() bool {
 
 // Defines values for KeyClassification.
 const (
-	Config KeyClassification = "config"
-	Secret KeyClassification = "secret"
+	KeyClassificationConfig KeyClassification = "config"
+	KeyClassificationSecret KeyClassification = "secret"
 )
 
 // Valid indicates whether the value is a known member of the KeyClassification enum.
 func (e KeyClassification) Valid() bool {
 	switch e {
-	case Config:
+	case KeyClassificationConfig:
 		return true
-	case Secret:
+	case KeyClassificationSecret:
 		return true
 	default:
 		return false
@@ -518,22 +857,25 @@ func (e ProjectRetentionPolicyMode) Valid() bool {
 
 // Defines values for ReauthPurpose.
 const (
-	Copy    ReauthPurpose = "copy"
-	Mint    ReauthPurpose = "mint"
-	Publish ReauthPurpose = "publish"
-	Reveal  ReauthPurpose = "reveal"
+	ReauthPurposeAdapter ReauthPurpose = "adapter"
+	ReauthPurposeCopy    ReauthPurpose = "copy"
+	ReauthPurposeMint    ReauthPurpose = "mint"
+	ReauthPurposePublish ReauthPurpose = "publish"
+	ReauthPurposeReveal  ReauthPurpose = "reveal"
 )
 
 // Valid indicates whether the value is a known member of the ReauthPurpose enum.
 func (e ReauthPurpose) Valid() bool {
 	switch e {
-	case Copy:
+	case ReauthPurposeAdapter:
 		return true
-	case Mint:
+	case ReauthPurposeCopy:
 		return true
-	case Publish:
+	case ReauthPurposeMint:
 		return true
-	case Reveal:
+	case ReauthPurposePublish:
+		return true
+	case ReauthPurposeReveal:
 		return true
 	default:
 		return false
@@ -740,16 +1082,16 @@ func (e SamlProviderWarningSeverity) Valid() bool {
 
 // Defines values for SamlSpKeyState.
 const (
-	Active   SamlSpKeyState = "active"
-	Retiring SamlSpKeyState = "retiring"
+	SamlSpKeyStateActive   SamlSpKeyState = "active"
+	SamlSpKeyStateRetiring SamlSpKeyState = "retiring"
 )
 
 // Valid indicates whether the value is a known member of the SamlSpKeyState enum.
 func (e SamlSpKeyState) Valid() bool {
 	switch e {
-	case Active:
+	case SamlSpKeyStateActive:
 		return true
-	case Retiring:
+	case SamlSpKeyStateRetiring:
 		return true
 	default:
 		return false
@@ -903,6 +1245,30 @@ func (e StartWorkspaceHandoffRequestPurpose) Valid() bool {
 	}
 }
 
+// Defines values for TotpReauthRequestOperation.
+const (
+	TotpReauthRequestOperationAdapterAdopt         TotpReauthRequestOperation = "adapter.adopt"
+	TotpReauthRequestOperationAdapterConfigure     TotpReauthRequestOperation = "adapter.configure"
+	TotpReauthRequestOperationAdapterCredentialSet TotpReauthRequestOperation = "adapter.credential-set"
+	TotpReauthRequestOperationAdapterSync          TotpReauthRequestOperation = "adapter.sync"
+)
+
+// Valid indicates whether the value is a known member of the TotpReauthRequestOperation enum.
+func (e TotpReauthRequestOperation) Valid() bool {
+	switch e {
+	case TotpReauthRequestOperationAdapterAdopt:
+		return true
+	case TotpReauthRequestOperationAdapterConfigure:
+		return true
+	case TotpReauthRequestOperationAdapterCredentialSet:
+		return true
+	case TotpReauthRequestOperationAdapterSync:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ValueOccurrenceCandidateIntendedType.
 const (
 	ValueOccurrenceCandidateIntendedTypeBoolean ValueOccurrenceCandidateIntendedType = "boolean"
@@ -927,6 +1293,48 @@ func (e ValueOccurrenceCandidateIntendedType) Valid() bool {
 	case ValueOccurrenceCandidateIntendedTypeString:
 		return true
 	case ValueOccurrenceCandidateIntendedTypeUrl:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WebauthnReauthStartRequestAdapterOperation.
+const (
+	WebauthnReauthStartRequestAdapterOperationAdapterAdopt         WebauthnReauthStartRequestAdapterOperation = "adapter.adopt"
+	WebauthnReauthStartRequestAdapterOperationAdapterConfigure     WebauthnReauthStartRequestAdapterOperation = "adapter.configure"
+	WebauthnReauthStartRequestAdapterOperationAdapterCredentialSet WebauthnReauthStartRequestAdapterOperation = "adapter.credential-set"
+	WebauthnReauthStartRequestAdapterOperationAdapterSync          WebauthnReauthStartRequestAdapterOperation = "adapter.sync"
+)
+
+// Valid indicates whether the value is a known member of the WebauthnReauthStartRequestAdapterOperation enum.
+func (e WebauthnReauthStartRequestAdapterOperation) Valid() bool {
+	switch e {
+	case WebauthnReauthStartRequestAdapterOperationAdapterAdopt:
+		return true
+	case WebauthnReauthStartRequestAdapterOperationAdapterConfigure:
+		return true
+	case WebauthnReauthStartRequestAdapterOperationAdapterCredentialSet:
+		return true
+	case WebauthnReauthStartRequestAdapterOperationAdapterSync:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ShowAdapterTargetParamsFormat.
+const (
+	Detail   ShowAdapterTargetParamsFormat = "detail"
+	Workflow ShowAdapterTargetParamsFormat = "workflow"
+)
+
+// Valid indicates whether the value is a known member of the ShowAdapterTargetParamsFormat enum.
+func (e ShowAdapterTargetParamsFormat) Valid() bool {
+	switch e {
+	case Detail:
+		return true
+	case Workflow:
 		return true
 	default:
 		return false
@@ -966,6 +1374,236 @@ type ActiveSession struct {
 // ActiveSessionArtifact A workspace session appears as its own artifact type — the ADR's
 // requirement, and the reason it is a session row at all.
 type ActiveSessionArtifact string
+
+// Adapter defines model for Adapter.
+type Adapter struct {
+	// AuthorityPrincipalId A prefixed UUIDv7, e.g. `org_0198…`.
+	AuthorityPrincipalId ID `json:"authority_principal_id"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt         Timestamp  `json:"created_at"`
+	CredentialPresent bool       `json:"credential_present"`
+	CredentialSetAt   *time.Time `json:"credential_set_at,omitempty"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id       ID              `json:"id"`
+	Origin   string          `json:"origin"`
+	Provider AdapterProvider `json:"provider"`
+	State    AdapterState    `json:"state"`
+	Targets  []AdapterTarget `json:"targets"`
+}
+
+// AdapterProvider defines model for Adapter.Provider.
+type AdapterProvider string
+
+// AdapterState defines model for Adapter.State.
+type AdapterState string
+
+// AdapterAdoptionRequest defines model for AdapterAdoptionRequest.
+type AdapterAdoptionRequest struct {
+	// ArtifactId A prefixed UUIDv7, e.g. `org_0198…`.
+	ArtifactId       ID                     `json:"artifact_id"`
+	DestinationId    int64                  `json:"destination_id"`
+	Entries          []AdapterConflictEntry `json:"entries"`
+	TargetGeneration int64                  `json:"target_generation"`
+}
+
+// AdapterChange defines model for AdapterChange.
+type AdapterChange struct {
+	Disposition   AdapterChangeDisposition `json:"disposition"`
+	EffectiveName string                   `json:"effective_name"`
+	Reason        *string                  `json:"reason,omitempty"`
+	Surface       AdapterChangeSurface     `json:"surface"`
+}
+
+// AdapterChangeDisposition defines model for AdapterChange.Disposition.
+type AdapterChangeDisposition string
+
+// AdapterChangeSurface defines model for AdapterChange.Surface.
+type AdapterChangeSurface string
+
+// AdapterConflictArtifact defines model for AdapterConflictArtifact.
+type AdapterConflictArtifact struct {
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt     Timestamp              `json:"created_at"`
+	DestinationId int64                  `json:"destination_id"`
+	Entries       []AdapterConflictEntry `json:"entries"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id               ID    `json:"id"`
+	TargetGeneration int64 `json:"target_generation"`
+}
+
+// AdapterConflictEntry defines model for AdapterConflictEntry.
+type AdapterConflictEntry struct {
+	EffectiveName string                      `json:"effective_name"`
+	Surface       AdapterConflictEntrySurface `json:"surface"`
+}
+
+// AdapterConflictEntrySurface defines model for AdapterConflictEntry.Surface.
+type AdapterConflictEntrySurface string
+
+// AdapterConnection defines model for AdapterConnection.
+type AdapterConnection struct {
+	DestinationId int64  `json:"destination_id"`
+	Version       string `json:"version"`
+}
+
+// AdapterDestinationKind defines model for AdapterDestinationKind.
+type AdapterDestinationKind string
+
+// AdapterJob defines model for AdapterJob.
+type AdapterJob struct {
+	Generation int64 `json:"generation"`
+
+	// JobId A prefixed UUIDv7, e.g. `org_0198…`.
+	JobId ID `json:"job_id"`
+}
+
+// AdapterList defines model for AdapterList.
+type AdapterList struct {
+	Items []Adapter `json:"items"`
+}
+
+// AdapterMappingEntry defines model for AdapterMappingEntry.
+type AdapterMappingEntry struct {
+	CanonicalName string `json:"canonical_name"`
+	EffectiveName string `json:"effective_name"`
+
+	// KeyId A prefixed UUIDv7, e.g. `org_0198…`.
+	KeyId   ID                         `json:"key_id"`
+	Surface AdapterMappingEntrySurface `json:"surface"`
+}
+
+// AdapterMappingEntrySurface defines model for AdapterMappingEntry.Surface.
+type AdapterMappingEntrySurface string
+
+// AdapterMove Durable route transition status. Credentials are never represented.
+type AdapterMove struct {
+	// AdapterId A prefixed UUIDv7, e.g. `org_0198…`.
+	AdapterId ID `json:"adapter_id"`
+
+	// CreatedAt RFC 3339 UTC, microsecond precision.
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id            ID                  `json:"id"`
+	KeepRemote    bool                `json:"keep_remote"`
+	Kind          AdapterMoveKind     `json:"kind"`
+	PendingOrigin string              `json:"pending_origin"`
+	State         AdapterMoveState    `json:"state"`
+	Targets       []AdapterMoveTarget `json:"targets"`
+}
+
+// AdapterMoveKind defines model for AdapterMove.Kind.
+type AdapterMoveKind string
+
+// AdapterMoveState defines model for AdapterMove.State.
+type AdapterMoveState string
+
+// AdapterMoveJob defines model for AdapterMoveJob.
+type AdapterMoveJob struct {
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id    ID                  `json:"id"`
+	Kind  AdapterMoveJobKind  `json:"kind"`
+	State AdapterMoveJobState `json:"state"`
+
+	// TargetId A prefixed UUIDv7, e.g. `org_0198…`.
+	TargetId ID `json:"target_id"`
+}
+
+// AdapterMoveJobKind defines model for AdapterMoveJob.Kind.
+type AdapterMoveJobKind string
+
+// AdapterMoveJobState defines model for AdapterMoveJob.State.
+type AdapterMoveJobState string
+
+// AdapterMoveTarget defines model for AdapterMoveTarget.
+type AdapterMoveTarget struct {
+	DestinationId    int64                  `json:"destination_id"`
+	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
+	DestinationName  string                 `json:"destination_name"`
+	DestinationOwner string                 `json:"destination_owner"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID               `json:"environment_id"`
+	Jobs          []AdapterMoveJob `json:"jobs"`
+	NamePrefix    string           `json:"name_prefix"`
+	OrphanedNames []string         `json:"orphaned_names"`
+
+	// TargetId A prefixed UUIDv7, e.g. `org_0198…`.
+	TargetId ID `json:"target_id"`
+}
+
+// AdapterPlan defines model for AdapterPlan.
+type AdapterPlan struct {
+	// ArtifactId A prefixed UUIDv7, e.g. `org_0198…`.
+	ArtifactId ID              `json:"artifact_id"`
+	Changes    []AdapterChange `json:"changes"`
+}
+
+// AdapterTarget defines model for AdapterTarget.
+type AdapterTarget struct {
+	// AdapterId A prefixed UUIDv7, e.g. `org_0198…`.
+	AdapterId ID `json:"adapter_id"`
+
+	// Conflicts Pending exact conflict artifacts eligible for adoption on this target.
+	Conflicts         []AdapterConflictArtifact `json:"conflicts"`
+	ConvergedRevision *int64                    `json:"converged_revision,omitempty"`
+	DestinationId     int64                     `json:"destination_id"`
+	DestinationKind   AdapterDestinationKind    `json:"destination_kind"`
+	DestinationName   string                    `json:"destination_name"`
+	DestinationOwner  string                    `json:"destination_owner"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID       `json:"environment_id"`
+	FailureNames  []string `json:"failure_names"`
+	Generation    int64    `json:"generation"`
+
+	// Id A prefixed UUIDv7, e.g. `org_0198…`.
+	Id         ID                      `json:"id"`
+	NamePrefix string                  `json:"name_prefix"`
+	State      AdapterTargetState      `json:"state"`
+	SyncStatus AdapterTargetSyncStatus `json:"sync_status"`
+}
+
+// AdapterTargetState defines model for AdapterTarget.State.
+type AdapterTargetState string
+
+// AdapterTargetSyncStatus defines model for AdapterTarget.SyncStatus.
+type AdapterTargetSyncStatus string
+
+// AdapterTargetDetail defines model for AdapterTargetDetail.
+type AdapterTargetDetail struct {
+	Conflicts []AdapterConflictArtifact `json:"conflicts"`
+	Mapping   []AdapterMappingEntry     `json:"mapping"`
+	Target    AdapterTarget             `json:"target"`
+}
+
+// AdapterTargetInput defines model for AdapterTargetInput.
+type AdapterTargetInput struct {
+	DestinationKind AdapterDestinationKind `json:"destination_kind"`
+
+	// DestinationName Repository name; empty for organization destinations.
+	DestinationName  string `json:"destination_name"`
+	DestinationOwner string `json:"destination_owner"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID     `json:"environment_id"`
+	KeyIds        []ID   `json:"key_ids"`
+	NamePrefix    string `json:"name_prefix"`
+}
+
+// AdapterTargetList defines model for AdapterTargetList.
+type AdapterTargetList struct {
+	Items []AdapterTarget `json:"items"`
+}
+
+// AdapterTeardown defines model for AdapterTeardown.
+type AdapterTeardown struct {
+	Jobs     []AdapterJob `json:"jobs"`
+	Orphaned []string     `json:"orphaned"`
+}
 
 // AddRemoteRequest defines model for AddRemoteRequest.
 type AddRemoteRequest struct {
@@ -1067,6 +1705,86 @@ type AuthMethods struct {
 	LocalLoginEnabled bool                 `json:"local_login_enabled"`
 	Providers         []AuthMethodProvider `json:"providers"`
 }
+
+// CLIReauthApproveRequest defines model for CLIReauthApproveRequest.
+type CLIReauthApproveRequest struct {
+	State string `json:"state"`
+}
+
+// CLIReauthApproved defines model for CLIReauthApproved.
+type CLIReauthApproved struct {
+	// Code Single-use front-channel authorization code; never a session bearer.
+	Code string `json:"code"`
+
+	// RedirectUri Exact server-bound loopback callback URI.
+	RedirectUri string `json:"redirect_uri"`
+
+	// State Exact opaque state supplied by the initiating CLI.
+	State string `json:"state"`
+}
+
+// CLIReauthEnvironmentPolicy defines model for CLIReauthEnvironmentPolicy.
+type CLIReauthEnvironmentPolicy struct {
+	EffectiveWindowSeconds int `json:"effective_window_seconds"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId    ID   `json:"environment_id"`
+	RequiresWebauthn bool `json:"requires_webauthn"`
+}
+
+// CLIReauthRedeemRequest defines model for CLIReauthRedeemRequest.
+type CLIReauthRedeemRequest struct {
+	Code         string `json:"code"`
+	PkceVerifier string `json:"pkce_verifier"`
+}
+
+// CLIReauthRedeemed defines model for CLIReauthRedeemed.
+type CLIReauthRedeemed struct {
+	// SessionId A prefixed UUIDv7, e.g. `org_0198…`.
+	SessionId ID `json:"session_id"`
+
+	// SessionToken Rotated CLI bearer. Client stores it silently and never prints or logs it.
+	SessionToken string         `json:"session_token"`
+	Windows      []ReauthResult `json:"windows"`
+}
+
+// CLIReauthStart defines model for CLIReauthStart.
+type CLIReauthStart struct {
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt Timestamp `json:"expires_at"`
+	State     string    `json:"state"`
+}
+
+// CLIReauthStartRequest defines model for CLIReauthStartRequest.
+type CLIReauthStartRequest struct {
+	EnvironmentIds []ID                           `json:"environment_ids"`
+	Operation      CLIReauthStartRequestOperation `json:"operation"`
+	PkceChallenge  string                         `json:"pkce_challenge"`
+	Purpose        CLIReauthStartRequestPurpose   `json:"purpose"`
+
+	// RedirectUri Exact ephemeral loopback callback, http://127.0.0.1:PORT/callback or the bracketed ::1 equivalent.
+	RedirectUri string `json:"redirect_uri"`
+}
+
+// CLIReauthStartRequestOperation defines model for CLIReauthStartRequest.Operation.
+type CLIReauthStartRequestOperation string
+
+// CLIReauthStartRequestPurpose defines model for CLIReauthStartRequest.Purpose.
+type CLIReauthStartRequestPurpose string
+
+// CLIReauthTransaction defines model for CLIReauthTransaction.
+type CLIReauthTransaction struct {
+	Environments []CLIReauthEnvironmentPolicy `json:"environments"`
+
+	// ExpiresAt RFC 3339 UTC, microsecond precision.
+	ExpiresAt   Timestamp                     `json:"expires_at"`
+	Operation   CLIReauthTransactionOperation `json:"operation"`
+	RedirectUri string                        `json:"redirect_uri"`
+	State       string                        `json:"state"`
+}
+
+// CLIReauthTransactionOperation defines model for CLIReauthTransaction.Operation.
+type CLIReauthTransactionOperation string
 
 // Capability One atom from the permission ADR's CLOSED capability set. The server
 // refuses anything outside it rather than storing a row nothing can ever
@@ -1197,6 +1915,14 @@ type CopyValuesResult struct {
 		// here and bytes in the service; the grammar is ASCII, so they agree.
 		Key KeyName `json:"key"`
 	} `json:"copied"`
+}
+
+// CreateAdapterRequest defines model for CreateAdapterRequest.
+type CreateAdapterRequest struct {
+	// Credential Write-only Forgejo PAT. Never returned.
+	Credential string             `json:"credential"`
+	Origin     string             `json:"origin"`
+	Target     AdapterTargetInput `json:"target"`
 }
 
 // CreateBindingRequest A binding names exactly one service account, matched byte-for-byte on
@@ -2870,10 +3596,14 @@ type ReauthPurpose string
 
 // ReauthResult defines model for ReauthResult.
 type ReauthResult struct {
-	EnvironmentId string `json:"environment_id"`
+	EnvironmentId  string `json:"environment_id"`
+	EnvironmentIds *[]ID  `json:"environment_ids,omitempty"`
 
 	// SessionId A prefixed UUIDv7, e.g. `org_0198…`.
 	SessionId ID `json:"session_id"`
+
+	// SessionToken Rotated bearer returned only to Authorization-header callers; cookie-authenticated browser callers receive the rotated HttpOnly cookie and this field is omitted.
+	SessionToken *string `json:"session_token,omitempty"`
 
 	// SingleDecision True where the effective window is zero — the window authorizes exactly one decision.
 	SingleDecision bool `json:"single_decision"`
@@ -3066,6 +3796,33 @@ type RenameRequest struct {
 	// and is still refused by the server with `bad_request`. Clients that want
 	// to pre-validate must measure the UTF-8 encoding, not the string length.
 	Name EntityName `json:"name"`
+}
+
+// ResumeAdapterMoveRequest defines model for ResumeAdapterMoveRequest.
+type ResumeAdapterMoveRequest struct {
+	union json.RawMessage
+}
+
+// ResumeAdapterOriginMoveRequest defines model for ResumeAdapterOriginMoveRequest.
+type ResumeAdapterOriginMoveRequest struct {
+	// Credential Write-only replacement for the pending origin credential.
+	Credential string `json:"credential"`
+	Origin     string `json:"origin"`
+}
+
+// ResumeAdapterTargetMoveRequest defines model for ResumeAdapterTargetMoveRequest.
+type ResumeAdapterTargetMoveRequest struct {
+	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
+	DestinationName  string                 `json:"destination_name"`
+	DestinationOwner string                 `json:"destination_owner"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId ID     `json:"environment_id"`
+	KeyIds        []ID   `json:"key_ids"`
+	NamePrefix    string `json:"name_prefix"`
+
+	// TargetId A prefixed UUIDv7, e.g. `org_0198…`.
+	TargetId ID `json:"target_id"`
 }
 
 // RetentionHealth defines model for RetentionHealth.
@@ -3749,6 +4506,11 @@ type SessionList struct {
 	Items []ActiveSession `json:"items"`
 }
 
+// SetAdapterCredentialRequest defines model for SetAdapterCredentialRequest.
+type SetAdapterCredentialRequest struct {
+	Credential string `json:"credential"`
+}
+
 // SetCredentialPolicyRequest defines model for SetCredentialPolicyRequest.
 type SetCredentialPolicyRequest struct {
 	AllowIndefinite bool `json:"allow_indefinite"`
@@ -3881,7 +4643,40 @@ type TotpReauthRequest struct {
 	Code string `json:"code"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
-	EnvironmentId ID `json:"environment_id"`
+	EnvironmentId  *ID                         `json:"environment_id,omitempty"`
+	EnvironmentIds *[]ID                       `json:"environment_ids,omitempty"`
+	Operation      *TotpReauthRequestOperation `json:"operation,omitempty"`
+
+	// Purpose The decision a disclosure ceremony authorizes. It is part of the SIGNED
+	// binding, not a label: without it an assertion given to `reveal` would be
+	// spendable on `publish` over the same environment and keys — the same
+	// unit, a different decision, and the human agreed to only one of them.
+	Purpose *ReauthPurpose `json:"purpose,omitempty"`
+}
+
+// TotpReauthRequestOperation defines model for TotpReauthRequest.Operation.
+type TotpReauthRequestOperation string
+
+// UpdateAdapterOriginRequest defines model for UpdateAdapterOriginRequest.
+type UpdateAdapterOriginRequest struct {
+	// Credential Write-only credential for the pending origin.
+	Credential string `json:"credential"`
+	KeepRemote *bool  `json:"keep_remote,omitempty"`
+	Origin     string `json:"origin"`
+}
+
+// UpdateAdapterTargetRequest defines model for UpdateAdapterTargetRequest.
+type UpdateAdapterTargetRequest struct {
+	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
+	DestinationName  string                 `json:"destination_name"`
+	DestinationOwner string                 `json:"destination_owner"`
+
+	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
+	EnvironmentId      ID     `json:"environment_id"`
+	ExpectedGeneration int64  `json:"expected_generation"`
+	KeepRemote         *bool  `json:"keep_remote,omitempty"`
+	KeyIds             []ID   `json:"key_ids"`
+	NamePrefix         string `json:"name_prefix"`
 }
 
 // UpdateFederationIssuerRequest The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
@@ -4147,7 +4942,9 @@ type WebauthnOptions map[string]interface{}
 
 // WebauthnReauthStartRequest defines model for WebauthnReauthStartRequest.
 type WebauthnReauthStartRequest struct {
-	EnvironmentId string `json:"environment_id"`
+	AdapterOperation *WebauthnReauthStartRequestAdapterOperation `json:"adapter_operation,omitempty"`
+	EnvironmentId    string                                      `json:"environment_id"`
+	EnvironmentIds   *[]ID                                       `json:"environment_ids,omitempty"`
 
 	// KeyIds The credential ids the reauthentication is bound to.
 	KeyIds []string `json:"key_ids"`
@@ -4158,6 +4955,9 @@ type WebauthnReauthStartRequest struct {
 	// unit, a different decision, and the human agreed to only one of them.
 	Operation ReauthPurpose `json:"operation"`
 }
+
+// WebauthnReauthStartRequestAdapterOperation defines model for WebauthnReauthStartRequest.AdapterOperation.
+type WebauthnReauthStartRequestAdapterOperation string
 
 // WebauthnResponse Opaque WebAuthn authenticator response (attestation or assertion) as
 // produced by the browser, passed to the relying party as raw bytes.
@@ -4252,6 +5052,12 @@ type WorkspaceSession struct {
 	// Present only on an elevation.
 	WindowExpiresAt *Timestamp `json:"window_expires_at,omitempty"`
 }
+
+// AdapterID A prefixed UUIDv7, e.g. `org_0198…`.
+type AdapterID = ID
+
+// AdapterTargetID A prefixed UUIDv7, e.g. `org_0198…`.
+type AdapterTargetID = ID
 
 // ConnectionID A prefixed UUIDv7, e.g. `org_0198…`.
 type ConnectionID = ID
@@ -4405,6 +5211,24 @@ type RevokeOrgGrantParams struct {
 	Capability GrantCapability `form:"capability" json:"capability"`
 }
 
+// RemoveAdapterTargetParams defines parameters for RemoveAdapterTarget.
+type RemoveAdapterTargetParams struct {
+	KeepRemote *bool `form:"keep_remote,omitempty" json:"keep_remote,omitempty"`
+}
+
+// ShowAdapterTargetParams defines parameters for ShowAdapterTarget.
+type ShowAdapterTargetParams struct {
+	Format *ShowAdapterTargetParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+}
+
+// ShowAdapterTargetParamsFormat defines parameters for ShowAdapterTarget.
+type ShowAdapterTargetParamsFormat string
+
+// DeleteAdapterParams defines parameters for DeleteAdapter.
+type DeleteAdapterParams struct {
+	KeepRemote *bool `form:"keep_remote,omitempty" json:"keep_remote,omitempty"`
+}
+
 // FetchDeliveryParams defines parameters for FetchDelivery.
 type FetchDeliveryParams struct {
 	// Cursor The opaque cursor a previous fetch returned. Absent means a full
@@ -4534,6 +5358,15 @@ type ScimListUsersParams struct {
 	// half-implementation the ADR forbids. Unconstrained: see `filter`.
 	SortOrder *ScimSortOrder `form:"sortOrder,omitempty" json:"sortOrder,omitempty"`
 }
+
+// ApproveCLIReauthJSONRequestBody defines body for ApproveCLIReauth for application/json ContentType.
+type ApproveCLIReauthJSONRequestBody = CLIReauthApproveRequest
+
+// RedeemCLIReauthJSONRequestBody defines body for RedeemCLIReauth for application/json ContentType.
+type RedeemCLIReauthJSONRequestBody = CLIReauthRedeemRequest
+
+// StartCLIReauthJSONRequestBody defines body for StartCLIReauth for application/json ContentType.
+type StartCLIReauthJSONRequestBody = CLIReauthStartRequest
 
 // EstablishCredentialJSONRequestBody defines body for EstablishCredential for application/json ContentType.
 type EstablishCredentialJSONRequestBody = EstablishCredentialRequest
@@ -4666,6 +5499,27 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
 type RenameProjectJSONRequestBody = RenameRequest
+
+// ResumeAdapterMoveJSONRequestBody defines body for ResumeAdapterMove for application/json ContentType.
+type ResumeAdapterMoveJSONRequestBody = ResumeAdapterMoveRequest
+
+// UpdateAdapterTargetJSONRequestBody defines body for UpdateAdapterTarget for application/json ContentType.
+type UpdateAdapterTargetJSONRequestBody = UpdateAdapterTargetRequest
+
+// AdoptAdapterTargetNamesJSONRequestBody defines body for AdoptAdapterTargetNames for application/json ContentType.
+type AdoptAdapterTargetNamesJSONRequestBody = AdapterAdoptionRequest
+
+// CreateAdapterJSONRequestBody defines body for CreateAdapter for application/json ContentType.
+type CreateAdapterJSONRequestBody = CreateAdapterRequest
+
+// UpdateAdapterOriginJSONRequestBody defines body for UpdateAdapterOrigin for application/json ContentType.
+type UpdateAdapterOriginJSONRequestBody = UpdateAdapterOriginRequest
+
+// SetAdapterCredentialJSONRequestBody defines body for SetAdapterCredential for application/json ContentType.
+type SetAdapterCredentialJSONRequestBody = SetAdapterCredentialRequest
+
+// AddAdapterTargetJSONRequestBody defines body for AddAdapterTarget for application/json ContentType.
+type AddAdapterTargetJSONRequestBody = AdapterTargetInput
 
 // CreateEnvironmentJSONRequestBody defines body for CreateEnvironment for application/json ContentType.
 type CreateEnvironmentJSONRequestBody = CreateEnvironmentRequest
@@ -4817,11 +5671,85 @@ type ScimReplaceUserJSONRequestBody = ScimResource
 // ScimReplaceUserApplicationScimPlusJSONRequestBody defines body for ScimReplaceUser for application/scim+json ContentType.
 type ScimReplaceUserApplicationScimPlusJSONRequestBody = ScimResource
 
+// AsResumeAdapterOriginMoveRequest returns the union data inside the ResumeAdapterMoveRequest as a ResumeAdapterOriginMoveRequest
+func (t ResumeAdapterMoveRequest) AsResumeAdapterOriginMoveRequest() (ResumeAdapterOriginMoveRequest, error) {
+	var body ResumeAdapterOriginMoveRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResumeAdapterOriginMoveRequest overwrites any union data inside the ResumeAdapterMoveRequest as the provided ResumeAdapterOriginMoveRequest
+func (t *ResumeAdapterMoveRequest) FromResumeAdapterOriginMoveRequest(v ResumeAdapterOriginMoveRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResumeAdapterOriginMoveRequest performs a merge with any union data inside the ResumeAdapterMoveRequest, using the provided ResumeAdapterOriginMoveRequest
+func (t *ResumeAdapterMoveRequest) MergeResumeAdapterOriginMoveRequest(v ResumeAdapterOriginMoveRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResumeAdapterTargetMoveRequest returns the union data inside the ResumeAdapterMoveRequest as a ResumeAdapterTargetMoveRequest
+func (t ResumeAdapterMoveRequest) AsResumeAdapterTargetMoveRequest() (ResumeAdapterTargetMoveRequest, error) {
+	var body ResumeAdapterTargetMoveRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResumeAdapterTargetMoveRequest overwrites any union data inside the ResumeAdapterMoveRequest as the provided ResumeAdapterTargetMoveRequest
+func (t *ResumeAdapterMoveRequest) FromResumeAdapterTargetMoveRequest(v ResumeAdapterTargetMoveRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResumeAdapterTargetMoveRequest performs a merge with any union data inside the ResumeAdapterMoveRequest, using the provided ResumeAdapterTargetMoveRequest
+func (t *ResumeAdapterMoveRequest) MergeResumeAdapterTargetMoveRequest(v ResumeAdapterTargetMoveRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResumeAdapterMoveRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ResumeAdapterMoveRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
 	// (POST /api/v1/accounts/{principal}/credential-reset)
 	ResetCredential(w http.ResponseWriter, r *http.Request, principal ResetTargetPrincipal)
+	// ApproveCLIReauth Approve a CLI adapter ceremony with the browser session's exact bound windows.
+	// (POST /api/v1/auth/cli-reauth/approve)
+	ApproveCLIReauth(w http.ResponseWriter, r *http.Request)
+	// RedeemCLIReauth Atomically exchange code and PKCE verifier for the rotated CLI bearer.
+	// (POST /api/v1/auth/cli-reauth/redeem)
+	RedeemCLIReauth(w http.ResponseWriter, r *http.Request)
+	// StartCLIReauth Bind an adapter reauthentication handoff to the acting CLI session and PKCE challenge.
+	// (POST /api/v1/auth/cli-reauth/start)
+	StartCLIReauth(w http.ResponseWriter, r *http.Request)
+	// ShowCLIReauthTransaction Load display-only policy and exact callback metadata for a live CLI handoff.
+	// (GET /api/v1/auth/cli-reauth/transactions/{state})
+	ShowCLIReauthTransaction(w http.ResponseWriter, r *http.Request, state string)
 	// EstablishCredential Consume a credential-establishment authority and set an initial credential.
 	// (POST /api/v1/auth/credential/establish)
 	EstablishCredential(w http.ResponseWriter, r *http.Request)
@@ -5092,6 +6020,63 @@ type ServerInterface interface {
 	// RenameProject Rename a project.
 	// (PATCH /api/v1/orgs/{org}/projects/{project})
 	RenameProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CancelAdapterMove Cancel an attention-required move and reconverge the old route.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	CancelAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID)
+	// ShowAdapterMove Poll a durable adapter route move without exposing either credential.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	ShowAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID)
+	// ResumeAdapterMove Replace an attention-required pending route and resume activation.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	ResumeAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID)
+	// RemoveAdapterTarget Tombstone a target and scrub its remote names by default.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	RemoveAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params RemoveAdapterTargetParams)
+	// ShowAdapterTarget Show target state, conflicts, mapping, or canonical workflow mapping.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	ShowAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params ShowAdapterTargetParams)
+	// UpdateAdapterTarget Replace target routing fields and the complete key subset.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	UpdateAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID)
+	// AdoptAdapterTargetNames Adopt an exact enumerated conflict artifact and enqueue convergence.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions)
+	AdoptAdapterTargetNames(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID)
+	// PlanAdapterTarget Produce a value-blind name plan and a conflict artifact when needed.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan)
+	PlanAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID)
+	// SyncAdapterTarget Enqueue a newest-wins manual converge.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync)
+	SyncAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID)
+	// TestAdapterTarget Probe Forgejo version and destination identity without values or writes.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test)
+	TestAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID)
+	// ListAdapters List project deployment adapters with redacted credential metadata.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters)
+	ListAdapters(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// CreateAdapter Atomically create a Forgejo adapter, credential, and first valid target.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapters)
+	CreateAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
+	// DeleteAdapter Tombstone an adapter and scrub its remote names by default.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	DeleteAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID, params DeleteAdapterParams)
+	// ShowAdapter Show one adapter and its targets; the credential is always redacted.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	ShowAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// UpdateAdapterOrigin Replace the adapter origin after its old remote custody is resolved.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	UpdateAdapterOrigin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// RevokeAdapterCredential Destroy outbound credential custody; remote scrub may then be impossible.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+	RevokeAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// SetAdapterCredential Replace the write-only Forgejo token.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+	SetAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// ListAdapterTargets List targets nested under an adapter.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+	ListAdapterTargets(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
+	// AddAdapterTarget Add a tested target and atomically reassign adapter authority.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+	AddAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID)
 	// ListEnvironments List the project's environments, in display order.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments)
 	ListEnvironments(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID)
@@ -5413,6 +6398,30 @@ type Unimplemented struct{}
 // ResetCredential Issue a credential-establishment authority for another account.
 // (POST /api/v1/accounts/{principal}/credential-reset)
 func (_ Unimplemented) ResetCredential(w http.ResponseWriter, r *http.Request, principal ResetTargetPrincipal) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApproveCLIReauth Approve a CLI adapter ceremony with the browser session's exact bound windows.
+// (POST /api/v1/auth/cli-reauth/approve)
+func (_ Unimplemented) ApproveCLIReauth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RedeemCLIReauth Atomically exchange code and PKCE verifier for the rotated CLI bearer.
+// (POST /api/v1/auth/cli-reauth/redeem)
+func (_ Unimplemented) RedeemCLIReauth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartCLIReauth Bind an adapter reauthentication handoff to the acting CLI session and PKCE challenge.
+// (POST /api/v1/auth/cli-reauth/start)
+func (_ Unimplemented) StartCLIReauth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowCLIReauthTransaction Load display-only policy and exact callback metadata for a live CLI handoff.
+// (GET /api/v1/auth/cli-reauth/transactions/{state})
+func (_ Unimplemented) ShowCLIReauthTransaction(w http.ResponseWriter, r *http.Request, state string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5953,6 +6962,120 @@ func (_ Unimplemented) GetProject(w http.ResponseWriter, r *http.Request, org Or
 // RenameProject Rename a project.
 // (PATCH /api/v1/orgs/{org}/projects/{project})
 func (_ Unimplemented) RenameProject(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelAdapterMove Cancel an attention-required move and reconverge the old route.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+func (_ Unimplemented) CancelAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowAdapterMove Poll a durable adapter route move without exposing either credential.
+// (GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+func (_ Unimplemented) ShowAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResumeAdapterMove Replace an attention-required pending route and resume activation.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+func (_ Unimplemented) ResumeAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemoveAdapterTarget Tombstone a target and scrub its remote names by default.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+func (_ Unimplemented) RemoveAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params RemoveAdapterTargetParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowAdapterTarget Show target state, conflicts, mapping, or canonical workflow mapping.
+// (GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+func (_ Unimplemented) ShowAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params ShowAdapterTargetParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateAdapterTarget Replace target routing fields and the complete key subset.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+func (_ Unimplemented) UpdateAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AdoptAdapterTargetNames Adopt an exact enumerated conflict artifact and enqueue convergence.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions)
+func (_ Unimplemented) AdoptAdapterTargetNames(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanAdapterTarget Produce a value-blind name plan and a conflict artifact when needed.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan)
+func (_ Unimplemented) PlanAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncAdapterTarget Enqueue a newest-wins manual converge.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync)
+func (_ Unimplemented) SyncAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestAdapterTarget Probe Forgejo version and destination identity without values or writes.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test)
+func (_ Unimplemented) TestAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAdapters List project deployment adapters with redacted credential metadata.
+// (GET /api/v1/orgs/{org}/projects/{project}/adapters)
+func (_ Unimplemented) ListAdapters(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateAdapter Atomically create a Forgejo adapter, credential, and first valid target.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapters)
+func (_ Unimplemented) CreateAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteAdapter Tombstone an adapter and scrub its remote names by default.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+func (_ Unimplemented) DeleteAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID, params DeleteAdapterParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ShowAdapter Show one adapter and its targets; the credential is always redacted.
+// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+func (_ Unimplemented) ShowAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateAdapterOrigin Replace the adapter origin after its old remote custody is resolved.
+// (PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+func (_ Unimplemented) UpdateAdapterOrigin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeAdapterCredential Destroy outbound credential custody; remote scrub may then be impossible.
+// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+func (_ Unimplemented) RevokeAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAdapterCredential Replace the write-only Forgejo token.
+// (PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+func (_ Unimplemented) SetAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAdapterTargets List targets nested under an adapter.
+// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+func (_ Unimplemented) ListAdapterTargets(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddAdapterTarget Add a tested target and atomically reassign adapter authority.
+// (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+func (_ Unimplemented) AddAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6606,6 +7729,74 @@ func (siw *ServerInterfaceWrapper) ResetCredential(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResetCredential(w, r, principal)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveCLIReauth operation middleware
+func (siw *ServerInterfaceWrapper) ApproveCLIReauth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveCLIReauth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RedeemCLIReauth operation middleware
+func (siw *ServerInterfaceWrapper) RedeemCLIReauth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RedeemCLIReauth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartCLIReauth operation middleware
+func (siw *ServerInterfaceWrapper) StartCLIReauth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartCLIReauth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowCLIReauthTransaction operation middleware
+func (siw *ServerInterfaceWrapper) ShowCLIReauthTransaction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "state" -------------
+	var state string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "state", chi.URLParam(r, "state"), &state, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowCLIReauthTransaction(w, r, state)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8453,6 +9644,872 @@ func (siw *ServerInterfaceWrapper) RenameProject(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RenameProject(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelAdapterMove operation middleware
+func (siw *ServerInterfaceWrapper) CancelAdapterMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "move" -------------
+	var move ID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "move", chi.URLParam(r, "move"), &move, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "move", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelAdapterMove(w, r, org, project, move)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowAdapterMove operation middleware
+func (siw *ServerInterfaceWrapper) ShowAdapterMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "move" -------------
+	var move ID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "move", chi.URLParam(r, "move"), &move, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "move", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowAdapterMove(w, r, org, project, move)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeAdapterMove operation middleware
+func (siw *ServerInterfaceWrapper) ResumeAdapterMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "move" -------------
+	var move ID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "move", chi.URLParam(r, "move"), &move, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "move", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeAdapterMove(w, r, org, project, move)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) RemoveAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RemoveAdapterTargetParams
+
+	// ------------- Optional query parameter "keep_remote" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "keep_remote", r.URL.Query(), &params.KeepRemote, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "keep_remote"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keep_remote", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveAdapterTarget(w, r, org, project, target, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) ShowAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ShowAdapterTargetParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowAdapterTarget(w, r, org, project, target, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAdapterTarget(w, r, org, project, target)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdoptAdapterTargetNames operation middleware
+func (siw *ServerInterfaceWrapper) AdoptAdapterTargetNames(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdoptAdapterTargetNames(w, r, org, project, target)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) PlanAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanAdapterTarget(w, r, org, project, target)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) SyncAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncAdapterTarget(w, r, org, project, target)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) TestAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "target" -------------
+	var target AdapterTargetID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "target", chi.URLParam(r, "target"), &target, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "target", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestAdapterTarget(w, r, org, project, target)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAdapters operation middleware
+func (siw *ServerInterfaceWrapper) ListAdapters(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAdapters(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAdapter operation middleware
+func (siw *ServerInterfaceWrapper) CreateAdapter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAdapter(w, r, org, project)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAdapter operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAdapter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteAdapterParams
+
+	// ------------- Optional query parameter "keep_remote" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "keep_remote", r.URL.Query(), &params.KeepRemote, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "keep_remote"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "keep_remote", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAdapter(w, r, org, project, adapter, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ShowAdapter operation middleware
+func (siw *ServerInterfaceWrapper) ShowAdapter(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ShowAdapter(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateAdapterOrigin operation middleware
+func (siw *ServerInterfaceWrapper) UpdateAdapterOrigin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateAdapterOrigin(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeAdapterCredential operation middleware
+func (siw *ServerInterfaceWrapper) RevokeAdapterCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeAdapterCredential(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAdapterCredential operation middleware
+func (siw *ServerInterfaceWrapper) SetAdapterCredential(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAdapterCredential(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAdapterTargets operation middleware
+func (siw *ServerInterfaceWrapper) ListAdapterTargets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAdapterTargets(w, r, org, project, adapter)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddAdapterTarget operation middleware
+func (siw *ServerInterfaceWrapper) AddAdapterTarget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "org" -------------
+	var org OrgID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "org", chi.URLParam(r, "org"), &org, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "org", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "project" -------------
+	var project ProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "project", chi.URLParam(r, "project"), &project, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "adapter" -------------
+	var adapter AdapterID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "adapter", chi.URLParam(r, "adapter"), &adapter, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "adapter", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddAdapterTarget(w, r, org, project, adapter)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13064,6 +15121,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/auth/reauth/totp", wrapper.ReauthTotp)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli-reauth/start", wrapper.StartCLIReauth)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/auth/cli-reauth/transactions/{state}", wrapper.ShowCLIReauthTransaction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli-reauth/approve", wrapper.ApproveCLIReauth)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/auth/cli-reauth/redeem", wrapper.RedeemCLIReauth)
+	})
+	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/api/v1/auth/totp", wrapper.RemoveTotp)
 	})
 	r.Group(func(r chi.Router) {
@@ -13621,6 +15690,63 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/instance/rotate-token-key", wrapper.RotateTokenKey)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters", wrapper.ListAdapters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters", wrapper.CreateAdapter)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}", wrapper.DeleteAdapter)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}", wrapper.ShowAdapter)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}", wrapper.UpdateAdapterOrigin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}", wrapper.CancelAdapterMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}", wrapper.ShowAdapterMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}", wrapper.ResumeAdapterMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential", wrapper.RevokeAdapterCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential", wrapper.SetAdapterCredential)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets", wrapper.ListAdapterTargets)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets", wrapper.AddAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}", wrapper.RemoveAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}", wrapper.ShowAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}", wrapper.UpdateAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan", wrapper.PlanAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync", wrapper.SyncAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test", wrapper.TestAdapterTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions", wrapper.AdoptAdapterTargetNames)
+	})
 
 	return r
 }
@@ -13714,6 +15840,347 @@ func (response ResetCredential429JSONResponse) VisitResetCredentialResponse(w ht
 type ResetCredential500JSONResponse struct{ InternalJSONResponse }
 
 func (response ResetCredential500JSONResponse) VisitResetCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauthRequestObject struct {
+	Body *ApproveCLIReauthJSONRequestBody
+}
+
+type ApproveCLIReauthResponseObject interface {
+	VisitApproveCLIReauthResponse(w http.ResponseWriter) error
+}
+
+type ApproveCLIReauth200JSONResponse CLIReauthApproved
+
+func (response ApproveCLIReauth200JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauth400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApproveCLIReauth400JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauth401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ApproveCLIReauth401JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauth404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ApproveCLIReauth404JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauth409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ApproveCLIReauth409JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveCLIReauth500JSONResponse struct{ InternalJSONResponse }
+
+func (response ApproveCLIReauth500JSONResponse) VisitApproveCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemCLIReauthRequestObject struct {
+	Body *RedeemCLIReauthJSONRequestBody
+}
+
+type RedeemCLIReauthResponseObject interface {
+	VisitRedeemCLIReauthResponse(w http.ResponseWriter) error
+}
+
+type RedeemCLIReauth200JSONResponse CLIReauthRedeemed
+
+func (response RedeemCLIReauth200JSONResponse) VisitRedeemCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemCLIReauth400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RedeemCLIReauth400JSONResponse) VisitRedeemCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemCLIReauth401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RedeemCLIReauth401JSONResponse) VisitRedeemCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemCLIReauth409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RedeemCLIReauth409JSONResponse) VisitRedeemCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RedeemCLIReauth500JSONResponse struct{ InternalJSONResponse }
+
+func (response RedeemCLIReauth500JSONResponse) VisitRedeemCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauthRequestObject struct {
+	Body *StartCLIReauthJSONRequestBody
+}
+
+type StartCLIReauthResponseObject interface {
+	VisitStartCLIReauthResponse(w http.ResponseWriter) error
+}
+
+type StartCLIReauth201JSONResponse CLIReauthStart
+
+func (response StartCLIReauth201JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauth400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response StartCLIReauth400JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauth401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response StartCLIReauth401JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauth404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartCLIReauth404JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauth429JSONResponse struct{ TooManyRequestsJSONResponse }
+
+func (response StartCLIReauth429JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", fmt.Sprint(response.Headers.RetryAfter))
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartCLIReauth500JSONResponse struct{ InternalJSONResponse }
+
+func (response StartCLIReauth500JSONResponse) VisitStartCLIReauthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowCLIReauthTransactionRequestObject struct {
+	State string `json:"state"`
+}
+
+type ShowCLIReauthTransactionResponseObject interface {
+	VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error
+}
+
+type ShowCLIReauthTransaction200JSONResponse CLIReauthTransaction
+
+func (response ShowCLIReauthTransaction200JSONResponse) VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowCLIReauthTransaction401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowCLIReauthTransaction401JSONResponse) VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowCLIReauthTransaction404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowCLIReauthTransaction404JSONResponse) VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowCLIReauthTransaction409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ShowCLIReauthTransaction409JSONResponse) VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowCLIReauthTransaction500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowCLIReauthTransaction500JSONResponse) VisitShowCLIReauthTransactionResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -22219,6 +24686,1673 @@ func (response RenameProject429JSONResponse) VisitRenameProjectResponse(w http.R
 type RenameProject500JSONResponse struct{ InternalJSONResponse }
 
 func (response RenameProject500JSONResponse) VisitRenameProjectResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMoveRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Move    ID        `json:"move"`
+}
+
+type CancelAdapterMoveResponseObject interface {
+	VisitCancelAdapterMoveResponse(w http.ResponseWriter) error
+}
+
+type CancelAdapterMove202JSONResponse AdapterMove
+
+func (response CancelAdapterMove202JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMove401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CancelAdapterMove401JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMove403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CancelAdapterMove403JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMove404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CancelAdapterMove404JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMove409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CancelAdapterMove409JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CancelAdapterMove500JSONResponse struct{ InternalJSONResponse }
+
+func (response CancelAdapterMove500JSONResponse) VisitCancelAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterMoveRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Move    ID        `json:"move"`
+}
+
+type ShowAdapterMoveResponseObject interface {
+	VisitShowAdapterMoveResponse(w http.ResponseWriter) error
+}
+
+type ShowAdapterMove200JSONResponse AdapterMove
+
+func (response ShowAdapterMove200JSONResponse) VisitShowAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterMove401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowAdapterMove401JSONResponse) VisitShowAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterMove404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowAdapterMove404JSONResponse) VisitShowAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterMove500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowAdapterMove500JSONResponse) VisitShowAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMoveRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Move    ID        `json:"move"`
+	Body    *ResumeAdapterMoveJSONRequestBody
+}
+
+type ResumeAdapterMoveResponseObject interface {
+	VisitResumeAdapterMoveResponse(w http.ResponseWriter) error
+}
+
+type ResumeAdapterMove202JSONResponse AdapterMove
+
+func (response ResumeAdapterMove202JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ResumeAdapterMove400JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ResumeAdapterMove401JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ResumeAdapterMove403JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ResumeAdapterMove404JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove409JSONResponse struct{ ConflictJSONResponse }
+
+func (response ResumeAdapterMove409JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResumeAdapterMove500JSONResponse struct{ InternalJSONResponse }
+
+func (response ResumeAdapterMove500JSONResponse) VisitResumeAdapterMoveResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+	Params  RemoveAdapterTargetParams
+}
+
+type RemoveAdapterTargetResponseObject interface {
+	VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type RemoveAdapterTarget200JSONResponse AdapterTeardown
+
+func (response RemoveAdapterTarget200JSONResponse) VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RemoveAdapterTarget401JSONResponse) VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RemoveAdapterTarget404JSONResponse) VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveAdapterTarget409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RemoveAdapterTarget409JSONResponse) VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RemoveAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response RemoveAdapterTarget500JSONResponse) VisitRemoveAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+	Params  ShowAdapterTargetParams
+}
+
+type ShowAdapterTargetResponseObject interface {
+	VisitShowAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type ShowAdapterTarget200JSONResponse AdapterTargetDetail
+
+func (response ShowAdapterTarget200JSONResponse) VisitShowAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterTarget200TextResponse string
+
+func (response ShowAdapterTarget200TextResponse) VisitShowAdapterTargetResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response)))
+	return err
+}
+
+type ShowAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowAdapterTarget401JSONResponse) VisitShowAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowAdapterTarget404JSONResponse) VisitShowAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowAdapterTarget500JSONResponse) VisitShowAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+	Body    *UpdateAdapterTargetJSONRequestBody
+}
+
+type UpdateAdapterTargetResponseObject interface {
+	VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type UpdateAdapterTarget200JSONResponse AdapterTarget
+
+func (response UpdateAdapterTarget200JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget202JSONResponse AdapterMove
+
+func (response UpdateAdapterTarget202JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateAdapterTarget400JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateAdapterTarget401JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateAdapterTarget403JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateAdapterTarget404JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateAdapterTarget409JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateAdapterTarget500JSONResponse) VisitUpdateAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNamesRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+	Body    *AdoptAdapterTargetNamesJSONRequestBody
+}
+
+type AdoptAdapterTargetNamesResponseObject interface {
+	VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error
+}
+
+type AdoptAdapterTargetNames202JSONResponse AdapterJob
+
+func (response AdoptAdapterTargetNames202JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AdoptAdapterTargetNames400JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AdoptAdapterTargetNames401JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AdoptAdapterTargetNames403JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AdoptAdapterTargetNames404JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AdoptAdapterTargetNames409JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AdoptAdapterTargetNames500JSONResponse struct{ InternalJSONResponse }
+
+func (response AdoptAdapterTargetNames500JSONResponse) VisitAdoptAdapterTargetNamesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PlanAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+}
+
+type PlanAdapterTargetResponseObject interface {
+	VisitPlanAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type PlanAdapterTarget200JSONResponse AdapterPlan
+
+func (response PlanAdapterTarget200JSONResponse) VisitPlanAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PlanAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response PlanAdapterTarget401JSONResponse) VisitPlanAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PlanAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PlanAdapterTarget404JSONResponse) VisitPlanAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PlanAdapterTarget409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PlanAdapterTarget409JSONResponse) VisitPlanAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PlanAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response PlanAdapterTarget500JSONResponse) VisitPlanAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+}
+
+type SyncAdapterTargetResponseObject interface {
+	VisitSyncAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type SyncAdapterTarget202JSONResponse AdapterJob
+
+func (response SyncAdapterTarget202JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SyncAdapterTarget401JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTarget403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SyncAdapterTarget403JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SyncAdapterTarget404JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTarget409JSONResponse struct{ ConflictJSONResponse }
+
+func (response SyncAdapterTarget409JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response SyncAdapterTarget500JSONResponse) VisitSyncAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestAdapterTargetRequestObject struct {
+	Org     OrgID           `json:"org"`
+	Project ProjectID       `json:"project"`
+	Target  AdapterTargetID `json:"target"`
+}
+
+type TestAdapterTargetResponseObject interface {
+	VisitTestAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type TestAdapterTarget200JSONResponse AdapterConnection
+
+func (response TestAdapterTarget200JSONResponse) VisitTestAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response TestAdapterTarget401JSONResponse) VisitTestAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response TestAdapterTarget404JSONResponse) VisitTestAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type TestAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response TestAdapterTarget500JSONResponse) VisitTestAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdaptersRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+}
+
+type ListAdaptersResponseObject interface {
+	VisitListAdaptersResponse(w http.ResponseWriter) error
+}
+
+type ListAdapters200JSONResponse AdapterList
+
+func (response ListAdapters200JSONResponse) VisitListAdaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapters401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListAdapters401JSONResponse) VisitListAdaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapters404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListAdapters404JSONResponse) VisitListAdaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapters500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListAdapters500JSONResponse) VisitListAdaptersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapterRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Body    *CreateAdapterJSONRequestBody
+}
+
+type CreateAdapterResponseObject interface {
+	VisitCreateAdapterResponse(w http.ResponseWriter) error
+}
+
+type CreateAdapter201JSONResponse Adapter
+
+func (response CreateAdapter201JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateAdapter400JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response CreateAdapter401JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateAdapter403JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateAdapter404JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter409JSONResponse struct{ ConflictJSONResponse }
+
+func (response CreateAdapter409JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateAdapter500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateAdapter500JSONResponse) VisitCreateAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAdapterRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+	Params  DeleteAdapterParams
+}
+
+type DeleteAdapterResponseObject interface {
+	VisitDeleteAdapterResponse(w http.ResponseWriter) error
+}
+
+type DeleteAdapter200JSONResponse AdapterTeardown
+
+func (response DeleteAdapter200JSONResponse) VisitDeleteAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAdapter401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response DeleteAdapter401JSONResponse) VisitDeleteAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAdapter404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteAdapter404JSONResponse) VisitDeleteAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAdapter409JSONResponse struct{ ConflictJSONResponse }
+
+func (response DeleteAdapter409JSONResponse) VisitDeleteAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteAdapter500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteAdapter500JSONResponse) VisitDeleteAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapterRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+}
+
+type ShowAdapterResponseObject interface {
+	VisitShowAdapterResponse(w http.ResponseWriter) error
+}
+
+type ShowAdapter200JSONResponse Adapter
+
+func (response ShowAdapter200JSONResponse) VisitShowAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapter401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ShowAdapter401JSONResponse) VisitShowAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapter404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ShowAdapter404JSONResponse) VisitShowAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ShowAdapter500JSONResponse struct{ InternalJSONResponse }
+
+func (response ShowAdapter500JSONResponse) VisitShowAdapterResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOriginRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+	Body    *UpdateAdapterOriginJSONRequestBody
+}
+
+type UpdateAdapterOriginResponseObject interface {
+	VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error
+}
+
+type UpdateAdapterOrigin202JSONResponse AdapterMove
+
+func (response UpdateAdapterOrigin202JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateAdapterOrigin400JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response UpdateAdapterOrigin401JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateAdapterOrigin403JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateAdapterOrigin404JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin409JSONResponse struct{ ConflictJSONResponse }
+
+func (response UpdateAdapterOrigin409JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateAdapterOrigin500JSONResponse struct{ InternalJSONResponse }
+
+func (response UpdateAdapterOrigin500JSONResponse) VisitUpdateAdapterOriginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAdapterCredentialRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+}
+
+type RevokeAdapterCredentialResponseObject interface {
+	VisitRevokeAdapterCredentialResponse(w http.ResponseWriter) error
+}
+
+type RevokeAdapterCredential204Response struct {
+}
+
+func (response RevokeAdapterCredential204Response) VisitRevokeAdapterCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeAdapterCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response RevokeAdapterCredential401JSONResponse) VisitRevokeAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAdapterCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokeAdapterCredential404JSONResponse) VisitRevokeAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeAdapterCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response RevokeAdapterCredential500JSONResponse) VisitRevokeAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredentialRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+	Body    *SetAdapterCredentialJSONRequestBody
+}
+
+type SetAdapterCredentialResponseObject interface {
+	VisitSetAdapterCredentialResponse(w http.ResponseWriter) error
+}
+
+type SetAdapterCredential204Response struct {
+}
+
+func (response SetAdapterCredential204Response) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetAdapterCredential400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetAdapterCredential400JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredential401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response SetAdapterCredential401JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredential403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetAdapterCredential403JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredential404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetAdapterCredential404JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredential409JSONResponse struct{ ConflictJSONResponse }
+
+func (response SetAdapterCredential409JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAdapterCredential500JSONResponse struct{ InternalJSONResponse }
+
+func (response SetAdapterCredential500JSONResponse) VisitSetAdapterCredentialResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapterTargetsRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+}
+
+type ListAdapterTargetsResponseObject interface {
+	VisitListAdapterTargetsResponse(w http.ResponseWriter) error
+}
+
+type ListAdapterTargets200JSONResponse AdapterTargetList
+
+func (response ListAdapterTargets200JSONResponse) VisitListAdapterTargetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapterTargets401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response ListAdapterTargets401JSONResponse) VisitListAdapterTargetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapterTargets404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListAdapterTargets404JSONResponse) VisitListAdapterTargetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAdapterTargets500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListAdapterTargets500JSONResponse) VisitListAdapterTargetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTargetRequestObject struct {
+	Org     OrgID     `json:"org"`
+	Project ProjectID `json:"project"`
+	Adapter AdapterID `json:"adapter"`
+	Body    *AddAdapterTargetJSONRequestBody
+}
+
+type AddAdapterTargetResponseObject interface {
+	VisitAddAdapterTargetResponse(w http.ResponseWriter) error
+}
+
+type AddAdapterTarget201JSONResponse AdapterTarget
+
+func (response AddAdapterTarget201JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AddAdapterTarget400JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget401JSONResponse struct{ UnauthenticatedJSONResponse }
+
+func (response AddAdapterTarget401JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AddAdapterTarget403JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AddAdapterTarget404JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AddAdapterTarget409JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AddAdapterTarget500JSONResponse struct{ InternalJSONResponse }
+
+func (response AddAdapterTarget500JSONResponse) VisitAddAdapterTargetResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -32401,6 +36535,18 @@ type StrictServerInterface interface {
 	// ResetCredential Issue a credential-establishment authority for another account.
 	// (POST /api/v1/accounts/{principal}/credential-reset)
 	ResetCredential(ctx context.Context, request ResetCredentialRequestObject) (ResetCredentialResponseObject, error)
+	// ApproveCLIReauth Approve a CLI adapter ceremony with the browser session's exact bound windows.
+	// (POST /api/v1/auth/cli-reauth/approve)
+	ApproveCLIReauth(ctx context.Context, request ApproveCLIReauthRequestObject) (ApproveCLIReauthResponseObject, error)
+	// RedeemCLIReauth Atomically exchange code and PKCE verifier for the rotated CLI bearer.
+	// (POST /api/v1/auth/cli-reauth/redeem)
+	RedeemCLIReauth(ctx context.Context, request RedeemCLIReauthRequestObject) (RedeemCLIReauthResponseObject, error)
+	// StartCLIReauth Bind an adapter reauthentication handoff to the acting CLI session and PKCE challenge.
+	// (POST /api/v1/auth/cli-reauth/start)
+	StartCLIReauth(ctx context.Context, request StartCLIReauthRequestObject) (StartCLIReauthResponseObject, error)
+	// ShowCLIReauthTransaction Load display-only policy and exact callback metadata for a live CLI handoff.
+	// (GET /api/v1/auth/cli-reauth/transactions/{state})
+	ShowCLIReauthTransaction(ctx context.Context, request ShowCLIReauthTransactionRequestObject) (ShowCLIReauthTransactionResponseObject, error)
 	// EstablishCredential Consume a credential-establishment authority and set an initial credential.
 	// (POST /api/v1/auth/credential/establish)
 	EstablishCredential(ctx context.Context, request EstablishCredentialRequestObject) (EstablishCredentialResponseObject, error)
@@ -32671,6 +36817,63 @@ type StrictServerInterface interface {
 	// RenameProject Rename a project.
 	// (PATCH /api/v1/orgs/{org}/projects/{project})
 	RenameProject(ctx context.Context, request RenameProjectRequestObject) (RenameProjectResponseObject, error)
+	// CancelAdapterMove Cancel an attention-required move and reconverge the old route.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	CancelAdapterMove(ctx context.Context, request CancelAdapterMoveRequestObject) (CancelAdapterMoveResponseObject, error)
+	// ShowAdapterMove Poll a durable adapter route move without exposing either credential.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	ShowAdapterMove(ctx context.Context, request ShowAdapterMoveRequestObject) (ShowAdapterMoveResponseObject, error)
+	// ResumeAdapterMove Replace an attention-required pending route and resume activation.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move})
+	ResumeAdapterMove(ctx context.Context, request ResumeAdapterMoveRequestObject) (ResumeAdapterMoveResponseObject, error)
+	// RemoveAdapterTarget Tombstone a target and scrub its remote names by default.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	RemoveAdapterTarget(ctx context.Context, request RemoveAdapterTargetRequestObject) (RemoveAdapterTargetResponseObject, error)
+	// ShowAdapterTarget Show target state, conflicts, mapping, or canonical workflow mapping.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	ShowAdapterTarget(ctx context.Context, request ShowAdapterTargetRequestObject) (ShowAdapterTargetResponseObject, error)
+	// UpdateAdapterTarget Replace target routing fields and the complete key subset.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target})
+	UpdateAdapterTarget(ctx context.Context, request UpdateAdapterTargetRequestObject) (UpdateAdapterTargetResponseObject, error)
+	// AdoptAdapterTargetNames Adopt an exact enumerated conflict artifact and enqueue convergence.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions)
+	AdoptAdapterTargetNames(ctx context.Context, request AdoptAdapterTargetNamesRequestObject) (AdoptAdapterTargetNamesResponseObject, error)
+	// PlanAdapterTarget Produce a value-blind name plan and a conflict artifact when needed.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan)
+	PlanAdapterTarget(ctx context.Context, request PlanAdapterTargetRequestObject) (PlanAdapterTargetResponseObject, error)
+	// SyncAdapterTarget Enqueue a newest-wins manual converge.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync)
+	SyncAdapterTarget(ctx context.Context, request SyncAdapterTargetRequestObject) (SyncAdapterTargetResponseObject, error)
+	// TestAdapterTarget Probe Forgejo version and destination identity without values or writes.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test)
+	TestAdapterTarget(ctx context.Context, request TestAdapterTargetRequestObject) (TestAdapterTargetResponseObject, error)
+	// ListAdapters List project deployment adapters with redacted credential metadata.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters)
+	ListAdapters(ctx context.Context, request ListAdaptersRequestObject) (ListAdaptersResponseObject, error)
+	// CreateAdapter Atomically create a Forgejo adapter, credential, and first valid target.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapters)
+	CreateAdapter(ctx context.Context, request CreateAdapterRequestObject) (CreateAdapterResponseObject, error)
+	// DeleteAdapter Tombstone an adapter and scrub its remote names by default.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	DeleteAdapter(ctx context.Context, request DeleteAdapterRequestObject) (DeleteAdapterResponseObject, error)
+	// ShowAdapter Show one adapter and its targets; the credential is always redacted.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	ShowAdapter(ctx context.Context, request ShowAdapterRequestObject) (ShowAdapterResponseObject, error)
+	// UpdateAdapterOrigin Replace the adapter origin after its old remote custody is resolved.
+	// (PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter})
+	UpdateAdapterOrigin(ctx context.Context, request UpdateAdapterOriginRequestObject) (UpdateAdapterOriginResponseObject, error)
+	// RevokeAdapterCredential Destroy outbound credential custody; remote scrub may then be impossible.
+	// (DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+	RevokeAdapterCredential(ctx context.Context, request RevokeAdapterCredentialRequestObject) (RevokeAdapterCredentialResponseObject, error)
+	// SetAdapterCredential Replace the write-only Forgejo token.
+	// (PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential)
+	SetAdapterCredential(ctx context.Context, request SetAdapterCredentialRequestObject) (SetAdapterCredentialResponseObject, error)
+	// ListAdapterTargets List targets nested under an adapter.
+	// (GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+	ListAdapterTargets(ctx context.Context, request ListAdapterTargetsRequestObject) (ListAdapterTargetsResponseObject, error)
+	// AddAdapterTarget Add a tested target and atomically reassign adapter authority.
+	// (POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets)
+	AddAdapterTarget(ctx context.Context, request AddAdapterTargetRequestObject) (AddAdapterTargetResponseObject, error)
 	// ListEnvironments List the project's environments, in display order.
 	// (GET /api/v1/orgs/{org}/projects/{project}/environments)
 	ListEnvironments(ctx context.Context, request ListEnvironmentsRequestObject) (ListEnvironmentsResponseObject, error)
@@ -33043,6 +37246,125 @@ func (sh *strictHandler) ResetCredential(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ResetCredentialResponseObject); ok {
 		if err := validResponse.VisitResetCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveCLIReauth operation middleware
+func (sh *strictHandler) ApproveCLIReauth(w http.ResponseWriter, r *http.Request) {
+	var request ApproveCLIReauthRequestObject
+
+	var body ApproveCLIReauthJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveCLIReauth(ctx, request.(ApproveCLIReauthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveCLIReauth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveCLIReauthResponseObject); ok {
+		if err := validResponse.VisitApproveCLIReauthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RedeemCLIReauth operation middleware
+func (sh *strictHandler) RedeemCLIReauth(w http.ResponseWriter, r *http.Request) {
+	var request RedeemCLIReauthRequestObject
+
+	var body RedeemCLIReauthJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RedeemCLIReauth(ctx, request.(RedeemCLIReauthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RedeemCLIReauth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RedeemCLIReauthResponseObject); ok {
+		if err := validResponse.VisitRedeemCLIReauthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartCLIReauth operation middleware
+func (sh *strictHandler) StartCLIReauth(w http.ResponseWriter, r *http.Request) {
+	var request StartCLIReauthRequestObject
+
+	var body StartCLIReauthJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartCLIReauth(ctx, request.(StartCLIReauthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartCLIReauth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartCLIReauthResponseObject); ok {
+		if err := validResponse.VisitStartCLIReauthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowCLIReauthTransaction operation middleware
+func (sh *strictHandler) ShowCLIReauthTransaction(w http.ResponseWriter, r *http.Request, state string) {
+	var request ShowCLIReauthTransactionRequestObject
+
+	request.State = state
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowCLIReauthTransaction(ctx, request.(ShowCLIReauthTransactionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowCLIReauthTransaction")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowCLIReauthTransactionResponseObject); ok {
+		if err := validResponse.VisitShowCLIReauthTransactionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -35596,6 +39918,588 @@ func (sh *strictHandler) RenameProject(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RenameProjectResponseObject); ok {
 		if err := validResponse.VisitRenameProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelAdapterMove operation middleware
+func (sh *strictHandler) CancelAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	var request CancelAdapterMoveRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Move = move
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelAdapterMove(ctx, request.(CancelAdapterMoveRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelAdapterMove")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelAdapterMoveResponseObject); ok {
+		if err := validResponse.VisitCancelAdapterMoveResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowAdapterMove operation middleware
+func (sh *strictHandler) ShowAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	var request ShowAdapterMoveRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Move = move
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowAdapterMove(ctx, request.(ShowAdapterMoveRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowAdapterMove")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowAdapterMoveResponseObject); ok {
+		if err := validResponse.VisitShowAdapterMoveResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResumeAdapterMove operation middleware
+func (sh *strictHandler) ResumeAdapterMove(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, move ID) {
+	var request ResumeAdapterMoveRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Move = move
+
+	var body ResumeAdapterMoveJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResumeAdapterMove(ctx, request.(ResumeAdapterMoveRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResumeAdapterMove")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResumeAdapterMoveResponseObject); ok {
+		if err := validResponse.VisitResumeAdapterMoveResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RemoveAdapterTarget operation middleware
+func (sh *strictHandler) RemoveAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params RemoveAdapterTargetParams) {
+	var request RemoveAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RemoveAdapterTarget(ctx, request.(RemoveAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RemoveAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RemoveAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitRemoveAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowAdapterTarget operation middleware
+func (sh *strictHandler) ShowAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID, params ShowAdapterTargetParams) {
+	var request ShowAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowAdapterTarget(ctx, request.(ShowAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitShowAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAdapterTarget operation middleware
+func (sh *strictHandler) UpdateAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	var request UpdateAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+
+	var body UpdateAdapterTargetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAdapterTarget(ctx, request.(UpdateAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitUpdateAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AdoptAdapterTargetNames operation middleware
+func (sh *strictHandler) AdoptAdapterTargetNames(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	var request AdoptAdapterTargetNamesRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+
+	var body AdoptAdapterTargetNamesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AdoptAdapterTargetNames(ctx, request.(AdoptAdapterTargetNamesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AdoptAdapterTargetNames")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AdoptAdapterTargetNamesResponseObject); ok {
+		if err := validResponse.VisitAdoptAdapterTargetNamesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PlanAdapterTarget operation middleware
+func (sh *strictHandler) PlanAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	var request PlanAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PlanAdapterTarget(ctx, request.(PlanAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PlanAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PlanAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitPlanAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncAdapterTarget operation middleware
+func (sh *strictHandler) SyncAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	var request SyncAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncAdapterTarget(ctx, request.(SyncAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitSyncAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestAdapterTarget operation middleware
+func (sh *strictHandler) TestAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, target AdapterTargetID) {
+	var request TestAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Target = target
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestAdapterTarget(ctx, request.(TestAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitTestAdapterTargetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAdapters operation middleware
+func (sh *strictHandler) ListAdapters(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request ListAdaptersRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAdapters(ctx, request.(ListAdaptersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAdapters")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAdaptersResponseObject); ok {
+		if err := validResponse.VisitListAdaptersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateAdapter operation middleware
+func (sh *strictHandler) CreateAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID) {
+	var request CreateAdapterRequestObject
+
+	request.Org = org
+	request.Project = project
+
+	var body CreateAdapterJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateAdapter(ctx, request.(CreateAdapterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateAdapter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateAdapterResponseObject); ok {
+		if err := validResponse.VisitCreateAdapterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteAdapter operation middleware
+func (sh *strictHandler) DeleteAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID, params DeleteAdapterParams) {
+	var request DeleteAdapterRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteAdapter(ctx, request.(DeleteAdapterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteAdapter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteAdapterResponseObject); ok {
+		if err := validResponse.VisitDeleteAdapterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ShowAdapter operation middleware
+func (sh *strictHandler) ShowAdapter(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request ShowAdapterRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ShowAdapter(ctx, request.(ShowAdapterRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ShowAdapter")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ShowAdapterResponseObject); ok {
+		if err := validResponse.VisitShowAdapterResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateAdapterOrigin operation middleware
+func (sh *strictHandler) UpdateAdapterOrigin(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request UpdateAdapterOriginRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	var body UpdateAdapterOriginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateAdapterOrigin(ctx, request.(UpdateAdapterOriginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateAdapterOrigin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateAdapterOriginResponseObject); ok {
+		if err := validResponse.VisitUpdateAdapterOriginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeAdapterCredential operation middleware
+func (sh *strictHandler) RevokeAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request RevokeAdapterCredentialRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeAdapterCredential(ctx, request.(RevokeAdapterCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeAdapterCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeAdapterCredentialResponseObject); ok {
+		if err := validResponse.VisitRevokeAdapterCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAdapterCredential operation middleware
+func (sh *strictHandler) SetAdapterCredential(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request SetAdapterCredentialRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	var body SetAdapterCredentialJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAdapterCredential(ctx, request.(SetAdapterCredentialRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAdapterCredential")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAdapterCredentialResponseObject); ok {
+		if err := validResponse.VisitSetAdapterCredentialResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAdapterTargets operation middleware
+func (sh *strictHandler) ListAdapterTargets(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request ListAdapterTargetsRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAdapterTargets(ctx, request.(ListAdapterTargetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAdapterTargets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAdapterTargetsResponseObject); ok {
+		if err := validResponse.VisitListAdapterTargetsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AddAdapterTarget operation middleware
+func (sh *strictHandler) AddAdapterTarget(w http.ResponseWriter, r *http.Request, org OrgID, project ProjectID, adapter AdapterID) {
+	var request AddAdapterTargetRequestObject
+
+	request.Org = org
+	request.Project = project
+	request.Adapter = adapter
+
+	var body AddAdapterTargetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AddAdapterTarget(ctx, request.(AddAdapterTargetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AddAdapterTarget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AddAdapterTargetResponseObject); ok {
+		if err := validResponse.VisitAddAdapterTargetResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

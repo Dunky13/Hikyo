@@ -414,8 +414,9 @@ DELETE FROM sessions WHERE provider_id = $1;
 INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-     consumed_at, created_at, bound_operation, bound_key_set)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13)
+     consumed_at, created_at, bound_operation, bound_key_set, bound_purpose,
+     bound_environment_set)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13, $14, $15)
 ON CONFLICT (session_id, environment_id) DO UPDATE SET
     id = excluded.id,
     ceremony_id = excluded.ceremony_id,
@@ -428,7 +429,9 @@ ON CONFLICT (session_id, environment_id) DO UPDATE SET
     consumed_at = NULL,
     created_at = excluded.created_at,
     bound_operation = excluded.bound_operation,
-    bound_key_set = excluded.bound_key_set;
+    bound_key_set = excluded.bound_key_set,
+    bound_purpose = excluded.bound_purpose,
+    bound_environment_set = excluded.bound_environment_set;
 
 -- Start resolves the provider by slug for an enabled provider only: a login,
 -- link or reauth may only begin against a provider that is currently serving.
@@ -449,7 +452,8 @@ FROM oidc_providers WHERE slug = $1 AND enabled = 1;
 -- name: GetReauthWindow :one
 SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
        authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-       consumed_at, created_at, bound_operation, bound_key_set
+       consumed_at, created_at, bound_operation, bound_key_set, bound_purpose,
+       bound_environment_set
 FROM reauth_windows WHERE session_id = $1 AND environment_id = $2;
 
 -- Slide the idle window clock on a sliding (non single-decision) window. The hard
@@ -584,6 +588,13 @@ WHERE id = 1;
 -- name: MarkAllPrincipalsUnreconciled :exec
 UPDATE principals SET reconciled_epoch = 0;
 
+-- Restored provider PATs are never trusted: unlike Hikyo authentication
+-- artifacts they carry no local epoch the provider checks, so restore must
+-- destroy custody and require operator re-entry.
+-- hikyo:authn-resolution
+-- name: InvalidateRestoredAdapterCredentials :exec
+UPDATE adapters SET credential_ciphertext = NULL, credential_set_at = NULL;
+
 -- The operator's commit covers `manual` origins ONLY (#73, scim-provisioning
 -- ADR section 9.1). A restored `scim` origin is a claim about what an identity
 -- provider asserted BEFORE the backup was taken, and the whole point of the
@@ -655,3 +666,24 @@ WHERE principals.id = $1;
 SELECT principals.id, principals.kind FROM principals
 WHERE principals.reconciled_epoch < (SELECT restore_epoch FROM auth_instance_state WHERE auth_instance_state.id = 1)
 ORDER BY principals.id;
+
+-- hikyo:authn-resolution
+-- name: InsertCLIReauthHandoff :exec
+INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,operation,environment_set,pkce_challenge,redirect_uri,created_at,expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10);
+
+-- hikyo:authn-resolution
+-- name: CLIReauthHandoffByState :one
+SELECT * FROM cli_reauth_handoffs WHERE state_verifier = $1;
+
+-- hikyo:authn-resolution
+-- name: CLIReauthHandoffByCode :one
+SELECT * FROM cli_reauth_handoffs WHERE code_verifier = $1;
+
+-- hikyo:authn-resolution
+-- name: ApproveCLIReauthHandoff :execrows
+UPDATE cli_reauth_handoffs SET code_verifier=$1,approved_windows=$2 WHERE id=$3 AND code_verifier IS NULL AND consumed_at IS NULL;
+
+-- hikyo:authn-resolution
+-- name: ConsumeCLIReauthHandoff :execrows
+UPDATE cli_reauth_handoffs SET consumed_at=$1 WHERE id=$2 AND code_verifier IS NOT NULL AND consumed_at IS NULL;

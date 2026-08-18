@@ -12,6 +12,230 @@ export const zId = z.string().min(3).max(64).regex(/^[a-z]{2,8}_[0-9a-fA-F-]{36}
  */
 export const zTimestamp = z.iso.datetime();
 
+export const zAdapterDestinationKind = z.enum(['repository', 'organization']);
+
+export const zAdapterTargetInput = z.object({
+    environment_id: zId,
+    destination_kind: zAdapterDestinationKind,
+    destination_owner: z.string().min(1).max(255),
+    destination_name: z.string().max(255),
+    name_prefix: z.string().max(64).regex(/^(?:[A-Z_][A-Z0-9_]*)?$/),
+    key_ids: z.array(zId).min(1).max(512)
+});
+
+export const zCreateAdapterRequest = z.object({
+    origin: z.url().max(2048),
+    credential: z.string().min(1).max(4096),
+    target: zAdapterTargetInput
+});
+
+export const zUpdateAdapterOriginRequest = z.object({
+    origin: z.url().max(2048),
+    credential: z.string().min(1).max(4096),
+    keep_remote: z.boolean().optional().default(false)
+});
+
+export const zSetAdapterCredentialRequest = z.object({
+    credential: z.string().min(1).max(4096)
+});
+
+export const zUpdateAdapterTargetRequest = z.object({
+    environment_id: zId,
+    destination_kind: zAdapterDestinationKind,
+    destination_owner: z.string().min(1).max(255),
+    destination_name: z.string().max(255),
+    name_prefix: z.string().max(64).regex(/^(?:[A-Z_][A-Z0-9_]*)?$/),
+    key_ids: z.array(zId).min(1).max(512),
+    expected_generation: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    keep_remote: z.boolean().optional().default(false)
+});
+
+export const zResumeAdapterOriginMoveRequest = z.object({
+    origin: z.url().max(2048),
+    credential: z.string().min(1).max(4096)
+});
+
+export const zResumeAdapterTargetMoveRequest = z.object({
+    target_id: zId,
+    environment_id: zId,
+    destination_kind: zAdapterDestinationKind,
+    destination_owner: z.string().min(1).max(255),
+    destination_name: z.string().max(255),
+    name_prefix: z.string().max(64).regex(/^(?:[A-Z_][A-Z0-9_]*)?$/),
+    key_ids: z.array(zId).min(1).max(512)
+});
+
+export const zResumeAdapterMoveRequest = z.union([
+    zResumeAdapterOriginMoveRequest,
+    zResumeAdapterTargetMoveRequest
+]);
+
+export const zAdapterConflictEntry = z.object({
+    surface: z.enum(['secret', 'variable']),
+    effective_name: z.string()
+});
+
+export const zAdapterConflictArtifact = z.object({
+    id: zId,
+    destination_id: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    target_generation: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    entries: z.array(zAdapterConflictEntry),
+    created_at: zTimestamp
+});
+
+export const zAdapterTarget = z.object({
+    id: zId,
+    adapter_id: zId,
+    environment_id: zId,
+    destination_kind: zAdapterDestinationKind,
+    destination_owner: z.string(),
+    destination_name: z.string(),
+    destination_id: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    name_prefix: z.string(),
+    generation: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    state: z.enum([
+        'active',
+        'moving',
+        'tombstoned'
+    ]),
+    sync_status: z.enum([
+        'never',
+        'converging',
+        'converged',
+        'failed'
+    ]),
+    converged_revision: z.coerce.bigint().min(BigInt('-9223372036854775808'), { error: 'Invalid value: Expected int64 to be >= -9223372036854775808' }).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).nullish(),
+    failure_names: z.array(z.string()),
+    conflicts: z.array(zAdapterConflictArtifact)
+});
+
+export const zAdapterTargetList = z.object({
+    items: z.array(zAdapterTarget)
+});
+
+export const zAdapter = z.object({
+    id: zId,
+    provider: z.enum(['forgejo']),
+    origin: z.url(),
+    credential_present: z.boolean(),
+    credential_set_at: z.iso.datetime().nullish(),
+    authority_principal_id: zId,
+    state: z.enum([
+        'active',
+        'moving',
+        'tombstoned'
+    ]),
+    created_at: zTimestamp,
+    targets: z.array(zAdapterTarget)
+});
+
+export const zAdapterList = z.object({
+    items: z.array(zAdapter)
+});
+
+export const zAdapterMappingEntry = z.object({
+    key_id: zId,
+    canonical_name: z.string(),
+    surface: z.enum(['secret', 'variable']),
+    effective_name: z.string()
+});
+
+export const zAdapterTargetDetail = z.object({
+    target: zAdapterTarget,
+    conflicts: z.array(zAdapterConflictArtifact),
+    mapping: z.array(zAdapterMappingEntry)
+});
+
+export const zAdapterChange = z.object({
+    surface: z.enum(['secret', 'variable']),
+    effective_name: z.string(),
+    disposition: z.enum([
+        'create',
+        'update',
+        'delete',
+        'conflict',
+        'refused'
+    ]),
+    reason: z.string().optional()
+});
+
+export const zAdapterPlan = z.object({
+    artifact_id: zId,
+    changes: z.array(zAdapterChange)
+});
+
+export const zAdapterAdoptionRequest = z.object({
+    artifact_id: zId,
+    target_generation: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    destination_id: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    entries: z.array(zAdapterConflictEntry).min(1)
+});
+
+export const zAdapterJob = z.object({
+    job_id: zId,
+    generation: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zAdapterConnection = z.object({
+    version: z.string(),
+    destination_id: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' })
+});
+
+export const zAdapterTeardown = z.object({
+    orphaned: z.array(z.string()),
+    jobs: z.array(zAdapterJob)
+});
+
+export const zAdapterMoveJob = z.object({
+    id: zId,
+    target_id: zId,
+    kind: z.enum([
+        'scrub',
+        'activate',
+        'converge'
+    ]),
+    state: z.enum([
+        'queued',
+        'running',
+        'retry',
+        'succeeded',
+        'failed',
+        'superseded'
+    ])
+});
+
+export const zAdapterMoveTarget = z.object({
+    target_id: zId,
+    environment_id: zId,
+    destination_kind: zAdapterDestinationKind,
+    destination_owner: z.string(),
+    destination_name: z.string(),
+    destination_id: z.coerce.bigint().gte(BigInt(0)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }),
+    name_prefix: z.string(),
+    orphaned_names: z.array(z.string()),
+    jobs: z.array(zAdapterMoveJob)
+});
+
+/**
+ * Durable route transition status. Credentials are never represented.
+ */
+export const zAdapterMove = z.object({
+    id: zId,
+    adapter_id: zId,
+    kind: z.enum(['target', 'origin']),
+    state: z.enum([
+        'scrubbing',
+        'activating',
+        'attention_required',
+        'completed',
+        'canceled'
+    ]),
+    keep_remote: z.boolean(),
+    pending_origin: z.url(),
+    targets: z.array(zAdapterMoveTarget).min(1),
+    created_at: zTimestamp
+});
+
 /**
  * Closed set — never grows. Clients branch on this, not on prose.
  */
@@ -77,15 +301,56 @@ export const zTotpCodeRequest = z.object({
     code: z.string().min(6).max(10)
 });
 
-/**
- * A disclosure reauthentication by TOTP. `environment_id` is what the
- * window is opened OVER — the reveal guard is per environment, so a
- * window on staging authorizes nothing in production.
- *
- */
-export const zTotpReauthRequest = z.object({
+export const zCliReauthStartRequest = z.object({
+    purpose: z.enum(['adapter']),
+    operation: z.enum([
+        'adapter.configure',
+        'adapter.credential-set',
+        'adapter.adopt',
+        'adapter.sync'
+    ]),
+    environment_ids: z.array(zId).min(1),
+    pkce_challenge: z.string().length(43).regex(/^[A-Za-z0-9_-]{43}$/),
+    redirect_uri: z.url().max(256)
+});
+
+export const zCliReauthStart = z.object({
+    state: z.string().min(1),
+    expires_at: zTimestamp
+});
+
+export const zCliReauthApproveRequest = z.object({
+    state: z.string().min(1)
+});
+
+export const zCliReauthApproved = z.object({
+    code: z.string().min(1),
+    state: z.string().min(1),
+    redirect_uri: z.url()
+});
+
+export const zCliReauthEnvironmentPolicy = z.object({
     environment_id: zId,
-    code: z.string().min(6).max(10)
+    effective_window_seconds: z.int().gte(0),
+    requires_webauthn: z.boolean()
+});
+
+export const zCliReauthTransaction = z.object({
+    state: z.string().min(1),
+    operation: z.enum([
+        'adapter.configure',
+        'adapter.credential-set',
+        'adapter.adopt',
+        'adapter.sync'
+    ]),
+    environments: z.array(zCliReauthEnvironmentPolicy).min(1),
+    redirect_uri: z.url(),
+    expires_at: zTimestamp
+});
+
+export const zCliReauthRedeemRequest = z.object({
+    code: z.string().min(1),
+    pkce_verifier: z.string().min(43).max(128).regex(/^[A-Za-z0-9._~-]+$/)
 });
 
 export const zTotpProofRequest = z.object({
@@ -1504,13 +1769,40 @@ export const zReauthPurpose = z.enum([
     'reveal',
     'copy',
     'publish',
-    'mint'
+    'mint',
+    'adapter'
 ]);
+
+/**
+ * A disclosure reauthentication by TOTP. `environment_id` is what the
+ * window is opened OVER — the reveal guard is per environment, so a
+ * window on staging authorizes nothing in production.
+ *
+ */
+export const zTotpReauthRequest = z.object({
+    environment_id: zId.optional(),
+    purpose: zReauthPurpose.optional(),
+    operation: z.enum([
+        'adapter.configure',
+        'adapter.credential-set',
+        'adapter.adopt',
+        'adapter.sync'
+    ]).optional(),
+    environment_ids: z.array(zId).min(1).optional(),
+    code: z.string().min(6).max(10)
+});
 
 export const zWebauthnReauthStartRequest = z.object({
     operation: zReauthPurpose,
     environment_id: z.string().max(64),
-    key_ids: z.array(z.string().max(256))
+    key_ids: z.array(z.string().max(256)),
+    adapter_operation: z.enum([
+        'adapter.configure',
+        'adapter.credential-set',
+        'adapter.adopt',
+        'adapter.sync'
+    ]).optional(),
+    environment_ids: z.array(zId).min(1).optional()
 });
 
 /**
@@ -1525,10 +1817,18 @@ export const zWebauthnCredentialProofRequest = z.object({
 });
 
 export const zReauthResult = z.object({
+    session_token: z.string().min(1).optional(),
     session_id: zId,
     environment_id: z.string(),
+    environment_ids: z.array(zId).optional(),
     single_decision: z.boolean(),
     window_expires: zTimestamp
+});
+
+export const zCliReauthRedeemed = z.object({
+    session_id: zId,
+    session_token: z.string().min(1),
+    windows: z.array(zReauthResult)
 });
 
 /**
@@ -1939,6 +2239,10 @@ export const zProjectId = zId;
  */
 export const zEnvironmentId = zId;
 
+export const zAdapterId = zId;
+
+export const zAdapterTargetId = zId;
+
 /**
  * Folder identifier.
  */
@@ -2165,6 +2469,36 @@ export const zReauthTotpBody = zTotpReauthRequest;
  * The window this reauthentication opened.
  */
 export const zReauthTotpResponse = zReauthResult;
+
+export const zStartCliReauthBody = zCliReauthStartRequest;
+
+/**
+ * Opaque state for the browser handoff.
+ */
+export const zStartCliReauthResponse = zCliReauthStart;
+
+export const zShowCliReauthTransactionPath = z.object({
+    state: z.string().min(1).max(512)
+});
+
+/**
+ * Live transaction metadata without ids, bearers, or verifiers.
+ */
+export const zShowCliReauthTransactionResponse = zCliReauthTransaction;
+
+export const zApproveCliReauthBody = zCliReauthApproveRequest;
+
+/**
+ * Single-use authorization code.
+ */
+export const zApproveCliReauthResponse = zCliReauthApproved;
+
+export const zRedeemCliReauthBody = zCliReauthRedeemRequest;
+
+/**
+ * Rotated bearer disclosed once to the initiating shell.
+ */
+export const zRedeemCliReauthResponse = zCliReauthRedeemed;
 
 export const zRemoveTotpBody = zTotpProofRequest;
 
@@ -4034,3 +4368,236 @@ export const zWatchProjectEventsResponse = z.string();
  * The rotation.
  */
 export const zRotateTokenKeyResponse = zTokenKeyRotation;
+
+export const zListAdaptersPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * Adapter list.
+ */
+export const zListAdaptersResponse = zAdapterList;
+
+export const zCreateAdapterBody = zCreateAdapterRequest;
+
+export const zCreateAdapterPath = z.object({
+    org: zId,
+    project: zId
+});
+
+/**
+ * Fully valid adapter.
+ */
+export const zCreateAdapterResponse = zAdapter;
+
+export const zDeleteAdapterPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+export const zDeleteAdapterQuery = z.object({
+    keep_remote: z.boolean().optional().default(false)
+});
+
+/**
+ * Teardown result.
+ */
+export const zDeleteAdapterResponse = zAdapterTeardown;
+
+export const zShowAdapterPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Adapter.
+ */
+export const zShowAdapterResponse = zAdapter;
+
+export const zUpdateAdapterOriginBody = zUpdateAdapterOriginRequest;
+
+export const zUpdateAdapterOriginPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Durable scrub-before-switch move.
+ */
+export const zUpdateAdapterOriginResponse = zAdapterMove;
+
+export const zCancelAdapterMovePath = z.object({
+    org: zId,
+    project: zId,
+    move: zId
+});
+
+/**
+ * Move canceled and old-route converge queued.
+ */
+export const zCancelAdapterMoveResponse = zAdapterMove;
+
+export const zShowAdapterMovePath = z.object({
+    org: zId,
+    project: zId,
+    move: zId
+});
+
+/**
+ * Move state.
+ */
+export const zShowAdapterMoveResponse = zAdapterMove;
+
+export const zResumeAdapterMoveBody = zResumeAdapterMoveRequest;
+
+export const zResumeAdapterMovePath = z.object({
+    org: zId,
+    project: zId,
+    move: zId
+});
+
+/**
+ * Updated move resumed.
+ */
+export const zResumeAdapterMoveResponse = zAdapterMove;
+
+export const zRevokeAdapterCredentialPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Credential revoked. No job was enqueued.
+ */
+export const zRevokeAdapterCredentialResponse = z.void();
+
+export const zSetAdapterCredentialBody = zSetAdapterCredentialRequest;
+
+export const zSetAdapterCredentialPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Credential replaced. No job was enqueued.
+ */
+export const zSetAdapterCredentialResponse = z.void();
+
+export const zListAdapterTargetsPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Targets.
+ */
+export const zListAdapterTargetsResponse = zAdapterTargetList;
+
+export const zAddAdapterTargetBody = zAdapterTargetInput;
+
+export const zAddAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    adapter: zId
+});
+
+/**
+ * Target.
+ */
+export const zAddAdapterTargetResponse = zAdapterTarget;
+
+export const zRemoveAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+export const zRemoveAdapterTargetQuery = z.object({
+    keep_remote: z.boolean().optional().default(false)
+});
+
+/**
+ * Teardown result.
+ */
+export const zRemoveAdapterTargetResponse = zAdapterTeardown;
+
+export const zShowAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+export const zShowAdapterTargetQuery = z.object({
+    format: z.enum(['detail', 'workflow']).optional().default('detail')
+});
+
+/**
+ * Target detail or names-only workflow YAML.
+ */
+export const zShowAdapterTargetResponse = zAdapterTargetDetail;
+
+export const zUpdateAdapterTargetBody = zUpdateAdapterTargetRequest;
+
+export const zUpdateAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+export const zUpdateAdapterTargetResponse = z.union([
+    zAdapterTarget,
+    zAdapterMove
+]);
+
+export const zPlanAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+/**
+ * Plan.
+ */
+export const zPlanAdapterTargetResponse = zAdapterPlan;
+
+export const zSyncAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+/**
+ * Queued job.
+ */
+export const zSyncAdapterTargetResponse = zAdapterJob;
+
+export const zTestAdapterTargetPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+/**
+ * Connection result.
+ */
+export const zTestAdapterTargetResponse = zAdapterConnection;
+
+export const zAdoptAdapterTargetNamesBody = zAdapterAdoptionRequest;
+
+export const zAdoptAdapterTargetNamesPath = z.object({
+    org: zId,
+    project: zId,
+    target: zId
+});
+
+/**
+ * Adoption committed and converge queued.
+ */
+export const zAdoptAdapterTargetNamesResponse = zAdapterJob;

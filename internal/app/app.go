@@ -9,14 +9,21 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/Hikyo-Org/hikyo/internal/adapter"
+	"github.com/Hikyo-Org/hikyo/internal/adapter/forgejo"
 	"github.com/Hikyo-Org/hikyo/internal/admission"
+	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/config"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
+	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/remotefetch"
 	"github.com/Hikyo-Org/hikyo/internal/server"
@@ -24,6 +31,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/store"
 	"github.com/Hikyo-Org/hikyo/internal/store/keyring"
 	"github.com/Hikyo-Org/hikyo/internal/store/migrate"
+	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 	"github.com/Hikyo-Org/hikyo/internal/webui"
 )
 
@@ -92,13 +100,14 @@ func beforeMigration(ctx context.Context, cfg *config.Config, log *slog.Logger, 
 
 // Server is a booted, listening server that has not started serving yet.
 type Server struct {
-	Addr      string
-	db        *store.DB
-	keyring   *crypto.Keyring // held for the process lifetime
-	ln        net.Listener
-	handler   http.Handler
-	log       *slog.Logger
-	scheduler *Scheduler
+	Addr          string
+	db            *store.DB
+	keyring       *crypto.Keyring // held for the process lifetime
+	ln            net.Listener
+	handler       http.Handler
+	log           *slog.Logger
+	scheduler     *Scheduler
+	adapterWorker *adapter.Worker
 }
 
 // devRootKeyName sits beside the dev sqlite database (cwd when no sqlite
@@ -259,6 +268,25 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		return nil, fmt.Errorf("boot: outbound directory client: %w", err)
 	}
 	retentionSvc := &service.Retention{DB: db}
+	adapterRuntime := store.NewAdapterRuntime(db, func(ctx context.Context, job adapter.Job, _ adapter.Effect) error {
+		return tx.Read(ctx, db, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
+			_, err := az.Authorize(ctx, authz.Identity{Principal: domain.PrincipalID(job.AuthorityPrincipal), Class: domain.ClassHuman}, authz.OpAdapterPush, domain.Scope{
+				Org: domain.OrgID(job.OrgID), Project: domain.ProjectID(job.ProjectID), Env: domain.EnvID(job.EnvironmentID),
+			})
+			return err
+		})
+	})
+	adapterWorker := &adapter.Worker{
+		Store: adapterRuntime, Loader: &adapterLoader{runtime: adapterRuntime, keyring: kr, egressPolicy: cfg.AdapterEgressPolicy},
+		ID: "adapter-worker-" + uuid.Must(uuid.NewV7()).String(), Poll: time.Second, Log: log,
+	}
+	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
+		client, err := forgejo.NewClient(forgejo.ClientConfig{Origin: origin, Credential: credential, AllowedCIDRs: append([]netip.Prefix(nil), cfg.AdapterEgressPolicy[origin]...), Deadline: 15 * time.Second})
+		if err != nil {
+			return nil, nil, err
+		}
+		return &forgejo.Module{API: client}, client.Forget, nil
+	}}
 
 	api := &server.API{
 		Auth:     authSvc,
@@ -308,6 +336,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		RetentionHealth: retentionSvc,
 		Providers:       &service.Providers{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin, Log: log},
 		SAMLProviders:   samlProviders,
+		Adapters:        adapterService,
 		// ONE SCIM service behind both surfaces: the administration verbs and
 		// the identity provider's wire read the same bindings, the same mapping
 		// table and the same bounds. Two instances would let the wire clamp a
@@ -344,6 +373,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 			},
 			LastSuccess: retentionSvc.LastPruneSuccess,
 		}}},
+		adapterWorker: adapterWorker,
 	}, nil
 }
 
@@ -422,6 +452,21 @@ func (s *Server) Serve(ctx context.Context) error {
 		stopScheduler()
 		if schedulerDone != nil {
 			<-schedulerDone
+		}
+	}()
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	var workerDone chan struct{}
+	if s.adapterWorker != nil {
+		workerDone = make(chan struct{})
+		go func() {
+			defer close(workerDone)
+			s.adapterWorker.Run(workerCtx)
+		}()
+	}
+	defer func() {
+		stopWorker()
+		if workerDone != nil {
+			<-workerDone
 		}
 	}()
 	srv := newHTTPServer(s.handler)

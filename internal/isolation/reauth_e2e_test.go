@@ -2,7 +2,10 @@ package isolation
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -85,6 +88,305 @@ func consumeWindowFor(t *testing.T, auth *service.Auth, db *store.DB, sessionID,
 		// for them and the OPERATION is what their binding turns on.
 		return auth.ConsumeReauthWindow(ctx, az, sessionID, service.PurposeReveal, env, operation, keys, now)
 	})
+}
+
+func consumeAdapterWindowFor(t *testing.T, auth *service.Auth, db *store.DB, sessionID, env string, operation authz.Operation, environmentIDs []string, now time.Time) error {
+	t.Helper()
+	return tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		return auth.ConsumeAdapterReauthWindow(ctx, az, sessionID, env, operation, environmentIDs, now)
+	})
+}
+
+func TestAdapterReauthWindowExactBindingSQLite(t *testing.T) {
+	runAdapterReauthWindowExactBinding(t, seededDB(t, openSQLite))
+}
+
+func TestAdapterReauthWindowExactBindingPostgres(t *testing.T) {
+	runAdapterReauthWindowExactBinding(t, seededDB(t, openPostgres))
+}
+
+func TestAdapterReauthTOTPMixedPolicySQLite(t *testing.T) {
+	runAdapterReauthTOTPMixedPolicy(t, seededDB(t, openSQLite))
+}
+
+func TestAdapterReauthTOTPMixedPolicyPostgres(t *testing.T) {
+	runAdapterReauthTOTPMixedPolicy(t, seededDB(t, openPostgres))
+}
+
+func TestAdapterReauthWebAuthnBindsFullEnvironmentSetSQLite(t *testing.T) {
+	runAdapterReauthWebAuthnBindsFullEnvironmentSet(t, seededDB(t, openSQLite))
+}
+
+func TestAdapterReauthWebAuthnBindsFullEnvironmentSetPostgres(t *testing.T) {
+	runAdapterReauthWebAuthnBindsFullEnvironmentSet(t, seededDB(t, openPostgres))
+}
+
+func TestCLIAdapterReauthHandoffSQLite(t *testing.T) {
+	runCLIAdapterReauthHandoff(t, seededDB(t, openSQLite))
+}
+
+func TestCLIAdapterReauthHandoffPostgres(t *testing.T) {
+	runCLIAdapterReauthHandoff(t, seededDB(t, openPostgres))
+}
+
+func runCLIAdapterReauthHandoff(t *testing.T, db *store.DB) {
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	execRaw(t, db, `INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('g_cli_adapter_manage','`+string(boot.PrincipalID)+`','manage-adapters','org_a','prj_a1',NULL,`+ts+`)`)
+	execRaw(t, db, `INSERT INTO grants (id,principal_id,capability,org_id,project_id,env_id,created_at) VALUES ('g_cli_adapter_reveal','`+string(boot.PrincipalID)+`','reveal','org_a','prj_a1','env_prod',`+ts+`)`)
+	execRaw(t, db, `INSERT INTO grant_origins (id,grant_id,kind,subject,created_at) VALUES ('gor_cli_adapter_manage','g_cli_adapter_manage','manual','`+string(boot.PrincipalID)+`',`+ts+`)`)
+	execRaw(t, db, `INSERT INTO grant_origins (id,grant_id,kind,subject,created_at) VALUES ('gor_cli_adapter_reveal','g_cli_adapter_reveal','manual','`+string(boot.PrincipalID)+`',`+ts+`)`)
+	base := time.Date(2026, 8, 17, 3, 0, 0, 0, time.UTC)
+	clock := base
+	auth.Now = func() time.Time { return clock }
+	auth.ReauthWindow = 5 * time.Minute
+	cliLogin, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := auth.EnrolTOTPStart(t.Context(), cliLogin.SessionToken, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = base.Add(30 * time.Second)
+	cliConfirmed, err := auth.EnrolTOTPConfirm(t.Context(), cliLogin.SessionToken, totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactBrowser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = base.Add(time.Minute)
+	browserWindows, err := auth.ReauthAdapterTOTP(t.Context(), browser.SessionToken, string(authz.OpAdapterSync), []string{"env_prod"}, totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifierBytes := sha256.Sum256([]byte("cli adapter reauth pkce verifier"))
+	verifier := base64.RawURLEncoding.EncodeToString(verifierBytes[:])
+	challengeBytes := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM grants WHERE principal_id = '"+string(boot.PrincipalID)+"' AND capability = 'reveal' AND env_id = 'env_prod'"); got != 1 {
+		t.Fatalf("reveal grants = %d", got)
+	}
+	if got := queryString(t, db, "SELECT principal_id FROM sessions WHERE id = '"+cliConfirmed.SessionID+"'"); got != string(boot.PrincipalID) {
+		t.Fatalf("CLI principal = %q, bootstrap = %q", got, boot.PrincipalID)
+	}
+	start, err := auth.StartCLIReauth(t.Context(), cliConfirmed.SessionToken, string(service.PurposeAdapter), string(authz.OpAdapterSync), []string{"env_prod"}, challenge, "http://127.0.0.1:40123/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := auth.CLIReauthTransaction(t.Context(), service.Bearer(browserWindows[0].SessionToken), start.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transaction.State != start.State || transaction.Operation != string(authz.OpAdapterSync) || transaction.RedirectURI != "http://127.0.0.1:40123/callback" || len(transaction.Environments) != 1 || transaction.Environments[0].EnvironmentID != "env_prod" || transaction.Environments[0].RequiresWebAuthn {
+		t.Fatalf("CLIReauthTransaction() = %+v", transaction)
+	}
+	// Policy is authoritative again at approval. A TOTP window opened while the
+	// environment had a nonzero window cannot satisfy a later effective-zero
+	// policy, which requires a WebAuthn-bound single-decision window.
+	execRaw(t, db, `UPDATE environments SET protected=TRUE,reauth_window_seconds=0 WHERE id='env_prod'`)
+	if _, err := auth.ApproveCLIReauth(t.Context(), service.Bearer(browserWindows[0].SessionToken), start.State); !errors.Is(err, service.ErrReauthRequired) {
+		t.Fatalf("approval after policy drift = %v, want WebAuthn reauth required", err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM cli_reauth_handoffs WHERE code_verifier IS NULL AND consumed_at IS NULL"); got != 1 {
+		t.Fatalf("failed approval mutated handoff rows=%d, want 1 untouched", got)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type='auth.cli_reauth_handoff' AND outcome='failure' AND CAST(payload AS TEXT) LIKE '%\"phase\":\"approve\"%' AND CAST(payload AS TEXT) LIKE '%\"cause\":\"reauth_required\"%'"); got != 1 {
+		t.Fatalf("failed approval settlement rows=%d, want durable before response", got)
+	}
+	execRaw(t, db, `UPDATE environments SET protected=FALSE,reauth_window_seconds=NULL WHERE id='env_prod'`)
+	approved, err := auth.ApproveCLIReauth(t.Context(), service.Bearer(browserWindows[0].SessionToken), start.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.State == "" || approved.Code == "" || strings.Contains(start.State, cliConfirmed.SessionToken) || strings.Contains(approved.Code, cliConfirmed.SessionToken) {
+		t.Fatal("front-channel state/code missing or disclosed the CLI bearer")
+	}
+	if approved.State != start.State || approved.RedirectURI != transaction.RedirectURI {
+		t.Fatalf("approval binding = %+v", approved)
+	}
+	wrongVerifierBytes := sha256.Sum256([]byte("different cli adapter reauth pkce verifier"))
+	wrongVerifier := base64.RawURLEncoding.EncodeToString(wrongVerifierBytes[:])
+	if _, err := auth.RedeemCLIReauth(t.Context(), approved.Code, wrongVerifier); !errors.Is(err, service.ErrCLIReauthInvalid) {
+		t.Fatalf("wrong PKCE redeem = %v", err)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM cli_reauth_handoffs WHERE code_verifier IS NOT NULL AND consumed_at IS NULL"); got != 1 {
+		t.Fatalf("failed PKCE redemption consumed handoff rows=%d, want 1 unconsumed", got)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type='auth.cli_reauth_handoff' AND outcome='failure' AND CAST(payload AS TEXT) LIKE '%\"cause\":\"pkce_mismatch\"%'"); got != 1 {
+		t.Fatalf("failed PKCE settlement rows=%d, want durable before response", got)
+	}
+	redeemed, err := auth.RedeemCLIReauth(t.Context(), approved.Code, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redeemed.SessionToken == "" || redeemed.SessionToken == cliConfirmed.SessionToken || len(redeemed.Windows) != 1 || redeemed.Windows[0].EnvironmentID != "env_prod" {
+		t.Fatalf("redeemed = %+v", redeemed)
+	}
+	if _, err := auth.Identity(t.Context(), cliConfirmed.SessionToken); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("old CLI bearer after rotation = %v", err)
+	}
+	if _, err := auth.Identity(t.Context(), redeemed.SessionToken); err != nil {
+		t.Fatalf("rotated CLI bearer = %v", err)
+	}
+	if _, err := auth.RedeemCLIReauth(t.Context(), approved.Code, verifier); !errors.Is(err, service.ErrCLIReauthInvalid) {
+		t.Fatalf("second redeem = %v", err)
+	}
+	for _, want := range []struct {
+		phase, outcome string
+		count          int64
+	}{
+		{"start", "success", 1}, {"inspect", "success", 1},
+		{"approve", "success", 1}, {"approve", "failure", 1},
+		{"redeem", "success", 1}, {"redeem", "failure", 2},
+	} {
+		got := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type='auth.cli_reauth_handoff' AND outcome='"+want.outcome+"' AND CAST(payload AS TEXT) LIKE '%\"phase\":\""+want.phase+"\"%'")
+		if got != want.count {
+			t.Errorf("%s/%s audit rows=%d, want %d", want.phase, want.outcome, got, want.count)
+		}
+	}
+	for _, cause := range []string{"reauth_required", "pkce_mismatch", "already_consumed"} {
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type='auth.cli_reauth_handoff' AND outcome='failure' AND CAST(payload AS TEXT) LIKE '%\"cause\":\""+cause+"\"%'"); got != 1 {
+			t.Errorf("failure cause %s rows=%d, want 1", cause, got)
+		}
+	}
+	for _, forbidden := range []string{start.State, approved.Code, verifier, cliConfirmed.SessionToken, redeemed.SessionToken} {
+		if got := queryInt(t, db, "SELECT COUNT(*) FROM audit_instance_events WHERE type='auth.cli_reauth_handoff' AND CAST(payload AS TEXT) LIKE '%"+forbidden+"%'"); got != 0 {
+			t.Errorf("handoff audit payload disclosed forbidden artifact: rows=%d", got)
+		}
+	}
+}
+
+func runAdapterReauthWebAuthnBindsFullEnvironmentSet(t *testing.T, db *store.DB) {
+	auth, _, token := bootstrapWebAuthnAdmin(t, db)
+	auth.ReauthWindow = 5 * time.Minute
+	auth.ReauthHardCap = 10 * time.Minute
+	ctx := t.Context()
+	device := webauthntest.New(waRPID, waOrigin)
+	token = enrolPasskey(t, auth, ctx, token, waPassword, device)
+	token = stepUpPasskey(t, auth, ctx, token, device)
+	execRaw(t, db, `INSERT INTO environments (id, org_id, project_id, name, note, protected, reauth_window_seconds, created_at, display_order) VALUES ('env_adapter_zero', 'org_a', 'prj_a1', 'adapter-zero', '', TRUE, 0, `+ts+`, 2)`)
+	environments := []string{"env_prod", "env_adapter_zero"}
+	options, err := auth.ReauthAdapterPasskeyStart(ctx, token, authz.OpAdapterConfigure, "env_adapter_zero", environments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertion, err := device.Assert(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := auth.ReauthPasskeyFinish(ctx, token, assertion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.SingleDecision || result.EnvironmentID != "env_adapter_zero" {
+		t.Fatalf("adapter WebAuthn result = %+v", result)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE session_id = '"+result.SessionID+"' AND environment_id = 'env_adapter_zero' AND factor_class = 'webauthn' AND single_decision = 1 AND bound_purpose = 'adapter' AND bound_operation = 'adapter.configure' AND bound_environment_set = 'env_adapter_zero"+"\n"+"env_prod'"); got != 1 {
+		t.Fatalf("exact adapter WebAuthn windows = %d, want 1", got)
+	}
+	if err := consumeAdapterWindowFor(t, auth, db, result.SessionID, "env_adapter_zero", authz.OpAdapterConfigure, environments, time.Now().UTC()); err != nil {
+		t.Fatalf("consume exact adapter WebAuthn window: %v", err)
+	}
+	if err := consumeAdapterWindowFor(t, auth, db, result.SessionID, "env_adapter_zero", authz.OpAdapterConfigure, environments, time.Now().UTC()); !errors.Is(err, service.ErrReauthWindowSpent) {
+		t.Fatalf("reuse adapter WebAuthn window: %v, want ErrReauthWindowSpent", err)
+	}
+}
+
+func runAdapterReauthTOTPMixedPolicy(t *testing.T, db *store.DB) {
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	base := time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)
+	clock := base
+	auth.Now = func() time.Time { return clock }
+	auth.ReauthWindow = 5 * time.Minute
+	auth.ReauthHardCap = 10 * time.Minute
+	login, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := auth.EnrolTOTPStart(t.Context(), login.SessionToken, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = base.Add(30 * time.Second)
+	confirmed, err := auth.EnrolTOTPConfirm(t.Context(), login.SessionToken, totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, `INSERT INTO environments (id, org_id, project_id, name, note, protected, reauth_window_seconds, created_at, display_order) VALUES ('env_adapter_zero', 'org_a', 'prj_a1', 'adapter-zero', '', TRUE, 0, `+ts+`, 2)`)
+	environments := []string{"env_prod", "env_adapter_zero"}
+	clock = base.Add(time.Minute)
+	results, err := auth.ReauthAdapterTOTP(t.Context(), confirmed.SessionToken, string(authz.OpAdapterSync), environments, totpCode(t, uri, clock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].EnvironmentID != "env_prod" || results[0].SessionToken == "" {
+		t.Fatalf("mixed-policy TOTP results = %+v", results)
+	}
+	sessionID := results[0].SessionID
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE session_id = '"+sessionID+"' AND bound_purpose = 'adapter' AND bound_operation = 'adapter.sync' AND bound_environment_set = 'env_adapter_zero"+"\n"+"env_prod'"); got != 1 {
+		t.Fatalf("purpose-bound TOTP windows = %d, want 1", got)
+	}
+	if got := queryInt(t, db, "SELECT COUNT(*) FROM reauth_windows WHERE session_id = '"+sessionID+"' AND environment_id = 'env_adapter_zero'"); got != 0 {
+		t.Fatalf("effective-zero TOTP windows = %d, want 0", got)
+	}
+	if err := consumeAdapterWindowFor(t, auth, db, sessionID, "env_prod", authz.OpAdapterSync, environments, clock.Add(time.Second)); err != nil {
+		t.Fatalf("consume exact mixed-policy TOTP window: %v", err)
+	}
+	if boot.PrincipalID == "" {
+		t.Fatal("bootstrap principal missing")
+	}
+}
+
+func runAdapterReauthWindowExactBinding(t *testing.T, db *store.DB) {
+	auth, boot, password := bootstrapFactorAdmin(t, db)
+	now := time.Now().UTC()
+	auth.Now = func() time.Time { return now }
+	auth.ReauthWindow = 5 * time.Minute
+	_, err := auth.LocalLogin(t.Context(), "factor-admin", password, service.ArtifactCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execRaw(t, db, `INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('env_stage', 'org_a', 'prj_a1', 'stage', '', `+ts+`, 2)`)
+	sessionID := queryString(t, db, "SELECT id FROM sessions WHERE principal_id = '"+string(boot.PrincipalID)+"' ORDER BY created_at DESC LIMIT 1")
+	environments := []string{"env_prod", "env_stage"}
+	err = tx.Write(t.Context(), db, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
+		epoch, err := az.CredentialEpoch(ctx)
+		if err != nil {
+			return err
+		}
+		for index, environmentID := range environments {
+			if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
+				ID: fmt.Sprintf("raw_adapter_%d", index), SessionID: sessionID, EnvironmentID: environmentID,
+				CeremonyID: "totp_adapter", FactorClass: "totp", AuthenticatedAt: now,
+				WindowExpiresAt: now.Add(5 * time.Minute), HardExpiresAt: now.Add(10 * time.Minute),
+				CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: string(service.PurposeAdapter),
+				BoundOperation: string(authz.OpAdapterSync), BoundEnvironmentSet: service.CanonicalEnvironmentSet(environments),
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := consumeWindow(t, auth, db, sessionID, "env_prod", nil, now.Add(time.Second)); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("adapter window spent as reveal: %v, want ErrReauthUnitMismatch", err)
+	}
+	if err := consumeAdapterWindowFor(t, auth, db, sessionID, "env_prod", authz.OpAdapterAdopt, environments, now.Add(time.Second)); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("adapter window spent for wrong operation: %v, want ErrReauthUnitMismatch", err)
+	}
+	if err := consumeAdapterWindowFor(t, auth, db, sessionID, "env_prod", authz.OpAdapterSync, []string{"env_prod"}, now.Add(time.Second)); !errors.Is(err, service.ErrReauthUnitMismatch) {
+		t.Fatalf("adapter window spent for partial environment set: %v, want ErrReauthUnitMismatch", err)
+	}
+	for _, environmentID := range environments {
+		if err := consumeAdapterWindowFor(t, auth, db, sessionID, environmentID, authz.OpAdapterSync, environments, now.Add(time.Second)); err != nil {
+			t.Fatalf("consume exact adapter window for %s: %v", environmentID, err)
+		}
+	}
 }
 
 func TestReauthConsumeSingleDecisionSQLite(t *testing.T) {

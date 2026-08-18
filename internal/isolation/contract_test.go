@@ -220,6 +220,9 @@ func chiPath(p string) string {
 //
 //   - MFA-mandatory tenant operation  => 403 MUST be declared (the code can
 //     produce it, and an undeclared status is a contract the server breaks).
+//   - a reviewed dynamic post-grant refusal => 403 MUST be declared (adapter
+//     operations refine the static project formula with affected-environment
+//     reveal and reauthentication checks after the tenant object resolves).
 //   - every other tenant operation    => 403 MUST NOT be declared (unreachable,
 //     and declaring it invites a handler to start answering it).
 func TestTenantRoutesDeclareForbiddenOnlyForMFA(t *testing.T) {
@@ -247,7 +250,15 @@ func TestTenantRoutesDeclareForbiddenOnlyForMFA(t *testing.T) {
 		// Artifact-class mismatch is handled before grant evaluation and always
 		// uses the uniform nonexistent response. A tenant-class route therefore
 		// declares 403 only for the post-grant MFA assurance floor.
-		wanted := authz.FormulaDemandsMFA(authz.Operation(op.AuthzOp))
+		operationID := authz.Operation(op.AuthzOp)
+		pins := facts.FormulaPins()
+		wanted := authz.FormulaDemandsMFA(operationID)
+		for _, pin := range pins {
+			if pin.Operation == string(operationID) {
+				wanted = wanted || pin.PostGrantForbidden
+				break
+			}
+		}
 		switch {
 		case wanted && !declared:
 			t.Errorf("%s is tenant-class with an MFA-mandatory post-grant refusal (formula %v) but declares no 403 — the refusal it can return is undeclared",

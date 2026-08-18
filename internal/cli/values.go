@@ -585,7 +585,7 @@ func emitRendered(f Format, t Table, label string, deliver disclose.Options) err
 // renderCell prints one cell. A revealed `secret` goes through the print
 // triad; everything else is ordinary output.
 func renderCell(ios IO, f Format, cell apigen.ValueCell, outputFile string, dangerous bool) error {
-	secret := cell.Classification == apigen.Secret
+	secret := cell.Classification == apigen.KeyClassificationSecret
 	if !secret || !cell.Revealed {
 		return Render(ios.Stdout, f, valueTable(apigen.ValueList{Items: []apigen.ValueCell{cell}, Count: 1}))
 	}

@@ -2,6 +2,7 @@
   "_comment": "Name-pinned exemptions from the audit completeness invariant (audit-model ADR CI invariant 2). The ADR's default-deny rule refuses `audited: none` to unauthenticated- and system-class operations, but declares no event types for health probes, or local version prints; the demonstration org reads are #44 scaffolding whose real surface (#48) must map them. Every entry here is a reviewed deviation, not a hole: removing an entry without mapping the operation fails the build.",
   "wire": {
     "cli:access": "client transport for the /grants routes at every depth, whose operations carry the audit mapping (grant.created / grant.modified / grant.revoked / grant.template_applied / grant.membership_read)",
+    "cli:adapter": "client transport for the tenant-scoped deployment-adapter routes, whose operations carry the complete adapter.* audit mapping; the local browser handoff opens no separate server-side act",
     "cli:account": "client transport for POST /api/v1/auth/credential/establish, audited server-side as auth.credential_established / auth.credential_authority_refused",
     "cli:context": "entirely client-local: the trust store and named contexts live on this box, reach no server, and hold no credential material; the offline client-side audit record is the compose ticket's (#63)",
     "cli:doctor": "client transport for GET /api/v1/instance/retention-health and /saml-providers; both server reads are audited and return the canonical health state",

@@ -53,6 +53,11 @@ FROM keys WHERE org_id = ? AND project_id = ? ORDER BY name;
 -- name: CountKeys :one
 SELECT COUNT(*) FROM keys WHERE org_id = ? AND project_id = ?;
 
+-- name: ListAdapterPinsForKey :many
+SELECT adapter_id, target_id FROM adapter_target_keys
+WHERE org_id = ? AND project_id = ? AND key_id = ?
+ORDER BY adapter_id, target_id;
+
 -- name: RenameKey :execrows
 UPDATE keys SET name = ?
 WHERE org_id = ? AND project_id = ? AND id = ?;

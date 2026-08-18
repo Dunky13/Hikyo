@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "modernc.org/sqlite"
 
+	"github.com/Hikyo-Org/hikyo/internal/adapter"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 )
@@ -390,6 +391,7 @@ type Repos interface {
 	SCIM() SCIMRepo
 	// Remotes is the multi-instance directory's viewing side (#71).
 	Remotes() RemoteRepo
+	Adapters() AdapterRepo
 }
 
 // ReadRepos bundles the read-only repositories bound to one read
@@ -409,6 +411,238 @@ type ReadRepos interface {
 	Folders() FolderReader
 	Audit() AuditReader
 	Remotes() RemoteReader
+	Adapters() AdapterReader
+}
+
+type AdapterConflictEntry struct {
+	Surface       string
+	EffectiveName string
+}
+
+type AdapterConflictArtifact struct {
+	ID               string
+	TargetID         string
+	JobID            string
+	DestinationID    int64
+	TargetGeneration int64
+	Entries          []AdapterConflictEntry
+	CreatedAt        time.Time
+}
+
+type AdapterTarget struct {
+	ID                   string
+	AdapterID            string
+	EnvironmentID        string
+	Origin               string
+	DestinationKind      string
+	DestinationOwner     string
+	DestinationName      string
+	DestinationID        int64
+	NamePrefix           string
+	Generation           int64
+	State                string
+	SyncStatus           string
+	ConvergedRevision    *int64
+	FailureNames         []string
+	AuthorityPrincipalID string
+}
+
+type AdapterRecord struct {
+	ID                   string
+	Provider             string
+	Origin               string
+	CredentialPresent    bool
+	CredentialSetAt      string
+	AuthorityPrincipalID string
+	State                string
+	CreatedAt            string
+}
+
+type AdapterTargetMutation struct {
+	ID               string
+	AdapterID        string
+	EnvironmentID    string
+	DestinationKind  string
+	DestinationOwner string
+	DestinationName  string
+	DestinationID    int64
+	NamePrefix       string
+	KeyIDs           []string
+}
+
+type AdapterCreate struct {
+	ID                   string
+	Origin               string
+	CredentialCiphertext []byte
+	AuthorityPrincipalID string
+	Target               AdapterTargetMutation
+	At                   time.Time
+}
+
+type AdapterTargetUpdate struct {
+	Target               AdapterTargetMutation
+	ExpectedGeneration   int64
+	AuthorityPrincipalID string
+	At                   time.Time
+}
+
+type AdapterTargetUpdateResult struct {
+	Target                       AdapterTarget
+	Enqueue                      AdapterEnqueueResult
+	PreviousAuthorityPrincipalID string
+	AuthorityPrincipalID         string
+}
+
+type AdapterTargetAddResult struct {
+	Target                       AdapterTarget
+	PreviousAuthorityPrincipalID string
+	AuthorityPrincipalID         string
+}
+
+type AdapterRouteMoveMutation struct {
+	MoveID               string
+	Target               AdapterTargetMutation
+	ExpectedGeneration   int64
+	AuthorityPrincipalID string
+	KeepRemote           bool
+	At                   time.Time
+}
+
+type AdapterRouteMoveResult struct {
+	MoveID          string
+	TargetID        string
+	JobID           string
+	SupersededJobID string
+	Generation      int64
+	Orphaned        []string
+}
+
+type AdapterOriginMoveMutation struct {
+	MoveID                      string
+	AdapterID                   string
+	Origin                      string
+	PendingCredentialCiphertext []byte
+	AuthorityPrincipalID        string
+	KeepRemote                  bool
+	At                          time.Time
+}
+
+type AdapterRouteMoveBatch struct {
+	MoveID   string
+	Targets  []AdapterRouteMoveResult
+	Orphaned []string
+}
+
+type AdapterMoveJob struct {
+	ID, TargetID, Kind, State string
+}
+
+type AdapterMoveTarget struct {
+	TargetID, EnvironmentID, DestinationKind, DestinationOwner, DestinationName, NamePrefix string
+	DestinationID                                                                           int64
+	Orphaned                                                                                []string
+	Jobs                                                                                    []AdapterMoveJob
+}
+
+type AdapterMove struct {
+	ID, AdapterID, Kind, State, PendingOrigin, CreatedAt string
+	KeepRemote                                           bool
+	Targets                                              []AdapterMoveTarget
+	PreviousAuthorityPrincipalID                         string
+	AuthorityPrincipalID                                 string
+}
+
+type AdapterAdoption struct {
+	TargetID             string
+	ArtifactID           string
+	Entries              []AdapterConflictEntry
+	AuthorityPrincipalID string
+	LedgerIDs            []string
+	JobID                string
+	AuditAt              time.Time
+}
+
+type AdapterAdoptionResult struct {
+	Generation      int64
+	JobID           string
+	SupersededJobID string
+}
+
+type AdapterReader interface {
+	Get(ctx context.Context, p authz.Proof, adapterID string) (AdapterRecord, error)
+	Configuration(ctx context.Context, p authz.Proof, adapterID string) (AdapterRecord, []byte, error)
+	List(ctx context.Context, p authz.Proof) ([]AdapterRecord, error)
+	ListTargets(ctx context.Context, p authz.Proof, adapterID string) ([]AdapterTarget, error)
+	TargetKeyIDs(ctx context.Context, p authz.Proof, targetID string) ([]string, error)
+	Target(ctx context.Context, p authz.Proof, targetID string) (AdapterTarget, error)
+	Mapping(ctx context.Context, p authz.Proof, targetID string) ([]adapter.ManifestEntry, error)
+	PlanMaterial(ctx context.Context, p authz.Proof, targetID string) (AdapterPlanMaterial, error)
+	TargetEnvironments(ctx context.Context, p authz.Proof, targetID string) ([]string, error)
+	Environments(ctx context.Context, p authz.Proof, adapterID string) ([]string, error)
+	Conflicts(ctx context.Context, p authz.Proof, targetID string) ([]AdapterConflictArtifact, error)
+	Move(ctx context.Context, p authz.Proof, moveID string) (AdapterMove, error)
+}
+
+type AdapterPlanMaterial struct {
+	Target               AdapterTarget
+	CredentialCiphertext []byte
+	Manifest             []adapter.ManifestEntry
+	Ledger               []adapter.LedgerEntry
+}
+
+type AdapterRepo interface {
+	AdapterReader
+	Create(ctx context.Context, p authz.Proof, mutation AdapterCreate) (AdapterRecord, AdapterTarget, error)
+	AddTarget(ctx context.Context, p authz.Proof, mutation AdapterTargetUpdate) (AdapterTargetAddResult, error)
+	UpdateTarget(ctx context.Context, p authz.Proof, mutation AdapterTargetUpdate) (AdapterTargetUpdateResult, error)
+	MoveTarget(ctx context.Context, p authz.Proof, mutation AdapterRouteMoveMutation) (AdapterRouteMoveResult, error)
+	MoveOrigin(ctx context.Context, p authz.Proof, mutation AdapterOriginMoveMutation) (AdapterRouteMoveBatch, error)
+	CancelMove(ctx context.Context, p authz.Proof, moveID, authorityPrincipalID string, at time.Time) (AdapterMove, error)
+	ReplaceMoveTarget(ctx context.Context, p authz.Proof, moveID string, target AdapterTargetMutation, authorityPrincipalID string, at time.Time) (AdapterMove, error)
+	ReplaceMoveOrigin(ctx context.Context, p authz.Proof, moveID, origin string, pendingCredential []byte, authorityPrincipalID string, at time.Time) (AdapterMove, error)
+	RecordPlan(ctx context.Context, p authz.Proof, targetID, artifactID string, expectedGeneration, expectedDestinationID int64, entries []AdapterConflictEntry, at time.Time) error
+	Adopt(ctx context.Context, p authz.Proof, adoption AdapterAdoption) (AdapterAdoptionResult, error)
+	EnqueuePublished(ctx context.Context, p authz.Proof, at time.Time) ([]AdapterEnqueueResult, error)
+	TeardownTarget(ctx context.Context, p authz.Proof, targetID string, keepRemote bool, at time.Time) (AdapterTeardownResult, error)
+	TeardownAdapter(ctx context.Context, p authz.Proof, adapterID string, keepRemote bool, at time.Time) (AdapterTeardownBatch, error)
+	ReplaceCredential(ctx context.Context, p authz.Proof, mutation AdapterCredentialMutation) (AdapterCredentialResult, error)
+	RevokeCredential(ctx context.Context, p authz.Proof, adapterID string, at time.Time) (AdapterCredentialResult, error)
+	EnqueueManual(ctx context.Context, p authz.Proof, targetID, authorityPrincipalID string, at time.Time) (AdapterEnqueueResult, error)
+}
+
+type AdapterEnqueueResult struct {
+	TargetID             string
+	JobID                string
+	SupersededJobID      string
+	AuthorityPrincipalID string
+	Generation           int64
+}
+
+type AdapterTeardownResult struct {
+	TargetID             string
+	JobID                string
+	SupersededJobID      string
+	AuthorityPrincipalID string
+	Generation           int64
+	Orphaned             []string
+}
+
+type AdapterTeardownBatch struct {
+	AuthorityPrincipalID string
+	Targets              []AdapterTeardownResult
+}
+
+type AdapterCredentialMutation struct {
+	AdapterID            string
+	CredentialCiphertext []byte
+	AuthorityPrincipalID string
+	At                   time.Time
+}
+
+type AdapterCredentialResult struct {
+	PreviousAuthorityPrincipalID string
+	AuthorityPrincipalID         string
+	TargetCount                  int
 }
 
 // ErrNotFound is the canonical cross-engine "no such row" — aliased from

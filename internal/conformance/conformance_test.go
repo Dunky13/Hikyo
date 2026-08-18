@@ -182,6 +182,9 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		"saml_transactions", "saml_replay", "saml_sp_keys",
 		"oidc_transactions", "external_identities",
 		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
+		// CLI adapter reauthentication handoffs reference both sessions and
+		// principals, so they must precede either parent.
+		"cli_reauth_handoffs",
 		"credential_authorities", "password_credentials", "sessions",
 		// oidc_providers is a PARENT of sessions (sessions.provider_id
 		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
@@ -204,6 +207,16 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		"retention_runtime", "snapshot_entries", "revision_pins", "snapshots",
 		"secret_value_occurrences",
 		"revision_key_changes", "pending_changes",
+		// Deployment adapters (#65), complete child-to-parent order. Effects and
+		// conflicts reference the outbox; the outbox references route moves and
+		// targets; move claims reference move keys/targets; and every remaining
+		// child hangs from a target or adapter. Keeping all 00024 tables together
+		// makes a second migration run prove the reset rather than inherit stale
+		// route-move state from a prior test.
+		"adapter_effects", "adapter_conflicts", "adapter_outbox",
+		"adapter_route_move_claims", "adapter_route_move_keys",
+		"adapter_route_move_targets", "adapter_route_moves",
+		"adapter_target_keys", "adapter_ledger", "adapter_targets", "adapters",
 		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
 		// OIDC federation (#62, migration 00018): machine_credentials gained a
 		// foreign key to federation_issuers, so the issuers drop AFTER it;

@@ -396,7 +396,7 @@ func (s *Revisions) PublishPlanned(ctx context.Context, actor Actor, scope domai
 					break
 				}
 			}
-			if err := recordPublish(ctx, r, ep, caller.Principal, envID, published, len(applies), trigger); err != nil {
+			if err := recordPublish(ctx, r, ep, caller.Principal, envID, published, len(applies), trigger, now); err != nil {
 				return err
 			}
 			out.Environments = append(out.Environments, published)
@@ -589,7 +589,7 @@ func buildImpactPreview(ctx context.Context, r store.Repos, p authz.Proof, seale
 // so there is one event shape for "this environment advanced to revision N"
 // and `trigger` says which act produced it.
 func recordPublish(ctx context.Context, r store.Repos, p authz.Proof, principal domain.PrincipalID,
-	envID string, published PublishedEnvironment, selected int, trigger string) error {
+	envID string, published PublishedEnvironment, selected int, trigger string, at time.Time) error {
 	ev, err := domainEvent(ctx, audit.EventRevisionPublished, principal,
 		audit.Object{Type: "environment", ID: envID}, audit.Payload{
 			"revision":        published.Revision,
@@ -601,7 +601,39 @@ func recordPublish(ctx context.Context, r store.Repos, p authz.Proof, principal 
 	if err != nil {
 		return err
 	}
-	return r.Audit().InsertTenant(ctx, p, ev)
+	if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
+		return err
+	}
+	jobs, err := r.Adapters().EnqueuePublished(ctx, p, at)
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		requested, err := newAuditEvent(ctx, audit.EventAdapterSyncRequested, principal,
+			audit.Object{Type: "adapter-target", ID: job.TargetID}, audit.OutcomeSuccess,
+			job.JobID, audit.Payload{"trigger": "on-publish"})
+		if err != nil {
+			return err
+		}
+		requested.AuthorityID = job.AuthorityPrincipalID
+		if err := r.Audit().InsertTenant(ctx, p, requested); err != nil {
+			return err
+		}
+		if job.SupersededJobID == "" {
+			continue
+		}
+		superseded, err := newAuditEvent(ctx, audit.EventAdapterSuperseded, principal,
+			audit.Object{Type: "adapter-target", ID: job.TargetID}, audit.OutcomeSuccess,
+			job.JobID, audit.Payload{"previous_job_id": job.SupersededJobID, "job_id": job.JobID})
+		if err != nil {
+			return err
+		}
+		superseded.AuthorityID = job.AuthorityPrincipalID
+		if err := r.Audit().InsertTenant(ctx, p, superseded); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // republish re-materializes one environment from its CURRENT published state,
@@ -629,7 +661,7 @@ func republish(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, calle
 	if err != nil {
 		return PublishedEnvironment{}, err
 	}
-	if err := recordPublish(ctx, r, p, caller.Principal, string(scope.Env), published, 0, trigger); err != nil {
+	if err := recordPublish(ctx, r, p, caller.Principal, string(scope.Env), published, 0, trigger, now); err != nil {
 		return PublishedEnvironment{}, err
 	}
 	return published, nil

@@ -44,6 +44,21 @@ type stubAuth struct {
 	passkeyFinish func(ctx context.Context, response []byte) (service.LoginResult, error)
 }
 
+type cliReauthAuth struct{ stubAuth }
+
+func (cliReauthAuth) StartCLIReauth(context.Context, string, string, string, []string, string, string) (service.CLIReauthStart, error) {
+	return service.CLIReauthStart{State: "front-channel-state", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC)}, nil
+}
+func (cliReauthAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
+	return service.CLIReauthTransaction{State: "front-channel-state", Operation: "adapter.sync", RedirectURI: "http://127.0.0.1:40123/callback", ExpiresAt: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC), Environments: []service.CLIReauthEnvironmentPolicy{{EnvironmentID: "env_00000000-0000-0000-0000-000000000001", RequiresWebAuthn: true}}}, nil
+}
+func (cliReauthAuth) ApproveCLIReauth(context.Context, service.Actor, string) (service.CLIReauthApproval, error) {
+	return service.CLIReauthApproval{Code: "single-use-code", State: "front-channel-state", RedirectURI: "http://127.0.0.1:40123/callback"}, nil
+}
+func (cliReauthAuth) RedeemCLIReauth(context.Context, string, string) (service.CLIReauthRedeemed, error) {
+	return service.CLIReauthRedeemed{SessionToken: "rotated-secret", SessionID: "ses_00000000-0000-0000-0000-000000000001", Windows: []service.ReauthResult{{SessionID: "ses_00000000-0000-0000-0000-000000000001", EnvironmentID: "env_00000000-0000-0000-0000-000000000001", WindowExpires: time.Date(2026, 8, 17, 4, 5, 0, 0, time.UTC)}}}, nil
+}
+
 func (s stubAuth) LocalLogin(ctx context.Context, u, p string, artifact service.Artifact) (service.LoginResult, error) {
 	if s.login == nil {
 		return service.LoginResult{}, domain.ErrUnauthenticated
@@ -178,6 +193,9 @@ func (s stubAuth) StepUpPasskeyFinish(context.Context, string, []byte) (service.
 func (s stubAuth) ReauthPasskeyStart(context.Context, string, service.ReauthPurpose, string, []string) ([]byte, error) {
 	return nil, domain.ErrUnauthenticated
 }
+func (s stubAuth) ReauthAdapterPasskeyStartWire(context.Context, string, string, string, []string) ([]byte, error) {
+	return nil, domain.ErrUnauthenticated
+}
 
 func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.ReauthResult, error) {
 	return service.ReauthResult{}, domain.ErrUnauthenticated
@@ -185,6 +203,21 @@ func (s stubAuth) ReauthPasskeyFinish(context.Context, string, []byte) (service.
 
 func (s stubAuth) ReauthTOTP(context.Context, string, string, string) (service.ReauthResult, error) {
 	return service.ReauthResult{}, domain.ErrUnauthenticated
+}
+func (s stubAuth) ReauthAdapterTOTP(context.Context, string, string, []string, string) ([]service.ReauthResult, error) {
+	return nil, domain.ErrUnauthenticated
+}
+func (s stubAuth) StartCLIReauth(context.Context, string, string, string, []string, string, string) (service.CLIReauthStart, error) {
+	return service.CLIReauthStart{}, domain.ErrUnauthenticated
+}
+func (s stubAuth) CLIReauthTransaction(context.Context, service.Actor, string) (service.CLIReauthTransaction, error) {
+	return service.CLIReauthTransaction{}, domain.ErrUnauthenticated
+}
+func (s stubAuth) ApproveCLIReauth(context.Context, service.Actor, string) (service.CLIReauthApproval, error) {
+	return service.CLIReauthApproval{}, domain.ErrUnauthenticated
+}
+func (s stubAuth) RedeemCLIReauth(context.Context, string, string) (service.CLIReauthRedeemed, error) {
+	return service.CLIReauthRedeemed{}, domain.ErrUnauthenticated
 }
 
 func (s stubAuth) RemovePasskey(context.Context, string, string, string, string) (service.LoginResult, error) {
@@ -409,6 +442,23 @@ func call(t *testing.T, srv *httptest.Server, method, path, bearer string, body 
 		}
 	}
 	return resp, payload
+}
+
+func TestCLIReauthOnlyRedeemDisclosesRotatedBearer(t *testing.T) {
+	srv := newTestServer(t, cliReauthAuth{}, stubOrgs{})
+	environment := "env_00000000-0000-0000-0000-000000000001"
+	_, start := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/cli-reauth/start", "cli-bearer", map[string]any{"purpose": "adapter", "operation": "adapter.sync", "environment_ids": []string{environment}, "pkce_challenge": strings.Repeat("a", 43), "redirect_uri": "http://127.0.0.1:40123/callback"})
+	_, transaction := call(t, srv, http.MethodGet, api.PathPrefix+"/auth/cli-reauth/transactions/front-channel-state", "browser-bearer", nil)
+	_, approved := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/cli-reauth/approve", "browser-bearer", map[string]any{"state": "front-channel-state"})
+	_, redeemed := call(t, srv, http.MethodPost, api.PathPrefix+"/auth/cli-reauth/redeem", "", map[string]any{"code": "single-use-code", "pkce_verifier": strings.Repeat("b", 43)})
+	for _, forbidden := range [][]byte{[]byte("rotated-secret"), []byte("state_verifier"), []byte("code_verifier"), []byte("pkce"), []byte("crh_")} {
+		if bytes.Contains(start, forbidden) || bytes.Contains(transaction, forbidden) || bytes.Contains(approved, forbidden) {
+			t.Fatalf("private handoff material %q crossed front channel: start=%s transaction=%s approve=%s", forbidden, start, transaction, approved)
+		}
+	}
+	if !bytes.Contains(redeemed, []byte(`"session_token":"rotated-secret"`)) {
+		t.Fatalf("redeem omitted rotated bearer: %s", redeemed)
+	}
 }
 
 func decodeError(t *testing.T, payload []byte) apigen.Error {

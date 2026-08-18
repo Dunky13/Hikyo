@@ -741,6 +741,9 @@ func (s *Keys) Rename(ctx context.Context, actor Actor, scope domain.Scope, id, 
 		if err != nil {
 			return err
 		}
+		if err := refuseAdapterPinnedKey(ctx, r.Catalogue(), p, before); err != nil {
+			return err
+		}
 		if err := r.Catalogue().Rename(ctx, p, id, name); err != nil {
 			return err
 		}
@@ -833,6 +836,21 @@ func (s *Keys) UpdateMetadata(ctx context.Context, actor Actor, scope domain.Sco
 		return r.Audit().InsertTenant(ctx, p, ev)
 	})
 	return out, err
+}
+
+func refuseAdapterPinnedKey(ctx context.Context, catalogue store.CatalogueRepo, p authz.Proof, key store.CatalogueKey) error {
+	pins, err := catalogue.AdapterPins(ctx, p, key.ID)
+	if err != nil {
+		return err
+	}
+	if len(pins) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		parts = append(parts, "adapter "+pin.AdapterID+" target "+pin.TargetID)
+	}
+	return fmt.Errorf("%w: key %s is pinned by %s; remove it from those targets, make this edit, then re-add it through the adapter widening ceremony", domain.ErrConflict, key.Name, strings.Join(parts, ", "))
 }
 
 // pick and pickBool are the PATCH merge: an absent member keeps the stored
@@ -1044,6 +1062,9 @@ func (s *Keys) Reclassify(ctx context.Context, actor Actor, scope domain.Scope, 
 		}
 		before, err := r.Catalogue().Get(ctx, p, id)
 		if err != nil {
+			return err
+		}
+		if err := refuseAdapterPinnedKey(ctx, r.Catalogue(), p, before); err != nil {
 			return err
 		}
 		if before.Classification == classification {

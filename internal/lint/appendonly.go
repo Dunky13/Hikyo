@@ -279,6 +279,9 @@ var ResolutionSurfaceWriters = map[string]bool{
 	"RevokeSessionForPrincipal":        true,
 	"CreateWorkspaceHandoff":           true,
 	"ApproveWorkspaceHandoff":          true,
+	"CreateCLIReauthHandoff":           true,
+	"ApproveCLIReauthHandoff":          true,
+	"ConsumeCLIReauthHandoff":          true,
 	"ConsumeWorkspaceHandoff":          true,
 	"SweepExpiredWorkspaceHandoffs":    true,
 	// The instance lifetime controls and the clamp they apply. Both are
@@ -325,8 +328,11 @@ var ResolutionSurfaceWriters = map[string]bool{
 	// authorize them. Both are local-host-authority operations (the
 	// tenant-isolation ADR's SiteRecoveryReconcile), reachable from no network
 	// route, and the classification-totality invariant keeps that true.
-	"AdvanceRestoreEpoch": true,
-	"ReconcilePrincipal":  true,
+	// Adapter PATs have no Hikyo credential epoch for the remote provider to
+	// enforce, so CompleteRestore must erase them in the same local-host act.
+	"AdvanceRestoreEpoch":                  true,
+	"InvalidateRestoredAdapterCredentials": true,
+	"ReconcilePrincipal":                   true,
 	// #73 section 9.1: the reconciliation commit drops restored `scim` origins
 	// and any grant row they were the last hold on, in the same act.
 	"dropRestoredSCIMOrigins": true,

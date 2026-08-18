@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -63,6 +64,36 @@ var (
 // must not become a consent for whatever the holder asks next.
 func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
 	purpose ReauthPurpose, environmentID, operation string, keyIDs []string, now time.Time) error {
+	return s.consumeReauthWindow(ctx, az, sessionID, purpose, environmentID, operation, keyIDs, nil, now)
+}
+
+// ConsumeAdapterReauthWindow consumes one environment's share of an adapter
+// ceremony. Every share is bound to the same full environment set, purpose and
+// operation, so independently consumed per-environment windows cannot be mixed
+// across adapter acts or assembled from partial ceremonies.
+func (s *Auth) ConsumeAdapterReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID, environmentID string,
+	operation authz.Operation, environmentIDs []string, now time.Time) error {
+	if !adapterReauthOperation(operation) || environmentID == "" || len(environmentIDs) == 0 {
+		return ErrReauthUnitMismatch
+	}
+	found := false
+	for _, candidate := range environmentIDs {
+		if candidate == "" {
+			return ErrReauthUnitMismatch
+		}
+		if candidate == environmentID {
+			found = true
+		}
+	}
+	if !found {
+		return ErrReauthUnitMismatch
+	}
+	return s.consumeReauthWindow(ctx, az, sessionID, PurposeAdapter, environmentID,
+		string(operation), nil, environmentIDs, now)
+}
+
+func (s *Auth) consumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, sessionID string,
+	purpose ReauthPurpose, environmentID, operation string, keyIDs, environmentIDs []string, now time.Time) error {
 	w, err := az.ReauthWindowFor(ctx, sessionID, environmentID)
 	if errors.Is(err, domain.ErrNotFound) {
 		return ErrNoReauthWindow
@@ -83,7 +114,13 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 	// operation ("" — every caller that has no operation-scoped consent to
 	// present) can never equal a bound one, so a bound window fails closed for
 	// it rather than being treated as unbound.
-	if w.BoundOperation != "" {
+	if w.BoundPurpose != "" || w.BoundEnvironmentSet != "" {
+		if w.BoundPurpose != string(purpose) || operation != w.BoundOperation ||
+			w.BoundKeySet != CanonicalKeySet(keyIDs) ||
+			w.BoundEnvironmentSet != CanonicalEnvironmentSet(environmentIDs) {
+			return ErrReauthUnitMismatch
+		}
+	} else if w.BoundOperation != "" {
 		if operation != w.BoundOperation || w.BoundKeySet != CanonicalKeySet(keyIDs) {
 			return ErrReauthUnitMismatch
 		}
@@ -97,7 +134,12 @@ func (s *Auth) ConsumeReauthWindow(ctx context.Context, az *authz.TxAuthorizer, 
 		if err != nil {
 			return err
 		}
-		want, err := operationBinding(purpose, environmentID, keyIDs)
+		var want string
+		if purpose == PurposeAdapter {
+			want, err = adapterOperationBinding(authz.Operation(operation), environmentID, environmentIDs)
+		} else {
+			want, err = operationBinding(purpose, environmentID, keyIDs)
+		}
 		if err != nil {
 			return err
 		}
@@ -178,6 +220,26 @@ func CanonicalKeySet(keyIDs []string) string {
 	sorted := append([]string(nil), keyIDs...)
 	sort.Strings(sorted)
 	return strings.Join(sorted, "\n")
+}
+
+// CanonicalEnvironmentSet is the one spelling of the full adapter ceremony
+// scope: sorted, de-duplicated and newline-joined.
+func CanonicalEnvironmentSet(environmentIDs []string) string {
+	if len(environmentIDs) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), environmentIDs...)
+	sort.Strings(sorted)
+	sorted = slices.Compact(sorted)
+	return strings.Join(sorted, "\n")
+}
+
+func adapterReauthOperation(operation authz.Operation) bool {
+	switch operation {
+	case authz.OpAdapterConfigure, authz.OpAdapterCredentialSet, authz.OpAdapterAdopt, authz.OpAdapterSync:
+		return true
+	}
+	return false
 }
 
 // LowerEffectiveWindow performs, in one transaction, the five ADR items on an
@@ -297,15 +359,44 @@ func (s *Auth) hardCap() time.Duration {
 // design lists (POST /auth/reauth/totp) waits on the reveal surface (#50/#58),
 // since there is no disclosure yet for a TOTP window to gate.
 func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code string) (ReauthResult, error) {
-	if environmentID == "" {
-		return ReauthResult{}, ErrNoReauthWindow
+	results, err := s.reauthTOTP(ctx, presented, []string{environmentID}, "", "", code)
+	if err != nil {
+		return ReauthResult{}, err
+	}
+	return results[0], nil
+}
+
+// ReauthAdapterTOTP proves one adapter ceremony with one TOTP code and opens
+// one purpose-bound window for every environment in the full set whose
+// effective window is non-zero. Effective-zero environments are deliberately
+// omitted: each needs its own signed WebAuthn assertion, but every resulting
+// window is still bound to this exact full environment set.
+func (s *Auth) ReauthAdapterTOTP(ctx context.Context, presented, operation string, environmentIDs []string, code string) ([]ReauthResult, error) {
+	op := authz.Operation(operation)
+	if !adapterReauthOperation(op) {
+		return nil, ErrReauthUnitMismatch
+	}
+	return s.reauthTOTP(ctx, presented, environmentIDs, PurposeAdapter, op, code)
+}
+
+func (s *Auth) reauthTOTP(ctx context.Context, presented string, environmentIDs []string, purpose ReauthPurpose, operation authz.Operation, code string) ([]ReauthResult, error) {
+	environmentIDs = adapterEnvironmentSet(environmentIDs)
+	if len(environmentIDs) == 0 || (purpose == "" && len(environmentIDs) != 1) {
+		return nil, ErrNoReauthWindow
+	}
+	boundEnvironmentSet := ""
+	if purpose != "" {
+		if purpose != PurposeAdapter || !adapterReauthOperation(operation) {
+			return nil, ErrReauthUnitMismatch
+		}
+		boundEnvironmentSet = CanonicalEnvironmentSet(environmentIDs)
 	}
 	// Phase 1 - read the acting session and confirmed factor.
 	var (
-		acting    authz.Identity
-		account   authz.Account
-		confirmed authz.TOTPCredential
-		effWin    time.Duration
+		acting             authz.Identity
+		account            authz.Account
+		confirmed          authz.TOTPCredential
+		windowEnvironments []string
 	)
 	err := tx.Read(ctx, s.DB, func(ctx context.Context, _ store.ReadRepos, az *authz.TxAuthorizer) error {
 		id, err := az.Authenticate(ctx, presented, s.now())
@@ -325,18 +416,27 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		// nonexistent one (401) by presenting nonsense. Resolving the chain and
 		// requiring `read(E)` first collapses both into the same refusal, and
 		// the chokepoint's own uniform nonexistent outcome does the collapsing.
-		if err := authorizeEnvironmentRead(ctx, az, id, environmentID); err != nil {
-			return err
+		for _, environmentID := range environmentIDs {
+			if err := authorizeEnvironmentRead(ctx, az, id, environmentID); err != nil {
+				return err
+			}
+			// THE ENVIRONMENT'S POLICY BEFORE THE CALLER'S FACTORS. Legacy
+			// disclosure TOTP still refuses at zero. An adapter ceremony skips
+			// zero-window members here because they require their own WebAuthn
+			// proof; the TOTP proof covers the remaining members once.
+			effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
+			if err != nil {
+				return err
+			}
+			if effWin <= 0 {
+				if purpose == "" {
+					return ErrReauthWindowClosed
+				}
+				continue
+			}
+			windowEnvironments = append(windowEnvironments, environmentID)
 		}
-		// THE ENVIRONMENT'S POLICY BEFORE THE CALLER'S FACTORS. A 0-window
-		// environment has no TOTP path whoever is asking, so it answers the
-		// same to an account with an enrolled authenticator and one without —
-		// and the remedy it names (a passkey ceremony) is the same for both.
-		effWin, err = s.effectiveReauthWindow(ctx, az, environmentID)
-		if err != nil {
-			return err
-		}
-		if effWin <= 0 {
+		if len(windowEnvironments) == 0 {
 			return ErrReauthWindowClosed
 		}
 		confirmed, err = az.ConfirmedTOTP(ctx, account.ID)
@@ -346,12 +446,12 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		return err
 	})
 	if err != nil {
-		return ReauthResult{}, err
+		return nil, err
 	}
 
 	release, err := s.enterFactorBudget(ctx, account.ID)
 	if err != nil {
-		return ReauthResult{}, err
+		return nil, err
 	}
 	defer release()
 
@@ -359,13 +459,13 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 	seed, err := s.Keyring.ForInstance().OpenField(totpSeedAAD(confirmed.ID), confirmed.Seed)
 	if err != nil {
 		s.logFault(ctx, "opening a TOTP seed failed", err, account.ID)
-		return ReauthResult{}, domain.ErrUnauthenticated
+		return nil, domain.ErrUnauthenticated
 	}
 	step, ok := crypto.ValidateTOTP(seed, code, s.now(), crypto.TOTPSkewSteps)
 	crypto.Zero(seed)
 	if !ok {
 		s.recordFactorFailure(ctx, account.PrincipalID, account.ID)
-		return ReauthResult{}, domain.ErrUnauthenticated
+		return nil, domain.ErrUnauthenticated
 	}
 	s.Admission.RecordSuccess(account.ID)
 
@@ -373,14 +473,10 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 	// and open the window over the environment.
 	value, verifier, err := s.newSessionArtifact(Artifact(acting.Artifact))
 	if err != nil {
-		return ReauthResult{}, err
-	}
-	windowID, err := newID("raw")
-	if err != nil {
-		return ReauthResult{}, err
+		return nil, err
 	}
 	now := s.now()
-	var out ReauthResult
+	var out []ReauthResult
 	err = tx.Write(ctx, s.DB, func(ctx context.Context, _ store.Repos, az *authz.TxAuthorizer) error {
 		// Re-authenticate inside the write tx: a revoked session may not open a
 		// window (mirrors StepUpTOTP's HIGH-2 fix).
@@ -393,27 +489,34 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		} else if err != nil {
 			return err
 		}
+		windowEnvironments = windowEnvironments[:0]
+		effectiveWindows := make(map[string]time.Duration, len(environmentIDs))
+		for _, environmentID := range environmentIDs {
+			if err := authorizeEnvironmentRead(ctx, az, live, environmentID); err != nil {
+				return err
+			}
+			effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
+			if err != nil {
+				return err
+			}
+			if effWin <= 0 {
+				if purpose == "" {
+					return ErrReauthWindowClosed
+				}
+				continue
+			}
+			windowEnvironments = append(windowEnvironments, environmentID)
+			effectiveWindows[environmentID] = effWin
+		}
+		if len(windowEnvironments) == 0 {
+			return ErrReauthWindowClosed
+		}
 		epoch, err := az.CredentialEpoch(ctx)
 		if err != nil {
 			return err
 		}
-		// Resolve the environment's effective window authoritatively inside the
-		// window-opening tx, through the one seam #55 will make a locked per-env
-		// read, and fail closed at <= 0 (A2). The idle window is derived from that
-		// value and clamped by the hard cap.
-		effWin, err := s.effectiveReauthWindow(ctx, az, environmentID)
-		if err != nil {
-			return err
-		}
-		if effWin <= 0 {
-			return ErrReauthWindowClosed
-		}
 		hardCap := s.hardCap()
 		hardExpires := now.Add(hardCap)
-		windowExpires := now.Add(effWin)
-		if windowExpires.After(hardExpires) {
-			windowExpires = hardExpires
-		}
 		// CAS on the row whose seed was verified in phase 1, so a code proved
 		// against a since-replaced factor cannot apply to its successor.
 		consumed, err := az.AdvanceTOTPStep(ctx, confirmed.ID, confirmed.RowVersion, step)
@@ -430,17 +533,31 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		if err := az.RotateSessionFactors(ctx, live.SessionID, verifier, string(factorsJSON)); err != nil {
 			return err
 		}
-		if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
-			// CeremonyID carries the confirmed TOTP credential id (TOTP has no
-			// challenge row of its own; totp_challenges is dormant, see B8): it is
-			// provenance only. A TOTP window is never single_decision, so
-			// ConsumeReauthWindow never resolves it as a ceremony for unit matching.
-			ID: windowID, SessionID: live.SessionID, EnvironmentID: environmentID,
-			CeremonyID: confirmed.ID, FactorClass: "totp", SingleDecision: false,
-			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
-			CredentialEpoch: epoch, CreatedAt: now,
-		}); err != nil {
-			return err
+		for _, environmentID := range windowEnvironments {
+			windowID, err := newID("raw")
+			if err != nil {
+				return err
+			}
+			windowExpires := now.Add(effectiveWindows[environmentID])
+			if windowExpires.After(hardExpires) {
+				windowExpires = hardExpires
+			}
+			if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
+				// CeremonyID carries the confirmed TOTP credential id (TOTP has no
+				// challenge row of its own; totp_challenges is dormant, see B8): it is
+				// provenance only. A TOTP window is never single_decision.
+				ID: windowID, SessionID: live.SessionID, EnvironmentID: environmentID,
+				CeremonyID: confirmed.ID, FactorClass: "totp", SingleDecision: false,
+				AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
+				CredentialEpoch: epoch, CreatedAt: now, BoundPurpose: string(purpose),
+				BoundOperation: string(operation), BoundEnvironmentSet: boundEnvironmentSet,
+			}); err != nil {
+				return err
+			}
+			out = append(out, ReauthResult{
+				SessionToken: value, SessionID: live.SessionID, EnvironmentID: environmentID,
+				SingleDecision: false, WindowExpires: windowExpires,
+			})
 		}
 		e, err := newAuditEvent(ctx, audit.EventAuthReauthenticated, account.PrincipalID,
 			audit.Object{Type: "session", ID: live.SessionID}, audit.OutcomeSuccess, "",
@@ -448,14 +565,10 @@ func (s *Auth) ReauthTOTP(ctx context.Context, presented, environmentID, code st
 		if err != nil {
 			return err
 		}
-		out = ReauthResult{
-			SessionToken: value, SessionID: live.SessionID, EnvironmentID: environmentID,
-			SingleDecision: false, WindowExpires: windowExpires,
-		}
 		return az.RecordAuthEvent(ctx, e)
 	})
 	if err != nil {
-		return ReauthResult{}, err
+		return nil, err
 	}
 	return out, nil
 }

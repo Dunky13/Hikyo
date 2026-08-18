@@ -445,6 +445,74 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/auth/cli-reauth/start:
+    post:
+      operationId: startCLIReauth
+      tags: [auth]
+      summary: Bind an adapter reauthentication handoff to the acting CLI session and PKCE challenge.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthStartRequest"}}}}
+      responses:
+        "201": {description: Opaque state for the browser handoff., content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthStart"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/auth/cli-reauth/transactions/{state}:
+    parameters:
+      - {name: state, in: path, required: true, schema: {type: string, minLength: 1, maxLength: 512}}
+    get:
+      operationId: showCLIReauthTransaction
+      tags: [auth]
+      summary: Load display-only policy and exact callback metadata for a live CLI handoff.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: "Live transaction metadata without ids, bearers, or verifiers.", content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthTransaction"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/auth/cli-reauth/approve:
+    post:
+      operationId: approveCLIReauth
+      tags: [auth]
+      summary: Approve a CLI adapter ceremony with the browser session's exact bound windows.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthApproveRequest"}}}}
+      responses:
+        "200": {description: Single-use authorization code., content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthApproved"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/auth/cli-reauth/redeem:
+    post:
+      operationId: redeemCLIReauth
+      tags: [auth]
+      summary: Atomically exchange code and PKCE verifier for the rotated CLI bearer.
+      x-hikyo-class: unauthenticated
+      x-hikyo-artifacts: [none]
+      x-hikyo-min-revision: 1
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthRedeemRequest"}}}}
+      responses:
+        "200": {description: Rotated bearer disclosed once to the initiating shell., content: {application/json: {schema: {$ref: "#/components/schemas/CLIReauthRedeemed"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
   /api/v1/auth/totp:
     delete:
       operationId: removeTotp
@@ -7910,6 +7978,366 @@ paths:
         "500":
           $ref: "#/components/responses/Internal"
 
+  /api/v1/orgs/{org}/projects/{project}/adapters:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+    get:
+      operationId: listAdapters
+      tags: [adapters]
+      summary: List project deployment adapters with redacted credential metadata.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.inspect
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Adapter list., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterList"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+    post:
+      operationId: createAdapter
+      tags: [adapters]
+      summary: Atomically create a Forgejo adapter, credential, and first valid target.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CreateAdapterRequest"}}}}
+      responses:
+        "201": {description: Fully valid adapter., content: {application/json: {schema: {$ref: "#/components/schemas/Adapter"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/AdapterID"
+    get:
+      operationId: showAdapter
+      tags: [adapters]
+      summary: Show one adapter and its targets; the credential is always redacted.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.inspect
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Adapter., content: {application/json: {schema: {$ref: "#/components/schemas/Adapter"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+    patch:
+      operationId: updateAdapterOrigin
+      tags: [adapters]
+      summary: Replace the adapter origin after its old remote custody is resolved.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/UpdateAdapterOriginRequest"}}}}
+      responses:
+        "202": {description: Durable scrub-before-switch move., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterMove"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+    delete:
+      operationId: deleteAdapter
+      tags: [adapters]
+      summary: Tombstone an adapter and scrub its remote names by default.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.delete
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      parameters:
+        - {name: keep_remote, in: query, required: false, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Teardown result., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTeardown"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - {name: move, in: path, required: true, schema: {$ref: "#/components/schemas/ID"}}
+    get:
+      operationId: showAdapterMove
+      tags: [adapters]
+      summary: Poll a durable adapter route move without exposing either credential.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.inspect
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Move state., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterMove"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+    patch:
+      operationId: resumeAdapterMove
+      tags: [adapters]
+      summary: Replace an attention-required pending route and resume activation.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/ResumeAdapterMoveRequest"}}}}
+      responses:
+        "202": {description: Updated move resumed., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterMove"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+    delete:
+      operationId: cancelAdapterMove
+      tags: [adapters]
+      summary: Cancel an attention-required move and reconverge the old route.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "202": {description: Move canceled and old-route converge queued., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterMove"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/AdapterID"
+    put:
+      operationId: setAdapterCredential
+      tags: [adapters]
+      summary: Replace the write-only Forgejo token.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.credential-set
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/SetAdapterCredentialRequest"}}}}
+      responses:
+        "204": {description: Credential replaced. No job was enqueued.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+    delete:
+      operationId: revokeAdapterCredential
+      tags: [adapters]
+      summary: Destroy outbound credential custody; remote scrub may then be impossible.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.credential-revoke
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "204": {description: Credential revoked. No job was enqueued.}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/AdapterID"
+    get:
+      operationId: listAdapterTargets
+      tags: [adapters]
+      summary: List targets nested under an adapter.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.inspect
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Targets., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTargetList"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+    post:
+      operationId: addAdapterTarget
+      tags: [adapters]
+      summary: Add a tested target and atomically reassign adapter authority.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTargetInput"}}}}
+      responses:
+        "201": {description: Target., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTarget"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/AdapterTargetID"
+    get:
+      operationId: showAdapterTarget
+      tags: [adapters]
+      summary: Show target state, conflicts, mapping, or canonical workflow mapping.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.inspect
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      parameters:
+        - {name: format, in: query, required: false, schema: {type: string, enum: [detail, workflow], default: detail}}
+      responses:
+        "200":
+          description: Target detail or names-only workflow YAML.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/AdapterTargetDetail"}}
+            text/plain: {schema: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+    patch:
+      operationId: updateAdapterTarget
+      tags: [adapters]
+      summary: Replace target routing fields and the complete key subset.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.configure
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/UpdateAdapterTargetRequest"}}}}
+      responses:
+        "200": {description: In-place key subset or prefix update with replacement converge queued., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTarget"}}}}
+        "202": {description: Durable scrub-before-switch move., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterMove"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+    delete:
+      operationId: removeAdapterTarget
+      tags: [adapters]
+      summary: Tombstone a target and scrub its remote names by default.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.delete
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      parameters:
+        - {name: keep_remote, in: query, required: false, schema: {type: boolean, default: false}}
+      responses:
+        "200": {description: Teardown result., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterTeardown"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan:
+    parameters: [{$ref: "#/components/parameters/OrgID"}, {$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/AdapterTargetID"}]
+    post:
+      operationId: planAdapterTarget
+      tags: [adapters]
+      summary: Produce a value-blind name plan and a conflict artifact when needed.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.plan
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Plan., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterPlan"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync:
+    parameters: [{$ref: "#/components/parameters/OrgID"}, {$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/AdapterTargetID"}]
+    post:
+      operationId: syncAdapterTarget
+      tags: [adapters]
+      summary: Enqueue a newest-wins manual converge.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.sync
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "202": {description: Queued job., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterJob"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test:
+    parameters: [{$ref: "#/components/parameters/OrgID"}, {$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/AdapterTargetID"}]
+    post:
+      operationId: testAdapterTarget
+      tags: [adapters]
+      summary: Probe Forgejo version and destination identity without values or writes.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.test
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      responses:
+        "200": {description: Connection result., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterConnection"}}}}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/Internal"}
+
+  /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions:
+    parameters: [{$ref: "#/components/parameters/OrgID"}, {$ref: "#/components/parameters/ProjectID"}, {$ref: "#/components/parameters/AdapterTargetID"}]
+    post:
+      operationId: adoptAdapterTargetNames
+      tags: [adapters]
+      summary: Adopt an exact enumerated conflict artifact and enqueue convergence.
+      x-hikyo-class: tenant
+      x-hikyo-operation: adapter.adopt
+      x-hikyo-formula: [manage-adapters@project]
+      x-hikyo-artifacts: [human-session]
+      x-hikyo-min-revision: 1
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AdapterAdoptionRequest"}}}}
+      responses:
+        "202": {description: Adoption committed and converge queued., content: {application/json: {schema: {$ref: "#/components/schemas/AdapterJob"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/Internal"}
+
 components:
   securitySchemes:
     hikyoSession:
@@ -7943,6 +8371,16 @@ components:
       description: Environment identifier.
       schema:
         $ref: "#/components/schemas/ID"
+    AdapterID:
+      name: adapter
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/ID"}
+    AdapterTargetID:
+      name: target
+      in: path
+      required: true
+      schema: {$ref: "#/components/schemas/ID"}
     FolderID:
       name: folder
       in: path
@@ -8264,6 +8702,295 @@ components:
       format: date-time
       description: RFC 3339 UTC, microsecond precision.
 
+    AdapterDestinationKind:
+      type: string
+      enum: [repository, organization]
+
+    AdapterTargetInput:
+      type: object
+      additionalProperties: false
+      required: [environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids]
+      properties:
+        environment_id: {$ref: "#/components/schemas/ID"}
+        destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
+        destination_owner: {type: string, minLength: 1, maxLength: 255}
+        destination_name:
+          type: string
+          maxLength: 255
+          description: Repository name; empty for organization destinations.
+        name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
+        key_ids:
+          type: array
+          minItems: 1
+          maxItems: 512
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
+
+    CreateAdapterRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, credential, target]
+      properties:
+        origin: {type: string, format: uri, maxLength: 2048}
+        credential:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Write-only Forgejo PAT. Never returned.
+        target: {$ref: "#/components/schemas/AdapterTargetInput"}
+
+    UpdateAdapterOriginRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, credential]
+      properties:
+        origin: {type: string, format: uri, maxLength: 2048}
+        credential: {type: string, minLength: 1, maxLength: 4096, description: Write-only credential for the pending origin.}
+        keep_remote: {type: boolean, default: false}
+
+    SetAdapterCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [credential]
+      properties:
+        credential: {type: string, minLength: 1, maxLength: 4096}
+
+    UpdateAdapterTargetRequest:
+      type: object
+      additionalProperties: false
+      required: [environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids, expected_generation]
+      properties:
+        environment_id: {$ref: "#/components/schemas/ID"}
+        destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
+        destination_owner: {type: string, minLength: 1, maxLength: 255}
+        destination_name: {type: string, maxLength: 255}
+        name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
+        key_ids:
+          type: array
+          minItems: 1
+          maxItems: 512
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
+        expected_generation: {type: integer, format: int64, minimum: 1}
+        keep_remote: {type: boolean, default: false}
+
+    ResumeAdapterMoveRequest:
+      oneOf:
+        - $ref: "#/components/schemas/ResumeAdapterOriginMoveRequest"
+        - $ref: "#/components/schemas/ResumeAdapterTargetMoveRequest"
+
+    ResumeAdapterOriginMoveRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, credential]
+      properties:
+        origin: {type: string, format: uri, maxLength: 2048}
+        credential: {type: string, minLength: 1, maxLength: 4096, description: Write-only replacement for the pending origin credential.}
+
+    ResumeAdapterTargetMoveRequest:
+      type: object
+      additionalProperties: false
+      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids]
+      properties:
+        target_id: {$ref: "#/components/schemas/ID"}
+        environment_id: {$ref: "#/components/schemas/ID"}
+        destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
+        destination_owner: {type: string, minLength: 1, maxLength: 255}
+        destination_name: {type: string, maxLength: 255}
+        name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
+        key_ids:
+          type: array
+          minItems: 1
+          maxItems: 512
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
+
+    AdapterTarget:
+      type: object
+      additionalProperties: false
+      required: [id, adapter_id, environment_id, destination_kind, destination_owner, destination_name, destination_id, name_prefix, generation, state, sync_status, failure_names, conflicts]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        adapter_id: {$ref: "#/components/schemas/ID"}
+        environment_id: {$ref: "#/components/schemas/ID"}
+        destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
+        destination_owner: {type: string}
+        destination_name: {type: string}
+        destination_id: {type: integer, format: int64, minimum: 1}
+        name_prefix: {type: string}
+        generation: {type: integer, format: int64, minimum: 1}
+        state: {type: string, enum: [active, moving, tombstoned]}
+        sync_status: {type: string, enum: [never, converging, converged, failed]}
+        converged_revision: {type: [integer, "null"], format: int64}
+        failure_names: {type: array, items: {type: string}}
+        conflicts:
+          type: array
+          description: Pending exact conflict artifacts eligible for adoption on this target.
+          items: {$ref: "#/components/schemas/AdapterConflictArtifact"}
+
+    AdapterTargetList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AdapterTarget"}}
+
+    Adapter:
+      type: object
+      additionalProperties: false
+      required: [id, provider, origin, credential_present, authority_principal_id, state, created_at, targets]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        provider: {type: string, enum: [forgejo]}
+        origin: {type: string, format: uri}
+        credential_present: {type: boolean}
+        credential_set_at: {type: [string, "null"], format: date-time}
+        authority_principal_id: {$ref: "#/components/schemas/ID"}
+        state: {type: string, enum: [active, moving, tombstoned]}
+        created_at: {$ref: "#/components/schemas/Timestamp"}
+        targets: {type: array, items: {$ref: "#/components/schemas/AdapterTarget"}}
+
+    AdapterList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Adapter"}}
+
+    AdapterConflictEntry:
+      type: object
+      additionalProperties: false
+      required: [surface, effective_name]
+      properties:
+        surface: {type: string, enum: [secret, variable]}
+        effective_name: {type: string}
+
+    AdapterConflictArtifact:
+      type: object
+      additionalProperties: false
+      required: [id, destination_id, target_generation, entries, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        destination_id: {type: integer, format: int64, minimum: 1}
+        target_generation: {type: integer, format: int64, minimum: 1}
+        entries: {type: array, items: {$ref: "#/components/schemas/AdapterConflictEntry"}}
+        created_at: {$ref: "#/components/schemas/Timestamp"}
+
+    AdapterMappingEntry:
+      type: object
+      additionalProperties: false
+      required: [key_id, canonical_name, surface, effective_name]
+      properties:
+        key_id: {$ref: "#/components/schemas/ID"}
+        canonical_name: {type: string}
+        surface: {type: string, enum: [secret, variable]}
+        effective_name: {type: string}
+
+    AdapterTargetDetail:
+      type: object
+      additionalProperties: false
+      required: [target, conflicts, mapping]
+      properties:
+        target: {$ref: "#/components/schemas/AdapterTarget"}
+        conflicts: {type: array, items: {$ref: "#/components/schemas/AdapterConflictArtifact"}}
+        mapping: {type: array, items: {$ref: "#/components/schemas/AdapterMappingEntry"}}
+
+    AdapterChange:
+      type: object
+      additionalProperties: false
+      required: [surface, effective_name, disposition]
+      properties:
+        surface: {type: string, enum: [secret, variable]}
+        effective_name: {type: string}
+        disposition: {type: string, enum: [create, update, delete, conflict, refused]}
+        reason: {type: string}
+
+    AdapterPlan:
+      type: object
+      additionalProperties: false
+      required: [artifact_id, changes]
+      properties:
+        artifact_id: {$ref: "#/components/schemas/ID"}
+        changes: {type: array, items: {$ref: "#/components/schemas/AdapterChange"}}
+
+    AdapterAdoptionRequest:
+      type: object
+      additionalProperties: false
+      required: [artifact_id, target_generation, destination_id, entries]
+      properties:
+        artifact_id: {$ref: "#/components/schemas/ID"}
+        target_generation: {type: integer, format: int64, minimum: 1}
+        destination_id: {type: integer, format: int64, minimum: 1}
+        entries:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/AdapterConflictEntry"}
+
+    AdapterJob:
+      type: object
+      additionalProperties: false
+      required: [job_id, generation]
+      properties:
+        job_id: {$ref: "#/components/schemas/ID"}
+        generation: {type: integer, format: int64, minimum: 1}
+
+    AdapterConnection:
+      type: object
+      additionalProperties: false
+      required: [version, destination_id]
+      properties:
+        version: {type: string}
+        destination_id: {type: integer, format: int64, minimum: 1}
+
+    AdapterTeardown:
+      type: object
+      additionalProperties: false
+      required: [orphaned, jobs]
+      properties:
+        orphaned: {type: array, items: {type: string}}
+        jobs: {type: array, items: {$ref: "#/components/schemas/AdapterJob"}}
+
+    AdapterMoveJob:
+      type: object
+      additionalProperties: false
+      required: [id, target_id, kind, state]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        target_id: {$ref: "#/components/schemas/ID"}
+        kind: {type: string, enum: [scrub, activate, converge]}
+        state: {type: string, enum: [queued, running, retry, succeeded, failed, superseded]}
+
+    AdapterMoveTarget:
+      type: object
+      additionalProperties: false
+      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, destination_id, name_prefix, orphaned_names, jobs]
+      properties:
+        target_id: {$ref: "#/components/schemas/ID"}
+        environment_id: {$ref: "#/components/schemas/ID"}
+        destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
+        destination_owner: {type: string}
+        destination_name: {type: string}
+        destination_id: {type: integer, format: int64, minimum: 0}
+        name_prefix: {type: string}
+        orphaned_names: {type: array, items: {type: string}}
+        jobs: {type: array, items: {$ref: "#/components/schemas/AdapterMoveJob"}}
+
+    AdapterMove:
+      type: object
+      additionalProperties: false
+      description: Durable route transition status. Credentials are never represented.
+      required: [id, adapter_id, kind, state, keep_remote, pending_origin, targets, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/ID"}
+        adapter_id: {$ref: "#/components/schemas/ID"}
+        kind: {type: string, enum: [target, origin]}
+        state: {type: string, enum: [scrubbing, activating, attention_required, completed, canceled]}
+        keep_remote: {type: boolean}
+        pending_origin: {type: string, format: uri}
+        targets: {type: array, minItems: 1, items: {$ref: "#/components/schemas/AdapterMoveTarget"}}
+        created_at: {$ref: "#/components/schemas/Timestamp"}
+
     Error:
       type: object
       required: [error]
@@ -8454,7 +9181,7 @@ components:
     TotpReauthRequest:
       type: object
       additionalProperties: false
-      required: [environment_id, code]
+      required: [code]
       description: |
         A disclosure reauthentication by TOTP. `environment_id` is what the
         window is opened OVER — the reveal guard is per environment, so a
@@ -8462,11 +9189,97 @@ components:
       properties:
         environment_id:
           $ref: "#/components/schemas/ID"
+        purpose:
+          $ref: "#/components/schemas/ReauthPurpose"
+        operation:
+          type: string
+          enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]
+        environment_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
         code:
           type: string
           description: A TOTP code from the enrolled authenticator.
           minLength: 6
           maxLength: 10
+
+    CLIReauthStartRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, operation, environment_ids, pkce_challenge, redirect_uri]
+      properties:
+        purpose: {type: string, enum: [adapter]}
+        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]}
+        environment_ids: {type: array, minItems: 1, uniqueItems: true, items: {$ref: "#/components/schemas/ID"}}
+        pkce_challenge: {type: string, minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]{43}$"}
+        redirect_uri:
+          type: string
+          format: uri
+          maxLength: 256
+          description: Exact ephemeral loopback callback, http://127.0.0.1:PORT/callback or the bracketed ::1 equivalent.
+
+    CLIReauthStart:
+      type: object
+      additionalProperties: false
+      required: [state, expires_at]
+      properties:
+        state: {type: string, minLength: 1}
+        expires_at: {$ref: "#/components/schemas/Timestamp"}
+
+    CLIReauthApproveRequest:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: {type: string, minLength: 1}
+
+    CLIReauthApproved:
+      type: object
+      additionalProperties: false
+      required: [code, state, redirect_uri]
+      properties:
+        code: {type: string, minLength: 1, description: Single-use front-channel authorization code; never a session bearer.}
+        state: {type: string, minLength: 1, description: Exact opaque state supplied by the initiating CLI.}
+        redirect_uri: {type: string, format: uri, description: Exact server-bound loopback callback URI.}
+
+    CLIReauthEnvironmentPolicy:
+      type: object
+      additionalProperties: false
+      required: [environment_id, effective_window_seconds, requires_webauthn]
+      properties:
+        environment_id: {$ref: "#/components/schemas/ID"}
+        effective_window_seconds: {type: integer, minimum: 0}
+        requires_webauthn: {type: boolean}
+
+    CLIReauthTransaction:
+      type: object
+      additionalProperties: false
+      required: [state, operation, environments, redirect_uri, expires_at]
+      properties:
+        state: {type: string, minLength: 1}
+        operation: {type: string, enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]}
+        environments: {type: array, minItems: 1, items: {$ref: "#/components/schemas/CLIReauthEnvironmentPolicy"}}
+        redirect_uri: {type: string, format: uri}
+        expires_at: {$ref: "#/components/schemas/Timestamp"}
+
+    CLIReauthRedeemRequest:
+      type: object
+      additionalProperties: false
+      required: [code, pkce_verifier]
+      properties:
+        code: {type: string, minLength: 1}
+        pkce_verifier: {type: string, minLength: 43, maxLength: 128, pattern: "^[A-Za-z0-9._~-]+$"}
+
+    CLIReauthRedeemed:
+      type: object
+      additionalProperties: false
+      required: [session_id, session_token, windows]
+      properties:
+        session_id: {$ref: "#/components/schemas/ID"}
+        session_token: {type: string, minLength: 1, description: Rotated CLI bearer. Client stores it silently and never prints or logs it.}
+        windows: {type: array, items: {$ref: "#/components/schemas/ReauthResult"}}
 
     TotpProofRequest:
       type: object
@@ -11438,6 +12251,14 @@ components:
           items:
             type: string
             maxLength: 256
+        adapter_operation:
+          type: string
+          enum: [adapter.configure, adapter.credential-set, adapter.adopt, adapter.sync]
+        environment_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
 
     ReauthPurpose:
       type: string
@@ -11451,6 +12272,7 @@ components:
         - copy
         - publish
         - mint
+        - adapter
 
     WebauthnCredentialProofRequest:
       type: object
@@ -11472,10 +12294,18 @@ components:
       additionalProperties: false
       required: [session_id, environment_id, single_decision, window_expires]
       properties:
+        session_token:
+          type: string
+          minLength: 1
+          description: Rotated bearer returned only to Authorization-header callers; cookie-authenticated browser callers receive the rotated HttpOnly cookie and this field is omitted.
         session_id:
           $ref: "#/components/schemas/ID"
         environment_id:
           type: string
+        environment_ids:
+          type: array
+          uniqueItems: true
+          items: {$ref: "#/components/schemas/ID"}
         single_decision:
           type: boolean
           description: True where the effective window is zero — the window authorizes exactly one decision.

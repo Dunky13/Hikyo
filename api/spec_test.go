@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,6 +24,28 @@ func TestDocumentLoadsAndValidates(t *testing.T) {
 	}
 	if !strings.HasPrefix(doc.OpenAPI, "3.1") {
 		t.Fatalf("contract is %q, the bound profile is 3.1", doc.OpenAPI)
+	}
+}
+
+func TestAdapterTargetUpdateDeclaresInPlaceAndMoveResponses(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := doc.Paths.Find("/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}").Patch
+	if operation == nil || operation.Responses.Status(http.StatusOK) == nil || operation.Responses.Status(http.StatusAccepted) == nil {
+		t.Fatalf("adapter target PATCH must expose 200 AdapterTarget and 202 AdapterMove")
+	}
+}
+
+func TestAdapterTargetSchemaCarriesPendingConflictArtifacts(t *testing.T) {
+	doc, err := api.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := doc.Components.Schemas["AdapterTarget"].Value
+	if schema == nil || schema.Properties["conflicts"] == nil || !slices.Contains(schema.Required, "conflicts") {
+		t.Fatalf("AdapterTarget must require pending conflict artifacts")
 	}
 }
 

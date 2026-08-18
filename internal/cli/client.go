@@ -178,6 +178,10 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 	if out == nil || len(payload) == 0 {
 		return nil
 	}
+	if text, ok := out.(*string); ok && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+		*text = string(payload)
+		return nil
+	}
 	if err := json.Unmarshal(payload, out); err != nil {
 		return failf(ExitInternal, "the server's response did not match the contract: %v", err)
 	}

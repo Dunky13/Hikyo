@@ -261,6 +261,10 @@ var wireRegistry = map[string]Class{
 	"http:POST /api/v1/auth/workspace/start":                ClassUnauthenticated,
 	"http:POST /api/v1/auth/workspace/approve":              ClassUnauthenticated,
 	"http:POST /api/v1/auth/workspace/redeem":               ClassUnauthenticated,
+	"http:POST /api/v1/auth/cli-reauth/start":               ClassUnauthenticated,
+	"http:GET /api/v1/auth/cli-reauth/transactions/{state}": ClassUnauthenticated,
+	"http:POST /api/v1/auth/cli-reauth/approve":             ClassUnauthenticated,
+	"http:POST /api/v1/auth/cli-reauth/redeem":              ClassUnauthenticated,
 	"http:GET /api/v1/me/sessions":                          ClassUnauthenticated,
 	"http:DELETE /api/v1/me/sessions/{session}":             ClassUnauthenticated,
 	"http:GET /api/v1/instance/credential-policy":           ClassInstance,
@@ -348,6 +352,29 @@ var wireRegistry = map[string]Class{
 	// The root token key belongs to the instance, so there is no tenant object
 	// whose nonexistence a refusal could mimic.
 	"http:POST /api/v1/instance/rotate-token-key": ClassInstance,
+
+	// Deployment adapters (#65). Every project and target surface is tenant
+	// class; dynamic reveal/reauth checks over the adapter's environment set are
+	// added by the service after this route-level classification.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters":                            ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapters":                           ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                  ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":               ClassTenant,
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":       ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":    ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":          ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":         ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":            ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":          ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":         ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan":      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync":      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test":      ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":                ClassTenant,
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":              ClassTenant,
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":             ClassTenant,
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/key-groups":            ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/key-groups":           ClassTenant,
@@ -444,6 +471,9 @@ var wireRegistry = map[string]Class{
 	// exactly like one that is not there. The wire routes are tenant-class too,
 	// but no CLI verb reaches them — they are the identity provider's.
 	"cli:scim": ClassTenant,
+	// `adapter` reaches only project-owned adapter and target routes. Dynamic
+	// affected-environment checks happen behind those tenant routes.
+	"cli:adapter": ClassTenant,
 
 	"cli:run":         ClassStub,
 	"cli:render":      ClassStub,
@@ -660,6 +690,10 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventAuthReauthenticated,
 		audit.EventAuthThrottleCrossed,
 	},
+	"http:POST /api/v1/auth/cli-reauth/start":               {audit.EventAuthCLIReauthHandoff},
+	"http:GET /api/v1/auth/cli-reauth/transactions/{state}": {audit.EventAuthCLIReauthHandoff},
+	"http:POST /api/v1/auth/cli-reauth/approve":             {audit.EventAuthCLIReauthHandoff},
+	"http:POST /api/v1/auth/cli-reauth/redeem":              {audit.EventAuthCLIReauthHandoff},
 	"http:DELETE /api/v1/auth/webauthn/credentials/{id}": {
 		audit.EventAuthPasskeyRemoved,
 		audit.EventAuthSessionCreated,
@@ -937,6 +971,29 @@ var wireRoutes = map[string][]Operation{
 	"http:POST /api/v1/instance/saml-sp-keys/rotate":                          {OpSAMLSPKeyRotate},
 	"http:DELETE /api/v1/instance/saml-sp-keys/{fingerprint}":                 {OpSAMLSPKeyRetire},
 	"http:POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire": {OpSAMLSPKeyCompromiseRetire},
+
+	// Deployment adapters (#65). Dynamic reveal and reauthentication checks
+	// refine these operations in service, but every route still names the
+	// static proof-bearing operation whose audit family it reaches.
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters":                            {OpAdapterInspect},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapters":                           {OpAdapterConfigure},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                  {OpAdapterInspect},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                {OpAdapterConfigure},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":               {OpAdapterDelete},
+	"http:PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":       {OpAdapterCredentialSet},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":    {OpAdapterCredentialRevoke},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":          {OpAdapterInspect},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":         {OpAdapterConfigure},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":            {OpAdapterInspect},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":          {OpAdapterConfigure},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":         {OpAdapterDelete},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan":      {OpAdapterPlan},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync":      {OpAdapterSync},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test":      {OpAdapterTest},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions": {OpAdapterAdopt},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":                {OpAdapterInspect},
+	"http:PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":              {OpAdapterConfigure},
+	"http:DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":             {OpAdapterConfigure},
 
 	// Credential reset (#54). ONE route dispatches at runtime between the
 	// org-scoped and instance-scoped credential-reset operations by the target's

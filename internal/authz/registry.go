@@ -479,6 +479,20 @@ const (
 	OpWorkspaceOriginAdd    Operation = "workspace-origin.add"
 	OpWorkspaceOriginRemove Operation = "workspace-origin.remove"
 
+	// Deployment adapters (#65). The registry carries the plain
+	// manage-adapters half; service code adds reveal over every affected
+	// environment and reauthentication for configure/widen/adopt/sync.
+	OpAdapterConfigure        Operation = "adapter.configure"
+	OpAdapterCredentialSet    Operation = "adapter.credential-set"
+	OpAdapterCredentialRevoke Operation = "adapter.credential-revoke"
+	OpAdapterAdopt            Operation = "adapter.adopt"
+	OpAdapterInspect          Operation = "adapter.inspect"
+	OpAdapterPlan             Operation = "adapter.plan"
+	OpAdapterTest             Operation = "adapter.test"
+	OpAdapterSync             Operation = "adapter.sync"
+	OpAdapterDelete           Operation = "adapter.delete"
+	OpAdapterPush             Operation = "adapter.push"
+
 	// NOT REGISTERED, deliberately: the active-session listing and its revoke
 	// (#71 criterion 5). Both are SELF-SCOPED — they address the caller's own
 	// principal and nothing else — so they take the shape /api/v1/me/orgs
@@ -536,6 +550,7 @@ const (
 	StoreCatalogueGet               StoreOp = "catalogue.Get"
 	StoreCatalogueList              StoreOp = "catalogue.List"
 	StoreCatalogueCount             StoreOp = "catalogue.Count"
+	StoreCatalogueAdapterPins       StoreOp = "catalogue.AdapterPins"
 	StoreCatalogueRename            StoreOp = "catalogue.Rename"
 	StoreCatalogueUpdateMetadata    StoreOp = "catalogue.UpdateMetadata"
 	StoreCatalogueUpdateDeclaration StoreOp = "catalogue.UpdateDeclaration"
@@ -553,6 +568,35 @@ const (
 	StoreCataloguePresenceReplace   StoreOp = "catalogue.ReplacePresence"
 	StoreCataloguePresenceCascade   StoreOp = "catalogue.DeletePresenceForEnvironment"
 	StoreCatalogueRevisionGet       StoreOp = "catalogue.SchemaRevision"
+
+	StoreAdaptersTarget             StoreOp = "adapters.Target"
+	StoreAdaptersGet                StoreOp = "adapters.Get"
+	StoreAdaptersConfiguration      StoreOp = "adapters.Configuration"
+	StoreAdaptersList               StoreOp = "adapters.List"
+	StoreAdaptersListTargets        StoreOp = "adapters.ListTargets"
+	StoreAdaptersTargetKeyIDs       StoreOp = "adapters.TargetKeyIDs"
+	StoreAdaptersCreate             StoreOp = "adapters.Create"
+	StoreAdaptersAddTarget          StoreOp = "adapters.AddTarget"
+	StoreAdaptersUpdateTarget       StoreOp = "adapters.UpdateTarget"
+	StoreAdaptersMoveTarget         StoreOp = "adapters.MoveTarget"
+	StoreAdaptersMoveOrigin         StoreOp = "adapters.MoveOrigin"
+	StoreAdaptersMove               StoreOp = "adapters.Move"
+	StoreAdaptersCancelMove         StoreOp = "adapters.CancelMove"
+	StoreAdaptersReplaceMoveTarget  StoreOp = "adapters.ReplaceMoveTarget"
+	StoreAdaptersReplaceMoveOrigin  StoreOp = "adapters.ReplaceMoveOrigin"
+	StoreAdaptersMapping            StoreOp = "adapters.Mapping"
+	StoreAdaptersPlanMaterial       StoreOp = "adapters.PlanMaterial"
+	StoreAdaptersTargetEnvironments StoreOp = "adapters.TargetEnvironments"
+	StoreAdaptersEnvironments       StoreOp = "adapters.Environments"
+	StoreAdaptersConflicts          StoreOp = "adapters.Conflicts"
+	StoreAdaptersRecordPlan         StoreOp = "adapters.RecordPlan"
+	StoreAdaptersAdopt              StoreOp = "adapters.Adopt"
+	StoreAdaptersEnqueuePublished   StoreOp = "adapters.EnqueuePublished"
+	StoreAdaptersTeardownTarget     StoreOp = "adapters.TeardownTarget"
+	StoreAdaptersTeardownAdapter    StoreOp = "adapters.TeardownAdapter"
+	StoreAdaptersReplaceCredential  StoreOp = "adapters.ReplaceCredential"
+	StoreAdaptersRevokeCredential   StoreOp = "adapters.RevokeCredential"
+	StoreAdaptersEnqueueManual      StoreOp = "adapters.EnqueueManual"
 	StoreCatalogueRevisionBump      StoreOp = "catalogue.BumpSchemaRevision"
 
 	StoreFoldersCreate StoreOp = "folders.Create"
@@ -752,6 +796,18 @@ var readOnlyStoreOps = map[StoreOp]bool{
 	StoreCatalogueGet:                      true,
 	StoreCatalogueList:                     true,
 	StoreCatalogueCount:                    true,
+	StoreAdaptersTarget:                    true,
+	StoreAdaptersGet:                       true,
+	StoreAdaptersConfiguration:             true,
+	StoreAdaptersList:                      true,
+	StoreAdaptersListTargets:               true,
+	StoreAdaptersTargetKeyIDs:              true,
+	StoreAdaptersMapping:                   true,
+	StoreAdaptersPlanMaterial:              true,
+	StoreAdaptersTargetEnvironments:        true,
+	StoreAdaptersEnvironments:              true,
+	StoreAdaptersConflicts:                 true,
+	StoreAdaptersMove:                      true,
 	StoreCatalogueGroupGet:                 true,
 	StoreCatalogueGroupList:                true,
 	StoreCatalogueGroupCount:               true,
@@ -823,6 +879,11 @@ type opSpec struct {
 	level    domain.Level // tenant ops: the depth the request must address
 	formula  Formula
 	storeOps map[StoreOp]bool
+	// postGrantForbidden records a dynamic refusal that is evaluated only
+	// after the static formula succeeds. Adapter configure/credential/adopt/
+	// sync then evaluate the full affected environment set and its bound
+	// reauthentication windows; failure is a reachable, non-enumerating 403.
+	postGrantForbidden bool
 
 	// events maps the operation to the audit event type(s) it emits, or —
 	// exactly one of the two — auditedNone declares a proof-scoped pure read
@@ -1213,6 +1274,7 @@ var operations = map[Operation]opSpec{
 			// separately, immediately before commit.
 			StoreEnvironmentsList: true,
 			StoreProjectsLock:     true, StoreCatalogueGet: true, StoreCatalogueRename: true,
+			StoreCatalogueAdapterPins:  true,
 			StoreCatalogueRevisionBump: true, StoreCataloguePresenceList: true,
 			StoreAuditTenantInsert: true,
 		},
@@ -1306,6 +1368,7 @@ var operations = map[Operation]opSpec{
 			StoreEnvironmentsList: true,
 			StoreProjectsLock:     true, StoreCatalogueGet: true,
 			StoreCatalogueSetClassification: true, StoreCatalogueRevisionBump: true,
+			StoreCatalogueAdapterPins:  true,
 			StoreCataloguePresenceList: true, StoreAuditTenantInsert: true,
 		},
 		events: []audit.EventType{audit.EventKeyReclassified},
@@ -1590,6 +1653,7 @@ var operations = map[Operation]opSpec{
 			StoreSnapshotsSecretValueOccurrenceIDs:    true,
 			StoreSnapshotsRecordSecretValueOccurrence: true,
 			StoreSnapshotsInsertChange:                true,
+			StoreAdaptersEnqueuePublished:             true,
 			StoreAuditTenantInsert:                    true,
 		},
 		events: []audit.EventType{
@@ -1597,6 +1661,7 @@ var operations = map[Operation]opSpec{
 			// The per-key delivery facts: a publish is where a cell starts and
 			// stops delivering, so the two transition events are emitted here.
 			audit.EventValueSet, audit.EventValueCleared,
+			audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded,
 		},
 	},
 	// The export triple. `read` alone exports `config` plaintext and `secret`
@@ -2783,6 +2848,75 @@ var operations = map[Operation]opSpec{
 			audit.EventRemoteWorkspaceSessionRevoked,
 		},
 	},
+	OpAdapterConfigure: {
+		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersCreate: true, StoreAdaptersAddTarget: true, StoreAdaptersUpdateTarget: true, StoreAdaptersMoveTarget: true, StoreAdaptersMoveOrigin: true, StoreAdaptersCancelMove: true, StoreAdaptersReplaceMoveTarget: true, StoreAdaptersReplaceMoveOrigin: true, StoreAdaptersMove: true, StoreAdaptersConfiguration: true, StoreAdaptersTarget: true, StoreAdaptersTargetKeyIDs: true, StoreAdaptersEnvironments: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterConfigure, audit.EventAdapterSyncRequested, audit.EventAdapterSuperseded, audit.EventAdapterScrub},
+	},
+	OpAdapterCredentialSet: {
+		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersEnvironments: true, StoreAdaptersReplaceCredential: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterCredentialReplace},
+	},
+	OpAdapterCredentialRevoke: {
+		class: ClassTenant, level: domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersRevokeCredential: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterCredentialRevoke},
+	},
+	OpAdapterAdopt: {
+		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersTarget: true, StoreAdaptersTargetEnvironments: true, StoreAdaptersConflicts: true, StoreAdaptersAdopt: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterAdopt, audit.EventAdapterSuperseded},
+	},
+	OpAdapterInspect: {
+		class: ClassTenant, level: domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersGet: true, StoreAdaptersList: true, StoreAdaptersListTargets: true, StoreAdaptersTarget: true, StoreAdaptersMapping: true, StoreAdaptersTargetEnvironments: true, StoreAdaptersConflicts: true, StoreAdaptersMove: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterInspect},
+	},
+	OpAdapterPlan: {
+		class: ClassTenant, level: domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersTarget: true, StoreAdaptersPlanMaterial: true, StoreAdaptersConflicts: true, StoreAdaptersRecordPlan: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterPlan},
+	},
+	OpAdapterTest: {
+		class: ClassTenant, level: domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersPlanMaterial: true, StoreAdaptersTarget: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterTest},
+	},
+	OpAdapterSync: {
+		class: ClassTenant, level: domain.LevelProject, postGrantForbidden: true,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersTarget: true, StoreAdaptersEnvironments: true, StoreAdaptersEnqueueManual: true, StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventAdapterSyncRequested, audit.EventAdapterPushIntent, audit.EventAdapterPushOutcome,
+			audit.EventAdapterKeyDelivered, audit.EventAdapterAbort, audit.EventAdapterSuperseded,
+		},
+	},
+	OpAdapterDelete: {
+		class: ClassTenant, level: domain.LevelProject,
+		formula:  Formula{{Cap: domain.CapManageAdapters, At: domain.LevelProject}},
+		storeOps: map[StoreOp]bool{StoreAdaptersTeardownTarget: true, StoreAdaptersTeardownAdapter: true, StoreAuditTenantInsert: true},
+		events:   []audit.EventType{audit.EventAdapterConfigure, audit.EventAdapterScrub, audit.EventAdapterPushIntent, audit.EventAdapterPushOutcome, audit.EventAdapterAbort, audit.EventAdapterSuperseded},
+	},
+	OpAdapterPush: {
+		class: ClassTenant, level: domain.LevelEnv,
+		formula: Formula{
+			{Cap: domain.CapManageAdapters, At: domain.LevelProject},
+			{Cap: domain.CapReveal, At: domain.LevelEnv},
+		},
+		storeOps: map[StoreOp]bool{StoreAuditTenantInsert: true},
+		events: []audit.EventType{
+			audit.EventAdapterPushIntent, audit.EventAdapterPushOutcome, audit.EventAdapterKeyDelivered,
+			audit.EventAdapterAbort, audit.EventAdapterScrub, audit.EventAdapterSuperseded,
+		},
+	},
 }
 
 // scimAdminFormula is `manage-members` AT ORG SCOPE EXACTLY (ADR §1). The atom
@@ -2999,10 +3133,11 @@ func (RegistryFacts) AuditMappings() map[Operation]AuditMapping {
 // without failing any probe whose fixtures happen to hold both. The pin
 // makes every such change a reviewed fixture diff.
 type FormulaPin struct {
-	Operation string   `json:"operation"`
-	Class     string   `json:"class"`
-	Level     string   `json:"level"`
-	Formula   []string `json:"formula"`
+	Operation          string   `json:"operation"`
+	Class              string   `json:"class"`
+	Level              string   `json:"level"`
+	Formula            []string `json:"formula"`
+	PostGrantForbidden bool     `json:"post_grant_forbidden,omitempty"`
 }
 
 var classNames = map[Class]string{
@@ -3021,9 +3156,10 @@ func (RegistryFacts) FormulaPins() []FormulaPin {
 	out := make([]FormulaPin, 0, len(operations))
 	for op, spec := range operations {
 		pin := FormulaPin{
-			Operation: string(op),
-			Class:     classNames[spec.class],
-			Level:     levelNames[spec.level],
+			Operation:          string(op),
+			Class:              classNames[spec.class],
+			Level:              levelNames[spec.level],
+			PostGrantForbidden: spec.postGrantForbidden,
 		}
 		for _, atom := range spec.formula {
 			pin.Formula = append(pin.Formula, string(atom.Cap)+"@"+levelNames[atom.At])

@@ -53,8 +53,14 @@ type AuthService interface {
 	StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error)
 	StepUpPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.LoginResult, error)
 	ReauthPasskeyStart(ctx context.Context, presented string, purpose service.ReauthPurpose, environmentID string, keyIDs []string) ([]byte, error)
+	ReauthAdapterPasskeyStartWire(ctx context.Context, presented, operation, environmentID string, environmentIDs []string) ([]byte, error)
 	ReauthPasskeyFinish(ctx context.Context, presented string, responseJSON []byte) (service.ReauthResult, error)
 	ReauthTOTP(ctx context.Context, presented, environmentID, code string) (service.ReauthResult, error)
+	ReauthAdapterTOTP(ctx context.Context, presented, operation string, environmentIDs []string, code string) ([]service.ReauthResult, error)
+	StartCLIReauth(ctx context.Context, presented, purpose, operation string, environmentIDs []string, pkceChallenge, redirectURI string) (service.CLIReauthStart, error)
+	CLIReauthTransaction(ctx context.Context, actor service.Actor, state string) (service.CLIReauthTransaction, error)
+	ApproveCLIReauth(ctx context.Context, actor service.Actor, state string) (service.CLIReauthApproval, error)
+	RedeemCLIReauth(ctx context.Context, code, pkceVerifier string) (service.CLIReauthRedeemed, error)
 	RemovePasskey(ctx context.Context, presented, credentialID, password, code string) (service.LoginResult, error)
 	ListPasskeys(ctx context.Context, presented string) ([]service.PasskeyView, error)
 	ResetCredential(ctx context.Context, actor service.Actor, targetPrincipal, delivery string) (service.ResetResult, error)
@@ -136,6 +142,7 @@ type API struct {
 	RetentionHealth OperationalRetentionHealthService
 	Providers       ProviderService
 	SAMLProviders   SAMLProviderService
+	Adapters        *service.Adapters
 	// SCIM is the provisioning ADMINISTRATION surface (human sessions,
 	// `manage-members` at org scope); SCIMWire is the identity provider's own
 	// protocol path (a provisioning credential, `scim-provision`). They are two

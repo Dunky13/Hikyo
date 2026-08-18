@@ -25,6 +25,12 @@
   },
   {
     "engine": "postgres",
+    "name": "ApproveCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "302ce366f3dd370acf57da2e41f03918bb6defe1b13e362091b6cd2fb33f2906"
+  },
+  {
+    "engine": "postgres",
     "name": "ApproveWorkspaceHandoff",
     "annotation": "authn-resolution",
     "hash": "df6f617122c04b3a57d21e5628efc5ba90665b459883ea3cebdbbc6d4b89a338"
@@ -34,6 +40,18 @@
     "name": "BindSessionToSAMLProvider",
     "annotation": "authn-resolution",
     "hash": "b5d86c12b60fdc2fdb44dd2e16bc2125228867912d25fa5903747154c73d6aad"
+  },
+  {
+    "engine": "postgres",
+    "name": "CLIReauthHandoffByCode",
+    "annotation": "authn-resolution",
+    "hash": "4924e5ab9d53cdc6a775725dd06230a1907cf1e5e2c682b9fcf1d28867042fd1"
+  },
+  {
+    "engine": "postgres",
+    "name": "CLIReauthHandoffByState",
+    "annotation": "authn-resolution",
+    "hash": "e71ab38813f0cf8f299b29a0c4f107f055bcc423e36a5c1c2c36c3f991cdb0b0"
   },
   {
     "engine": "postgres",
@@ -52,6 +70,12 @@
     "name": "ConfirmTOTP",
     "annotation": "authn-resolution",
     "hash": "59095ca36fdf72afb548db9b485dfbf9c7ce601731f47058aace861616a2ab2b"
+  },
+  {
+    "engine": "postgres",
+    "name": "ConsumeCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "d81de1579d138ca2068fb0057baafc79f134e3abeb3df531e4efe9bb283886db"
   },
   {
     "engine": "postgres",
@@ -537,7 +561,7 @@
     "engine": "postgres",
     "name": "GetReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "6bc2f4e7b3d73d709ac056514ccf26134172adceb1db417a07549ebf25dfd1c5"
+    "hash": "ed15d3371087d93841af711b1c535febb3ba1ca3191a0644b2fe6d337f8fd90b"
   },
   {
     "engine": "postgres",
@@ -685,6 +709,12 @@
   },
   {
     "engine": "postgres",
+    "name": "InsertCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "6b47e651594b1223e0996fe20d201bcf877c40cac868c0cf63419bf365facdb3"
+  },
+  {
+    "engine": "postgres",
     "name": "InsertCredentialAuthority",
     "annotation": "authn-resolution",
     "hash": "4190d037ef55279755904cbc0bc84a7a9317f19a778f7d89303e20d8d05ccd31"
@@ -747,7 +777,7 @@
     "engine": "postgres",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "9444e46e79158035f84d86483b62e89d838fb87dcc52af3979d47a82284da17c"
+    "hash": "e18b9f4f71fe3aab3544b1ca47a2a7f0307db2216819f5c1168bf12bbb9b3dc0"
   },
   {
     "engine": "postgres",
@@ -838,6 +868,12 @@
     "name": "InstanceIdentity",
     "annotation": "instance-scoped",
     "hash": "430c49aafa3d35b912744d7e3552360e2efc663d542b0a4891cd4e5b2e38f477"
+  },
+  {
+    "engine": "postgres",
+    "name": "InvalidateRestoredAdapterCredentials",
+    "annotation": "authn-resolution",
+    "hash": "27f28de7b5558d0d0df1d153be0982c3a6c48223a443d429ff592975c2f51ca4"
   },
   {
     "engine": "postgres",
@@ -1327,6 +1363,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "ApproveCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "925210eadc5372c7fa8976620c4523f53dc40b685c7315ed7a8ec3eaa82401c1"
+  },
+  {
+    "engine": "sqlite",
     "name": "ApproveWorkspaceHandoff",
     "annotation": "authn-resolution",
     "hash": "4b1c5eef6d0c89901e49563522fb7ce6644ea48173b29939b320241044c90021"
@@ -1336,6 +1378,18 @@
     "name": "BindSessionToSAMLProvider",
     "annotation": "authn-resolution",
     "hash": "0641ec905f2c406364637e77395f062fb8e295ff51e1b75025c35f8d7551c2c8"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CLIReauthHandoffByCode",
+    "annotation": "authn-resolution",
+    "hash": "30f9d9e83aa0942a9612c1650ab7e4faf3f3e8feff0bda827415d744eb2ff27e"
+  },
+  {
+    "engine": "sqlite",
+    "name": "CLIReauthHandoffByState",
+    "annotation": "authn-resolution",
+    "hash": "1b3a00de6cd65a774e90cfbc7575ef3935a644ae28cd204ffefce4f14b32bd50"
   },
   {
     "engine": "sqlite",
@@ -1354,6 +1408,12 @@
     "name": "ConfirmTOTP",
     "annotation": "authn-resolution",
     "hash": "4351e66bec34613178ea3ad67da06835e385ce87df92e458d0b8a5a669fe959d"
+  },
+  {
+    "engine": "sqlite",
+    "name": "ConsumeCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "27046f25d4bbdb9c7e293a3835a1ee0a8fbf5352b842632f0b6497ecdefafc3f"
   },
   {
     "engine": "sqlite",
@@ -1839,7 +1899,7 @@
     "engine": "sqlite",
     "name": "GetReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "f8bb140e321732295a5b176718634d0513b9abef02811fc6d105565c6d81e642"
+    "hash": "6d3c427b3be25fea87c7cba3300773a83c3b0ca84e283ff465d9e5b9b3bb743f"
   },
   {
     "engine": "sqlite",
@@ -1987,6 +2047,12 @@
   },
   {
     "engine": "sqlite",
+    "name": "InsertCLIReauthHandoff",
+    "annotation": "authn-resolution",
+    "hash": "6a97964ade60e0598a6982d557bdd0e42481b8be63775fd92c4de19c928debe7"
+  },
+  {
+    "engine": "sqlite",
     "name": "InsertCredentialAuthority",
     "annotation": "authn-resolution",
     "hash": "dd31f5fca392f36d4af0e819ab351217f576aeeead3703df0eb4fea5362a7667"
@@ -2049,7 +2115,7 @@
     "engine": "sqlite",
     "name": "InsertReauthWindow",
     "annotation": "authn-resolution",
-    "hash": "943626c0b9894298a182db06e02adefc9469611a4f5f619a7e742dc8f238084a"
+    "hash": "71554027311092f00f14349df6707a48398fd945034f62793f64fedeb193ab75"
   },
   {
     "engine": "sqlite",
@@ -2140,6 +2206,12 @@
     "name": "InstanceIdentity",
     "annotation": "instance-scoped",
     "hash": "430c49aafa3d35b912744d7e3552360e2efc663d542b0a4891cd4e5b2e38f477"
+  },
+  {
+    "engine": "sqlite",
+    "name": "InvalidateRestoredAdapterCredentials",
+    "annotation": "authn-resolution",
+    "hash": "27f28de7b5558d0d0df1d153be0982c3a6c48223a443d429ff592975c2f51ca4"
   },
   {
     "engine": "sqlite",

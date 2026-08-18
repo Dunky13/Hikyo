@@ -25,12 +25,29 @@ Do not use `--dev` for real secret material or any non-loopback deployment.
 | `HIKYO_DB` | Required: `sqlite:PATH` or `postgres://...` datastore. |
 | `HIKYO_EXTERNAL_ORIGIN` | Set explicitly to the canonical public HTTPS origin. |
 | `HIKYO_TRUSTED_PROXY_CIDRS` | Required for non-loopback listen: allowed proxy networks. |
+| `HIKYO_ADAPTER_EGRESS_POLICY_FILE` | Optional startup-only Forgejo origin-to-CIDR exception policy. |
 
 When origin is unset, Hikyo derives `http://<listen>`. That fallback supports a
 loopback evaluation, not a public HTTPS deployment or stable WebAuthn identity.
 
 The proxy list is mandatory only when the listener is not loopback. It is not a
 list of browser client networks; it names the proxies allowed to reach Hikyo.
+
+Adapter egress is public-address-only by default. To approve a private Forgejo
+origin, point `HIKYO_ADAPTER_EGRESS_POLICY_FILE` at a JSON object whose keys are
+exact canonical bare HTTPS origins and whose values are CIDR lists:
+
+```json
+{
+  "https://git.internal.example": ["10.40.0.0/24", "fd42:40::/64"]
+}
+```
+
+The file is read and validated only at startup. Origins must have no path,
+query, fragment, or user information. An exception applies only when both the
+configured origin and every dialed IP match the same entry. It does not disable
+TLS verification, redirects remain refused, and DNS answers are checked again
+when connecting.
 
 ## Root key
 

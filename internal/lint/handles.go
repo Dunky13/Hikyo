@@ -32,6 +32,7 @@ var handleUsers = map[string]bool{
 	Module + "/internal/store/migrate":    true, // opens its own connection for DDL
 	Module + "/internal/store/sqlitegen":  true, // generated: it IS the driver layer
 	Module + "/internal/store/pggen":      true, // generated: it IS the driver layer
+	Module + "/internal/store_test":       true, // external store harness: runtime durability/state assertions
 	Module + "/internal/conformance":      true, // cross-engine fixtures
 	Module + "/internal/isolation":        true, // probe fixtures + instrumentation
 	Module + "/internal/conformance_test": true,

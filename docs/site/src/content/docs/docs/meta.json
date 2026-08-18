@@ -19,6 +19,7 @@
     "values-workflows",
     "machine-identities",
     "account-security",
+    "deployment-adapters",
     "---Identity providers---",
     "saml",
     "scim",

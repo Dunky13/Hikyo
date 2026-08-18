@@ -47,7 +47,7 @@ export const FLOWS: readonly Flow[] = [
   {
     id: 'workspace',
     spec: 'flows/workspace.spec.ts',
-    surfaces: ['remotes', 'workspace-approve', 'workspace-callback'],
+    surfaces: ['remotes', 'cli-reauth', 'workspace-approve', 'workspace-callback'],
   },
 ];
 

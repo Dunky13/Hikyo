@@ -61,6 +61,12 @@ FROM keys WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_
 SELECT COUNT(*) FROM keys
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id);
 
+-- name: ListAdapterPinsForKey :many
+SELECT adapter_id, target_id FROM adapter_target_keys
+WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id)
+  AND key_id = sqlc.arg(key_id)
+ORDER BY adapter_id, target_id;
+
 -- name: RenameKey :execrows
 UPDATE keys SET name = sqlc.arg(name)
 WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(id);

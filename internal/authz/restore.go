@@ -36,6 +36,10 @@ func (a *TxAuthorizer) AdvanceRestoreEpoch(ctx context.Context, now time.Time) e
 	return a.r.AdvanceRestoreEpoch(ctx, now)
 }
 
+func (a *TxAuthorizer) InvalidateRestoredAdapterCredentials(ctx context.Context) error {
+	return a.r.InvalidateRestoredAdapterCredentials(ctx)
+}
+
 // ReconcilePrincipal commits ONE principal's reconciliation. The signature is
 // the guarantee: one id in, one answer out. There is no set-taking sibling of
 // this method anywhere in the module, and the drill asserts that.

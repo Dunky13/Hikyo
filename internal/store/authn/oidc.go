@@ -609,11 +609,13 @@ type NewReauthWindow struct {
 	HardExpiresAt   time.Time
 	CredentialEpoch int64
 	CreatedAt       time.Time
-	// BoundOperation and BoundKeySet pin the window to exactly one consented
-	// operation and key set. Every opener here leaves them empty (unbound,
-	// environment-wide, #54's shape); the workspace step-up sets them.
-	BoundOperation string
-	BoundKeySet    string
+	// Bound fields pin the window to one consented unit. Empty means the legacy
+	// environment-wide window. Workspace step-up binds operation+keys; adapter
+	// reauth binds purpose+operation+the full environment set.
+	BoundOperation      string
+	BoundKeySet         string
+	BoundPurpose        string
+	BoundEnvironmentSet string
 }
 
 // CreateReauthWindow opens a reauthentication window over one environment,
@@ -640,6 +642,7 @@ func (r *Resolver) CreateReauthWindow(ctx context.Context, w NewReauthWindow) er
 			WindowExpiresAt: encodeTime(w.WindowExpiresAt), HardExpiresAt: encodeTime(w.HardExpiresAt),
 			CredentialEpoch: w.CredentialEpoch, CreatedAt: encodeTime(w.CreatedAt),
 			BoundOperation: w.BoundOperation, BoundKeySet: w.BoundKeySet,
+			BoundPurpose: w.BoundPurpose, BoundEnvironmentSet: w.BoundEnvironmentSet,
 		})
 	}
 	return r.pg.InsertReauthWindow(ctx, pggen.InsertReauthWindowParams{
@@ -649,5 +652,6 @@ func (r *Resolver) CreateReauthWindow(ctx context.Context, w NewReauthWindow) er
 		WindowExpiresAt: pgTime(w.WindowExpiresAt), HardExpiresAt: pgTime(w.HardExpiresAt),
 		CredentialEpoch: w.CredentialEpoch, CreatedAt: pgTime(w.CreatedAt),
 		BoundOperation: w.BoundOperation, BoundKeySet: w.BoundKeySet,
+		BoundPurpose: w.BoundPurpose, BoundEnvironmentSet: w.BoundEnvironmentSet,
 	})
 }

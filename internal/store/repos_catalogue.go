@@ -100,6 +100,24 @@ func (r sqliteCatalogue) Count(ctx context.Context, p authz.Proof) (int64, error
 	})
 }
 
+func (r sqliteCatalogue) AdapterPins(ctx context.Context, p authz.Proof, keyID string) ([]AdapterPin, error) {
+	chain, err := authz.Verify(p, authz.StoreCatalogueAdapterPins, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListAdapterPinsForKey(ctx, sqlitegen.ListAdapterPinsForKeyParams{
+		OrgID: string(chain.Org), ProjectID: string(chain.Project), KeyID: keyID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdapterPin, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, AdapterPin{AdapterID: row.AdapterID, TargetID: row.TargetID})
+	}
+	return out, nil
+}
+
 func (r sqliteCatalogue) Rename(ctx context.Context, p authz.Proof, id, name string) error {
 	chain, err := authz.Verify(p, authz.StoreCatalogueRename, r.tok)
 	if err != nil {
@@ -506,6 +524,24 @@ func (r pgCatalogue) Count(ctx context.Context, p authz.Proof) (int64, error) {
 		ChainOrgID:     string(chain.Org),
 		ChainProjectID: string(chain.Project),
 	})
+}
+
+func (r pgCatalogue) AdapterPins(ctx context.Context, p authz.Proof, keyID string) ([]AdapterPin, error) {
+	chain, err := authz.Verify(p, authz.StoreCatalogueAdapterPins, r.tok)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.q.ListAdapterPinsForKey(ctx, pggen.ListAdapterPinsForKeyParams{
+		ChainOrgID: string(chain.Org), ChainProjectID: string(chain.Project), KeyID: keyID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AdapterPin, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, AdapterPin{AdapterID: row.AdapterID, TargetID: row.TargetID})
+	}
+	return out, nil
 }
 
 func (r pgCatalogue) Rename(ctx context.Context, p authz.Proof, id, name string) error {
