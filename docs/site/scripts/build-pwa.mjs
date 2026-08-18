@@ -11,7 +11,7 @@ const { count, size, warnings } = await generateSW({
   ignoreURLParametersMatching: [/^deployment$/, /^utm_/, /^fbclid$/],
   inlineWorkboxRuntime: true,
   navigateFallback: '/index.html',
-  navigateFallbackDenylist: [/^\/api\//],
+  navigateFallbackDenylist: [/^\/api\//, /^\/prototypes(?:\/|$)/],
   skipWaiting: true,
   sourcemap: false,
   swDest: fileURLToPath(new URL('../dist/sw.js', import.meta.url)),
