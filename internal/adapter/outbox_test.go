@@ -86,22 +86,193 @@ func TestWorkerActivationRequiresAttentionOnlyForCredentialOrCollision(t *testin
 }
 
 type workerJobStore struct {
-	job             Job
-	failed, retried bool
-	activationErr   error
-	retryFailures   []Change
+	job                        Job
+	journal                    Journal
+	failed, retried, succeeded bool
+	activationErr              error
+	retryFailures              []Change
+	retryDue                   time.Time
+	warnings                   []string
+}
+
+type cursorModule struct {
+	now       time.Time
+	calls     int
+	completed []Change
+}
+
+func (*cursorModule) ValidateConfig(Config) error { return nil }
+func (*cursorModule) TestConnection(context.Context, ConnectionRequest) (Connection, error) {
+	return Connection{}, nil
+}
+func (*cursorModule) Plan(context.Context, PlanRequest) (Plan, error) { return Plan{}, nil }
+func (m *cursorModule) Sync(_ context.Context, request SyncRequest, _ Journal) (SyncResult, error) {
+	m.calls++
+	if m.calls == 1 {
+		return SyncResult{Changes: []Change{{Surface: Secret, EffectiveName: "DONE", Disposition: Update}}}, retryAtTestError{at: m.now.Add(time.Second)}
+	}
+	m.completed = append([]Change(nil), request.Completed...)
+	return SyncResult{Warnings: []string{"provider delivery cap is near"}}, nil
+}
+
+type cursorLoader struct {
+	module   Module
+	loads    int
+	releases int
+}
+
+func (l *cursorLoader) Load(context.Context, Job, Journal) (LoadedSync, error) {
+	l.loads++
+	return LoadedSync{Module: l.module, Release: func() { l.releases++ }}, nil
+}
+
+func TestWorkerRateWaitReleasesPlaintextAndResumesAfterCompletedName(t *testing.T) {
+	now := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	module := &cursorModule{now: now}
+	loader := &cursorLoader{module: module}
+	store := &workerJobStore{job: Job{ID: "job_cursor", Kind: Converge, Attempt: 1}}
+	waits := 0
+	worker := Worker{
+		Store: store, Loader: loader, ID: "worker_1", Now: func() time.Time { return now },
+		Wait: func(_ context.Context, delay time.Duration) error {
+			waits++
+			if loader.releases != 1 || delay != time.Second {
+				t.Fatalf("wait started with releases=%d delay=%s", loader.releases, delay)
+			}
+			return nil
+		},
+	}
+	if worked, err := worker.RunOnce(t.Context()); err != nil || !worked {
+		t.Fatalf("RunOnce() = %v, %v", worked, err)
+	}
+	if waits != 1 || loader.loads != 2 || loader.releases != 2 || !store.succeeded || store.retried {
+		t.Fatalf("waits=%d loads=%d releases=%d succeeded=%v retried=%v", waits, loader.loads, loader.releases, store.succeeded, store.retried)
+	}
+	if len(module.completed) != 1 || module.completed[0].EffectiveName != "DONE" {
+		t.Fatalf("resume cursor = %+v", module.completed)
+	}
+	if len(store.warnings) != 1 || store.warnings[0] != "provider delivery cap is near" {
+		t.Fatalf("persisted warnings = %v", store.warnings)
+	}
 }
 
 func (s *workerJobStore) ClaimDue(context.Context, string, time.Time, time.Time) (Job, bool, error) {
 	return s.job, true, nil
 }
-func (*workerJobStore) Journal(Job) Journal { return workerJournal{} }
-func (s *workerJobStore) Retry(_ context.Context, _ Job, _ time.Time, failed []Change, _ error) error {
+func (s *workerJobStore) Journal(Job) Journal {
+	if s.journal != nil {
+		return s.journal
+	}
+	return workerJournal{}
+}
+func (s *workerJobStore) Retry(_ context.Context, _ Job, due time.Time, failed []Change, warnings []string, _ error) error {
 	s.retried = true
+	s.retryDue = due
 	s.retryFailures = append([]Change{}, failed...)
+	s.warnings = append([]string(nil), warnings...)
 	return nil
 }
-func (*workerJobStore) Succeed(context.Context, Job, int64, time.Time) error { return nil }
+
+type retryAtTestError struct{ at time.Time }
+
+func (e retryAtTestError) Error() string      { return "rate limited" }
+func (e retryAtTestError) RetryAt() time.Time { return e.at }
+
+func TestWorkerHonorsProviderRetryDeadline(t *testing.T) {
+	now := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	want := now.Add(3 * time.Minute)
+	store := &workerJobStore{job: Job{ID: "job_rate", Kind: Converge, Attempt: 1}}
+	worker := Worker{
+		Store: store, Loader: workerLoader{module: workerModule{syncErr: retryAtTestError{at: want}}}, ID: "worker_1",
+		Now: func() time.Time { return now }, Jitter: func(time.Duration) time.Duration { return time.Second },
+	}
+	if worked, err := worker.RunOnce(t.Context()); err != nil || !worked {
+		t.Fatalf("RunOnce() = %v, %v", worked, err)
+	}
+	if !store.retried || !store.retryDue.Equal(want) {
+		t.Fatalf("retry due = %s, retried=%v; want %s", store.retryDue, store.retried, want)
+	}
+}
+
+type slowLeaseJournal struct {
+	now      *time.Time
+	leaseEnd time.Time
+	calls    int
+}
+
+func (j *slowLeaseJournal) Gate(context.Context, Effect) error {
+	j.calls++
+	if j.calls == 1 {
+		*j.now = j.now.Add(LeaseTime - 10*time.Second)
+		return nil
+	}
+	if !j.now.Before(j.leaseEnd) {
+		return ErrSuperseded
+	}
+	return nil
+}
+func (*slowLeaseJournal) Reserve(context.Context, Effect) (LedgerState, error) { return Reserved, nil }
+func (*slowLeaseJournal) Prepare(context.Context, Effect, LedgerState) error   { return nil }
+func (*slowLeaseJournal) Finish(context.Context, Effect, Completion) error     { return nil }
+func (*slowLeaseJournal) Refuse(context.Context, Effect) error                 { return nil }
+func (*slowLeaseJournal) ReleaseReservation(context.Context, Effect) error     { return nil }
+
+type leaseCheckingLoader struct {
+	module Module
+	loads  int
+}
+
+func (l *leaseCheckingLoader) Load(ctx context.Context, _ Job, journal Journal) (LoadedSync, error) {
+	l.loads++
+	if err := journal.Gate(ctx, Effect{Surface: Secret, EffectiveName: "*", Disposition: Update}); err != nil {
+		return LoadedSync{}, err
+	}
+	return LoadedSync{Module: l.module}, nil
+}
+func (l *leaseCheckingLoader) LoadActivation(ctx context.Context, _ Job, journal Journal) (LoadedActivation, error) {
+	l.loads++
+	if err := journal.Gate(ctx, Effect{Surface: Secret, EffectiveName: "*", Disposition: Update}); err != nil {
+		return LoadedActivation{}, err
+	}
+	return LoadedActivation{Module: l.module, Request: ConnectionRequest{Gate: func(context.Context) error { return nil }}}, nil
+}
+
+func TestWorkerSlowInitialGateCannotWaitPastOriginalDurableLease(t *testing.T) {
+	for _, kind := range []JobKind{Converge, Activate} {
+		t.Run(string(kind), func(t *testing.T) {
+			claimedAt := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+			now := claimedAt
+			retryAt := claimedAt.Add(LeaseTime + 5*time.Second)
+			journal := &slowLeaseJournal{now: &now, leaseEnd: claimedAt.Add(LeaseTime)}
+			module := workerModule{syncErr: retryAtTestError{at: retryAt}, connectionErr: retryAtTestError{at: retryAt}}
+			loader := &leaseCheckingLoader{module: module}
+			store := &workerJobStore{job: Job{ID: "job_slow_gate", Kind: kind, RouteMoveID: "move_slow_gate", Attempt: 1}, journal: journal}
+			waits := 0
+			worker := Worker{
+				Store: store, Loader: loader, ID: "worker_slow_gate", Now: func() time.Time { return now },
+				Wait: func(_ context.Context, delay time.Duration) error {
+					waits++
+					now = now.Add(delay)
+					return nil
+				},
+			}
+			if worked, err := worker.RunOnce(t.Context()); err != nil || !worked {
+				t.Fatalf("RunOnce() = %v, %v", worked, err)
+			}
+			if waits != 0 || loader.loads != 1 || !store.retried || store.failed {
+				t.Fatalf("waits=%d loads=%d retried=%v failed=%v, want direct nonterminal retry", waits, loader.loads, store.retried, store.failed)
+			}
+			if !store.retryDue.Equal(retryAt) {
+				t.Fatalf("retry due=%s, want provider deadline %s", store.retryDue, retryAt)
+			}
+		})
+	}
+}
+func (s *workerJobStore) Succeed(_ context.Context, _ Job, _ int64, warnings []string, _ time.Time) error {
+	s.succeeded = true
+	s.warnings = append([]string(nil), warnings...)
+	return nil
+}
 func (s *workerJobStore) Fail(context.Context, Job, time.Time, error) error {
 	s.failed = true
 	return nil
@@ -147,7 +318,7 @@ func TestWorkerRetryFailureNamesIncludeFailedAndConflicts(t *testing.T) {
 	conflict := Change{Surface: Variable, EffectiveName: "CLAIMED"}
 	store := &workerJobStore{job: Job{ID: "job_1", Kind: Converge, Attempt: 1}}
 	worker := Worker{
-		Store: store, Loader: workerLoader{module: workerModule{syncErr: errors.New("retry"), result: SyncResult{Failed: []Change{failed}, Conflicts: []Change{conflict}}}}, ID: "worker_1",
+		Store: store, Loader: workerLoader{module: workerModule{syncErr: errors.New("retry"), result: SyncResult{Failed: []Change{failed}, Conflicts: []Change{conflict}, Warnings: []string{"provider cap is near"}}}}, ID: "worker_1",
 		Now: func() time.Time { return time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC) }, Jitter: func(time.Duration) time.Duration { return time.Second },
 	}
 	if worked, err := worker.RunOnce(t.Context()); err != nil || !worked {
@@ -155,6 +326,9 @@ func TestWorkerRetryFailureNamesIncludeFailedAndConflicts(t *testing.T) {
 	}
 	if len(store.retryFailures) != 2 || store.retryFailures[0] != failed || store.retryFailures[1] != conflict {
 		t.Fatalf("retry failures = %+v, want failed then conflict", store.retryFailures)
+	}
+	if len(store.warnings) != 1 || store.warnings[0] != "provider cap is near" {
+		t.Fatalf("retry warnings = %v", store.warnings)
 	}
 }
 

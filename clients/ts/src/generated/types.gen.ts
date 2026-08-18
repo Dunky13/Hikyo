@@ -14,7 +14,11 @@ export type Id = string;
  */
 export type Timestamp = string;
 
-export type AdapterDestinationKind = 'repository' | 'organization';
+export type AdapterDestinationKind = 'repository' | 'organization' | 'environment';
+
+export type AdapterVisibility = 'all' | 'private' | 'selected';
+
+export type AdapterProvider = 'forgejo' | 'github-actions';
 
 export type AdapterTargetInput = {
     environment_id: Id;
@@ -24,14 +28,24 @@ export type AdapterTargetInput = {
      * Repository name; empty for organization destinations.
      */
     destination_name: string;
+    /**
+     * GitHub environment name; empty for repository and organization destinations.
+     */
+    destination_environment: string;
+    /**
+     * GitHub organization recipient visibility; empty for other destinations.
+     */
+    visibility: '' | 'all' | 'private' | 'selected';
+    selected_repository_ids: Array<number>;
     name_prefix: string;
     key_ids: Array<Id>;
 };
 
 export type CreateAdapterRequest = {
+    provider: AdapterProvider;
     origin: string;
     /**
-     * Write-only Forgejo PAT. Never returned.
+     * Write-only provider credential. Never returned.
      */
     credential: string;
     target: AdapterTargetInput;
@@ -55,6 +69,9 @@ export type UpdateAdapterTargetRequest = {
     destination_kind: AdapterDestinationKind;
     destination_owner: string;
     destination_name: string;
+    destination_environment: string;
+    visibility: '' | 'all' | 'private' | 'selected';
+    selected_repository_ids: Array<number>;
     name_prefix: string;
     key_ids: Array<Id>;
     expected_generation: number;
@@ -77,6 +94,9 @@ export type ResumeAdapterTargetMoveRequest = {
     destination_kind: AdapterDestinationKind;
     destination_owner: string;
     destination_name: string;
+    destination_environment: string;
+    visibility: '' | 'all' | 'private' | 'selected';
+    selected_repository_ids: Array<number>;
     name_prefix: string;
     key_ids: Array<Id>;
 };
@@ -88,13 +108,18 @@ export type AdapterTarget = {
     destination_kind: AdapterDestinationKind;
     destination_owner: string;
     destination_name: string;
+    destination_environment: string;
     destination_id: number;
+    repository_id: number;
+    visibility: '' | 'all' | 'private' | 'selected';
+    selected_repository_ids: Array<number>;
     name_prefix: string;
     generation: number;
     state: 'active' | 'moving' | 'tombstoned';
     sync_status: 'never' | 'converging' | 'converged' | 'failed';
     converged_revision?: number | null;
     failure_names: Array<string>;
+    warnings: Array<string>;
     /**
      * Pending exact conflict artifacts eligible for adoption on this target.
      */
@@ -107,10 +132,11 @@ export type AdapterTargetList = {
 
 export type Adapter = {
     id: Id;
-    provider: 'forgejo';
+    provider: AdapterProvider;
     origin: string;
     credential_present: boolean;
     credential_set_at?: string | null;
+    credential_expires_at?: string | null;
     authority_principal_id: Id;
     state: 'active' | 'moving' | 'tombstoned';
     created_at: Timestamp;
@@ -129,6 +155,7 @@ export type AdapterConflictEntry = {
 export type AdapterConflictArtifact = {
     id: Id;
     destination_id: number;
+    repository_id: number;
     target_generation: number;
     entries: Array<AdapterConflictEntry>;
     created_at: Timestamp;
@@ -157,12 +184,14 @@ export type AdapterChange = {
 export type AdapterPlan = {
     artifact_id: Id;
     changes: Array<AdapterChange>;
+    warnings: Array<string>;
 };
 
 export type AdapterAdoptionRequest = {
     artifact_id: Id;
     target_generation: number;
     destination_id: number;
+    repository_id: number;
     entries: Array<AdapterConflictEntry>;
 };
 
@@ -174,6 +203,8 @@ export type AdapterJob = {
 export type AdapterConnection = {
     version: string;
     destination_id: number;
+    repository_id: number;
+    credential_expires_at?: string | null;
 };
 
 export type AdapterTeardown = {
@@ -194,7 +225,11 @@ export type AdapterMoveTarget = {
     destination_kind: AdapterDestinationKind;
     destination_owner: string;
     destination_name: string;
+    destination_environment: string;
     destination_id: number;
+    repository_id: number;
+    visibility: '' | 'all' | 'private' | 'selected';
+    selected_repository_ids: Array<number>;
     name_prefix: string;
     orphaned_names: Array<string>;
     jobs: Array<AdapterMoveJob>;

@@ -36,18 +36,18 @@ type AdapterSnapshotEntry struct {
 }
 
 type AdapterExecution struct {
-	Origin, CredentialOwnerID string
-	CredentialCiphertext      []byte
-	Target                    adapter.Target
-	Entries                   []AdapterSnapshotEntry
-	Ledger                    []adapter.LedgerEntry
-	Revision                  int64
+	Provider, Origin, CredentialOwnerID string
+	CredentialCiphertext                []byte
+	Target                              adapter.Target
+	Entries                             []AdapterSnapshotEntry
+	Ledger                              []adapter.LedgerEntry
+	Revision                            int64
 }
 
 type AdapterActivation struct {
-	Origin, CredentialOwnerID string
-	CredentialCiphertext      []byte
-	Target                    adapter.Target
+	Provider, Origin, CredentialOwnerID string
+	CredentialCiphertext                []byte
+	Target                              adapter.Target
 }
 
 func NewAdapterRuntime(db *DB, authorize AdapterAuthorizer) *AdapterRuntime {
@@ -61,8 +61,8 @@ func (r *AdapterRuntime) LoadExecution(ctx context.Context, job adapter.Job) (Ad
 	var out AdapterExecution
 	var kind string
 	query := r.query(
-		`SELECT a.origin,a.id,a.credential_ciphertext,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_outbox j ON j.id=? AND j.target_id=t.id AND j.org_id=t.org_id AND j.project_id=t.project_id AND j.environment_id=t.environment_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND t.generation=? AND j.state='running' AND j.lease_owner=?`,
-		`SELECT a.origin,a.id,a.credential_ciphertext,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_outbox j ON j.id=$1 AND j.target_id=t.id AND j.org_id=t.org_id AND j.project_id=t.project_id AND j.environment_id=t.environment_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.environment_id=$5 AND t.generation=$6 AND j.state='running' AND j.lease_owner=$7`)
+		`SELECT a.provider,a.origin,a.id,a.credential_ciphertext,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.repository_id,t.visibility,t.selected_repository_ids,t.name_prefix,t.generation FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_outbox j ON j.id=? AND j.target_id=t.id AND j.org_id=t.org_id AND j.project_id=t.project_id AND j.environment_id=t.environment_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND t.generation=? AND j.state='running' AND j.lease_owner=?`,
+		`SELECT a.provider,a.origin,a.id,a.credential_ciphertext,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.repository_id,t.visibility,t.selected_repository_ids,t.name_prefix,t.generation FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_outbox j ON j.id=$1 AND j.target_id=t.id AND j.org_id=t.org_id AND j.project_id=t.project_id AND j.environment_id=t.environment_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.environment_id=$5 AND t.generation=$6 AND j.state='running' AND j.lease_owner=$7`)
 	args := []any{job.ID, job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation, job.LeaseOwner}
 	var row adapterRow
 	if r.db.Engine() == EnginePostgres {
@@ -70,8 +70,8 @@ func (r *AdapterRuntime) LoadExecution(ctx context.Context, job adapter.Job) (Ad
 	} else {
 		row = r.db.SQLiteRead().QueryRowContext(ctx, query, args...)
 	}
-	var credential []byte
-	if err := row.Scan(&out.Origin, &out.CredentialOwnerID, &credential, &kind, &out.Target.Destination.Owner, &out.Target.Destination.Name, &out.Target.Destination.NumericID, &out.Target.NamePrefix, &out.Target.Generation); err != nil {
+	var credential, selectedRaw []byte
+	if err := row.Scan(&out.Provider, &out.Origin, &out.CredentialOwnerID, &credential, &kind, &out.Target.Destination.Owner, &out.Target.Destination.Name, &out.Target.Destination.Environment, &out.Target.Destination.NumericID, &out.Target.Destination.RepositoryID, &out.Target.Destination.Visibility, &selectedRaw, &out.Target.NamePrefix, &out.Target.Generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			return AdapterExecution{}, ErrNotFound
 		}
@@ -84,10 +84,13 @@ func (r *AdapterRuntime) LoadExecution(ctx context.Context, job adapter.Job) (Ad
 	out.Target.ID = job.TargetID
 	out.Target.Environment = job.EnvironmentID
 	out.Target.Destination.Kind = adapter.DestinationKind(kind)
+	if err := json.Unmarshal(selectedRaw, &out.Target.Destination.SelectedRepositoryIDs); err != nil {
+		return AdapterExecution{}, fmt.Errorf("store: adapter selected repository ids: %w", err)
+	}
 
 	ledgerQuery := r.query(
-		`SELECT surface,effective_name,state FROM adapter_ledger WHERE target_id=? AND org_id=? AND project_id=? AND environment_id=? AND state<>'released' ORDER BY surface,normalized_name`,
-		`SELECT surface,effective_name,state FROM adapter_ledger WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND environment_id=$4 AND state<>'released' ORDER BY surface,normalized_name`)
+		`SELECT surface,effective_name,state,missing FROM adapter_ledger WHERE target_id=? AND org_id=? AND project_id=? AND environment_id=? AND state<>'released' ORDER BY surface,normalized_name`,
+		`SELECT surface,effective_name,state,missing FROM adapter_ledger WHERE target_id=$1 AND org_id=$2 AND project_id=$3 AND environment_id=$4 AND state<>'released' ORDER BY surface,normalized_name`)
 	if r.db.Engine() == EnginePostgres {
 		rows, err := r.db.PG().Query(ctx, ledgerQuery, job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID)
 		if err != nil {
@@ -97,7 +100,7 @@ func (r *AdapterRuntime) LoadExecution(ctx context.Context, job adapter.Job) (Ad
 		for rows.Next() {
 			var surface, state string
 			var entry adapter.LedgerEntry
-			if err := rows.Scan(&surface, &entry.EffectiveName, &state); err != nil {
+			if err := rows.Scan(&surface, &entry.EffectiveName, &state, &entry.Missing); err != nil {
 				return AdapterExecution{}, err
 			}
 			entry.Surface, entry.State = adapter.Surface(surface), adapter.LedgerState(state)
@@ -115,9 +118,11 @@ func (r *AdapterRuntime) LoadExecution(ctx context.Context, job adapter.Job) (Ad
 		for rows.Next() {
 			var surface, state string
 			var entry adapter.LedgerEntry
-			if err := rows.Scan(&surface, &entry.EffectiveName, &state); err != nil {
+			var missing int
+			if err := rows.Scan(&surface, &entry.EffectiveName, &state, &missing); err != nil {
 				return AdapterExecution{}, err
 			}
+			entry.Missing = missing != 0
 			entry.Surface, entry.State = adapter.Surface(surface), adapter.LedgerState(state)
 			out.Ledger = append(out.Ledger, entry)
 		}
@@ -192,10 +197,10 @@ func (r *AdapterRuntime) LoadActivation(ctx context.Context, job adapter.Job) (A
 		return AdapterActivation{}, fmt.Errorf("%w: job is not a route activation", domain.ErrInvalid)
 	}
 	query := r.query(
-		`SELECT COALESCE(m.pending_origin,a.origin),a.id,COALESCE(m.pending_credential_ciphertext,a.credential_ciphertext),mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_id,mt.name_prefix,t.generation FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=j.route_move_id AND m.org_id=j.org_id AND m.project_id=j.project_id AND m.adapter_id=a.id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE j.id=? AND j.route_move_id=? AND j.target_id=? AND j.org_id=? AND j.project_id=? AND j.environment_id=? AND j.generation=? AND j.kind='activate' AND j.state='running' AND j.lease_owner=? AND m.state='activating' AND t.state='moving'`,
-		`SELECT COALESCE(m.pending_origin,a.origin),a.id,COALESCE(m.pending_credential_ciphertext,a.credential_ciphertext),mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_id,mt.name_prefix,t.generation FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=j.route_move_id AND m.org_id=j.org_id AND m.project_id=j.project_id AND m.adapter_id=a.id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE j.id=$1 AND j.route_move_id=$2 AND j.target_id=$3 AND j.org_id=$4 AND j.project_id=$5 AND j.environment_id=$6 AND j.generation=$7 AND j.kind='activate' AND j.state='running' AND j.lease_owner=$8 AND m.state='activating' AND t.state='moving'`)
+		`SELECT a.provider,COALESCE(m.pending_origin,a.origin),a.id,COALESCE(m.pending_credential_ciphertext,a.credential_ciphertext),mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.destination_id,mt.repository_id,mt.visibility,mt.selected_repository_ids,mt.name_prefix,t.generation FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=j.route_move_id AND m.org_id=j.org_id AND m.project_id=j.project_id AND m.adapter_id=a.id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE j.id=? AND j.route_move_id=? AND j.target_id=? AND j.org_id=? AND j.project_id=? AND j.environment_id=? AND j.generation=? AND j.kind='activate' AND j.state='running' AND j.lease_owner=? AND m.state='activating' AND t.state='moving'`,
+		`SELECT a.provider,COALESCE(m.pending_origin,a.origin),a.id,COALESCE(m.pending_credential_ciphertext,a.credential_ciphertext),mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.destination_id,mt.repository_id,mt.visibility,mt.selected_repository_ids,mt.name_prefix,t.generation FROM adapter_outbox j JOIN adapter_targets t ON t.id=j.target_id AND t.org_id=j.org_id AND t.project_id=j.project_id AND t.environment_id=j.environment_id JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=j.route_move_id AND m.org_id=j.org_id AND m.project_id=j.project_id AND m.adapter_id=a.id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE j.id=$1 AND j.route_move_id=$2 AND j.target_id=$3 AND j.org_id=$4 AND j.project_id=$5 AND j.environment_id=$6 AND j.generation=$7 AND j.kind='activate' AND j.state='running' AND j.lease_owner=$8 AND m.state='activating' AND t.state='moving'`)
 	var out AdapterActivation
-	var credential []byte
+	var credential, selectedRaw []byte
 	var kind string
 	var row adapterRow
 	args := []any{job.ID, job.RouteMoveID, job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation, job.LeaseOwner}
@@ -204,8 +209,8 @@ func (r *AdapterRuntime) LoadActivation(ctx context.Context, job adapter.Job) (A
 	} else {
 		row = r.db.SQLiteRead().QueryRowContext(ctx, query, args...)
 	}
-	if err := row.Scan(&out.Origin, &out.CredentialOwnerID, &credential, &out.Target.Environment, &kind,
-		&out.Target.Destination.Owner, &out.Target.Destination.Name, &out.Target.Destination.NumericID,
+	if err := row.Scan(&out.Provider, &out.Origin, &out.CredentialOwnerID, &credential, &out.Target.Environment, &kind,
+		&out.Target.Destination.Owner, &out.Target.Destination.Name, &out.Target.Destination.Environment, &out.Target.Destination.NumericID, &out.Target.Destination.RepositoryID, &out.Target.Destination.Visibility, &selectedRaw,
 		&out.Target.NamePrefix, &out.Target.Generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			return AdapterActivation{}, ErrNotFound
@@ -218,6 +223,9 @@ func (r *AdapterRuntime) LoadActivation(ctx context.Context, job adapter.Job) (A
 	out.CredentialCiphertext = append([]byte(nil), credential...)
 	out.Target.ID = job.TargetID
 	out.Target.Destination.Kind = adapter.DestinationKind(kind)
+	if err := json.Unmarshal(selectedRaw, &out.Target.Destination.SelectedRepositoryIDs); err != nil {
+		return AdapterActivation{}, fmt.Errorf("store: adapter selected repository ids: %w", err)
+	}
 	return out, nil
 }
 
@@ -534,8 +542,8 @@ func (j *adapterJournal) Reserve(ctx context.Context, effect adapter.Effect) (ad
 	state := adapter.Reserved
 	err := j.runtime.transaction(ctx, func(tx adapterDBTX) error {
 		pendingQuery := j.runtime.query(
-			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_move_claims c ON c.provider_origin=a.origin AND c.destination_kind=t.destination_kind AND c.destination_owner=t.destination_owner AND c.destination_name=t.destination_name WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND c.target_id<>t.id AND c.surface=? AND c.normalized_name=?`,
-			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_move_claims c ON c.provider_origin=a.origin AND c.destination_kind=t.destination_kind AND c.destination_owner=t.destination_owner AND c.destination_name=t.destination_name WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4 AND c.target_id<>t.id AND c.surface=$5 AND c.normalized_name=$6`)
+			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_move_claims c ON c.provider_origin=a.origin AND c.destination_kind=t.destination_kind AND c.destination_owner=t.destination_owner AND c.destination_name=t.destination_name AND c.destination_environment=t.destination_environment WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND c.target_id<>t.id AND c.surface=? AND c.normalized_name=?`,
+			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_move_claims c ON c.provider_origin=a.origin AND c.destination_kind=t.destination_kind AND c.destination_owner=t.destination_owner AND c.destination_name=t.destination_name AND c.destination_environment=t.destination_environment WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4 AND c.target_id<>t.id AND c.surface=$5 AND c.normalized_name=$6`)
 		var pending int
 		normalized := strings.ToUpper(effect.EffectiveName)
 		if err := tx.QueryRow(ctx, pendingQuery, j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, string(effect.Surface), normalized).Scan(&pending); err != nil {
@@ -551,18 +559,18 @@ func (j *adapterJournal) Reserve(ctx context.Context, effect adapter.Effect) (ad
 		err := tx.QueryRow(ctx, selectQuery, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), normalized).Scan(&raw)
 		if err == nil {
 			if adapter.LedgerState(raw) == adapter.Released {
-				var origin string
-				var destinationID int64
+				var origin, destinationKind string
+				var destinationID, repositoryID int64
 				currentRoute := j.runtime.query(
-					`SELECT a.origin,t.destination_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=?`,
-					`SELECT a.origin,t.destination_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4`)
-				if err := tx.QueryRow(ctx, currentRoute, j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID).Scan(&origin, &destinationID); err != nil {
+					`SELECT a.origin,t.destination_kind,t.destination_id,t.repository_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=?`,
+					`SELECT a.origin,t.destination_kind,t.destination_id,t.repository_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4`)
+				if err := tx.QueryRow(ctx, currentRoute, j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID).Scan(&origin, &destinationKind, &destinationID, &repositoryID); err != nil {
 					return err
 				}
 				reactivate := j.runtime.query(
-					`UPDATE adapter_ledger SET state='reserved',effective_name=?,provider_origin=?,destination_id=?,updated_at=? WHERE org_id=? AND project_id=? AND environment_id=? AND target_id=? AND surface=? AND normalized_name=? AND state='released'`,
-					`UPDATE adapter_ledger SET state='reserved',effective_name=$1,provider_origin=$2,destination_id=$3,updated_at=$4 WHERE org_id=$5 AND project_id=$6 AND environment_id=$7 AND target_id=$8 AND surface=$9 AND normalized_name=$10 AND state='released'`)
-				rows, updateErr := tx.Exec(ctx, reactivate, effect.EffectiveName, origin, destinationID, adapterTimestamp(j.runtime.db.Engine(), time.Now()), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), normalized)
+					`UPDATE adapter_ledger SET state='reserved',missing=0,effective_name=?,provider_origin=?,destination_kind=?,repository_id=?,destination_id=?,updated_at=? WHERE org_id=? AND project_id=? AND environment_id=? AND target_id=? AND surface=? AND normalized_name=? AND state='released'`,
+					`UPDATE adapter_ledger SET state='reserved',missing=false,effective_name=$1,provider_origin=$2,destination_kind=$3,repository_id=$4,destination_id=$5,updated_at=$6 WHERE org_id=$7 AND project_id=$8 AND environment_id=$9 AND target_id=$10 AND surface=$11 AND normalized_name=$12 AND state='released'`)
+				rows, updateErr := tx.Exec(ctx, reactivate, effect.EffectiveName, origin, destinationKind, repositoryID, destinationID, adapterTimestamp(j.runtime.db.Engine(), time.Now()), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), normalized)
 				if constraint(updateErr) != nil {
 					return adapter.ErrConflict
 				}
@@ -591,18 +599,18 @@ func (j *adapterJournal) Reserve(ctx context.Context, effect adapter.Effect) (ad
 		if ledgerRows >= 10_000 {
 			return adapter.ErrLedgerFull
 		}
-		var origin string
-		var destinationID int64
+		var origin, destinationKind string
+		var destinationID, repositoryID int64
 		lookup := j.runtime.query(
-			`SELECT a.origin,t.destination_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=?`,
-			`SELECT a.origin,t.destination_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4`)
-		if err := tx.QueryRow(ctx, lookup, j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID).Scan(&origin, &destinationID); err != nil {
+			`SELECT a.origin,t.destination_kind,t.destination_id,t.repository_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=?`,
+			`SELECT a.origin,t.destination_kind,t.destination_id,t.repository_id FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.environment_id=$4`)
+		if err := tx.QueryRow(ctx, lookup, j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID).Scan(&origin, &destinationKind, &destinationID, &repositoryID); err != nil {
 			return err
 		}
 		insert := j.runtime.query(
-			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`)
-		_, err = tx.Exec(ctx, insert, newAdapterID("led"), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, origin, destinationID, string(effect.Surface), effect.EffectiveName, normalized, string(adapter.Reserved), adapterTimestamp(j.runtime.db.Engine(), time.Now()))
+			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			`INSERT INTO adapter_ledger (id,org_id,project_id,environment_id,target_id,provider_origin,destination_kind,repository_id,destination_id,surface,effective_name,normalized_name,state,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`)
+		_, err = tx.Exec(ctx, insert, newAdapterID("led"), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, origin, destinationKind, repositoryID, destinationID, string(effect.Surface), effect.EffectiveName, normalized, string(adapter.Reserved), adapterTimestamp(j.runtime.db.Engine(), time.Now()))
 		if constraint(err) != nil {
 			return adapter.ErrConflict
 		}
@@ -672,8 +680,18 @@ func (j *adapterJournal) Finish(ctx context.Context, effect adapter.Effect, comp
 	outcomeID := newAdapterID("aud")
 	now := time.Now().UTC()
 	err := j.runtime.transaction(ctx, func(tx adapterDBTX) error {
-		payload, _ := json.Marshal(map[string]string{"surface": string(effect.Surface), "effective_name": effect.EffectiveName, "disposition": string(effect.Disposition)})
-		if err := j.insertAudit(ctx, tx, outcomeID, "adapter.push_outcome", completion.Outcome, now, payload); err != nil {
+		payload := map[string]any{"surface": string(effect.Surface), "effective_name": effect.EffectiveName, "disposition": string(effect.Disposition)}
+		if completion.ProviderStatus != 0 {
+			payload["provider_status"] = completion.ProviderStatus
+		}
+		if completion.Finding != "" {
+			payload["finding"] = completion.Finding
+		}
+		if completion.Missing {
+			payload["owned_missing"] = true
+		}
+		payloadJSON, _ := json.Marshal(payload)
+		if err := j.insertAudit(ctx, tx, outcomeID, "adapter.push_outcome", completion.Outcome, now, payloadJSON); err != nil {
 			return err
 		}
 		updateEffect := j.runtime.query(
@@ -695,9 +713,9 @@ func (j *adapterJournal) Finish(ctx context.Context, effect adapter.Effect, comp
 			rows, err = tx.Exec(ctx, remove, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), strings.ToUpper(effect.EffectiveName))
 		} else {
 			update := j.runtime.query(
-				`UPDATE adapter_ledger SET state=CASE WHEN state='released' THEN 'released' ELSE ? END,updated_at=? WHERE org_id=? AND project_id=? AND environment_id=? AND target_id=? AND surface=? AND normalized_name=?`,
-				`UPDATE adapter_ledger SET state=CASE WHEN state='released' THEN 'released' ELSE $1 END,updated_at=$2 WHERE org_id=$3 AND project_id=$4 AND environment_id=$5 AND target_id=$6 AND surface=$7 AND normalized_name=$8`)
-			rows, err = tx.Exec(ctx, update, string(completion.State), adapterTimestamp(j.runtime.db.Engine(), now), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), strings.ToUpper(effect.EffectiveName))
+				`UPDATE adapter_ledger SET state=CASE WHEN state='released' THEN 'released' ELSE ? END,missing=?,updated_at=? WHERE org_id=? AND project_id=? AND environment_id=? AND target_id=? AND surface=? AND normalized_name=?`,
+				`UPDATE adapter_ledger SET state=CASE WHEN state='released' THEN 'released' ELSE $1 END,missing=$2,updated_at=$3 WHERE org_id=$4 AND project_id=$5 AND environment_id=$6 AND target_id=$7 AND surface=$8 AND normalized_name=$9`)
+			rows, err = tx.Exec(ctx, update, string(completion.State), completion.Missing, adapterTimestamp(j.runtime.db.Engine(), now), j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, string(effect.Surface), strings.ToUpper(effect.EffectiveName))
 		}
 		if err != nil {
 			return err
@@ -774,8 +792,8 @@ func (j *adapterJournal) ReleaseReservation(ctx context.Context, effect adapter.
 
 func (j *adapterJournal) insertConflict(ctx context.Context, tx adapterDBTX, effect adapter.Effect, now time.Time) error {
 	insert := j.runtime.query(
-		`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at) SELECT ?,?,?,?,?,?,?,destination_id,?,?,?,? FROM adapter_targets WHERE id=? AND org_id=? AND project_id=? AND environment_id=?`,
-		`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,target_generation,surface,effective_name,created_at) SELECT $1,$2,$3,$4,$5,$6,$7,destination_id,$8,$9,$10,$11 FROM adapter_targets WHERE id=$12 AND org_id=$13 AND project_id=$14 AND environment_id=$15`)
+		`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at) SELECT ?,?,?,?,?,?,?,destination_id,repository_id,?,?,?,? FROM adapter_targets WHERE id=? AND org_id=? AND project_id=? AND environment_id=?`,
+		`INSERT INTO adapter_conflicts (id,artifact_id,org_id,project_id,environment_id,target_id,job_id,destination_id,repository_id,target_generation,surface,effective_name,created_at) SELECT $1,$2,$3,$4,$5,$6,$7,destination_id,repository_id,$8,$9,$10,$11 FROM adapter_targets WHERE id=$12 AND org_id=$13 AND project_id=$14 AND environment_id=$15`)
 	artifactID := newAdapterID("acf")
 	rows, err := tx.Exec(ctx, insert, newAdapterID("acn"), artifactID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID, j.job.TargetID, j.job.ID, j.job.Generation, string(effect.Surface), effect.EffectiveName, adapterTimestamp(j.runtime.db.Engine(), now), j.job.TargetID, j.job.OrgID, j.job.ProjectID, j.job.EnvironmentID)
 	if err != nil {
@@ -804,14 +822,14 @@ func (r *AdapterRuntime) insertAdapterJobAuditWithID(ctx context.Context, tx ada
 	return err
 }
 
-func (r *AdapterRuntime) Retry(ctx context.Context, job adapter.Job, due time.Time, failed []adapter.Change, _ error) error {
-	return r.finishJob(ctx, job, "queued", due, time.Time{}, "failed", 0, failed, nil)
+func (r *AdapterRuntime) Retry(ctx context.Context, job adapter.Job, due time.Time, failed []adapter.Change, warnings []string, _ error) error {
+	return r.finishJob(ctx, job, "queued", due, time.Time{}, "failed", 0, failed, warnings, nil)
 }
 func (r *AdapterRuntime) Fail(ctx context.Context, job adapter.Job, at time.Time, cause error) error {
-	return r.finishJob(ctx, job, "failed", time.Time{}, at, "failed", 0, nil, cause)
+	return r.finishJob(ctx, job, "failed", time.Time{}, at, "failed", 0, nil, nil, cause)
 }
-func (r *AdapterRuntime) Succeed(ctx context.Context, job adapter.Job, revision int64, at time.Time) error {
-	return r.finishJob(ctx, job, "succeeded", time.Time{}, at, "converged", revision, nil, nil)
+func (r *AdapterRuntime) Succeed(ctx context.Context, job adapter.Job, revision int64, warnings []string, at time.Time) error {
+	return r.finishJob(ctx, job, "succeeded", time.Time{}, at, "converged", revision, nil, warnings, nil)
 }
 
 // Activate commits a tested pending target route and installs its first
@@ -833,11 +851,12 @@ func (r *AdapterRuntime) Activate(ctx context.Context, job adapter.Job, connecti
 		if rows != 1 {
 			return adapter.ErrSuperseded
 		}
-		var adapterID, currentEnvironment, pendingEnvironment, kind, owner, name, prefix, moveKind, pendingOrigin string
+		var adapterID, currentEnvironment, pendingEnvironment, kind, owner, name, destinationEnvironment, visibility, prefix, moveKind, pendingOrigin string
+		var selectedRaw []byte
 		lookup := r.query(
-			`SELECT t.adapter_id,t.environment_id,mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.name_prefix,m.kind,COALESCE(m.pending_origin,a.origin) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=? AND m.org_id=t.org_id AND m.project_id=t.project_id AND m.adapter_id=t.adapter_id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND t.generation=? AND t.state='moving' AND m.state='activating' AND (m.kind='origin' OR (m.kind='target' AND m.target_id=t.id))`,
-			`SELECT t.adapter_id,t.environment_id,mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.name_prefix,m.kind,COALESCE(m.pending_origin,a.origin) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=$1 AND m.org_id=t.org_id AND m.project_id=t.project_id AND m.adapter_id=t.adapter_id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.environment_id=$5 AND t.generation=$6 AND t.state='moving' AND m.state='activating' AND (m.kind='origin' OR (m.kind='target' AND m.target_id=t.id)) FOR UPDATE OF t,a,m,mt`)
-		if err := tx.QueryRow(ctx, lookup, job.RouteMoveID, job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation).Scan(&adapterID, &currentEnvironment, &pendingEnvironment, &kind, &owner, &name, &prefix, &moveKind, &pendingOrigin); err != nil {
+			`SELECT t.adapter_id,t.environment_id,mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.visibility,mt.selected_repository_ids,mt.name_prefix,m.kind,COALESCE(m.pending_origin,a.origin) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=? AND m.org_id=t.org_id AND m.project_id=t.project_id AND m.adapter_id=t.adapter_id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.environment_id=? AND t.generation=? AND t.state='moving' AND m.state='activating' AND (m.kind='origin' OR (m.kind='target' AND m.target_id=t.id))`,
+			`SELECT t.adapter_id,t.environment_id,mt.environment_id,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.visibility,mt.selected_repository_ids,mt.name_prefix,m.kind,COALESCE(m.pending_origin,a.origin) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id JOIN adapter_route_moves m ON m.id=$1 AND m.org_id=t.org_id AND m.project_id=t.project_id AND m.adapter_id=t.adapter_id JOIN adapter_route_move_targets mt ON mt.move_id=m.id AND mt.target_id=t.id AND mt.org_id=t.org_id AND mt.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.environment_id=$5 AND t.generation=$6 AND t.state='moving' AND m.state='activating' AND (m.kind='origin' OR (m.kind='target' AND m.target_id=t.id)) FOR UPDATE OF t,a,m,mt`)
+		if err := tx.QueryRow(ctx, lookup, job.RouteMoveID, job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation).Scan(&adapterID, &currentEnvironment, &pendingEnvironment, &kind, &owner, &name, &destinationEnvironment, &visibility, &selectedRaw, &prefix, &moveKind, &pendingOrigin); err != nil {
 			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 				return adapter.ErrSuperseded
 			}
@@ -847,19 +866,19 @@ func (r *AdapterRuntime) Activate(ctx context.Context, job adapter.Job, connecti
 			return fmt.Errorf("%w: target environment move requires a replacement identity", domain.ErrConflict)
 		}
 		collisionQuery := r.query(
-			`SELECT (SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_targets other ON other.org_id=c.org_id AND other.project_id=c.project_id AND other.id<>c.target_id AND other.state='active' JOIN adapters oa ON oa.id=other.adapter_id AND oa.org_id=other.org_id AND oa.project_id=other.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=other.id AND tk.org_id=other.org_id AND tk.project_id=other.project_id AND tk.environment_id=other.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE c.move_id=? AND c.target_id=? AND oa.origin=? AND other.destination_kind=? AND other.destination_id=? AND (c.effective_name=other.name_prefix||? OR c.effective_name=other.name_prefix||k.name))+(SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_ledger l ON l.provider_origin=? AND l.destination_id=? AND l.surface=c.surface AND l.normalized_name=c.normalized_name AND l.state<>'released' AND l.target_id<>c.target_id WHERE c.move_id=? AND c.target_id=?)`,
-			`SELECT (SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_targets other ON other.org_id=c.org_id AND other.project_id=c.project_id AND other.id<>c.target_id AND other.state='active' JOIN adapters oa ON oa.id=other.adapter_id AND oa.org_id=other.org_id AND oa.project_id=other.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=other.id AND tk.org_id=other.org_id AND tk.project_id=other.project_id AND tk.environment_id=other.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE c.move_id=$1 AND c.target_id=$2 AND oa.origin=$3 AND other.destination_kind=$4 AND other.destination_id=$5 AND (c.effective_name=other.name_prefix||$6 OR c.effective_name=other.name_prefix||k.name))+(SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_ledger l ON l.provider_origin=$7 AND l.destination_id=$8 AND l.surface=c.surface AND l.normalized_name=c.normalized_name AND l.state<>'released' AND l.target_id<>c.target_id WHERE c.move_id=$9 AND c.target_id=$10)`)
+			`SELECT (SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_targets other ON other.org_id=c.org_id AND other.project_id=c.project_id AND other.id<>c.target_id AND other.state='active' JOIN adapters oa ON oa.id=other.adapter_id AND oa.org_id=other.org_id AND oa.project_id=other.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=other.id AND tk.org_id=other.org_id AND tk.project_id=other.project_id AND tk.environment_id=other.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE c.move_id=? AND c.target_id=? AND oa.origin=? AND other.destination_kind=? AND other.repository_id=? AND other.destination_id=? AND (c.effective_name=other.name_prefix||? OR c.effective_name=other.name_prefix||k.name))+(SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_ledger l ON l.provider_origin=? AND l.destination_kind=? AND l.repository_id=? AND l.destination_id=? AND l.surface=c.surface AND l.normalized_name=c.normalized_name AND l.state<>'released' AND l.target_id<>c.target_id WHERE c.move_id=? AND c.target_id=?)`,
+			`SELECT (SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_targets other ON other.org_id=c.org_id AND other.project_id=c.project_id AND other.id<>c.target_id AND other.state='active' JOIN adapters oa ON oa.id=other.adapter_id AND oa.org_id=other.org_id AND oa.project_id=other.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=other.id AND tk.org_id=other.org_id AND tk.project_id=other.project_id AND tk.environment_id=other.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE c.move_id=$1 AND c.target_id=$2 AND oa.origin=$3 AND other.destination_kind=$4 AND other.repository_id=$5 AND other.destination_id=$6 AND (c.effective_name=other.name_prefix||$7 OR c.effective_name=other.name_prefix||k.name))+(SELECT COUNT(*) FROM adapter_route_move_claims c JOIN adapter_ledger l ON l.provider_origin=$8 AND l.destination_kind=$9 AND l.repository_id=$10 AND l.destination_id=$11 AND l.surface=c.surface AND l.normalized_name=c.normalized_name AND l.state<>'released' AND l.target_id<>c.target_id WHERE c.move_id=$12 AND c.target_id=$13)`)
 		var collisions int
-		if err := tx.QueryRow(ctx, collisionQuery, job.RouteMoveID, job.TargetID, pendingOrigin, kind, connection.DestinationID, adapter.SentinelName, pendingOrigin, connection.DestinationID, job.RouteMoveID, job.TargetID).Scan(&collisions); err != nil {
+		if err := tx.QueryRow(ctx, collisionQuery, job.RouteMoveID, job.TargetID, pendingOrigin, kind, connection.RepositoryID, connection.DestinationID, adapter.SentinelName, pendingOrigin, kind, connection.RepositoryID, connection.DestinationID, job.RouteMoveID, job.TargetID).Scan(&collisions); err != nil {
 			return err
 		}
 		if collisions != 0 {
 			return fmt.Errorf("%w: pending effective names collide on the resolved destination", adapter.ErrConflict)
 		}
 		setResolved := r.query(
-			`UPDATE adapter_route_move_targets SET destination_id=? WHERE move_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=? AND destination_id=0`,
-			`UPDATE adapter_route_move_targets SET destination_id=$1 WHERE move_id=$2 AND target_id=$3 AND org_id=$4 AND project_id=$5 AND environment_id=$6 AND destination_id=0`)
-		rows, err = tx.Exec(ctx, setResolved, connection.DestinationID, job.RouteMoveID, job.TargetID, job.OrgID, job.ProjectID, pendingEnvironment)
+			`UPDATE adapter_route_move_targets SET destination_id=?,repository_id=? WHERE move_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=? AND destination_id=0`,
+			`UPDATE adapter_route_move_targets SET destination_id=$1,repository_id=$2 WHERE move_id=$3 AND target_id=$4 AND org_id=$5 AND project_id=$6 AND environment_id=$7 AND destination_id=0`)
+		rows, err = tx.Exec(ctx, setResolved, connection.DestinationID, connection.RepositoryID, job.RouteMoveID, job.TargetID, job.OrgID, job.ProjectID, pendingEnvironment)
 		if err != nil {
 			return err
 		}
@@ -901,14 +920,26 @@ func (r *AdapterRuntime) Activate(ctx context.Context, job adapter.Job, connecti
 			return ErrConflict
 		}
 		applyTarget := r.query(
-			`UPDATE adapter_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_id=?,name_prefix=?,generation=?,state='active',sync_status='converging',failure_names='[]',active_job_id=? WHERE id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND state='moving' AND provider_lease_job_id IS NULL`,
-			`UPDATE adapter_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_id=$4,name_prefix=$5,generation=$6,state='active',sync_status='converging',failure_names='[]'::jsonb,active_job_id=$7 WHERE id=$8 AND org_id=$9 AND project_id=$10 AND environment_id=$11 AND generation=$12 AND state='moving' AND provider_lease_job_id IS NULL`)
-		rows, err = tx.Exec(ctx, applyTarget, kind, owner, name, connection.DestinationID, prefix, generation, convergeID, job.TargetID, job.OrgID, job.ProjectID, currentEnvironment, job.Generation)
+			`UPDATE adapter_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_environment=?,destination_id=?,repository_id=?,visibility=?,selected_repository_ids=?,name_prefix=?,generation=?,state='active',sync_status='converging',failure_names='[]',active_job_id=? WHERE id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND state='moving' AND provider_lease_job_id IS NULL`,
+			`UPDATE adapter_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_environment=$4,destination_id=$5,repository_id=$6,visibility=$7,selected_repository_ids=$8,name_prefix=$9,generation=$10,state='active',sync_status='converging',failure_names='[]'::jsonb,active_job_id=$11 WHERE id=$12 AND org_id=$13 AND project_id=$14 AND environment_id=$15 AND generation=$16 AND state='moving' AND provider_lease_job_id IS NULL`)
+		rows, err = tx.Exec(ctx, applyTarget, kind, owner, name, destinationEnvironment, connection.DestinationID, connection.RepositoryID, visibility, selectedRaw, prefix, generation, convergeID, job.TargetID, job.OrgID, job.ProjectID, currentEnvironment, job.Generation)
 		if err != nil {
 			return err
 		}
 		if rows != 1 {
 			return adapter.ErrSuperseded
+		}
+		if !connection.CredentialExpiresAt.IsZero() {
+			updateExpiry := r.query(
+				`UPDATE adapters SET credential_expires_at=? WHERE id=? AND org_id=? AND project_id=? AND state='active'`,
+				`UPDATE adapters SET credential_expires_at=$1 WHERE id=$2 AND org_id=$3 AND project_id=$4 AND state='active'`)
+			rows, err = tx.Exec(ctx, updateExpiry, adapterTimestamp(r.db.Engine(), connection.CredentialExpiresAt), adapterID, job.OrgID, job.ProjectID)
+			if err != nil {
+				return err
+			}
+			if rows != 1 {
+				return adapter.ErrSuperseded
+			}
 		}
 		deleteClaims := r.query(`DELETE FROM adapter_route_move_claims WHERE move_id=? AND org_id=? AND project_id=?`, `DELETE FROM adapter_route_move_claims WHERE move_id=$1 AND org_id=$2 AND project_id=$3`)
 		if _, err := tx.Exec(ctx, deleteClaims, job.RouteMoveID, job.OrgID, job.ProjectID); err != nil {
@@ -969,20 +1000,21 @@ func (r *AdapterRuntime) activateOriginRouteMove(ctx context.Context, tx adapter
 		return fmt.Errorf("%w: origin move lost pending provider custody", adapter.ErrSuperseded)
 	}
 	targetQuery := r.query(
-		`SELECT t.id,t.environment_id,t.generation,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_id,mt.name_prefix FROM adapter_route_move_targets mt JOIN adapter_targets t ON t.id=mt.target_id AND t.org_id=mt.org_id AND t.project_id=mt.project_id AND t.environment_id=mt.environment_id WHERE mt.move_id=? AND mt.org_id=? AND mt.project_id=? AND t.adapter_id=? AND t.state='moving' AND t.active_job_id IS NULL AND t.provider_lease_job_id IS NULL ORDER BY t.id`,
-		`SELECT t.id,t.environment_id,t.generation,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_id,mt.name_prefix FROM adapter_route_move_targets mt JOIN adapter_targets t ON t.id=mt.target_id AND t.org_id=mt.org_id AND t.project_id=mt.project_id AND t.environment_id=mt.environment_id WHERE mt.move_id=$1 AND mt.org_id=$2 AND mt.project_id=$3 AND t.adapter_id=$4 AND t.state='moving' AND t.active_job_id IS NULL AND t.provider_lease_job_id IS NULL ORDER BY t.id FOR UPDATE OF t,mt`)
+		`SELECT t.id,t.environment_id,t.generation,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.destination_id,mt.repository_id,mt.visibility,mt.selected_repository_ids,mt.name_prefix FROM adapter_route_move_targets mt JOIN adapter_targets t ON t.id=mt.target_id AND t.org_id=mt.org_id AND t.project_id=mt.project_id AND t.environment_id=mt.environment_id WHERE mt.move_id=? AND mt.org_id=? AND mt.project_id=? AND t.adapter_id=? AND t.state='moving' AND t.active_job_id IS NULL AND t.provider_lease_job_id IS NULL ORDER BY t.id`,
+		`SELECT t.id,t.environment_id,t.generation,mt.destination_kind,mt.destination_owner,mt.destination_name,mt.destination_environment,mt.destination_id,mt.repository_id,mt.visibility,mt.selected_repository_ids,mt.name_prefix FROM adapter_route_move_targets mt JOIN adapter_targets t ON t.id=mt.target_id AND t.org_id=mt.org_id AND t.project_id=mt.project_id AND t.environment_id=mt.environment_id WHERE mt.move_id=$1 AND mt.org_id=$2 AND mt.project_id=$3 AND t.adapter_id=$4 AND t.state='moving' AND t.active_job_id IS NULL AND t.provider_lease_job_id IS NULL ORDER BY t.id FOR UPDATE OF t,mt`)
 	targetRows, err := tx.Query(ctx, targetQuery, job.RouteMoveID, job.OrgID, job.ProjectID, adapterID)
 	if err != nil {
 		return err
 	}
 	type activatedTarget struct {
-		id, environment, kind, owner, name, prefix string
-		generation, destinationID                  int64
+		id, environment, kind, owner, name, destinationEnvironment, visibility, prefix string
+		generation, destinationID, repositoryID                                        int64
+		selectedRaw                                                                    []byte
 	}
 	var targets []activatedTarget
 	for targetRows.Next() {
 		var target activatedTarget
-		if err := targetRows.Scan(&target.id, &target.environment, &target.generation, &target.kind, &target.owner, &target.name, &target.destinationID, &target.prefix); err != nil {
+		if err := targetRows.Scan(&target.id, &target.environment, &target.generation, &target.kind, &target.owner, &target.name, &target.destinationEnvironment, &target.destinationID, &target.repositoryID, &target.visibility, &target.selectedRaw, &target.prefix); err != nil {
 			targetRows.Close()
 			return err
 		}
@@ -1030,9 +1062,9 @@ func (r *AdapterRuntime) activateOriginRouteMove(ctx context.Context, tx adapter
 			return ErrConflict
 		}
 		applyTarget := r.query(
-			`UPDATE adapter_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_id=?,name_prefix=?,generation=?,state='active',sync_status='converging',failure_names='[]',active_job_id=? WHERE id=? AND adapter_id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND state='moving' AND active_job_id IS NULL AND provider_lease_job_id IS NULL`,
-			`UPDATE adapter_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_id=$4,name_prefix=$5,generation=$6,state='active',sync_status='converging',failure_names='[]'::jsonb,active_job_id=$7 WHERE id=$8 AND adapter_id=$9 AND org_id=$10 AND project_id=$11 AND environment_id=$12 AND generation=$13 AND state='moving' AND active_job_id IS NULL AND provider_lease_job_id IS NULL`)
-		rows, err = tx.Exec(ctx, applyTarget, target.kind, target.owner, target.name, target.destinationID, target.prefix, generation, convergeID, target.id, adapterID, job.OrgID, job.ProjectID, target.environment, target.generation)
+			`UPDATE adapter_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_environment=?,destination_id=?,repository_id=?,visibility=?,selected_repository_ids=?,name_prefix=?,generation=?,state='active',sync_status='converging',failure_names='[]',active_job_id=? WHERE id=? AND adapter_id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND state='moving' AND active_job_id IS NULL AND provider_lease_job_id IS NULL`,
+			`UPDATE adapter_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_environment=$4,destination_id=$5,repository_id=$6,visibility=$7,selected_repository_ids=$8,name_prefix=$9,generation=$10,state='active',sync_status='converging',failure_names='[]'::jsonb,active_job_id=$11 WHERE id=$12 AND adapter_id=$13 AND org_id=$14 AND project_id=$15 AND environment_id=$16 AND generation=$17 AND state='moving' AND active_job_id IS NULL AND provider_lease_job_id IS NULL`)
+		rows, err = tx.Exec(ctx, applyTarget, target.kind, target.owner, target.name, target.destinationEnvironment, target.destinationID, target.repositoryID, target.visibility, target.selectedRaw, target.prefix, generation, convergeID, target.id, adapterID, job.OrgID, job.ProjectID, target.environment, target.generation)
 		if err != nil {
 			return err
 		}
@@ -1041,9 +1073,13 @@ func (r *AdapterRuntime) activateOriginRouteMove(ctx context.Context, tx adapter
 		}
 	}
 	activateAdapter := r.query(
-		`UPDATE adapters SET origin=?,credential_ciphertext=?,credential_set_at=?,state='active' WHERE id=? AND org_id=? AND project_id=? AND state='moving'`,
-		`UPDATE adapters SET origin=$1,credential_ciphertext=$2,credential_set_at=$3,state='active' WHERE id=$4 AND org_id=$5 AND project_id=$6 AND state='moving'`)
-	rows, err = tx.Exec(ctx, activateAdapter, pendingOrigin, pendingCredential, stamp, adapterID, job.OrgID, job.ProjectID)
+		`UPDATE adapters SET origin=?,credential_ciphertext=?,credential_set_at=?,credential_expires_at=?,state='active' WHERE id=? AND org_id=? AND project_id=? AND state='moving'`,
+		`UPDATE adapters SET origin=$1,credential_ciphertext=$2,credential_set_at=$3,credential_expires_at=$4,state='active' WHERE id=$5 AND org_id=$6 AND project_id=$7 AND state='moving'`)
+	var expires any
+	if !connection.CredentialExpiresAt.IsZero() {
+		expires = adapterTimestamp(r.db.Engine(), connection.CredentialExpiresAt)
+	}
+	rows, err = tx.Exec(ctx, activateAdapter, pendingOrigin, pendingCredential, stamp, expires, adapterID, job.OrgID, job.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -1067,7 +1103,7 @@ func (r *AdapterRuntime) activateOriginRouteMove(ctx context.Context, tx adapter
 	return nil
 }
 
-func (r *AdapterRuntime) finishJob(ctx context.Context, job adapter.Job, state string, due, finished time.Time, targetStatus string, revision int64, failed []adapter.Change, terminalErr error) error {
+func (r *AdapterRuntime) finishJob(ctx context.Context, job adapter.Job, state string, due, finished time.Time, targetStatus string, revision int64, failed []adapter.Change, warnings []string, terminalErr error) error {
 	return r.transaction(ctx, func(tx adapterDBTX) error {
 		if state == "queued" {
 			query := r.query(`UPDATE adapter_outbox SET state='queued',next_attempt_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND lease_owner=?`, `UPDATE adapter_outbox SET state='queued',next_attempt_at=$1,lease_owner=NULL,lease_expires_at=NULL WHERE id=$2 AND lease_owner=$3`)
@@ -1170,14 +1206,18 @@ func (r *AdapterRuntime) finishJob(ctx context.Context, job adapter.Job, state s
 		if err != nil {
 			return err
 		}
+		warningJSON, err := json.Marshal(append([]string{}, warnings...))
+		if err != nil {
+			return err
+		}
 		query := r.query(
-			`UPDATE adapter_targets SET sync_status=?,converged_revision=CASE WHEN ?>0 THEN ? ELSE converged_revision END,failure_names=?,active_job_id=`+activeJob+` WHERE id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND provider_lease_job_id IS NULL`,
-			`UPDATE adapter_targets SET sync_status=$1,converged_revision=CASE WHEN $2>0 THEN $3 ELSE converged_revision END,failure_names=$4,active_job_id=`+activeJob+` WHERE id=$5 AND org_id=$6 AND project_id=$7 AND environment_id=$8 AND generation=$9 AND provider_lease_job_id IS NULL`)
+			`UPDATE adapter_targets SET sync_status=?,converged_revision=CASE WHEN ?>0 THEN ? ELSE converged_revision END,failure_names=?,warnings=?,active_job_id=`+activeJob+` WHERE id=? AND org_id=? AND project_id=? AND environment_id=? AND generation=? AND provider_lease_job_id IS NULL`,
+			`UPDATE adapter_targets SET sync_status=$1,converged_revision=CASE WHEN $2>0 THEN $3 ELSE converged_revision END,failure_names=$4,warnings=$5,active_job_id=`+activeJob+` WHERE id=$6 AND org_id=$7 AND project_id=$8 AND environment_id=$9 AND generation=$10 AND provider_lease_job_id IS NULL`)
 		var rev any
 		if revision > 0 {
 			rev = revision
 		}
-		rows, err := tx.Exec(ctx, query, targetStatus, revision, rev, string(failureJSON), job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation)
+		rows, err := tx.Exec(ctx, query, targetStatus, revision, rev, string(failureJSON), string(warningJSON), job.TargetID, job.OrgID, job.ProjectID, job.EnvironmentID, job.Generation)
 		if err != nil {
 			return err
 		}

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
+	"unicode/utf8"
 )
 
 const SentinelName = "MANAGED_BY_WENV"
@@ -33,6 +35,7 @@ type DestinationKind string
 const (
 	Repository   DestinationKind = "repository"
 	Organization DestinationKind = "organization"
+	Environment  DestinationKind = "environment"
 )
 
 type LedgerState string
@@ -49,10 +52,14 @@ type Config struct {
 }
 
 type Destination struct {
-	Kind      DestinationKind
-	Owner     string
-	Name      string
-	NumericID int64
+	Kind                  DestinationKind
+	Owner                 string
+	Name                  string
+	Environment           string
+	NumericID             int64
+	RepositoryID          int64
+	Visibility            string
+	SelectedRepositoryIDs []int64
 }
 
 type Target struct {
@@ -68,15 +75,20 @@ type Access struct {
 }
 
 type ConnectionRequest struct {
-	Config      Config
-	Destination Destination
-	Access      Access
-	Gate        func(context.Context) error
+	Config                  Config
+	Destination             Destination
+	Access                  Access
+	Gate                    func(context.Context) error
+	AllowEnvironmentCreate  bool
+	BeforeEnvironmentCreate func(context.Context) error
+	AfterEnvironmentCreate  func(context.Context, error) error
 }
 
 type Connection struct {
-	Version       string
-	DestinationID int64
+	Version             string
+	DestinationID       int64
+	RepositoryID        int64
+	CredentialExpiresAt time.Time
 }
 
 type ManifestEntry struct {
@@ -97,6 +109,10 @@ type LedgerEntry struct {
 	Surface       Surface
 	EffectiveName string
 	State         LedgerState
+	// Missing records that Hikyo owns this name but the provider no longer has
+	// it. This makes PATCH-404 -> POST crash safe without treating the retry as
+	// an unowned capture attempt.
+	Missing bool
 }
 
 type Disposition string
@@ -125,7 +141,8 @@ type PlanRequest struct {
 }
 
 type Plan struct {
-	Changes []Change
+	Changes  []Change
+	Warnings []string
 }
 
 type SyncRequest struct {
@@ -137,12 +154,16 @@ type SyncRequest struct {
 	// Teardown is explicit and fail-closed. Every ordinary sync desires both
 	// sentinels; only a tombstoned target's scrub sets this true.
 	Teardown bool
+	// Completed names were durably finished earlier in this leased job before
+	// an in-job provider-rate wait. Modules skip them when plaintext is reloaded.
+	Completed []Change
 }
 
 type SyncResult struct {
 	Changes   []Change
 	Conflicts []Change
 	Failed    []Change
+	Warnings  []string
 }
 
 type Effect struct {
@@ -153,9 +174,12 @@ type Effect struct {
 }
 
 type Completion struct {
-	Outcome  string
-	State    LedgerState // empty releases the claim
-	Conflict bool
+	Outcome        string
+	State          LedgerState // empty releases the claim
+	Conflict       bool
+	Missing        bool
+	ProviderStatus int
+	Finding        string
 }
 
 // Journal is the durable half of Sync. Prepare runs immediately before each
@@ -220,12 +244,88 @@ func ValidateManifest(prefix string, entries []ManifestEntry) error {
 	return nil
 }
 
+// ValidateGitHubActionsManifest applies GitHub's name and byte contract.
+// Unlike Forgejo, GitHub permits FORGEJO_, GITEA_, and CI; only GITHUB_ is
+// provider-reserved.
+func ValidateGitHubActionsManifest(prefix string, entries []ManifestEntry, values bool) error {
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		name := prefix + entry.CanonicalName
+		switch {
+		case entry.Classification != SecretClassification && entry.Classification != ConfigClassification:
+			return fmt.Errorf("github-actions: %s: unknown classification %q", entry.CanonicalName, entry.Classification)
+		case name == prefix+SentinelName:
+			return fmt.Errorf("github-actions: %s: effective name is reserved for management sentinel", entry.CanonicalName)
+		case !effectiveName.MatchString(name):
+			return fmt.Errorf("github-actions: %s: effective name %q is not uppercase GitHub Actions identifier syntax", entry.CanonicalName, name)
+		case strings.HasPrefix(name, "GITHUB_"):
+			return fmt.Errorf("github-actions: %s: effective name %q uses reserved GITHUB_ prefix", entry.CanonicalName, name)
+		case values && len([]byte(entry.Value)) > 48*1024:
+			return fmt.Errorf("github-actions: %s: value exceeds GitHub's 48 KB limit", entry.CanonicalName)
+		case values && strings.ContainsRune(entry.Value, '\x00'):
+			return fmt.Errorf("github-actions: %s: NUL-containing values are not workflow-byte-exact", entry.CanonicalName)
+		case values && !utf8.ValidString(entry.Value):
+			return fmt.Errorf("github-actions: %s: non-UTF-8 values cannot be represented byte-exactly by GitHub's JSON API", entry.CanonicalName)
+		}
+		normalized := strings.ToUpper(name)
+		if _, ok := seen[normalized]; ok {
+			return fmt.Errorf("github-actions: %s: effective name %q collides case-insensitively", entry.CanonicalName, name)
+		}
+		seen[normalized] = struct{}{}
+	}
+	return nil
+}
+
+func ValidateProviderManifest(provider, prefix string, entries []ManifestEntry, values bool) error {
+	switch provider {
+	case "github-actions":
+		return ValidateGitHubActionsManifest(prefix, entries, values)
+	case "forgejo", "":
+		return ValidateManifest(prefix, entries)
+	default:
+		return fmt.Errorf("adapter: unknown provider %q", provider)
+	}
+}
+
 // Workflow renders names only. Prefixing is provider wiring; applications
 // continue to receive canonical names in every environment.
 func Workflow(prefix string, entries []ManifestEntry) (string, error) {
 	if err := ValidateManifest(prefix, entries); err != nil {
 		return "", err
 	}
+	return renderWorkflow(prefix, entries), nil
+}
+
+func WorkflowForProvider(provider, prefix string, entries []ManifestEntry) (string, error) {
+	if err := ValidateProviderManifest(provider, prefix, entries, false); err != nil {
+		return "", err
+	}
+	return renderWorkflow(prefix, entries), nil
+}
+
+// RecipientSetNeedsCeremony classifies the exact locked narrowing cases.
+// Only all->private, all->selected, and removal from an unchanged selected
+// set may skip the full recipient-set authorization ceremony.
+func RecipientSetNeedsCeremony(oldVisibility string, oldIDs []int64, newVisibility string, newIDs []int64) bool {
+	oldSet := append([]int64(nil), oldIDs...)
+	newSet := append([]int64(nil), newIDs...)
+	slices.Sort(oldSet)
+	slices.Sort(newSet)
+	if oldVisibility == newVisibility {
+		if oldVisibility != "selected" || slices.Equal(oldSet, newSet) {
+			return false
+		}
+		for _, id := range newSet {
+			if !slices.Contains(oldSet, id) {
+				return true
+			}
+		}
+		return false
+	}
+	return !(oldVisibility == "all" && (newVisibility == "private" || newVisibility == "selected"))
+}
+
+func renderWorkflow(prefix string, entries []ManifestEntry) string {
 	rows := slices.Clone(entries)
 	slices.SortFunc(rows, func(a, b ManifestEntry) int { return strings.Compare(a.CanonicalName, b.CanonicalName) })
 	var out strings.Builder
@@ -237,7 +337,7 @@ func Workflow(prefix string, entries []ManifestEntry) (string, error) {
 		}
 		_, _ = fmt.Fprintf(&out, "  %s: ${{ %s.%s%s }}\n", entry.CanonicalName, surface, prefix, entry.CanonicalName)
 	}
-	return out.String(), nil
+	return out.String()
 }
 
 var (
@@ -251,4 +351,20 @@ var (
 	ErrProviderBusy  = errors.New("adapter: provider write is still in flight")
 	ErrQueueFull     = errors.New("adapter: target outbox queue limit reached")
 	ErrLedgerFull    = errors.New("adapter: target ownership ledger limit reached")
+	ErrRateLimited   = errors.New("adapter: provider rate limited")
 )
+
+// RetryAtError lets a provider preserve an authoritative rate-limit deadline
+// through the generic outbox boundary without retaining plaintext in memory.
+type RetryAtError interface {
+	error
+	RetryAt() time.Time
+}
+
+func ProviderRetryAt(err error) (time.Time, bool) {
+	var retry RetryAtError
+	if !errors.As(err, &retry) {
+		return time.Time{}, false
+	}
+	return retry.RetryAt(), true
+}

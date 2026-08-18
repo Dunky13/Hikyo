@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,7 +17,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
-	"github.com/Hikyo-Org/hikyo/internal/adapter/forgejo"
 	"github.com/Hikyo-Org/hikyo/internal/admission"
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/config"
@@ -280,12 +278,8 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 		Store: adapterRuntime, Loader: &adapterLoader{runtime: adapterRuntime, keyring: kr, egressPolicy: cfg.AdapterEgressPolicy},
 		ID: "adapter-worker-" + uuid.Must(uuid.NewV7()).String(), Poll: time.Second, Log: log,
 	}
-	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, PlanModule: func(origin, credential string) (adapter.Module, func(), error) {
-		client, err := forgejo.NewClient(forgejo.ClientConfig{Origin: origin, Credential: credential, AllowedCIDRs: append([]netip.Prefix(nil), cfg.AdapterEgressPolicy[origin]...), Deadline: 15 * time.Second})
-		if err != nil {
-			return nil, nil, err
-		}
-		return &forgejo.Module{API: client}, client.Forget, nil
+	adapterService := &service.Adapters{DB: db, Auth: authSvc, Keyring: kr, ProviderModule: func(provider, origin, credential string) (adapter.Module, func(), error) {
+		return deploymentModule(provider, origin, credential, cfg.AdapterEgressPolicy[origin])
 	}}
 
 	api := &server.API{

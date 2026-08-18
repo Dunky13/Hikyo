@@ -9,10 +9,13 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/api/apigen"
+	"github.com/Hikyo-Org/hikyo/internal/adapter"
 )
 
 type adapterCredentialSource struct {
@@ -33,7 +36,7 @@ func (s adapterCredentialSource) read(ios IO) ([]byte, error) {
 		raw, err = os.ReadFile(s.file)
 	default:
 		var value string
-		value, err = ios.readPassword("Forgejo personal access token: ")
+		value, err = ios.readPassword("Deployment provider credential: ")
 		raw = []byte(value)
 	}
 	if err != nil {
@@ -52,26 +55,59 @@ func (s adapterCredentialSource) read(ios IO) ([]byte, error) {
 func adapterBase(org, project string) string {
 	return api.PathPrefix + "/orgs/" + url.PathEscape(org) + "/projects/" + url.PathEscape(project)
 }
-func adapterTargetInput(env, kind, owner, repo, prefix, keys string) (apigen.AdapterTargetInput, error) {
+func adapterTargetInput(env, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys string) (apigen.AdapterTargetInput, error) {
 	ids := splitAdapterKeys(keys)
 	if env == "" || kind == "" || owner == "" || len(ids) == 0 {
 		return apigen.AdapterTargetInput{}, failf(ExitUsage, "target requires --env, --kind, --owner, and a non-empty --keys list")
 	}
-	if kind == "repository" && repo == "" {
-		return apigen.AdapterTargetInput{}, failf(ExitUsage, "repository target requires --repo")
+	repositoryIDs, err := splitAdapterRepositoryIDs(selectedRepositories)
+	if err != nil {
+		return apigen.AdapterTargetInput{}, err
 	}
-	if kind == "organization" && repo != "" {
-		return apigen.AdapterTargetInput{}, failf(ExitUsage, "organization target refuses --repo")
+	switch kind {
+	case "repository":
+		if repo == "" || destinationEnvironment != "" || visibility != "" || len(repositoryIDs) != 0 {
+			return apigen.AdapterTargetInput{}, failf(ExitUsage, "repository target requires --repo and refuses environment/visibility routing")
+		}
+	case "organization":
+		if repo != "" || destinationEnvironment != "" || (visibility != "all" && visibility != "private" && visibility != "selected") {
+			return apigen.AdapterTargetInput{}, failf(ExitUsage, "organization target requires --visibility all|private|selected and refuses --repo/--destination-environment")
+		}
+		if (visibility == "selected") != (len(repositoryIDs) != 0) {
+			return apigen.AdapterTargetInput{}, failf(ExitUsage, "--selected-repository-ids is required exactly for selected visibility")
+		}
+	case "environment":
+		if repo == "" || destinationEnvironment == "" || visibility != "" || len(repositoryIDs) != 0 {
+			return apigen.AdapterTargetInput{}, failf(ExitUsage, "environment target requires --repo and --destination-environment and refuses visibility routing")
+		}
+	default:
+		return apigen.AdapterTargetInput{}, failf(ExitUsage, "--kind must be repository, organization, or environment")
 	}
-	if kind != "repository" && kind != "organization" {
-		return apigen.AdapterTargetInput{}, failf(ExitUsage, "--kind must be repository or organization")
-	}
-	out := apigen.AdapterTargetInput{EnvironmentId: apigen.ID(env), DestinationKind: apigen.AdapterDestinationKind(kind), DestinationOwner: owner, DestinationName: repo, NamePrefix: prefix}
+	out := apigen.AdapterTargetInput{EnvironmentId: apigen.ID(env), DestinationKind: apigen.AdapterDestinationKind(kind), DestinationOwner: owner, DestinationName: repo, DestinationEnvironment: destinationEnvironment, Visibility: apigen.AdapterTargetInputVisibility(visibility), SelectedRepositoryIds: repositoryIDs, NamePrefix: prefix}
 	for _, id := range ids {
 		out.KeyIds = append(out.KeyIds, apigen.ID(id))
 	}
 	return out, nil
 }
+
+func splitAdapterRepositoryIDs(raw string) ([]int64, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []int64{}, nil
+	}
+	seen := map[int64]bool{}
+	var out []int64
+	for _, part := range strings.Split(raw, ",") {
+		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || id <= 0 || seen[id] {
+			return nil, failf(ExitUsage, "--selected-repository-ids must be unique positive numeric GitHub repository ids")
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func splitAdapterKeys(raw string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -129,7 +165,7 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 	case "plan", "sync", "test":
 		return runAdapterAction(ctx, ios, sub, rest)
 	}
-	var format, origin, target, moveID, kind, owner, repo, prefix, keys string
+	var format, provider, origin, target, moveID, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys string
 	var keepRemote, cancelMove bool
 	var source adapterCredentialSource
 	st, flags, err := parseCommon("adapter "+sub, ios, rest, func(fs *flag.FlagSet) {
@@ -137,15 +173,21 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 		if sub == "create" || sub == "update" {
 			fs.StringVar(&origin, "origin", "", "canonical Forgejo https origin")
 		}
+		if sub == "create" {
+			fs.StringVar(&provider, "provider", "forgejo", "forgejo or github-actions")
+		}
 		if sub == "update" {
 			fs.StringVar(&target, "target", "", "target id to mutate")
 			fs.StringVar(&moveID, "move", "", "attention-required move id to resume")
 			fs.BoolVar(&cancelMove, "cancel-move", false, "cancel the move and reconverge the old route")
 		}
 		if sub == "create" || sub == "update" {
-			fs.StringVar(&kind, "kind", "", "repository or organization")
-			fs.StringVar(&owner, "owner", "", "Forgejo owner")
-			fs.StringVar(&repo, "repo", "", "Forgejo repository")
+			fs.StringVar(&kind, "kind", "", "repository, organization, or environment")
+			fs.StringVar(&owner, "owner", "", "provider owner or organization")
+			fs.StringVar(&repo, "repo", "", "provider repository")
+			fs.StringVar(&destinationEnvironment, "destination-environment", "", "GitHub Actions environment name")
+			fs.StringVar(&visibility, "visibility", "", "GitHub organization visibility: all, private, or selected")
+			fs.StringVar(&selectedRepositories, "selected-repository-ids", "", "comma-separated GitHub numeric repository ids")
 			fs.StringVar(&prefix, "prefix", "", "structural name prefix")
 			fs.StringVar(&keys, "keys", "", "comma-separated immutable key ids")
 		}
@@ -178,7 +220,7 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 		return failf(ExitUsage, "adapter create requires --origin")
 	}
 	if sub == "update" {
-		targetFields := kind != "" || owner != "" || repo != "" || prefix != "" || keys != "" || flags.Env != ""
+		targetFields := kind != "" || owner != "" || repo != "" || destinationEnvironment != "" || visibility != "" || selectedRepositories != "" || prefix != "" || keys != "" || flags.Env != ""
 		credentialFields := source.stdin || source.file != ""
 		if cancelMove {
 			if moveID == "" || target != "" || origin != "" || targetFields || credentialFields || keepRemote {
@@ -239,11 +281,14 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 		}
 		return Render(ios.Stdout, f, adapterDetailTable(out))
 	case "create":
+		if provider != "forgejo" && provider != "github-actions" {
+			return failf(ExitUsage, "--provider must be forgejo or github-actions")
+		}
 		envID, err := resolved.Require(DimEnv)
 		if err != nil {
 			return err
 		}
-		input, err := adapterTargetInput(envID, kind, owner, repo, prefix, keys)
+		input, err := adapterTargetInput(envID, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys)
 		if err != nil {
 			return err
 		}
@@ -256,7 +301,7 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 		}
 		defer zeroBytes(credential)
 		var out apigen.Adapter
-		if err := client.Do(ctx, http.MethodPost, base+"/adapters", apigen.CreateAdapterRequest{Origin: origin, Credential: string(credential), Target: input}, &out); err != nil {
+		if err := client.Do(ctx, http.MethodPost, base+"/adapters", apigen.CreateAdapterRequest{Provider: apigen.AdapterProvider(provider), Origin: origin, Credential: string(credential), Target: input}, &out); err != nil {
 			return err
 		}
 		return Render(ios.Stdout, f, adapterListTable(apigen.AdapterList{Items: []apigen.Adapter{out}}))
@@ -309,7 +354,7 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 		if err != nil {
 			return err
 		}
-		input, err := adapterTargetInput(envID, kind, owner, repo, prefix, keys)
+		input, err := adapterTargetInput(envID, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys)
 		if err != nil {
 			return err
 		}
@@ -342,8 +387,8 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 					break
 				}
 			}
-			destinationChanged := input.DestinationKind != current.Target.DestinationKind || input.DestinationOwner != current.Target.DestinationOwner || input.DestinationName != current.Target.DestinationName
-			full := destinationChanged || input.NamePrefix != current.Target.NamePrefix || widened
+			destinationChanged := input.DestinationKind != current.Target.DestinationKind || input.DestinationOwner != current.Target.DestinationOwner || input.DestinationName != current.Target.DestinationName || input.DestinationEnvironment != current.Target.DestinationEnvironment
+			full := destinationChanged || input.NamePrefix != current.Target.NamePrefix || widened || adapter.RecipientSetNeedsCeremony(string(current.Target.Visibility), current.Target.SelectedRepositoryIds, string(input.Visibility), input.SelectedRepositoryIds)
 			if full {
 				if err := runAdapterCeremony(ctx, ios, client, st, artifact, base, adapterID, "adapter.configure"); err != nil {
 					return err
@@ -353,7 +398,7 @@ func runAdapter(ctx context.Context, ios IO, args []string) error {
 				return failf(ExitUsage, "--keep-remote applies only to a destination move")
 			}
 			path = base + "/adapter-targets/" + url.PathEscape(target)
-			body = apigen.UpdateAdapterTargetRequest{EnvironmentId: input.EnvironmentId, DestinationKind: input.DestinationKind, DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, NamePrefix: input.NamePrefix, KeyIds: input.KeyIds, ExpectedGeneration: current.Target.Generation, KeepRemote: &keepRemote}
+			body = apigen.UpdateAdapterTargetRequest{EnvironmentId: input.EnvironmentId, DestinationKind: input.DestinationKind, DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, DestinationEnvironment: input.DestinationEnvironment, Visibility: apigen.UpdateAdapterTargetRequestVisibility(input.Visibility), SelectedRepositoryIds: input.SelectedRepositoryIds, NamePrefix: input.NamePrefix, KeyIds: input.KeyIds, ExpectedGeneration: current.Target.Generation, KeepRemote: &keepRemote}
 			if !destinationChanged {
 				var updated apigen.AdapterTarget
 				if err := client.Do(ctx, http.MethodPatch, path, body, &updated); err != nil {
@@ -446,7 +491,8 @@ func resumeAdapterTargetBody(targetID string, input apigen.AdapterTargetInput) a
 	var body apigen.ResumeAdapterMoveRequest
 	_ = body.FromResumeAdapterTargetMoveRequest(apigen.ResumeAdapterTargetMoveRequest{
 		TargetId: targetID, EnvironmentId: input.EnvironmentId, DestinationKind: input.DestinationKind,
-		DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName,
+		DestinationOwner: input.DestinationOwner, DestinationName: input.DestinationName, DestinationEnvironment: input.DestinationEnvironment,
+		Visibility: apigen.ResumeAdapterTargetMoveRequestVisibility(input.Visibility), SelectedRepositoryIds: input.SelectedRepositoryIds,
 		NamePrefix: input.NamePrefix, KeyIds: input.KeyIds,
 	})
 	return body
@@ -457,7 +503,7 @@ func runAdapterTarget(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	var adapterID, format, kind, owner, repo, prefix, keys, outFormat string
+	var adapterID, format, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys, outFormat string
 	var keep bool
 	st, flags, err := parseCommon("adapter target "+sub, ios, rest, func(fs *flag.FlagSet) {
 		fs.StringVar(&adapterID, "adapter", "", "adapter id")
@@ -466,9 +512,12 @@ func runAdapterTarget(ctx context.Context, ios IO, args []string) error {
 			fs.StringVar(&format, "format", "detail", "detail or workflow")
 		}
 		if sub == "add" {
-			fs.StringVar(&kind, "kind", "", "repository or organization")
-			fs.StringVar(&owner, "owner", "", "Forgejo owner")
-			fs.StringVar(&repo, "repo", "", "Forgejo repository")
+			fs.StringVar(&kind, "kind", "", "repository, organization, or environment")
+			fs.StringVar(&owner, "owner", "", "provider owner or organization")
+			fs.StringVar(&repo, "repo", "", "provider repository")
+			fs.StringVar(&destinationEnvironment, "destination-environment", "", "GitHub Actions environment name")
+			fs.StringVar(&visibility, "visibility", "", "GitHub organization visibility: all, private, or selected")
+			fs.StringVar(&selectedRepositories, "selected-repository-ids", "", "comma-separated GitHub numeric repository ids")
 			fs.StringVar(&prefix, "prefix", "", "structural prefix")
 			fs.StringVar(&keys, "keys", "", "comma-separated key ids")
 		}
@@ -521,7 +570,7 @@ func runAdapterTarget(ctx context.Context, ios IO, args []string) error {
 		if err := runAdapterCeremony(ctx, ios, client, st, artifact, base, adapterID, "adapter.configure", envID); err != nil {
 			return err
 		}
-		input, err := adapterTargetInput(envID, kind, owner, repo, prefix, keys)
+		input, err := adapterTargetInput(envID, kind, owner, repo, destinationEnvironment, visibility, selectedRepositories, prefix, keys)
 		if err != nil {
 			return err
 		}
@@ -606,6 +655,9 @@ func runAdapterAction(ctx context.Context, ios IO, sub string, args []string) er
 		for _, c := range out.Changes {
 			rows = append(rows, []string{string(c.Surface), c.EffectiveName, string(c.Disposition)})
 		}
+		for _, warning := range out.Warnings {
+			fmt.Fprintf(ios.Stderr, "warning: %s\n", warning)
+		}
 		return Render(ios.Stdout, f, Table{Columns: []string{"SURFACE", "NAME", "DISPOSITION"}, Rows: rows, JSON: out})
 	case "sync":
 		var detail apigen.AdapterTargetDetail
@@ -625,7 +677,11 @@ func runAdapterAction(ctx context.Context, ios IO, sub string, args []string) er
 		if err := client.Do(ctx, http.MethodPost, path, nil, &out); err != nil {
 			return err
 		}
-		return Render(ios.Stdout, f, Table{Columns: []string{"VERSION", "DESTINATION"}, Rows: [][]string{{out.Version, fmt.Sprint(out.DestinationId)}}, JSON: out})
+		expires := ""
+		if out.CredentialExpiresAt != nil {
+			expires = out.CredentialExpiresAt.Format(time.RFC3339)
+		}
+		return Render(ios.Stdout, f, Table{Columns: []string{"VERSION", "DESTINATION", "CREDENTIAL EXPIRES"}, Rows: [][]string{{out.Version, fmt.Sprint(out.DestinationId), expires}}, JSON: out})
 	}
 	return nil
 }
@@ -688,7 +744,7 @@ func runAdapterAdopt(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 	selected := eligible[0]
-	body := apigen.AdapterAdoptionRequest{ArtifactId: selected.Id, TargetGeneration: selected.TargetGeneration, DestinationId: selected.DestinationId, Entries: selected.Entries}
+	body := apigen.AdapterAdoptionRequest{ArtifactId: selected.Id, TargetGeneration: selected.TargetGeneration, DestinationId: selected.DestinationId, RepositoryId: selected.RepositoryId, Entries: selected.Entries}
 	var job apigen.AdapterJob
 	if err := client.Do(ctx, http.MethodPost, base+"/adoptions", body, &job); err != nil {
 		return err
@@ -699,9 +755,13 @@ func runAdapterAdopt(ctx context.Context, ios IO, args []string) error {
 func adapterListTable(list apigen.AdapterList) Table {
 	rows := [][]string{}
 	for _, a := range list.Items {
-		rows = append(rows, []string{string(a.Id), string(a.Provider), a.Origin, fmt.Sprint(a.CredentialPresent), fmt.Sprint(len(a.Targets))})
+		expires := ""
+		if a.CredentialExpiresAt != nil {
+			expires = a.CredentialExpiresAt.Format(time.RFC3339)
+		}
+		rows = append(rows, []string{string(a.Id), string(a.Provider), a.Origin, fmt.Sprint(a.CredentialPresent), expires, fmt.Sprint(len(a.Targets))})
 	}
-	return Table{Columns: []string{"ID", "PROVIDER", "ORIGIN", "CREDENTIAL", "TARGETS"}, Rows: rows, JSON: list}
+	return Table{Columns: []string{"ID", "PROVIDER", "ORIGIN", "CREDENTIAL", "CREDENTIAL EXPIRES", "TARGETS"}, Rows: rows, JSON: list}
 }
 func targetTable(list apigen.AdapterTargetList) Table {
 	rows := [][]string{}
@@ -714,14 +774,18 @@ func targetTable(list apigen.AdapterTargetList) Table {
 		if t.ConvergedRevision != nil {
 			revision = fmt.Sprint(*t.ConvergedRevision)
 		}
-		rows = append(rows, []string{string(t.Id), string(t.EnvironmentId), destination, t.NamePrefix, string(t.SyncStatus), revision, strings.Join(t.FailureNames, ","), strings.Join(adapterConflictNames(t.Conflicts), ",")})
+		rows = append(rows, []string{string(t.Id), string(t.EnvironmentId), destination, t.NamePrefix, string(t.SyncStatus), revision, strings.Join(t.FailureNames, ","), strings.Join(t.Warnings, ","), strings.Join(adapterConflictNames(t.Conflicts), ",")})
 	}
-	return Table{Columns: []string{"ID", "ENVIRONMENT", "DESTINATION", "PREFIX", "STATUS", "REVISION", "FAILURES", "CONFLICTS"}, Rows: rows, JSON: list}
+	return Table{Columns: []string{"ID", "ENVIRONMENT", "DESTINATION", "PREFIX", "STATUS", "REVISION", "FAILURES", "WARNINGS", "CONFLICTS"}, Rows: rows, JSON: list}
 }
 
 func adapterDetailTable(in apigen.Adapter) Table {
 	rows := make([][]string, 0, len(in.Targets))
 	for _, target := range in.Targets {
+		expires := ""
+		if in.CredentialExpiresAt != nil {
+			expires = in.CredentialExpiresAt.Format(time.RFC3339)
+		}
 		destination := target.DestinationOwner
 		if target.DestinationName != "" {
 			destination += "/" + target.DestinationName
@@ -730,12 +794,12 @@ func adapterDetailTable(in apigen.Adapter) Table {
 		if target.ConvergedRevision != nil {
 			revision = fmt.Sprint(*target.ConvergedRevision)
 		}
-		rows = append(rows, []string{string(in.Id), in.Origin, string(target.Id), string(target.EnvironmentId), destination, string(target.SyncStatus), revision, strings.Join(target.FailureNames, ","), strings.Join(adapterConflictNames(target.Conflicts), ",")})
+		rows = append(rows, []string{string(in.Id), in.Origin, expires, string(target.Id), string(target.EnvironmentId), destination, string(target.SyncStatus), revision, strings.Join(target.FailureNames, ","), strings.Join(target.Warnings, ","), strings.Join(adapterConflictNames(target.Conflicts), ",")})
 	}
 	if len(rows) == 0 {
-		rows = append(rows, []string{string(in.Id), in.Origin, "", "", "", "", "", "", ""})
+		rows = append(rows, []string{string(in.Id), in.Origin, "", "", "", "", "", "", "", "", ""})
 	}
-	return Table{Columns: []string{"ADAPTER", "ORIGIN", "TARGET", "ENVIRONMENT", "DESTINATION", "STATUS", "REVISION", "FAILURES", "CONFLICTS"}, Rows: rows, JSON: in}
+	return Table{Columns: []string{"ADAPTER", "ORIGIN", "CREDENTIAL EXPIRES", "TARGET", "ENVIRONMENT", "DESTINATION", "STATUS", "REVISION", "FAILURES", "WARNINGS", "CONFLICTS"}, Rows: rows, JSON: in}
 }
 
 func adapterConflictNames(artifacts []apigen.AdapterConflictArtifact) []string {

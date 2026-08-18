@@ -8704,12 +8704,20 @@ components:
 
     AdapterDestinationKind:
       type: string
-      enum: [repository, organization]
+      enum: [repository, organization, environment]
+
+    AdapterVisibility:
+      type: string
+      enum: [all, private, selected]
+
+    AdapterProvider:
+      type: string
+      enum: [forgejo, github-actions]
 
     AdapterTargetInput:
       type: object
       additionalProperties: false
-      required: [environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids]
+      required: [environment_id, destination_kind, destination_owner, destination_name, destination_environment, visibility, selected_repository_ids, name_prefix, key_ids]
       properties:
         environment_id: {$ref: "#/components/schemas/ID"}
         destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
@@ -8718,6 +8726,19 @@ components:
           type: string
           maxLength: 255
           description: Repository name; empty for organization destinations.
+        destination_environment:
+          type: string
+          maxLength: 255
+          description: GitHub environment name; empty for repository and organization destinations.
+        visibility:
+          type: string
+          enum: ["", all, private, selected]
+          description: GitHub organization recipient visibility; empty for other destinations.
+        selected_repository_ids:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: {type: integer, format: int64, minimum: 1}
         name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
         key_ids:
           type: array
@@ -8729,14 +8750,15 @@ components:
     CreateAdapterRequest:
       type: object
       additionalProperties: false
-      required: [origin, credential, target]
+      required: [provider, origin, credential, target]
       properties:
+        provider: {$ref: "#/components/schemas/AdapterProvider"}
         origin: {type: string, format: uri, maxLength: 2048}
         credential:
           type: string
           minLength: 1
           maxLength: 4096
-          description: Write-only Forgejo PAT. Never returned.
+          description: Write-only provider credential. Never returned.
         target: {$ref: "#/components/schemas/AdapterTargetInput"}
 
     UpdateAdapterOriginRequest:
@@ -8758,12 +8780,19 @@ components:
     UpdateAdapterTargetRequest:
       type: object
       additionalProperties: false
-      required: [environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids, expected_generation]
+      required: [environment_id, destination_kind, destination_owner, destination_name, destination_environment, visibility, selected_repository_ids, name_prefix, key_ids, expected_generation]
       properties:
         environment_id: {$ref: "#/components/schemas/ID"}
         destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
         destination_owner: {type: string, minLength: 1, maxLength: 255}
         destination_name: {type: string, maxLength: 255}
+        destination_environment: {type: string, maxLength: 255}
+        visibility: {type: string, enum: ["", all, private, selected]}
+        selected_repository_ids:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: {type: integer, format: int64, minimum: 1}
         name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
         key_ids:
           type: array
@@ -8790,13 +8819,20 @@ components:
     ResumeAdapterTargetMoveRequest:
       type: object
       additionalProperties: false
-      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, name_prefix, key_ids]
+      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, destination_environment, visibility, selected_repository_ids, name_prefix, key_ids]
       properties:
         target_id: {$ref: "#/components/schemas/ID"}
         environment_id: {$ref: "#/components/schemas/ID"}
         destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
         destination_owner: {type: string, minLength: 1, maxLength: 255}
         destination_name: {type: string, maxLength: 255}
+        destination_environment: {type: string, maxLength: 255}
+        visibility: {type: string, enum: ["", all, private, selected]}
+        selected_repository_ids:
+          type: array
+          maxItems: 500
+          uniqueItems: true
+          items: {type: integer, format: int64, minimum: 1}
         name_prefix: {type: string, maxLength: 64, pattern: "^(?:[A-Z_][A-Z0-9_]*)?$"}
         key_ids:
           type: array
@@ -8808,7 +8844,7 @@ components:
     AdapterTarget:
       type: object
       additionalProperties: false
-      required: [id, adapter_id, environment_id, destination_kind, destination_owner, destination_name, destination_id, name_prefix, generation, state, sync_status, failure_names, conflicts]
+      required: [id, adapter_id, environment_id, destination_kind, destination_owner, destination_name, destination_environment, destination_id, repository_id, visibility, selected_repository_ids, name_prefix, generation, state, sync_status, failure_names, warnings, conflicts]
       properties:
         id: {$ref: "#/components/schemas/ID"}
         adapter_id: {$ref: "#/components/schemas/ID"}
@@ -8816,13 +8852,20 @@ components:
         destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
         destination_owner: {type: string}
         destination_name: {type: string}
+        destination_environment: {type: string}
         destination_id: {type: integer, format: int64, minimum: 1}
+        repository_id: {type: integer, format: int64, minimum: 0}
+        visibility: {type: string, enum: ["", all, private, selected]}
+        selected_repository_ids:
+          type: array
+          items: {type: integer, format: int64, minimum: 1}
         name_prefix: {type: string}
         generation: {type: integer, format: int64, minimum: 1}
         state: {type: string, enum: [active, moving, tombstoned]}
         sync_status: {type: string, enum: [never, converging, converged, failed]}
         converged_revision: {type: [integer, "null"], format: int64}
         failure_names: {type: array, items: {type: string}}
+        warnings: {type: array, items: {type: string}}
         conflicts:
           type: array
           description: Pending exact conflict artifacts eligible for adoption on this target.
@@ -8841,10 +8884,11 @@ components:
       required: [id, provider, origin, credential_present, authority_principal_id, state, created_at, targets]
       properties:
         id: {$ref: "#/components/schemas/ID"}
-        provider: {type: string, enum: [forgejo]}
+        provider: {$ref: "#/components/schemas/AdapterProvider"}
         origin: {type: string, format: uri}
         credential_present: {type: boolean}
         credential_set_at: {type: [string, "null"], format: date-time}
+        credential_expires_at: {type: [string, "null"], format: date-time}
         authority_principal_id: {$ref: "#/components/schemas/ID"}
         state: {type: string, enum: [active, moving, tombstoned]}
         created_at: {$ref: "#/components/schemas/Timestamp"}
@@ -8868,10 +8912,11 @@ components:
     AdapterConflictArtifact:
       type: object
       additionalProperties: false
-      required: [id, destination_id, target_generation, entries, created_at]
+      required: [id, destination_id, repository_id, target_generation, entries, created_at]
       properties:
         id: {$ref: "#/components/schemas/ID"}
         destination_id: {type: integer, format: int64, minimum: 1}
+        repository_id: {type: integer, format: int64, minimum: 0}
         target_generation: {type: integer, format: int64, minimum: 1}
         entries: {type: array, items: {$ref: "#/components/schemas/AdapterConflictEntry"}}
         created_at: {$ref: "#/components/schemas/Timestamp"}
@@ -8908,19 +8953,21 @@ components:
     AdapterPlan:
       type: object
       additionalProperties: false
-      required: [artifact_id, changes]
+      required: [artifact_id, changes, warnings]
       properties:
         artifact_id: {$ref: "#/components/schemas/ID"}
         changes: {type: array, items: {$ref: "#/components/schemas/AdapterChange"}}
+        warnings: {type: array, items: {type: string}}
 
     AdapterAdoptionRequest:
       type: object
       additionalProperties: false
-      required: [artifact_id, target_generation, destination_id, entries]
+      required: [artifact_id, target_generation, destination_id, repository_id, entries]
       properties:
         artifact_id: {$ref: "#/components/schemas/ID"}
         target_generation: {type: integer, format: int64, minimum: 1}
         destination_id: {type: integer, format: int64, minimum: 1}
+        repository_id: {type: integer, format: int64, minimum: 0}
         entries:
           type: array
           minItems: 1
@@ -8938,10 +8985,12 @@ components:
     AdapterConnection:
       type: object
       additionalProperties: false
-      required: [version, destination_id]
+      required: [version, destination_id, repository_id]
       properties:
         version: {type: string}
         destination_id: {type: integer, format: int64, minimum: 1}
+        repository_id: {type: integer, format: int64, minimum: 0}
+        credential_expires_at: {type: [string, "null"], format: date-time}
 
     AdapterTeardown:
       type: object
@@ -8964,14 +9013,20 @@ components:
     AdapterMoveTarget:
       type: object
       additionalProperties: false
-      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, destination_id, name_prefix, orphaned_names, jobs]
+      required: [target_id, environment_id, destination_kind, destination_owner, destination_name, destination_environment, destination_id, repository_id, visibility, selected_repository_ids, name_prefix, orphaned_names, jobs]
       properties:
         target_id: {$ref: "#/components/schemas/ID"}
         environment_id: {$ref: "#/components/schemas/ID"}
         destination_kind: {$ref: "#/components/schemas/AdapterDestinationKind"}
         destination_owner: {type: string}
         destination_name: {type: string}
+        destination_environment: {type: string}
         destination_id: {type: integer, format: int64, minimum: 0}
+        repository_id: {type: integer, format: int64, minimum: 0}
+        visibility: {type: string, enum: ["", all, private, selected]}
+        selected_repository_ids:
+          type: array
+          items: {type: integer, format: int64, minimum: 1}
         name_prefix: {type: string}
         orphaned_names: {type: array, items: {type: string}}
         jobs: {type: array, items: {$ref: "#/components/schemas/AdapterMoveJob"}}

@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/netip"
-	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/adapter"
-	"github.com/Hikyo-Org/hikyo/internal/adapter/forgejo"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
@@ -57,15 +55,13 @@ func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, jou
 	if err != nil {
 		return adapter.LoadedActivation{}, err
 	}
-	client, err := forgejo.NewClient(forgejo.ClientConfig{
-		Origin: material.Origin, Credential: string(credential), AllowedCIDRs: l.allowedCIDRs(material.Origin), Deadline: 15 * time.Second,
-	})
+	module, forget, err := deploymentModule(material.Provider, material.Origin, string(credential), l.allowedCIDRs(material.Origin))
 	if err != nil {
 		crypto.Zero(credential)
 		return adapter.LoadedActivation{}, err
 	}
 	return adapter.LoadedActivation{
-		Module: &forgejo.Module{API: client},
+		Module: module,
 		Request: adapter.ConnectionRequest{
 			Config:      adapter.Config{Origin: material.Origin},
 			Destination: material.Target.Destination, Access: adapter.Access{Credential: string(credential)},
@@ -75,7 +71,7 @@ func (l *adapterLoader) LoadActivation(ctx context.Context, job adapter.Job, jou
 		},
 		Release: func() {
 			crypto.Zero(credential)
-			client.Forget()
+			forget()
 		},
 	}, nil
 }
@@ -126,9 +122,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 	if err != nil {
 		return adapter.LoadedSync{}, err
 	}
-	client, err := forgejo.NewClient(forgejo.ClientConfig{
-		Origin: material.Origin, Credential: string(credential), AllowedCIDRs: l.allowedCIDRs(material.Origin), Deadline: 15 * time.Second,
-	})
+	module, forget, err := deploymentModule(material.Provider, material.Origin, string(credential), l.allowedCIDRs(material.Origin))
 	if err != nil {
 		crypto.Zero(credential)
 		return adapter.LoadedSync{}, err
@@ -145,7 +139,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 				crypto.Zero(value)
 			}
 			crypto.Zero(credential)
-			client.Forget()
+			forget()
 			return adapter.LoadedSync{}, err
 		}
 		plain, err := openField(crypto.ProjectFieldAAD{
@@ -158,7 +152,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 				crypto.Zero(value)
 			}
 			crypto.Zero(credential)
-			client.Forget()
+			forget()
 			return adapter.LoadedSync{}, err
 		}
 		opened = append(opened, plain)
@@ -172,7 +166,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 		Manifest: manifest, Ledger: material.Ledger,
 	}
 	return adapter.LoadedSync{
-		Module: &forgejo.Module{API: client}, Request: request, Revision: material.Revision,
+		Module: module, Request: request, Revision: material.Revision,
 		Release: func() {
 			for i := range manifest {
 				manifest[i].Value = ""
@@ -181,7 +175,7 @@ func (l *adapterLoader) Load(ctx context.Context, job adapter.Job, journal adapt
 				crypto.Zero(value)
 			}
 			crypto.Zero(credential)
-			client.Forget()
+			forget()
 		},
 	}, nil
 }

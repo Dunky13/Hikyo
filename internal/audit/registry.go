@@ -2245,7 +2245,7 @@ var registry = map[EventType]TypeSpec{
 		Outcomes:      map[Outcome]bool{OutcomeIntent: true},
 		Trails:        map[Trail]bool{TrailTenant: true},
 		Schema: Schema{
-			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable"}},
+			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable", "environment"}},
 			"effective_name": {Kind: KindString, Required: true},
 			"disposition":    {Kind: KindString, Required: true, Enum: []string{"create", "update", "delete"}},
 		},
@@ -2256,7 +2256,7 @@ var registry = map[EventType]TypeSpec{
 		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true, OutcomeUnknown: true},
 		Trails:        map[Trail]bool{TrailTenant: true},
 		Schema: Schema{
-			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable"}},
+			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable", "environment"}},
 			"effective_name": {Kind: KindString, Required: true},
 			"disposition":    {Kind: KindString, Required: true, Enum: []string{"create", "update", "delete"}},
 		},

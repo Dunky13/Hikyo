@@ -39,21 +39,6 @@ func (e ActiveSessionArtifact) Valid() bool {
 	}
 }
 
-// Defines values for AdapterProvider.
-const (
-	AdapterProviderForgejo AdapterProvider = "forgejo"
-)
-
-// Valid indicates whether the value is a known member of the AdapterProvider enum.
-func (e AdapterProvider) Valid() bool {
-	switch e {
-	case AdapterProviderForgejo:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AdapterState.
 const (
 	AdapterStateActive     AdapterState = "active"
@@ -140,16 +125,19 @@ func (e AdapterConflictEntrySurface) Valid() bool {
 
 // Defines values for AdapterDestinationKind.
 const (
-	Organization AdapterDestinationKind = "organization"
-	Repository   AdapterDestinationKind = "repository"
+	AdapterDestinationKindEnvironment  AdapterDestinationKind = "environment"
+	AdapterDestinationKindOrganization AdapterDestinationKind = "organization"
+	AdapterDestinationKindRepository   AdapterDestinationKind = "repository"
 )
 
 // Valid indicates whether the value is a known member of the AdapterDestinationKind enum.
 func (e AdapterDestinationKind) Valid() bool {
 	switch e {
-	case Organization:
+	case AdapterDestinationKindEnvironment:
 		return true
-	case Repository:
+	case AdapterDestinationKindOrganization:
+		return true
+	case AdapterDestinationKindRepository:
 		return true
 	default:
 		return false
@@ -270,6 +258,48 @@ func (e AdapterMoveJobState) Valid() bool {
 	}
 }
 
+// Defines values for AdapterMoveTargetVisibility.
+const (
+	AdapterMoveTargetVisibilityAll      AdapterMoveTargetVisibility = "all"
+	AdapterMoveTargetVisibilityEmpty    AdapterMoveTargetVisibility = ""
+	AdapterMoveTargetVisibilityPrivate  AdapterMoveTargetVisibility = "private"
+	AdapterMoveTargetVisibilitySelected AdapterMoveTargetVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the AdapterMoveTargetVisibility enum.
+func (e AdapterMoveTargetVisibility) Valid() bool {
+	switch e {
+	case AdapterMoveTargetVisibilityAll:
+		return true
+	case AdapterMoveTargetVisibilityEmpty:
+		return true
+	case AdapterMoveTargetVisibilityPrivate:
+		return true
+	case AdapterMoveTargetVisibilitySelected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterProvider.
+const (
+	AdapterProviderForgejo       AdapterProvider = "forgejo"
+	AdapterProviderGithubActions AdapterProvider = "github-actions"
+)
+
+// Valid indicates whether the value is a known member of the AdapterProvider enum.
+func (e AdapterProvider) Valid() bool {
+	switch e {
+	case AdapterProviderForgejo:
+		return true
+	case AdapterProviderGithubActions:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdapterTargetState.
 const (
 	AdapterTargetStateActive     AdapterTargetState = "active"
@@ -309,6 +339,75 @@ func (e AdapterTargetSyncStatus) Valid() bool {
 	case AdapterTargetSyncStatusFailed:
 		return true
 	case AdapterTargetSyncStatusNever:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterTargetVisibility.
+const (
+	AdapterTargetVisibilityAll      AdapterTargetVisibility = "all"
+	AdapterTargetVisibilityEmpty    AdapterTargetVisibility = ""
+	AdapterTargetVisibilityPrivate  AdapterTargetVisibility = "private"
+	AdapterTargetVisibilitySelected AdapterTargetVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the AdapterTargetVisibility enum.
+func (e AdapterTargetVisibility) Valid() bool {
+	switch e {
+	case AdapterTargetVisibilityAll:
+		return true
+	case AdapterTargetVisibilityEmpty:
+		return true
+	case AdapterTargetVisibilityPrivate:
+		return true
+	case AdapterTargetVisibilitySelected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterTargetInputVisibility.
+const (
+	AdapterTargetInputVisibilityAll      AdapterTargetInputVisibility = "all"
+	AdapterTargetInputVisibilityEmpty    AdapterTargetInputVisibility = ""
+	AdapterTargetInputVisibilityPrivate  AdapterTargetInputVisibility = "private"
+	AdapterTargetInputVisibilitySelected AdapterTargetInputVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the AdapterTargetInputVisibility enum.
+func (e AdapterTargetInputVisibility) Valid() bool {
+	switch e {
+	case AdapterTargetInputVisibilityAll:
+		return true
+	case AdapterTargetInputVisibilityEmpty:
+		return true
+	case AdapterTargetInputVisibilityPrivate:
+		return true
+	case AdapterTargetInputVisibilitySelected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdapterVisibility.
+const (
+	AdapterVisibilityAll      AdapterVisibility = "all"
+	AdapterVisibilityPrivate  AdapterVisibility = "private"
+	AdapterVisibilitySelected AdapterVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the AdapterVisibility enum.
+func (e AdapterVisibility) Valid() bool {
+	switch e {
+	case AdapterVisibilityAll:
+		return true
+	case AdapterVisibilityPrivate:
+		return true
+	case AdapterVisibilitySelected:
 		return true
 	default:
 		return false
@@ -695,19 +794,19 @@ func (e KeyClassification) Valid() bool {
 
 // Defines values for KeyPresenceMode.
 const (
-	All      KeyPresenceMode = "all"
-	Explicit KeyPresenceMode = "explicit"
-	None     KeyPresenceMode = "none"
+	KeyPresenceModeAll      KeyPresenceMode = "all"
+	KeyPresenceModeExplicit KeyPresenceMode = "explicit"
+	KeyPresenceModeNone     KeyPresenceMode = "none"
 )
 
 // Valid indicates whether the value is a known member of the KeyPresenceMode enum.
 func (e KeyPresenceMode) Valid() bool {
 	switch e {
-	case All:
+	case KeyPresenceModeAll:
 		return true
-	case Explicit:
+	case KeyPresenceModeExplicit:
 		return true
-	case None:
+	case KeyPresenceModeNone:
 		return true
 	default:
 		return false
@@ -909,6 +1008,30 @@ func (e RemoteState) Valid() bool {
 	case SelfConnected:
 		return true
 	case Unreachable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResumeAdapterTargetMoveRequestVisibility.
+const (
+	ResumeAdapterTargetMoveRequestVisibilityAll      ResumeAdapterTargetMoveRequestVisibility = "all"
+	ResumeAdapterTargetMoveRequestVisibilityEmpty    ResumeAdapterTargetMoveRequestVisibility = ""
+	ResumeAdapterTargetMoveRequestVisibilityPrivate  ResumeAdapterTargetMoveRequestVisibility = "private"
+	ResumeAdapterTargetMoveRequestVisibilitySelected ResumeAdapterTargetMoveRequestVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the ResumeAdapterTargetMoveRequestVisibility enum.
+func (e ResumeAdapterTargetMoveRequestVisibility) Valid() bool {
+	switch e {
+	case ResumeAdapterTargetMoveRequestVisibilityAll:
+		return true
+	case ResumeAdapterTargetMoveRequestVisibilityEmpty:
+		return true
+	case ResumeAdapterTargetMoveRequestVisibilityPrivate:
+		return true
+	case ResumeAdapterTargetMoveRequestVisibilitySelected:
 		return true
 	default:
 		return false
@@ -1269,6 +1392,30 @@ func (e TotpReauthRequestOperation) Valid() bool {
 	}
 }
 
+// Defines values for UpdateAdapterTargetRequestVisibility.
+const (
+	UpdateAdapterTargetRequestVisibilityAll      UpdateAdapterTargetRequestVisibility = "all"
+	UpdateAdapterTargetRequestVisibilityEmpty    UpdateAdapterTargetRequestVisibility = ""
+	UpdateAdapterTargetRequestVisibilityPrivate  UpdateAdapterTargetRequestVisibility = "private"
+	UpdateAdapterTargetRequestVisibilitySelected UpdateAdapterTargetRequestVisibility = "selected"
+)
+
+// Valid indicates whether the value is a known member of the UpdateAdapterTargetRequestVisibility enum.
+func (e UpdateAdapterTargetRequestVisibility) Valid() bool {
+	switch e {
+	case UpdateAdapterTargetRequestVisibilityAll:
+		return true
+	case UpdateAdapterTargetRequestVisibilityEmpty:
+		return true
+	case UpdateAdapterTargetRequestVisibilityPrivate:
+		return true
+	case UpdateAdapterTargetRequestVisibilitySelected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ValueOccurrenceCandidateIntendedType.
 const (
 	ValueOccurrenceCandidateIntendedTypeBoolean ValueOccurrenceCandidateIntendedType = "boolean"
@@ -1381,9 +1528,10 @@ type Adapter struct {
 	AuthorityPrincipalId ID `json:"authority_principal_id"`
 
 	// CreatedAt RFC 3339 UTC, microsecond precision.
-	CreatedAt         Timestamp  `json:"created_at"`
-	CredentialPresent bool       `json:"credential_present"`
-	CredentialSetAt   *time.Time `json:"credential_set_at,omitempty"`
+	CreatedAt           Timestamp  `json:"created_at"`
+	CredentialExpiresAt *time.Time `json:"credential_expires_at,omitempty"`
+	CredentialPresent   bool       `json:"credential_present"`
+	CredentialSetAt     *time.Time `json:"credential_set_at,omitempty"`
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
 	Id       ID              `json:"id"`
@@ -1392,9 +1540,6 @@ type Adapter struct {
 	State    AdapterState    `json:"state"`
 	Targets  []AdapterTarget `json:"targets"`
 }
-
-// AdapterProvider defines model for Adapter.Provider.
-type AdapterProvider string
 
 // AdapterState defines model for Adapter.State.
 type AdapterState string
@@ -1405,6 +1550,7 @@ type AdapterAdoptionRequest struct {
 	ArtifactId       ID                     `json:"artifact_id"`
 	DestinationId    int64                  `json:"destination_id"`
 	Entries          []AdapterConflictEntry `json:"entries"`
+	RepositoryId     int64                  `json:"repository_id"`
 	TargetGeneration int64                  `json:"target_generation"`
 }
 
@@ -1431,6 +1577,7 @@ type AdapterConflictArtifact struct {
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
 	Id               ID    `json:"id"`
+	RepositoryId     int64 `json:"repository_id"`
 	TargetGeneration int64 `json:"target_generation"`
 }
 
@@ -1445,8 +1592,10 @@ type AdapterConflictEntrySurface string
 
 // AdapterConnection defines model for AdapterConnection.
 type AdapterConnection struct {
-	DestinationId int64  `json:"destination_id"`
-	Version       string `json:"version"`
+	CredentialExpiresAt *time.Time `json:"credential_expires_at,omitempty"`
+	DestinationId       int64      `json:"destination_id"`
+	RepositoryId        int64      `json:"repository_id"`
+	Version             string     `json:"version"`
 }
 
 // AdapterDestinationKind defines model for AdapterDestinationKind.
@@ -1520,27 +1669,38 @@ type AdapterMoveJobState string
 
 // AdapterMoveTarget defines model for AdapterMoveTarget.
 type AdapterMoveTarget struct {
-	DestinationId    int64                  `json:"destination_id"`
-	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
-	DestinationName  string                 `json:"destination_name"`
-	DestinationOwner string                 `json:"destination_owner"`
+	DestinationEnvironment string                 `json:"destination_environment"`
+	DestinationId          int64                  `json:"destination_id"`
+	DestinationKind        AdapterDestinationKind `json:"destination_kind"`
+	DestinationName        string                 `json:"destination_name"`
+	DestinationOwner       string                 `json:"destination_owner"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
-	EnvironmentId ID               `json:"environment_id"`
-	Jobs          []AdapterMoveJob `json:"jobs"`
-	NamePrefix    string           `json:"name_prefix"`
-	OrphanedNames []string         `json:"orphaned_names"`
+	EnvironmentId         ID               `json:"environment_id"`
+	Jobs                  []AdapterMoveJob `json:"jobs"`
+	NamePrefix            string           `json:"name_prefix"`
+	OrphanedNames         []string         `json:"orphaned_names"`
+	RepositoryId          int64            `json:"repository_id"`
+	SelectedRepositoryIds []int64          `json:"selected_repository_ids"`
 
 	// TargetId A prefixed UUIDv7, e.g. `org_0198…`.
-	TargetId ID `json:"target_id"`
+	TargetId   ID                          `json:"target_id"`
+	Visibility AdapterMoveTargetVisibility `json:"visibility"`
 }
+
+// AdapterMoveTargetVisibility defines model for AdapterMoveTarget.Visibility.
+type AdapterMoveTargetVisibility string
 
 // AdapterPlan defines model for AdapterPlan.
 type AdapterPlan struct {
 	// ArtifactId A prefixed UUIDv7, e.g. `org_0198…`.
 	ArtifactId ID              `json:"artifact_id"`
 	Changes    []AdapterChange `json:"changes"`
+	Warnings   []string        `json:"warnings"`
 }
+
+// AdapterProvider defines model for AdapterProvider.
+type AdapterProvider string
 
 // AdapterTarget defines model for AdapterTarget.
 type AdapterTarget struct {
@@ -1548,12 +1708,13 @@ type AdapterTarget struct {
 	AdapterId ID `json:"adapter_id"`
 
 	// Conflicts Pending exact conflict artifacts eligible for adoption on this target.
-	Conflicts         []AdapterConflictArtifact `json:"conflicts"`
-	ConvergedRevision *int64                    `json:"converged_revision,omitempty"`
-	DestinationId     int64                     `json:"destination_id"`
-	DestinationKind   AdapterDestinationKind    `json:"destination_kind"`
-	DestinationName   string                    `json:"destination_name"`
-	DestinationOwner  string                    `json:"destination_owner"`
+	Conflicts              []AdapterConflictArtifact `json:"conflicts"`
+	ConvergedRevision      *int64                    `json:"converged_revision,omitempty"`
+	DestinationEnvironment string                    `json:"destination_environment"`
+	DestinationId          int64                     `json:"destination_id"`
+	DestinationKind        AdapterDestinationKind    `json:"destination_kind"`
+	DestinationName        string                    `json:"destination_name"`
+	DestinationOwner       string                    `json:"destination_owner"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
 	EnvironmentId ID       `json:"environment_id"`
@@ -1561,10 +1722,14 @@ type AdapterTarget struct {
 	Generation    int64    `json:"generation"`
 
 	// Id A prefixed UUIDv7, e.g. `org_0198…`.
-	Id         ID                      `json:"id"`
-	NamePrefix string                  `json:"name_prefix"`
-	State      AdapterTargetState      `json:"state"`
-	SyncStatus AdapterTargetSyncStatus `json:"sync_status"`
+	Id                    ID                      `json:"id"`
+	NamePrefix            string                  `json:"name_prefix"`
+	RepositoryId          int64                   `json:"repository_id"`
+	SelectedRepositoryIds []int64                 `json:"selected_repository_ids"`
+	State                 AdapterTargetState      `json:"state"`
+	SyncStatus            AdapterTargetSyncStatus `json:"sync_status"`
+	Visibility            AdapterTargetVisibility `json:"visibility"`
+	Warnings              []string                `json:"warnings"`
 }
 
 // AdapterTargetState defines model for AdapterTarget.State.
@@ -1572,6 +1737,9 @@ type AdapterTargetState string
 
 // AdapterTargetSyncStatus defines model for AdapterTarget.SyncStatus.
 type AdapterTargetSyncStatus string
+
+// AdapterTargetVisibility defines model for AdapterTarget.Visibility.
+type AdapterTargetVisibility string
 
 // AdapterTargetDetail defines model for AdapterTargetDetail.
 type AdapterTargetDetail struct {
@@ -1582,17 +1750,26 @@ type AdapterTargetDetail struct {
 
 // AdapterTargetInput defines model for AdapterTargetInput.
 type AdapterTargetInput struct {
-	DestinationKind AdapterDestinationKind `json:"destination_kind"`
+	// DestinationEnvironment GitHub environment name; empty for repository and organization destinations.
+	DestinationEnvironment string                 `json:"destination_environment"`
+	DestinationKind        AdapterDestinationKind `json:"destination_kind"`
 
 	// DestinationName Repository name; empty for organization destinations.
 	DestinationName  string `json:"destination_name"`
 	DestinationOwner string `json:"destination_owner"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
-	EnvironmentId ID     `json:"environment_id"`
-	KeyIds        []ID   `json:"key_ids"`
-	NamePrefix    string `json:"name_prefix"`
+	EnvironmentId         ID      `json:"environment_id"`
+	KeyIds                []ID    `json:"key_ids"`
+	NamePrefix            string  `json:"name_prefix"`
+	SelectedRepositoryIds []int64 `json:"selected_repository_ids"`
+
+	// Visibility GitHub organization recipient visibility; empty for other destinations.
+	Visibility AdapterTargetInputVisibility `json:"visibility"`
 }
+
+// AdapterTargetInputVisibility GitHub organization recipient visibility; empty for other destinations.
+type AdapterTargetInputVisibility string
 
 // AdapterTargetList defines model for AdapterTargetList.
 type AdapterTargetList struct {
@@ -1604,6 +1781,9 @@ type AdapterTeardown struct {
 	Jobs     []AdapterJob `json:"jobs"`
 	Orphaned []string     `json:"orphaned"`
 }
+
+// AdapterVisibility defines model for AdapterVisibility.
+type AdapterVisibility string
 
 // AddRemoteRequest defines model for AddRemoteRequest.
 type AddRemoteRequest struct {
@@ -1919,9 +2099,10 @@ type CopyValuesResult struct {
 
 // CreateAdapterRequest defines model for CreateAdapterRequest.
 type CreateAdapterRequest struct {
-	// Credential Write-only Forgejo PAT. Never returned.
+	// Credential Write-only provider credential. Never returned.
 	Credential string             `json:"credential"`
 	Origin     string             `json:"origin"`
+	Provider   AdapterProvider    `json:"provider"`
 	Target     AdapterTargetInput `json:"target"`
 }
 
@@ -3812,18 +3993,24 @@ type ResumeAdapterOriginMoveRequest struct {
 
 // ResumeAdapterTargetMoveRequest defines model for ResumeAdapterTargetMoveRequest.
 type ResumeAdapterTargetMoveRequest struct {
-	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
-	DestinationName  string                 `json:"destination_name"`
-	DestinationOwner string                 `json:"destination_owner"`
+	DestinationEnvironment string                 `json:"destination_environment"`
+	DestinationKind        AdapterDestinationKind `json:"destination_kind"`
+	DestinationName        string                 `json:"destination_name"`
+	DestinationOwner       string                 `json:"destination_owner"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
-	EnvironmentId ID     `json:"environment_id"`
-	KeyIds        []ID   `json:"key_ids"`
-	NamePrefix    string `json:"name_prefix"`
+	EnvironmentId         ID      `json:"environment_id"`
+	KeyIds                []ID    `json:"key_ids"`
+	NamePrefix            string  `json:"name_prefix"`
+	SelectedRepositoryIds []int64 `json:"selected_repository_ids"`
 
 	// TargetId A prefixed UUIDv7, e.g. `org_0198…`.
-	TargetId ID `json:"target_id"`
+	TargetId   ID                                       `json:"target_id"`
+	Visibility ResumeAdapterTargetMoveRequestVisibility `json:"visibility"`
 }
+
+// ResumeAdapterTargetMoveRequestVisibility defines model for ResumeAdapterTargetMoveRequest.Visibility.
+type ResumeAdapterTargetMoveRequestVisibility string
 
 // RetentionHealth defines model for RetentionHealth.
 type RetentionHealth struct {
@@ -4667,17 +4854,23 @@ type UpdateAdapterOriginRequest struct {
 
 // UpdateAdapterTargetRequest defines model for UpdateAdapterTargetRequest.
 type UpdateAdapterTargetRequest struct {
-	DestinationKind  AdapterDestinationKind `json:"destination_kind"`
-	DestinationName  string                 `json:"destination_name"`
-	DestinationOwner string                 `json:"destination_owner"`
+	DestinationEnvironment string                 `json:"destination_environment"`
+	DestinationKind        AdapterDestinationKind `json:"destination_kind"`
+	DestinationName        string                 `json:"destination_name"`
+	DestinationOwner       string                 `json:"destination_owner"`
 
 	// EnvironmentId A prefixed UUIDv7, e.g. `org_0198…`.
-	EnvironmentId      ID     `json:"environment_id"`
-	ExpectedGeneration int64  `json:"expected_generation"`
-	KeepRemote         *bool  `json:"keep_remote,omitempty"`
-	KeyIds             []ID   `json:"key_ids"`
-	NamePrefix         string `json:"name_prefix"`
+	EnvironmentId         ID                                   `json:"environment_id"`
+	ExpectedGeneration    int64                                `json:"expected_generation"`
+	KeepRemote            *bool                                `json:"keep_remote,omitempty"`
+	KeyIds                []ID                                 `json:"key_ids"`
+	NamePrefix            string                               `json:"name_prefix"`
+	SelectedRepositoryIds []int64                              `json:"selected_repository_ids"`
+	Visibility            UpdateAdapterTargetRequestVisibility `json:"visibility"`
 }
+
+// UpdateAdapterTargetRequestVisibility defines model for UpdateAdapterTargetRequest.Visibility.
+type UpdateAdapterTargetRequestVisibility string
 
 // UpdateFederationIssuerRequest The MUTABLE half only. `issuer` and `issuer_type` are absent on purpose:
 // changing either would silently re-point every binding underneath at a

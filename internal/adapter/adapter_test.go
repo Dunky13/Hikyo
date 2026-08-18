@@ -55,6 +55,33 @@ func TestWorkflowUsesCanonicalNamesAtRuntime(t *testing.T) {
 	}
 }
 
+func TestGitHubWorkflowAllowsForeignPrefixesAndCIWhileBanningGitHub(t *testing.T) {
+	entries := []ManifestEntry{
+		{CanonicalName: "FORGEJO_TOKEN", Classification: SecretClassification},
+		{CanonicalName: "GITEA_URL", Classification: ConfigClassification},
+		{CanonicalName: "CI", Classification: ConfigClassification},
+	}
+	workflow, err := WorkflowForProvider("github-actions", "", entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"FORGEJO_TOKEN", "GITEA_URL", "CI"} {
+		if !strings.Contains(workflow, name+":") {
+			t.Fatalf("workflow omitted GitHub-valid name %q:\n%s", name, workflow)
+		}
+	}
+	if _, err := WorkflowForProvider("github-actions", "", []ManifestEntry{{CanonicalName: "GITHUB_TOKEN", Classification: SecretClassification}}); err == nil {
+		t.Fatal("GitHub workflow accepted GITHUB_ reserved prefix")
+	}
+}
+
+func TestGitHubManifestRefusesUnrepresentableNonUTF8ByName(t *testing.T) {
+	err := ValidateGitHubActionsManifest("", []ManifestEntry{{CanonicalName: "BINARY", Classification: SecretClassification, Value: string([]byte{0xff, 0xfe})}}, true)
+	if err == nil || !strings.Contains(err.Error(), "BINARY") || !strings.Contains(err.Error(), "non-UTF-8") {
+		t.Fatalf("ValidateGitHubActionsManifest() = %v, want named byte-exactness refusal", err)
+	}
+}
+
 func TestModuleSeamHasExactlyFourOperations(t *testing.T) {
 	typeOf := reflect.TypeOf((*Module)(nil)).Elem()
 	got := make([]string, 0, typeOf.NumMethod())

@@ -159,7 +159,7 @@ func TestForgejoRealLifecycle(t *testing.T) {
 	if durableState != "owned" || unresolvedIntents < 1 {
 		t.Fatalf("dispatch replay state=%q unresolved intents=%d", durableState, unresolvedIntents)
 	}
-	if err := runtime.Succeed(t.Context(), replayJob, 0, time.Now().UTC()); err != nil {
+	if err := runtime.Succeed(t.Context(), replayJob, 0, nil, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,7 +170,7 @@ func TestForgejoRealLifecycle(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return repos.Adapters().RecordPlan(ctx, p, adoptTarget.ID, artifactID, 1, destination.NumericID, []store.AdapterConflictEntry{entry}, time.Now().UTC())
+		return repos.Adapters().RecordPlan(ctx, p, adoptTarget.ID, artifactID, 1, 0, destination.NumericID, []store.AdapterConflictEntry{entry}, time.Now().UTC())
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestForgejoRealLifecycle(t *testing.T) {
 	if _, err := module.Sync(t.Context(), adapter.SyncRequest{Target: adoptTarget, Manifest: adoptManifest, Ledger: adoptLedger}, runtime.Journal(adoptJob)); err != nil {
 		t.Fatalf("adoption converge: %v", err)
 	}
-	if err := runtime.Succeed(t.Context(), adoptJob, 1, time.Now().UTC()); err != nil {
+	if err := runtime.Succeed(t.Context(), adoptJob, 1, nil, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 	teardown, err := adoptionService.RemoveTarget(t.Context(), service.LocalPrincipal("usr_external"), projectScope, adoptTarget.ID, false)
@@ -207,7 +207,7 @@ func TestForgejoRealLifecycle(t *testing.T) {
 	if _, err := module.Sync(t.Context(), adapter.SyncRequest{Target: adoptTarget, Ledger: realLedger(t, db, adoptTarget.ID), Teardown: true}, runtime.Journal(scrubJob)); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.Succeed(t.Context(), scrubJob, 0, time.Now().UTC()); err != nil {
+	if err := runtime.Succeed(t.Context(), scrubJob, 0, nil, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 

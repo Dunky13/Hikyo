@@ -141,20 +141,24 @@ func readAdapterMove(ctx context.Context, db adoptDB, chain domain.Scope, moveID
 	}
 	out.KeepRemote, out.CreatedAt = keep, created.value
 	targetQuery := db.SQL(
-		`SELECT target_id,environment_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,orphaned_names FROM adapter_route_move_targets WHERE move_id=? AND org_id=? AND project_id=? ORDER BY target_id`,
-		`SELECT target_id,environment_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,orphaned_names FROM adapter_route_move_targets WHERE move_id=$1 AND org_id=$2 AND project_id=$3 ORDER BY target_id`)
+		`SELECT target_id,environment_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names FROM adapter_route_move_targets WHERE move_id=? AND org_id=? AND project_id=? ORDER BY target_id`,
+		`SELECT target_id,environment_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names FROM adapter_route_move_targets WHERE move_id=$1 AND org_id=$2 AND project_id=$3 ORDER BY target_id`)
 	rows, err := db.Query(ctx, targetQuery, moveID, chain.Org, chain.Project)
 	if err != nil {
 		return AdapterMove{}, err
 	}
 	for rows.Next() {
 		var target AdapterMoveTarget
-		var orphanJSON []byte
-		if err := rows.Scan(&target.TargetID, &target.EnvironmentID, &target.DestinationKind, &target.DestinationOwner, &target.DestinationName, &target.DestinationID, &target.NamePrefix, &orphanJSON); err != nil {
+		var orphanJSON, selectedJSON []byte
+		if err := rows.Scan(&target.TargetID, &target.EnvironmentID, &target.DestinationKind, &target.DestinationOwner, &target.DestinationName, &target.DestinationEnvironment, &target.DestinationID, &target.RepositoryID, &target.Visibility, &selectedJSON, &target.NamePrefix, &orphanJSON); err != nil {
 			_ = closeMoveRows(rows)
 			return AdapterMove{}, err
 		}
 		if err := json.Unmarshal(orphanJSON, &target.Orphaned); err != nil {
+			_ = closeMoveRows(rows)
+			return AdapterMove{}, err
+		}
+		if err := json.Unmarshal(selectedJSON, &target.SelectedRepositoryIDs); err != nil {
 			_ = closeMoveRows(rows)
 			return AdapterMove{}, err
 		}
@@ -281,10 +285,14 @@ func replaceAdapterMoveTarget(ctx context.Context, db adoptDB, chain domain.Scop
 	if _, err := db.Exec(ctx, deleteKeys, moveID, target.ID, chain.Org, chain.Project, target.EnvironmentID); err != nil {
 		return AdapterMove{}, err
 	}
+	selectedJSON, err := json.Marshal(target.SelectedRepositoryIDs)
+	if err != nil {
+		return AdapterMove{}, err
+	}
 	updateTarget := db.SQL(
-		`UPDATE adapter_route_move_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_id=0,name_prefix=? WHERE move_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=?`,
-		`UPDATE adapter_route_move_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_id=0,name_prefix=$4 WHERE move_id=$5 AND target_id=$6 AND org_id=$7 AND project_id=$8 AND environment_id=$9`)
-	if rows, err := db.Exec(ctx, updateTarget, target.DestinationKind, target.DestinationOwner, target.DestinationName, target.NamePrefix, moveID, target.ID, chain.Org, chain.Project, target.EnvironmentID); err != nil || rows != 1 {
+		`UPDATE adapter_route_move_targets SET destination_kind=?,destination_owner=?,destination_name=?,destination_environment=?,destination_id=0,repository_id=?,visibility=?,selected_repository_ids=?,name_prefix=? WHERE move_id=? AND target_id=? AND org_id=? AND project_id=? AND environment_id=?`,
+		`UPDATE adapter_route_move_targets SET destination_kind=$1,destination_owner=$2,destination_name=$3,destination_environment=$4,destination_id=0,repository_id=$5,visibility=$6,selected_repository_ids=$7,name_prefix=$8 WHERE move_id=$9 AND target_id=$10 AND org_id=$11 AND project_id=$12 AND environment_id=$13`)
+	if rows, err := db.Exec(ctx, updateTarget, target.DestinationKind, target.DestinationOwner, target.DestinationName, target.DestinationEnvironment, target.RepositoryID, target.Visibility, selectedJSON, target.NamePrefix, moveID, target.ID, chain.Org, chain.Project, target.EnvironmentID); err != nil || rows != 1 {
 		return AdapterMove{}, errors.Join(err, adapter.ErrSuperseded)
 	}
 	for _, keyID := range target.KeyIDs {
@@ -368,7 +376,9 @@ func replaceAdapterMoveOrigin(ctx context.Context, db adoptDB, chain domain.Scop
 		if err := reserveAdapterMoveClaims(ctx, db, chain, moveID, origin, AdapterTargetMutation{
 			ID: target.TargetID, AdapterID: move.AdapterID, EnvironmentID: target.EnvironmentID,
 			DestinationKind: target.DestinationKind, DestinationOwner: target.DestinationOwner,
-			DestinationName: target.DestinationName, NamePrefix: target.NamePrefix, KeyIDs: keyIDs,
+			DestinationName: target.DestinationName, DestinationEnvironment: target.DestinationEnvironment,
+			RepositoryID: target.RepositoryID, Visibility: target.Visibility, SelectedRepositoryIDs: target.SelectedRepositoryIDs,
+			NamePrefix: target.NamePrefix, KeyIDs: keyIDs,
 		}); err != nil {
 			return AdapterMove{}, err
 		}
@@ -460,13 +470,14 @@ func beginAdapterOriginMove(ctx context.Context, db adoptDB, chain domain.Scope,
 		return AdapterRouteMoveBatch{}, fmt.Errorf("%w: adapter origin is already configured or pending", domain.ErrConflict)
 	}
 	type originTarget struct {
-		id, environmentID, kind, owner, name, prefix, activeJob string
-		destinationID, generation                               int64
-		orphaned                                                []string
+		id, environmentID, kind, owner, name, destinationEnvironment, visibility, prefix, activeJob string
+		destinationID, repositoryID, generation                                                     int64
+		selectedRepositoryIDs                                                                       []int64
+		orphaned                                                                                    []string
 	}
 	targetQuery := db.SQL(
-		`SELECT t.id,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),COALESCE((SELECT json_group_array(value) FROM (SELECT surface||':'||effective_name AS value FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched') ORDER BY surface,effective_name)),'[]') FROM adapter_targets t WHERE t.adapter_id=? AND t.org_id=? AND t.project_id=? AND t.state='active' ORDER BY t.id`,
-		`SELECT t.id,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),COALESCE((SELECT jsonb_agg(surface||':'||effective_name ORDER BY surface,effective_name) FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched')),'[]'::jsonb) FROM adapter_targets t WHERE t.adapter_id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.state='active' ORDER BY t.id FOR UPDATE`)
+		`SELECT t.id,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.repository_id,t.visibility,t.selected_repository_ids,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),COALESCE((SELECT json_group_array(value) FROM (SELECT surface||':'||effective_name AS value FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched') ORDER BY surface,effective_name)),'[]') FROM adapter_targets t WHERE t.adapter_id=? AND t.org_id=? AND t.project_id=? AND t.state='active' ORDER BY t.id`,
+		`SELECT t.id,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.repository_id,t.visibility,t.selected_repository_ids,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),COALESCE((SELECT jsonb_agg(surface||':'||effective_name ORDER BY surface,effective_name) FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched')),'[]'::jsonb) FROM adapter_targets t WHERE t.adapter_id=$1 AND t.org_id=$2 AND t.project_id=$3 AND t.state='active' ORDER BY t.id FOR UPDATE`)
 	rows, err := db.Query(ctx, targetQuery, mutation.AdapterID, chain.Org, chain.Project)
 	if err != nil {
 		return AdapterRouteMoveBatch{}, err
@@ -474,12 +485,16 @@ func beginAdapterOriginMove(ctx context.Context, db adoptDB, chain domain.Scope,
 	var targets []originTarget
 	for rows.Next() {
 		var target originTarget
-		var orphanRaw []byte
-		if err := rows.Scan(&target.id, &target.environmentID, &target.kind, &target.owner, &target.name, &target.destinationID, &target.prefix, &target.generation, &target.activeJob, &orphanRaw); err != nil {
+		var orphanRaw, selectedRaw []byte
+		if err := rows.Scan(&target.id, &target.environmentID, &target.kind, &target.owner, &target.name, &target.destinationEnvironment, &target.destinationID, &target.repositoryID, &target.visibility, &selectedRaw, &target.prefix, &target.generation, &target.activeJob, &orphanRaw); err != nil {
 			_ = closeMoveRows(rows)
 			return AdapterRouteMoveBatch{}, err
 		}
 		if err := json.Unmarshal(orphanRaw, &target.orphaned); err != nil {
+			_ = closeMoveRows(rows)
+			return AdapterRouteMoveBatch{}, err
+		}
+		if err := json.Unmarshal(selectedRaw, &target.selectedRepositoryIDs); err != nil {
 			_ = closeMoveRows(rows)
 			return AdapterRouteMoveBatch{}, err
 		}
@@ -511,10 +526,11 @@ func beginAdapterOriginMove(ctx context.Context, db adoptDB, chain domain.Scope,
 			pendingOrphans = target.orphaned
 		}
 		orphanJSON, _ := json.Marshal(pendingOrphans)
+		selectedJSON, _ := json.Marshal(target.selectedRepositoryIDs)
 		insertTarget := db.SQL(
-			`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,orphaned_names) VALUES (?,?,?,?,?,?,?,?,0,?,?)`,
-			`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,orphaned_names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0,$9,$10)`)
-		if affected, err := db.Exec(ctx, insertTarget, mutation.MoveID, chain.Org, chain.Project, target.environmentID, target.id, target.kind, target.owner, target.name, target.prefix, string(orphanJSON)); err != nil || affected != 1 {
+			`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)`,
+			`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14)`)
+		if affected, err := db.Exec(ctx, insertTarget, mutation.MoveID, chain.Org, chain.Project, target.environmentID, target.id, target.kind, target.owner, target.name, target.destinationEnvironment, target.repositoryID, target.visibility, selectedJSON, target.prefix, string(orphanJSON)); err != nil || affected != 1 {
 			if err != nil {
 				return AdapterRouteMoveBatch{}, err
 			}
@@ -552,6 +568,8 @@ func beginAdapterOriginMove(ctx context.Context, db adoptDB, chain domain.Scope,
 		if err := reserveAdapterMoveClaims(ctx, db, chain, mutation.MoveID, mutation.Origin, AdapterTargetMutation{
 			ID: target.id, AdapterID: mutation.AdapterID, EnvironmentID: target.environmentID,
 			DestinationKind: target.kind, DestinationOwner: target.owner, DestinationName: target.name,
+			DestinationEnvironment: target.destinationEnvironment, RepositoryID: target.repositoryID,
+			Visibility: target.visibility, SelectedRepositoryIDs: target.selectedRepositoryIDs,
 			NamePrefix: target.prefix, KeyIDs: keyIDs,
 		}); err != nil {
 			return AdapterRouteMoveBatch{}, err
@@ -617,12 +635,22 @@ func validatePendingTarget(m AdapterTargetMutation) error {
 	}
 	switch m.DestinationKind {
 	case string(adapter.Repository):
-		if m.DestinationName == "" {
+		if m.DestinationName == "" || m.DestinationEnvironment != "" || m.Visibility != "" || len(m.SelectedRepositoryIDs) != 0 {
 			return fmt.Errorf("%w: repository target requires repository name", domain.ErrInvalid)
 		}
 	case string(adapter.Organization):
-		if m.DestinationName != "" {
+		if m.DestinationName != "" || m.DestinationEnvironment != "" {
 			return fmt.Errorf("%w: organization target does not take repository name", domain.ErrInvalid)
+		}
+		if m.Visibility == "selected" && len(m.SelectedRepositoryIDs) == 0 {
+			return fmt.Errorf("%w: selected visibility requires repository ids", domain.ErrInvalid)
+		}
+		if m.Visibility != "" && m.Visibility != "all" && m.Visibility != "private" && m.Visibility != "selected" {
+			return fmt.Errorf("%w: invalid organization visibility", domain.ErrInvalid)
+		}
+	case string(adapter.Environment):
+		if m.DestinationName == "" || m.DestinationEnvironment == "" || m.Visibility != "" || len(m.SelectedRepositoryIDs) != 0 {
+			return fmt.Errorf("%w: environment target requires repository and environment", domain.ErrInvalid)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported adapter destination kind", domain.ErrInvalid)
@@ -649,16 +677,16 @@ func beginAdapterTargetMove(ctx context.Context, db adoptDB, chain domain.Scope,
 	}
 	stamp := db.Stamp(mutation.At)
 	var current struct {
-		adapterID, origin, environmentID, kind, owner, name, prefix, activeJob string
-		destinationID, generation                                              int64
-		providerBusy                                                           int
+		adapterID, origin, environmentID, kind, owner, name, destinationEnvironment, prefix, activeJob string
+		destinationID, generation                                                                      int64
+		providerBusy                                                                                   int
 	}
 	var orphanRaw []byte
 	lookup := db.SQL(
-		`SELECT t.adapter_id,a.origin,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>? THEN 1 ELSE 0 END,COALESCE((SELECT json_group_array(value) FROM (SELECT surface||':'||effective_name AS value FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched') ORDER BY surface,effective_name)),'[]') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.state='active' AND a.state='active'`,
-		`SELECT t.adapter_id,a.origin,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>$1 THEN 1 ELSE 0 END,COALESCE((SELECT jsonb_agg(surface||':'||effective_name ORDER BY surface,effective_name) FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched')),'[]'::jsonb) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.state='active' AND a.state='active' FOR UPDATE OF t,a`)
+		`SELECT t.adapter_id,a.origin,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>? THEN 1 ELSE 0 END,COALESCE((SELECT json_group_array(value) FROM (SELECT surface||':'||effective_name AS value FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched') ORDER BY surface,effective_name)),'[]') FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=? AND t.org_id=? AND t.project_id=? AND t.state='active' AND a.state='active'`,
+		`SELECT t.adapter_id,a.origin,t.environment_id,t.destination_kind,t.destination_owner,t.destination_name,t.destination_environment,t.destination_id,t.name_prefix,t.generation,COALESCE(t.active_job_id,''),CASE WHEN t.provider_lease_job_id IS NOT NULL AND t.provider_lease_expires_at>$1 THEN 1 ELSE 0 END,COALESCE((SELECT jsonb_agg(surface||':'||effective_name ORDER BY surface,effective_name) FROM adapter_ledger WHERE target_id=t.id AND org_id=t.org_id AND project_id=t.project_id AND environment_id=t.environment_id AND state IN ('owned','dispatched')),'[]'::jsonb) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id WHERE t.id=$2 AND t.org_id=$3 AND t.project_id=$4 AND t.state='active' AND a.state='active' FOR UPDATE OF t,a`)
 	err := db.QueryRow(ctx, lookup, stamp, mutation.Target.ID, chain.Org, chain.Project).Scan(
-		&current.adapterID, &current.origin, &current.environmentID, &current.kind, &current.owner, &current.name,
+		&current.adapterID, &current.origin, &current.environmentID, &current.kind, &current.owner, &current.name, &current.destinationEnvironment,
 		&current.destinationID, &current.prefix, &current.generation, &current.activeJob,
 		&current.providerBusy, &orphanRaw)
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
@@ -679,7 +707,7 @@ func beginAdapterTargetMove(ctx context.Context, db adoptDB, chain domain.Scope,
 	if current.environmentID != mutation.Target.EnvironmentID {
 		return AdapterRouteMoveResult{}, fmt.Errorf("%w: moving a target between environments requires a replacement target identity", domain.ErrConflict)
 	}
-	if current.kind == mutation.Target.DestinationKind && current.owner == mutation.Target.DestinationOwner && current.name == mutation.Target.DestinationName {
+	if current.kind == mutation.Target.DestinationKind && current.owner == mutation.Target.DestinationOwner && current.name == mutation.Target.DestinationName && current.destinationEnvironment == mutation.Target.DestinationEnvironment {
 		return AdapterRouteMoveResult{}, fmt.Errorf("%w: target update does not move its route", domain.ErrInvalid)
 	}
 	var orphaned []string
@@ -707,7 +735,11 @@ func beginAdapterTargetMove(ctx context.Context, db adoptDB, chain domain.Scope,
 		pendingOrphans = orphaned
 	}
 	pendingOrphanJSON, _ := json.Marshal(pendingOrphans)
-	if rows, err := db.Exec(ctx, insertTarget, mutation.MoveID, chain.Org, chain.Project, mutation.Target.EnvironmentID, mutation.Target.ID, mutation.Target.DestinationKind, mutation.Target.DestinationOwner, mutation.Target.DestinationName, mutation.Target.NamePrefix, string(pendingOrphanJSON)); err != nil || rows != 1 {
+	selectedJSON, _ := json.Marshal(mutation.Target.SelectedRepositoryIDs)
+	insertTarget = db.SQL(
+		`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)`,
+		`INSERT INTO adapter_route_move_targets (move_id,org_id,project_id,environment_id,target_id,destination_kind,destination_owner,destination_name,destination_environment,destination_id,repository_id,visibility,selected_repository_ids,name_prefix,orphaned_names) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14)`)
+	if rows, err := db.Exec(ctx, insertTarget, mutation.MoveID, chain.Org, chain.Project, mutation.Target.EnvironmentID, mutation.Target.ID, mutation.Target.DestinationKind, mutation.Target.DestinationOwner, mutation.Target.DestinationName, mutation.Target.DestinationEnvironment, mutation.Target.RepositoryID, mutation.Target.Visibility, selectedJSON, mutation.Target.NamePrefix, string(pendingOrphanJSON)); err != nil || rows != 1 {
 		if err != nil {
 			return AdapterRouteMoveResult{}, err
 		}
@@ -817,22 +849,22 @@ func reserveAdapterMoveClaims(ctx context.Context, db adoptDB, chain domain.Scop
 	for _, pending := range claims {
 		var configured int
 		configuredCollision := db.SQL(
-			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=t.id AND tk.org_id=t.org_id AND tk.project_id=t.project_id AND tk.environment_id=t.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE t.org_id=? AND t.project_id=? AND t.id<>? AND t.state='active' AND a.state='active' AND a.origin=? AND t.destination_kind=? AND t.destination_owner=? AND t.destination_name=? AND (?=t.name_prefix||? OR (?=CASE WHEN k.classification='config' THEN 'variable' ELSE 'secret' END AND ?=t.name_prefix||k.name))`,
-			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=t.id AND tk.org_id=t.org_id AND tk.project_id=t.project_id AND tk.environment_id=t.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE t.org_id=$1 AND t.project_id=$2 AND t.id<>$3 AND t.state='active' AND a.state='active' AND a.origin=$4 AND t.destination_kind=$5 AND t.destination_owner=$6 AND t.destination_name=$7 AND ($8=t.name_prefix||$9 OR ($10=CASE WHEN k.classification='config' THEN 'variable' ELSE 'secret' END AND $11=t.name_prefix||k.name))`)
-		if err := db.QueryRow(ctx, configuredCollision, chain.Org, chain.Project, target.ID, origin, target.DestinationKind, target.DestinationOwner, target.DestinationName, pending.effective, adapter.SentinelName, pending.surface, pending.effective).Scan(&configured); err != nil {
+			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=t.id AND tk.org_id=t.org_id AND tk.project_id=t.project_id AND tk.environment_id=t.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE t.org_id=? AND t.project_id=? AND t.id<>? AND t.state='active' AND a.state='active' AND a.origin=? AND t.destination_kind=? AND t.destination_owner=? AND t.destination_name=? AND t.destination_environment=? AND (?=t.name_prefix||? OR (?=CASE WHEN k.classification='config' THEN 'variable' ELSE 'secret' END AND ?=t.name_prefix||k.name))`,
+			`SELECT COUNT(*) FROM adapter_targets t JOIN adapters a ON a.id=t.adapter_id AND a.org_id=t.org_id AND a.project_id=t.project_id LEFT JOIN adapter_target_keys tk ON tk.target_id=t.id AND tk.org_id=t.org_id AND tk.project_id=t.project_id AND tk.environment_id=t.environment_id LEFT JOIN keys k ON k.id=tk.key_id AND k.org_id=tk.org_id AND k.project_id=tk.project_id WHERE t.org_id=$1 AND t.project_id=$2 AND t.id<>$3 AND t.state='active' AND a.state='active' AND a.origin=$4 AND t.destination_kind=$5 AND t.destination_owner=$6 AND t.destination_name=$7 AND t.destination_environment=$8 AND ($9=t.name_prefix||$10 OR ($11=CASE WHEN k.classification='config' THEN 'variable' ELSE 'secret' END AND $12=t.name_prefix||k.name))`)
+		if err := db.QueryRow(ctx, configuredCollision, chain.Org, chain.Project, target.ID, origin, target.DestinationKind, target.DestinationOwner, target.DestinationName, target.DestinationEnvironment, pending.effective, adapter.SentinelName, pending.surface, pending.effective).Scan(&configured); err != nil {
 			return err
 		}
 		if configured != 0 {
 			return fmt.Errorf("%w: effective name %q is already configured on the pending destination", domain.ErrConflict, pending.effective)
 		}
 		insert := db.SQL(
-			`INSERT INTO adapter_route_move_claims (move_id,org_id,project_id,environment_id,target_id,key_id,provider_origin,destination_kind,destination_owner,destination_name,surface,effective_name,normalized_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			`INSERT INTO adapter_route_move_claims (move_id,org_id,project_id,environment_id,target_id,key_id,provider_origin,destination_kind,destination_owner,destination_name,surface,effective_name,normalized_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`)
+			`INSERT INTO adapter_route_move_claims (move_id,org_id,project_id,environment_id,target_id,key_id,provider_origin,destination_kind,destination_owner,destination_name,destination_environment,surface,effective_name,normalized_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			`INSERT INTO adapter_route_move_claims (move_id,org_id,project_id,environment_id,target_id,key_id,provider_origin,destination_kind,destination_owner,destination_name,destination_environment,surface,effective_name,normalized_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`)
 		var keyID any
 		if pending.keyID != "" {
 			keyID = pending.keyID
 		}
-		if _, err := db.Exec(ctx, insert, moveID, chain.Org, chain.Project, target.EnvironmentID, target.ID, keyID, origin, target.DestinationKind, target.DestinationOwner, target.DestinationName, pending.surface, pending.effective, strings.ToUpper(pending.effective)); err != nil {
+		if _, err := db.Exec(ctx, insert, moveID, chain.Org, chain.Project, target.EnvironmentID, target.ID, keyID, origin, target.DestinationKind, target.DestinationOwner, target.DestinationName, target.DestinationEnvironment, pending.surface, pending.effective, strings.ToUpper(pending.effective)); err != nil {
 			if constraint(err) != nil {
 				return fmt.Errorf("%w: pending effective name %q is already claimed", domain.ErrConflict, pending.effective)
 			}

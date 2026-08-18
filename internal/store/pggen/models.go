@@ -28,6 +28,24 @@ type Adapter struct {
 	AuthorityPrincipalID string
 	State                string
 	CreatedAt            pgtype.Timestamptz
+	CredentialExpiresAt  pgtype.Timestamptz
+}
+
+type AdapterConfigureFence struct {
+	TargetID               string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationEnvironment string
+	Generation             int64
+	EffectID               string
+	LeaseExpiresAt         pgtype.Timestamptz
+	State                  string
+	CreatedAt              pgtype.Timestamptz
+	CompletedAt            pgtype.Timestamptz
 }
 
 type AdapterConflict struct {
@@ -44,6 +62,7 @@ type AdapterConflict struct {
 	EffectiveName    string
 	CreatedAt        pgtype.Timestamptz
 	AdoptedAt        pgtype.Timestamptz
+	RepositoryID     int64
 }
 
 type AdapterEffect struct {
@@ -64,18 +83,21 @@ type AdapterEffect struct {
 }
 
 type AdapterLedger struct {
-	ID             string
-	OrgID          string
-	ProjectID      string
-	EnvironmentID  string
-	TargetID       string
-	ProviderOrigin string
-	DestinationID  int64
-	Surface        string
-	EffectiveName  string
-	NormalizedName string
-	State          string
-	UpdatedAt      pgtype.Timestamptz
+	ID              string
+	OrgID           string
+	ProjectID       string
+	EnvironmentID   string
+	TargetID        string
+	ProviderOrigin  string
+	DestinationID   int64
+	Surface         string
+	EffectiveName   string
+	NormalizedName  string
+	State           string
+	UpdatedAt       pgtype.Timestamptz
+	DestinationKind string
+	RepositoryID    int64
+	Missing         bool
 }
 
 type AdapterOutbox struct {
@@ -114,19 +136,20 @@ type AdapterRouteMove struct {
 }
 
 type AdapterRouteMoveClaim struct {
-	MoveID           string
-	OrgID            string
-	ProjectID        string
-	EnvironmentID    string
-	TargetID         string
-	KeyID            pgtype.Text
-	ProviderOrigin   string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	Surface          string
-	EffectiveName    string
-	NormalizedName   string
+	MoveID                 string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	TargetID               string
+	KeyID                  pgtype.Text
+	ProviderOrigin         string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	Surface                string
+	EffectiveName          string
+	NormalizedName         string
+	DestinationEnvironment string
 }
 
 type AdapterRouteMoveKey struct {
@@ -139,17 +162,21 @@ type AdapterRouteMoveKey struct {
 }
 
 type AdapterRouteMoveTarget struct {
-	MoveID           string
-	OrgID            string
-	ProjectID        string
-	EnvironmentID    string
-	TargetID         string
-	DestinationKind  string
-	DestinationOwner string
-	DestinationName  string
-	DestinationID    int64
-	NamePrefix       string
-	OrphanedNames    []byte
+	MoveID                 string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	TargetID               string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationID          int64
+	NamePrefix             string
+	OrphanedNames          []byte
+	DestinationEnvironment string
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIds  []byte
 }
 
 type AdapterTarget struct {
@@ -173,6 +200,11 @@ type AdapterTarget struct {
 	ProviderLeaseEffectID  pgtype.Text
 	ProviderLeaseExpiresAt pgtype.Timestamptz
 	CreatedAt              pgtype.Timestamptz
+	DestinationEnvironment string
+	RepositoryID           int64
+	Visibility             string
+	SelectedRepositoryIds  []byte
+	Warnings               []byte
 }
 
 type AdapterTargetKey struct {
