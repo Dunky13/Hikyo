@@ -28,6 +28,7 @@ ALTER TABLE adapter_route_move_claims ADD COLUMN destination_environment TEXT NO
 ALTER TABLE adapter_route_move_claims DROP CONSTRAINT adapter_route_move_claims_destination_kind_check;
 ALTER TABLE adapter_route_move_claims ADD CONSTRAINT adapter_route_move_claims_destination_kind_check
     CHECK (destination_kind IN ('repository', 'organization', 'environment'));
+-- +goose StatementBegin
 DO $$
 DECLARE legacy_unique TEXT;
 BEGIN
@@ -41,6 +42,7 @@ BEGIN
         EXECUTE format('ALTER TABLE adapter_route_move_claims DROP CONSTRAINT %I', legacy_unique);
     END IF;
 END $$;
+-- +goose StatementEnd
 ALTER TABLE adapter_route_move_claims ADD CONSTRAINT adapter_route_move_claims_provider_destination_name_unique
     UNIQUE (provider_origin, destination_kind, destination_owner, destination_name, destination_environment, surface, normalized_name);
 
