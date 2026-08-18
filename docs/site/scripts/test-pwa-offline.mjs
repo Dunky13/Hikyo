@@ -94,6 +94,16 @@ try {
     });
   });
 
+  const prototypeResponse = await page.goto(`${origin}/prototypes/`, {
+    waitUntil: 'networkidle',
+  });
+  assert.ok(prototypeResponse?.ok(), 'online prototype hub did not load successfully');
+  assert.equal(
+    await page.title(),
+    'Hikyo prototypes',
+    'service worker navigation fallback replaced the prototype hub',
+  );
+
   const cacheNames = await page.evaluate(() => caches.keys());
   assert.ok(cacheNames.length > 0, 'service worker created no runtime cache');
 
