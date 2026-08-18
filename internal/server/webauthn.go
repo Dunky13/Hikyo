@@ -235,8 +235,20 @@ func (a *API) ReauthPasskeyStart(ctx context.Context, req apigen.ReauthPasskeySt
 	if req.Body == nil {
 		return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
 	}
-	raw, err := a.Auth.ReauthPasskeyStart(ctx, bearer(ctx),
-		service.ReauthPurpose(req.Body.Operation), req.Body.EnvironmentId, req.Body.KeyIds)
+	var raw []byte
+	var err error
+	if req.Body.Operation == apigen.ReauthPurposeAdapter {
+		if req.Body.AdapterOperation == nil || req.Body.EnvironmentIds == nil {
+			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		environments := make([]string, 0, len(*req.Body.EnvironmentIds))
+		for _, environmentID := range *req.Body.EnvironmentIds {
+			environments = append(environments, string(environmentID))
+		}
+		raw, err = a.Auth.ReauthAdapterPasskeyStartWire(ctx, bearer(ctx), string(*req.Body.AdapterOperation), req.Body.EnvironmentId, environments)
+	} else {
+		raw, err = a.Auth.ReauthPasskeyStart(ctx, bearer(ctx), service.ReauthPurpose(req.Body.Operation), req.Body.EnvironmentId, req.Body.KeyIds)
+	}
 	if err != nil {
 		if webauthnPrecondition(err) {
 			return apigen.ReauthPasskeyStart400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil

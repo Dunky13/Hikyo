@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import { useSession } from '../api/session.ts';
+import { CLIReauth } from '../routes/CLIReauth.tsx';
 import { Login } from '../routes/Login.tsx';
 import { MachineAccess } from '../routes/MachineAccess.tsx';
 import { Matrix } from '../routes/Matrix.tsx';
@@ -34,6 +35,7 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   matrix: <Matrix />,
   values: <Values />,
   'machine-access': <MachineAccess />,
+  'cli-reauth': <CLIReauth />,
   'workspace-approve': <WorkspaceApprove />,
   'workspace-callback': <WorkspaceCallback />,
 };

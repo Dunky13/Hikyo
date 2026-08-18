@@ -107,6 +107,11 @@ type KeyPresence struct {
 	Rule          string // required | forbidden
 }
 
+type AdapterPin struct {
+	AdapterID string
+	TargetID  string
+}
+
 // Presence rule values, fixed here because they are a stored enum.
 const (
 	PresenceRuleRequired  = "required"
@@ -120,6 +125,7 @@ type CatalogueReader interface {
 	// Count is the per-project key cap's input, read inside the same
 	// transaction as the insert it bounds.
 	Count(ctx context.Context, p authz.Proof) (int64, error)
+	AdapterPins(ctx context.Context, p authz.Proof, keyID string) ([]AdapterPin, error)
 	GetGroup(ctx context.Context, p authz.Proof, id string) (CatalogueGroup, error)
 	ListGroups(ctx context.Context, p authz.Proof) ([]CatalogueGroup, error)
 	CountGroups(ctx context.Context, p authz.Proof) (int64, error)

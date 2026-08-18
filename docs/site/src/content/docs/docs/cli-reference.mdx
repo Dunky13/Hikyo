@@ -36,9 +36,57 @@ stored locally and are never printed as a login receipt.
 | `folder`, `key` | Manage the catalogue and declarations. |
 | `values` | List, get, set, clear, diff, copy, and bulk declare. |
 | `access`, `project-settings` | Manage grants, members, and protected environments. |
+| `adapter` | Configure Forgejo deployment adapters, targets, plans, adoption, and converge jobs. |
 
 Most list and show commands accept `-o table|json`. JSON shapes may gain fields;
 automation must ignore unknown fields.
+
+### Deployment adapters
+
+`adapter create` atomically creates an adapter, its write-only credential, and
+its first target. Credential input is a no-echo terminal, `--stdin`, or
+`--value-file`; it is never accepted as an argument value.
+
+```text
+hikyo adapter create --origin URL --env ENV --kind repository --owner OWNER --repo REPO --prefix PREFIX --keys ID,ID [--stdin|--value-file FILE]
+hikyo adapter update ADAPTER --origin URL [--keep-remote] [--stdin|--value-file FILE]
+hikyo adapter update ADAPTER --target TARGET --env ENV --kind KIND --owner OWNER [--repo REPO] --prefix PREFIX --keys ID,ID [--keep-remote]
+hikyo adapter update ADAPTER --move MOVE --origin URL [--stdin|--value-file FILE]
+hikyo adapter update ADAPTER --move MOVE --target TARGET --env ENV --kind KIND --owner OWNER [--repo REPO] --prefix PREFIX --keys ID,ID
+hikyo adapter update ADAPTER --move MOVE --cancel-move
+hikyo adapter credential set --adapter ADAPTER [--stdin|--value-file FILE]
+hikyo adapter credential set --adapter ADAPTER --move MOVE [--stdin|--value-file FILE]
+hikyo adapter credential revoke --adapter ADAPTER
+hikyo adapter target add|list --adapter ADAPTER
+hikyo adapter target show|remove TARGET
+hikyo adapter plan|sync|test --target TARGET
+hikyo adapter adopt --target TARGET [--artifact ARTIFACT] NAME...
+```
+
+A target update replaces the complete key subset. Target fields cannot be mixed
+with adapter-level origin or credential fields. The environment is immutable;
+repeat the current environment when updating, or remove and re-add the target
+to move it. Origin and destination changes return a durable asynchronous move;
+the table output includes its move id, state, pending route, jobs, and orphaned
+names. Adoption without `--artifact` succeeds only when exactly one eligible
+artifact matches every requested name exactly. See
+[Forgejo deployment adapters](/docs/deployment-adapters/) for custody,
+prefixing, scopes, and teardown behavior.
+
+An `attention_required` move is always addressed explicitly with `--move`.
+Supplying the new route replaces its pending claims and resumes activation;
+credential set with `--move` replaces only that origin move's pending
+credential. `--cancel-move` atomically restores the old route and queues its
+reconverge. These forms cannot mutate the live credential by ambiguity.
+
+Commands that consume adapter authority bind an ephemeral loopback listener,
+open `/reauth/cli?transaction=<opaque-state>` in the browser, and wait for its
+exact callback. The browser displays the operation and complete environment
+set, collects one TOTP proof for all nonzero-window environments and one
+passkey proof for each zero-window environment, then returns only a single-use
+code and the same state. PKCE binds redemption to the waiting process. The
+rotated session bearer is written silently to local mode-`0600` state and is
+never printed, logged, or placed in the browser URL.
 
 ## Identity providers and machines
 

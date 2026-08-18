@@ -66,6 +66,7 @@ func run() int {
 			Stderr:  os.Stderr,
 			Env:     cli.Env{Getenv: os.Getenv},
 			Workdir: workdir(),
+			OpenURL: cli.OpenBrowser,
 		}, os.Args[1:])
 	case slices.Contains(app.ClientVerbs, cmd):
 		fmt.Fprintf(os.Stderr, "hikyo %s: not implemented yet\n", cmd)

@@ -21,6 +21,7 @@ export type SurfaceId =
   | 'values'
   | 'machine-access'
   | 'remotes'
+  | 'cli-reauth'
   | 'workspace-approve'
   | 'workspace-callback';
 
@@ -67,6 +68,10 @@ export const SURFACES: readonly Surface[] = [
     label: 'Machine access',
     section: null,
   },
+  // Browser half of the CLI's purpose-bound reauthentication handoff. The
+  // opaque transaction state stays in the query string so login can render on
+  // this same route without losing it.
+  { id: 'cli-reauth', path: '/reauth/cli', label: 'Authorize CLI', section: null },
   // The two ceremony pages. Neither is a navigation destination and neither
   // wears the chrome: they are the two ends of the workspace handoff's front
   // channel, and both are reached by a redirect, never by choosing them.
@@ -113,7 +118,12 @@ export const SECTIONS: readonly Section[] = Object.entries(
  * establishment would be bounced to `/login` and lose the `state` the whole
  * transaction is addressed by.
  */
-const CHROMELESS_IDS: readonly SurfaceId[] = ['login', 'workspace-approve', 'workspace-callback'];
+const CHROMELESS_IDS: readonly SurfaceId[] = [
+  'login',
+  'cli-reauth',
+  'workspace-approve',
+  'workspace-callback',
+];
 
 export const CHROMELESS: readonly Surface[] = SURFACES.filter((s) =>
   CHROMELESS_IDS.includes(s.id),

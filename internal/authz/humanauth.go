@@ -254,6 +254,8 @@ type NewExternalIdentity = authn.NewExternalIdentity
 
 // NewReauthWindow is the reauth-window insert carrier.
 type NewReauthWindow = authn.NewReauthWindow
+type CLIReauthHandoff = authn.CLIReauthHandoff
+type NewCLIReauthHandoff = authn.NewCLIReauthHandoff
 
 // EnabledProviderByIssuer resolves the currently enabled provider for an issuer.
 func (a *TxAuthorizer) EnabledProviderByIssuer(ctx context.Context, kind, issuer string) (OIDCProvider, error) {
@@ -371,6 +373,22 @@ func (a *TxAuthorizer) SweepSessionsForProvider(ctx context.Context, providerID 
 // OpenReauthWindow opens a reauthentication window over one environment.
 func (a *TxAuthorizer) OpenReauthWindow(ctx context.Context, w NewReauthWindow) error {
 	return a.r.CreateReauthWindow(ctx, w)
+}
+
+func (a *TxAuthorizer) CreateCLIReauthHandoff(ctx context.Context, h NewCLIReauthHandoff) error {
+	return a.r.CreateCLIReauthHandoff(ctx, h)
+}
+func (a *TxAuthorizer) CLIReauthHandoffByState(ctx context.Context, verifier []byte) (CLIReauthHandoff, error) {
+	return a.r.CLIReauthHandoffByState(ctx, verifier)
+}
+func (a *TxAuthorizer) CLIReauthHandoffByCode(ctx context.Context, verifier []byte) (CLIReauthHandoff, error) {
+	return a.r.CLIReauthHandoffByCode(ctx, verifier)
+}
+func (a *TxAuthorizer) ApproveCLIReauthHandoff(ctx context.Context, id string, codeVerifier, windows []byte) (bool, error) {
+	return a.r.ApproveCLIReauthHandoff(ctx, id, codeVerifier, windows)
+}
+func (a *TxAuthorizer) ConsumeCLIReauthHandoff(ctx context.Context, id string, at time.Time) (bool, error) {
+	return a.r.ConsumeCLIReauthHandoff(ctx, id, at)
 }
 
 // ReauthWindow is a resolved reauthentication-window row.

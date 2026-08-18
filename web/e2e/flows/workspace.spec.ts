@@ -326,14 +326,64 @@ test.describe('multi-instance', () => {
     for (const scheme of ['dark', 'light'] as const) {
       test(`meets the pinned assertion set on ${surface.label} (${scheme})`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
+        const cliTransactionState = 'hik_1_test';
+        const cliTransactionPath =
+          `/api/v1/auth/cli-reauth/transactions/${cliTransactionState}`;
+        let cliTransactionReads = 0;
+
+        if (surface.id === 'cli-reauth') {
+          // This matrix addresses a visual surface, not a durable handoff
+          // fixture. Stub only its exact display-policy read so the real page
+          // renders the interactive state that the registry claims. The
+          // response intentionally contains no handoff id, bearer, verifier,
+          // code, or credential.
+          await page.route(`${BASE_URL}${cliTransactionPath}`, async (route) => {
+            const request = route.request();
+            const requestURL = new URL(request.url());
+            expect(request.method()).toBe('GET');
+            expect(requestURL.pathname).toBe(cliTransactionPath);
+            expect(requestURL.search).toBe('');
+            cliTransactionReads += 1;
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                state: cliTransactionState,
+                operation: 'adapter.sync',
+                environments: [
+                  {
+                    environment_id: 'env_00000000-0000-4000-8000-000000000001',
+                    effective_window_seconds: 300,
+                    requires_webauthn: false,
+                  },
+                ],
+                redirect_uri: 'http://127.0.0.1:40123/callback',
+                expires_at: '2099-01-01T00:00:00Z',
+              }),
+            });
+          });
+        }
+
         // The two ceremony pages are reached by a redirect in life, so they are
         // visited with the query they are addressed by — the approve page with
         // a state to consent to, the callback page with none, which is its own
         // refusal state and the one that renders without closing the window.
-        await page.goto(surface.id === 'workspace-approve' ? `${surface.path}?state=hik_1_test` : surface.path);
+        const addressedPath =
+          surface.id === 'workspace-approve'
+            ? `${surface.path}?state=hik_1_test`
+            : surface.id === 'cli-reauth'
+              ? `${surface.path}?transaction=${cliTransactionState}`
+              : surface.path;
+        await page.goto(addressedPath);
 
         const heading = page.getByRole('heading', { level: 1 }).first();
         await expect(heading).toBeVisible();
+        if (surface.id === 'cli-reauth') {
+          await expect(page.getByLabel('Authenticator code')).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Authorize CLI' })).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+          expect(cliTransactionReads).toBe(1);
+        }
         const container = page.locator('.card, .login__card').first();
 
         await expectPinnedAssertionSet(page, {

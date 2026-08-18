@@ -1,5 +1,90 @@
 [
   {
+    "operation": "adapter.adopt",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ],
+    "post_grant_forbidden": true
+  },
+  {
+    "operation": "adapter.configure",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ],
+    "post_grant_forbidden": true
+  },
+  {
+    "operation": "adapter.credential-revoke",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ]
+  },
+  {
+    "operation": "adapter.credential-set",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ],
+    "post_grant_forbidden": true
+  },
+  {
+    "operation": "adapter.delete",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ]
+  },
+  {
+    "operation": "adapter.inspect",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ]
+  },
+  {
+    "operation": "adapter.plan",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ]
+  },
+  {
+    "operation": "adapter.push",
+    "class": "tenant",
+    "level": "environment",
+    "formula": [
+      "manage-adapters@project",
+      "reveal@environment"
+    ]
+  },
+  {
+    "operation": "adapter.sync",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ],
+    "post_grant_forbidden": true
+  },
+  {
+    "operation": "adapter.test",
+    "class": "tenant",
+    "level": "project",
+    "formula": [
+      "manage-adapters@project"
+    ]
+  },
+  {
     "operation": "advisory.event",
     "class": "tenant",
     "level": "environment",

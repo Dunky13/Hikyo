@@ -480,6 +480,10 @@ func runAuditSuite(t *testing.T, db *store.DB) {
 		// binding, credential, user, group, mapping, attention and the lockout
 		// pair — before the trails are read.
 		runSCIMLifecycle(t, db)
+		// Deployment adapters (#65): configuration, conflict adoption, outbox
+		// converge/abort and teardown all traverse their real service/runtime
+		// boundaries before the registry-emitter closure check.
+		runAdapterAuditLifecycle(t, db)
 		// The multi-instance surface (#71): both tiers, against a real pinned
 		// TLS peer, so every remote.* type has a real emitter behind it too.
 		// Before the backup lifecycle, because that one advances the restore

@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/Hikyo-Org/hikyo/api/apigen"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
@@ -60,7 +62,30 @@ func (a *API) GetRevealWindow(ctx context.Context, req apigen.GetRevealWindowReq
 // their code was wrong and send them to re-enrol an authenticator that was
 // never the problem.
 func (a *API) ReauthTotp(ctx context.Context, req apigen.ReauthTotpRequestObject) (apigen.ReauthTotpResponseObject, error) {
-	result, err := a.Auth.ReauthTOTP(ctx, bearer(ctx), req.Body.EnvironmentId, req.Body.Code)
+	var (
+		results []service.ReauthResult
+		err     error
+	)
+	adapterPurpose := req.Body.Purpose != nil && *req.Body.Purpose == apigen.ReauthPurposeAdapter
+	if adapterPurpose {
+		if req.Body.Operation == nil || req.Body.EnvironmentIds == nil || len(*req.Body.EnvironmentIds) == 0 || req.Body.EnvironmentId != nil {
+			return apigen.ReauthTotp400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		rawIDs := make([]string, 0, len(*req.Body.EnvironmentIds))
+		for _, environmentID := range *req.Body.EnvironmentIds {
+			rawIDs = append(rawIDs, string(environmentID))
+		}
+		results, err = a.Auth.ReauthAdapterTOTP(ctx, bearer(ctx), string(*req.Body.Operation), rawIDs, req.Body.Code)
+	} else {
+		if req.Body.Purpose != nil || req.Body.Operation != nil || req.Body.EnvironmentIds != nil || req.Body.EnvironmentId == nil {
+			return apigen.ReauthTotp400JSONResponse{BadRequestJSONResponse: apigen.BadRequestJSONResponse(errorBody(apigen.ErrorCodeBadRequest, ""))}, nil
+		}
+		var result service.ReauthResult
+		result, err = a.Auth.ReauthTOTP(ctx, bearer(ctx), string(*req.Body.EnvironmentId), req.Body.Code)
+		if err == nil {
+			results = []service.ReauthResult{result}
+		}
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrReauthWindowClosed):
@@ -98,24 +123,46 @@ func (a *API) ReauthTotp(ctx context.Context, req apigen.ReauthTotpRequestObject
 			}, nil
 		}
 	}
-	resp := reauthTotpResponse{body: apigen.ReauthResult{
-		SessionId:      result.SessionID,
-		EnvironmentId:  result.EnvironmentID,
-		SingleDecision: result.SingleDecision,
-		WindowExpires:  result.WindowExpires,
-	}}
-	// Every reauth rotates the acting session. Deliver the rotated token on
-	// the channel that carried the presented one, exactly as the passkey
-	// reauth does: a browser gets its cookie, a bearer caller re-reads nothing
-	// from the body by contract.
-	if result.SessionToken != "" {
-		if r := requestFrom(ctx); r != nil {
-			if _, cerr := r.Cookie(browserSessionCookie); cerr == nil {
-				resp.cookies = browserCookiesFor(result.SessionToken, "")
-			}
-		}
+	resp, err := makeReauthTotpResponse(requestFrom(ctx), results, adapterPurpose)
+	if err != nil {
+		a.fault(ctx, "totp reauth response", err)
+		return apigen.ReauthTotp500JSONResponse{InternalJSONResponse: apigen.InternalJSONResponse(errorBody(apigen.ErrorCodeInternal, ""))}, nil
 	}
 	return resp, nil
+}
+
+func makeReauthTotpResponse(request *http.Request, results []service.ReauthResult, adapterPurpose bool) (reauthTotpResponse, error) {
+	if request == nil || len(results) == 0 || results[0].SessionToken == "" {
+		return reauthTotpResponse{}, errors.New("server: TOTP reauth result has no delivery channel or rotated token")
+	}
+	first := results[0]
+	earliest := first.WindowExpires
+	environments := make([]apigen.ID, 0, len(results))
+	for _, result := range results {
+		if result.SessionID != first.SessionID || result.SessionToken != first.SessionToken {
+			return reauthTotpResponse{}, errors.New("server: TOTP reauth results disagree on rotated session")
+		}
+		environments = append(environments, apigen.ID(result.EnvironmentID))
+		if result.WindowExpires.Before(earliest) {
+			earliest = result.WindowExpires
+		}
+	}
+	resp := reauthTotpResponse{body: apigen.ReauthResult{
+		SessionId: first.SessionID, EnvironmentId: first.EnvironmentID,
+		SingleDecision: first.SingleDecision, WindowExpires: earliest,
+	}}
+	if adapterPurpose {
+		resp.body.EnvironmentIds = &environments
+	}
+	if cookie, err := request.Cookie(browserSessionCookie); err == nil && strings.TrimSpace(cookie.Value) != "" {
+		resp.cookies = browserCookiesFor(first.SessionToken, first.CSRFToken)
+		return resp, nil
+	}
+	if value, ok := strings.CutPrefix(request.Header.Get("Authorization"), "Bearer "); ok && strings.TrimSpace(value) != "" {
+		resp.body.SessionToken = &first.SessionToken
+		return resp, nil
+	}
+	return reauthTotpResponse{}, fmt.Errorf("server: TOTP reauth request carried no recognized session artifact")
 }
 
 type reauthTotpResponse struct {

@@ -71,6 +71,12 @@ func TestNoServerSideProxyEndpointExists(t *testing.T) {
 		}
 		for _, param := range passthroughParams {
 			if strings.Contains(lower, "{"+param+"}") {
+				// An adapter target is a server-minted local configuration row,
+				// not a caller-chosen network target. The deployment-adapter ADR
+				// and public resource grammar deliberately call it `target`.
+				if param == "target" && strings.Contains(lower, "/adapter-targets/{target}") {
+					continue
+				}
 				t.Errorf("%s %s: the path takes a caller-chosen %q. An endpoint whose target is "+
 					"named by the request is a proxy whatever it is called; a remote is addressed "+
 					"by its stored entry, whose URL is immutable by design",
@@ -200,6 +206,33 @@ func TestRemoteContractSurfaceIsPinned(t *testing.T) {
 // THIS instance's own data — its configuration, its metadata, a snapshot it
 // stored — and never fetches, relays or forwards on behalf of the caller.
 var pinnedContractSurface = map[string]bool{
+	// Deployment adapters (#65): these rows, plans, jobs and conflict
+	// artifacts are this instance's own durable state. Plan/test contact only
+	// the immutable origin stored on the addressed adapter; no request member
+	// selects an arbitrary upstream and no response relays provider values.
+	"GET /api/v1/orgs/{org}/projects/{project}/adapters":                                                      true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapters":                                                     true,
+	"GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                                            true,
+	"PATCH /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                                          true,
+	"DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}":                                         true,
+	"PUT /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":                                 true,
+	"DELETE /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential":                              true,
+	"GET /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":                                    true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets":                                   true,
+	"GET /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":                                      true,
+	"PATCH /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":                                    true,
+	"DELETE /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}":                                   true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan":                                true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync":                                true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test":                                true,
+	"POST /api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions":                           true,
+	"GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":                                          true,
+	"PATCH /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":                                        true,
+	"DELETE /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}":                                       true,
+	"POST /api/v1/auth/cli-reauth/start":                                                                      true,
+	"GET /api/v1/auth/cli-reauth/transactions/{state}":                                                        true,
+	"POST /api/v1/auth/cli-reauth/approve":                                                                    true,
+	"POST /api/v1/auth/cli-reauth/redeem":                                                                     true,
 	"DELETE /api/v1/auth/identities/{id}":                                                                     true,
 	"DELETE /api/v1/auth/totp":                                                                                true,
 	"DELETE /api/v1/auth/webauthn/credentials/{id}":                                                           true,

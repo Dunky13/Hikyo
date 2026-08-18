@@ -219,6 +219,65 @@ export async function runPasskeyCeremony(input: PasskeyCeremonyInput): Promise<v
   );
 }
 
+/** Run one adapter-purpose passkey ceremony over one zero-window environment. */
+export async function runAdapterPasskeyCeremony(input: {
+  operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+  environmentId: string;
+  environmentIds: readonly string[];
+}): Promise<void> {
+  const options = await parsed(
+    reauthPasskeyStart({
+      body: {
+        operation: 'adapter',
+        adapter_operation: input.operation,
+        environment_id: input.environmentId,
+        environment_ids: [...input.environmentIds],
+        key_ids: [],
+      },
+    }),
+    zWebauthnOptions,
+  );
+  const request = requestOptions(options);
+  const assertion = await navigator.credentials.get({ publicKey: request });
+  if (assertion === null || !(assertion instanceof PublicKeyCredential)) {
+    throw new Error('the authenticator returned no assertion');
+  }
+  const response = assertion.response;
+  if (!(response instanceof AuthenticatorAssertionResponse)) {
+    throw new Error('the authenticator returned the wrong response type');
+  }
+  await parsed(
+    reauthPasskeyFinish({
+      body: {
+        id: assertion.id,
+        rawId: toBase64URL(assertion.rawId),
+        type: assertion.type,
+        response: {
+          clientDataJSON: toBase64URL(response.clientDataJSON),
+          authenticatorData: toBase64URL(response.authenticatorData),
+          signature: toBase64URL(response.signature),
+          userHandle: response.userHandle === null ? null : toBase64URL(response.userHandle),
+        },
+      },
+    }),
+    zReauthResult,
+  );
+}
+
+/** One TOTP proof opens the adapter-bound windows for every nonzero environment. */
+export async function runAdapterTOTPCeremony(
+  operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync',
+  environmentIds: readonly string[],
+  code: string,
+): Promise<void> {
+  await parsed(
+    reauthTotp({
+      body: { purpose: 'adapter', operation, environment_ids: [...environmentIds], code },
+    }),
+    zReauthResult,
+  );
+}
+
 /**
  * requestOptions narrows the server's options blob to what
  * `navigator.credentials.get` needs, validating as it goes.

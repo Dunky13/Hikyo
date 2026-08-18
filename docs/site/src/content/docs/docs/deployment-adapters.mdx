@@ -1,0 +1,121 @@
+---
+title: Forgejo deployment adapters
+description: Push selected published values to Forgejo Actions without reading provider values back.
+editUrl: https://github.com/Hikyo-Org/hikyo/edit/main/docs/site/src/content/docs/docs/deployment-adapters.mdx
+---
+
+If a job can fetch values at runtime, use Forgejo OIDC federation. Use a
+deployment adapter only for static values that must exist before the first
+fetch.
+
+The Forgejo adapter is one-way and value-blind. It writes selected values from
+one Hikyo environment to a repository or organization Actions namespace. It
+never calls a Forgejo variable GET or list endpoint. Secret planning reads
+names only; variable planning uses Hikyo's ownership ledger. Hikyo therefore
+cannot detect provider-side value drift. Run a converge to restore the last
+published Hikyo state.
+
+## Requirements
+
+- Forgejo 1.21 or newer.
+- A repository target PAT with `write:repository`, or an organization target
+  PAT with `write:organization`. Forgejo write scopes also permit GET requests,
+  but Hikyo's variable-read operations do not exist in the client.
+- `manage-adapters` for inspection and lifecycle operations. Creating,
+  widening, adopting, changing a prefix, replacing a credential, and manually
+  syncing also require reveal authority and adapter reauthentication for every
+  environment synchronized by that adapter.
+
+The credential is write-only after entry. `hikyo adapter create` and
+`hikyo adapter credential set` read it from a no-echo terminal by default, or
+from `--stdin` or `--value-file`. There is no credential-value argument.
+
+## Targets and names
+
+An adapter owns one Forgejo origin and credential. Each target binds one Hikyo
+environment to one Forgejo repository or organization and an explicit,
+non-empty key subset. Organization targets are wide: every repository in that
+Forgejo organization can consume the organization-level values. That breadth
+is a Forgejo storage-level property, not an override guarantee: a repository-
+level secret or variable with the same name shadows the organization-level
+value for workflows in that repository.
+
+Effective provider names are `prefix + canonical key name`. The optional
+prefix applies to every key and to the `MANAGED_BY_WENV` sentinels. Effective
+name sets for targets sharing a destination must be disjoint. Use distinct
+prefixes when multiple environments feed one repository.
+
+Applications still consume canonical names. Generate the required workflow
+mapping without exposing values:
+
+```sh
+hikyo adapter target show tgt_123 --format workflow
+```
+
+For example, a `PROD_` target produces mappings from `DATABASE_URL` to
+`${{ secrets.PROD_DATABASE_URL }}`. Local execution, rendered env files, and
+the Kubernetes operator continue to use `DATABASE_URL`.
+
+## Lifecycle
+
+Create is an atomic bootstrap: provider connection and destination identity are
+validated before one transaction stores the adapter credential and first
+target. A failed validation or target insert leaves no partial adapter.
+
+Published environment changes automatically queue a newest-wins converge for
+intersecting targets under their recorded authority. `adapter plan` reports
+names and dispositions only. Existing provider names are never captured
+silently: adoption requires an exact conflict artifact, generation,
+destination, and `(surface, name)` pairs. If multiple exact-match artifacts are
+eligible, pass `--artifact` explicitly.
+
+`hikyo adapter show` includes every target's sync status, converged revision,
+failed names, and pending conflict artifacts. Its table view prints the pending
+`surface:name` pairs; JSON retains the full artifact id, generation,
+destination, entries, and creation time required for an exact adoption.
+
+Origin and destination changes are asynchronous scrub-before-switch moves.
+They block new pushes, scrub the old route, activate and test the pending route,
+then converge it. The update response contains a move id; API clients poll
+`GET /api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}` for the state,
+per-target scrub/activation/converge jobs, pending route, and orphaned names.
+Credentials never appear in a move response. `--keep-remote` skips the scrub,
+releases custody immediately, and enumerates the resulting orphaned names.
+When an old credential is dead, the move uses that same orphan-and-release rule
+before proceeding.
+
+Transient activation failures retry. An invalid pending credential or a
+collision on the new route leaves the move in `attention_required`; Hikyo does
+not silently roll back. PATCHing the concrete move replaces either its pending
+origin plus write-only credential or its complete pending target route, then
+resumes activation. DELETEing that move atomically cancels it, restores the old
+route, and queues old-route reconvergence. The CLI requires the move id through
+`--move` for either recovery path, so pending and live credential replacement
+cannot be confused.
+Target environments are immutable: cross-environment movement is remove plus
+add, so authority and custody are never silently rebound.
+
+Adapter reauthentication is distinct from value reveal. Its signed windows
+bind purpose `adapter`, the exact operation, and the complete environment set.
+One TOTP proof covers environments whose effective window is nonzero; each
+effective-zero environment requires its own WebAuthn proof. The CLI handoff is
+state- and PKCE-bound, has a single-use authorization code, and rotates the CLI
+bearer. The CLI binds an ephemeral `127.0.0.1` callback before opening
+`/reauth/cli?transaction=<opaque-state>`. The browser reads only display policy,
+performs the required ceremonies, and returns only `code` plus the same state
+to that exact callback. Only redemption returns the bearer; the CLI replaces
+its mode-0600 local artifact without printing or logging it.
+
+Removing a target or adapter scrubs ledger-owned names by default, with
+sentinels last. `--keep-remote` releases custody instead and loudly lists the
+orphaned names. Remove targets while the PAT still authenticates. If a dead or
+revoked credential prevents scrub, Hikyo completes local teardown but reports
+the remote names as orphaned.
+
+## Private Forgejo origins
+
+Adapters deny private, loopback, link-local, documentation, and reserved
+addresses by default. Operators can add origin-scoped exceptions with
+`HIKYO_ADAPTER_EGRESS_POLICY_FILE`; see
+[server configuration](/docs/configuration/). HTTPS, certificate validation,
+DNS rebinding protection, and the no-redirect rule remain mandatory.

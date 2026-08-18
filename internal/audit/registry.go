@@ -89,6 +89,10 @@ const (
 	// auth.reauthenticated records a step-up: the acting session presented a
 	// possession factor and gained a factor class.
 	EventAuthReauthenticated EventType = "auth.reauthenticated"
+	// auth.cli_reauth_handoff records each phase of the CLI/browser adapter
+	// reauthentication transport. The payload carries only the internal row id
+	// and public policy shape; front-channel artifacts never enter the trail.
+	EventAuthCLIReauthHandoff EventType = "auth.cli_reauth_handoff"
 	// auth.passkey_added / auth.passkey_removed record a WebAuthn credential
 	// coming into or out of existence, naming the credential class that
 	// authorized the account-security mutation (#54). auth.passkey_cloned is the
@@ -609,6 +613,23 @@ const (
 	EventRemoteCredentialsListed   EventType = "remote.credentials_listed"
 	EventRemoteOriginAllowlistRead EventType = "remote.origin_allowlist_read"
 
+	// adapter.* — deployment-module configuration, provider inspection and
+	// durable per-request external-effect linkage (#65).
+	EventAdapterConfigure         EventType = "adapter.configure"
+	EventAdapterCredentialReplace EventType = "adapter.credential_replace"
+	EventAdapterCredentialRevoke  EventType = "adapter.credential_revoke"
+	EventAdapterAdopt             EventType = "adapter.adopt"
+	EventAdapterInspect           EventType = "adapter.inspect"
+	EventAdapterPlan              EventType = "adapter.plan"
+	EventAdapterTest              EventType = "adapter.test"
+	EventAdapterSyncRequested     EventType = "adapter.sync_requested"
+	EventAdapterPushIntent        EventType = "adapter.push_intent"
+	EventAdapterPushOutcome       EventType = "adapter.push_outcome"
+	EventAdapterKeyDelivered      EventType = "adapter.key_delivered"
+	EventAdapterAbort             EventType = "adapter.abort"
+	EventAdapterScrub             EventType = "adapter.scrub"
+	EventAdapterSuperseded        EventType = "adapter.superseded"
+
 	// NOT REGISTERED HERE, deliberately: `identity.disclosure`, the per-key
 	// disclosure event on a machine fetch. #15's locked cardinality — one
 	// immutable event per disclosed key, never collapsed, never counted — is
@@ -888,6 +909,25 @@ var registry = map[EventType]TypeSpec{
 		Schema: Schema{
 			"session_id": {Kind: KindString, Required: true},
 			"factor":     {Kind: KindString, Required: true}, // totp
+		},
+	},
+	EventAuthCLIReauthHandoff: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:        map[Trail]bool{TrailInstance: true},
+		Schema: Schema{
+			"phase": {Kind: KindString, Required: true, Enum: []string{"start", "inspect", "approve", "redeem"}},
+			// Unknown or malformed front-channel artifacts cannot be resolved to
+			// a row; optional fields are populated only after the internal row is
+			// known. They never contain state, code, verifier, bearer or credential.
+			"handoff_id":      {Kind: KindString},
+			"operation":       {Kind: KindString},
+			"environment_ids": {Kind: KindStringList},
+			"cause": {Kind: KindString, Enum: []string{
+				"invalid_request", "unauthenticated", "unauthorized", "invalid_or_expired",
+				"reauth_required", "pkce_mismatch", "already_consumed",
+			}},
 		},
 	},
 	EventAuthPasskeyAdded: {
@@ -2199,6 +2239,94 @@ var registry = map[EventType]TypeSpec{
 			"row_count": {Kind: KindInt, Required: true},
 		},
 	},
+	EventAdapterPushIntent: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeIntent: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable"}},
+			"effective_name": {Kind: KindString, Required: true},
+			"disposition":    {Kind: KindString, Required: true, Enum: []string{"create", "update", "delete"}},
+		},
+	},
+	EventAdapterPushOutcome: {
+		SchemaVersion: 1,
+		Retention:     RetentionSecurity,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true, OutcomeUnknown: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"surface":        {Kind: KindString, Required: true, Enum: []string{"secret", "variable"}},
+			"effective_name": {Kind: KindString, Required: true},
+			"disposition":    {Kind: KindString, Required: true, Enum: []string{"create", "update", "delete"}},
+		},
+	},
+	EventAdapterConfigure: adapterLifecycleEvent(Schema{
+		"mutation":           {Kind: KindString, Required: true},
+		"previous_authority": {Kind: KindString}, "authority": {Kind: KindString, Required: true},
+	}),
+	EventAdapterCredentialReplace: adapterLifecycleEvent(Schema{
+		"credential_present": {Kind: KindBool, Required: true},
+		"previous_authority": {Kind: KindString, Required: true},
+		"authority":          {Kind: KindString, Required: true},
+	}),
+	EventAdapterCredentialRevoke: adapterLifecycleEvent(Schema{
+		"credential_present": {Kind: KindBool, Required: true},
+	}),
+	EventAdapterAdopt: adapterLifecycleEvent(Schema{
+		"artifact_id": {Kind: KindString, Required: true}, "target_generation": {Kind: KindInt, Required: true},
+		"entries": {Kind: KindStringList, Required: true},
+	}),
+	EventAdapterInspect: {
+		SchemaVersion: 1, Retention: RetentionAccess,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeDenied: true},
+		Trails:   map[Trail]bool{TrailTenant: true}, Schema: Schema{"row_count": {Kind: KindInt, Required: true}},
+	},
+	EventAdapterPlan: adapterLifecycleEvent(Schema{
+		"changes": {Kind: KindStringList, Required: true},
+	}),
+	EventAdapterTest: adapterLifecycleEvent(Schema{
+		"version": {Kind: KindString}, "destination_id": {Kind: KindInt},
+	}),
+	EventAdapterSyncRequested: {
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeDenied: true},
+		Trails:   map[Trail]bool{TrailTenant: true}, Schema: Schema{
+			"trigger": {Kind: KindString, Required: true, Enum: []string{"manual", "on-publish"}},
+		},
+	},
+	EventAdapterKeyDelivered: {
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true}, Trails: map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			"key_id": {Kind: KindString, Required: true}, "surface": {Kind: KindString, Required: true, Enum: []string{"secret", "variable"}},
+			"effective_name": {Kind: KindString, Required: true},
+		},
+	},
+	EventAdapterAbort: {
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeFailure: true}, Trails: map[Trail]bool{TrailTenant: true},
+		Schema: Schema{"cause": {Kind: KindString, Required: true, Enum: []string{"authority", "generation"}}},
+	},
+	EventAdapterScrub: {
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeFailure: true},
+		Trails:   map[Trail]bool{TrailTenant: true},
+		Schema:   Schema{"orphaned": {Kind: KindStringList, Required: true}},
+	},
+	EventAdapterSuperseded: {
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true}, Trails: map[Trail]bool{TrailTenant: true},
+		Schema: Schema{"previous_job_id": {Kind: KindString, Required: true}, "job_id": {Kind: KindString, Required: true}},
+	},
+}
+
+func adapterLifecycleEvent(schema Schema) TypeSpec {
+	return TypeSpec{
+		SchemaVersion: 1, Retention: RetentionSecurity,
+		Outcomes: map[Outcome]bool{OutcomeSuccess: true, OutcomeDenied: true, OutcomeFailure: true},
+		Trails:   map[Trail]bool{TrailTenant: true}, Schema: schema,
+	}
 }
 
 // grantSchema is the shared shape of the three grant-lifecycle rows. The

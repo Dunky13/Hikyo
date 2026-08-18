@@ -41,6 +41,9 @@ type IO struct {
 	ReadPassword func(prompt string) (string, error)
 	// OpenTerminal backs the print triad's interactive leg.
 	OpenTerminal func() (io.WriteCloser, error)
+	// OpenURL launches a browser without printing the opaque handoff state.
+	// Nil uses the platform browser opener.
+	OpenURL func(string) error
 }
 
 // Run dispatches one invocation and returns its exit code.
@@ -86,6 +89,7 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"remote":            runRemote,
 	"remote-credential": runRemoteCredential,
 	"import":            runImport,
+	"adapter":           runAdapter,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -184,6 +188,30 @@ revisions:                                         --env selects the environment
   hikyo pin list                                    show pins and expired status
   hikyo pin release <workload-principal>            release a durable pin
   hikyo rotate-token-key --yes                      new token key; one full fetch, no restart wave
+
+adapters:
+  hikyo adapter create --origin <https-origin> --env E --kind repository|organization
+      --owner <owner> [--repo <repo>] --prefix <prefix> --keys <id,...>
+      [--stdin | --value-file PATH]
+  hikyo adapter list [-o table|json]
+  hikyo adapter show <adapter> [-o table|json]
+  hikyo adapter update <adapter> --origin <https-origin>
+  hikyo adapter update <adapter> --target <target> --env E --kind <kind>
+      --owner <owner> [--repo <repo>] --prefix <prefix> --keys <id,...>
+  hikyo adapter delete <adapter> [--keep-remote]
+  hikyo adapter credential set --adapter <adapter> [--stdin | --value-file PATH]
+  hikyo adapter credential revoke --adapter <adapter>
+  hikyo adapter target add --adapter <adapter> --env E --kind <kind> --owner <owner>
+      [--repo <repo>] [--prefix <prefix>] --keys <id,...>
+  hikyo adapter target list --adapter <adapter>
+  hikyo adapter target show <target> [--format detail|workflow]
+  hikyo adapter target remove <target> [--keep-remote]
+  hikyo adapter adopt --target <target> [--artifact <id>] <NAME>...
+  hikyo adapter plan|sync|test --target <target>
+
+  adapter credentials are read with terminal echo disabled, from stdin, or
+  from --value-file. There is no credential-value argv flag.
+
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

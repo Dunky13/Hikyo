@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -670,7 +671,7 @@ func (s *Auth) mintPasskeySession(ctx context.Context, az *authz.TxAuthorizer, a
 // StepUpPasskeyStart opens a non-discoverable ceremony scoped to the acting
 // account's credentials, to elevate the session in place.
 func (s *Auth) StepUpPasskeyStart(ctx context.Context, presented string) ([]byte, error) {
-	return s.beginAccountCeremony(ctx, presented, "step-up", "", "")
+	return s.beginAccountCeremony(ctx, presented, "step-up", "", "", nil)
 }
 
 // StepUpPasskeyFinish validates the assertion, applies the sign-count rule, and
@@ -693,7 +694,33 @@ func (s *Auth) ReauthPasskeyStart(ctx context.Context, presented string, purpose
 	if err != nil {
 		return nil, err
 	}
-	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID)
+	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, []string{environmentID})
+}
+
+// ReauthAdapterPasskeyStart opens one signed WebAuthn ceremony for one
+// effective-zero environment, with the adapter purpose, concrete operation and
+// complete adapter environment set all inside the signed challenge binding.
+// A mixed-policy act calls this once per zero-window environment.
+func (s *Auth) ReauthAdapterPasskeyStart(ctx context.Context, presented string, operation authz.Operation,
+	environmentID string, environmentIDs []string) ([]byte, error) {
+	if !adapterReauthOperation(operation) || environmentID == "" {
+		return nil, ErrReauthUnitMismatch
+	}
+	environmentIDs = adapterEnvironmentSet(environmentIDs)
+	if !slices.Contains(environmentIDs, environmentID) {
+		return nil, ErrReauthUnitMismatch
+	}
+	binding, err := adapterOperationBinding(operation, environmentID, environmentIDs)
+	if err != nil {
+		return nil, err
+	}
+	return s.beginAccountCeremony(ctx, presented, "reauth", binding, environmentID, environmentIDs)
+}
+
+// ReauthAdapterPasskeyStartWire keeps the transport boundary free of authz
+// package types while preserving the same closed operation validation here.
+func (s *Auth) ReauthAdapterPasskeyStartWire(ctx context.Context, presented, operation, environmentID string, environmentIDs []string) ([]byte, error) {
+	return s.ReauthAdapterPasskeyStart(ctx, presented, authz.Operation(operation), environmentID, environmentIDs)
 }
 
 // ReauthPasskeyFinish validates the assertion and opens a reauthentication
@@ -729,12 +756,23 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 		if single || windowExpires.After(hardExpires) {
 			windowExpires = hardExpires
 		}
-		if err := az.OpenReauthWindow(ctx, authz.NewReauthWindow{
+		window := authz.NewReauthWindow{
 			ID: windowID, SessionID: ceremony.SessionID, EnvironmentID: ceremony.EnvironmentID,
 			CeremonyID: ceremony.ID, FactorClass: "webauthn", SingleDecision: single,
 			AuthenticatedAt: now, WindowExpiresAt: windowExpires, HardExpiresAt: hardExpires,
 			CredentialEpoch: epoch, CreatedAt: now,
-		}); err != nil {
+		}
+		if binding, ok, err := parseAdapterOperationBinding(ceremony.OperationBinding); err != nil {
+			return err
+		} else if ok {
+			if binding.EnvironmentID != ceremony.EnvironmentID || !adapterReauthOperation(authz.Operation(binding.Operation)) {
+				return ErrReauthUnitMismatch
+			}
+			window.BoundPurpose = string(PurposeAdapter)
+			window.BoundOperation = binding.Operation
+			window.BoundEnvironmentSet = CanonicalEnvironmentSet(binding.EnvironmentIDs)
+		}
+		if err := az.OpenReauthWindow(ctx, window); err != nil {
 			return err
 		}
 		out = ReauthResult{
@@ -755,7 +793,7 @@ func (s *Auth) ReauthPasskeyFinish(ctx context.Context, presented string, respon
 
 // beginAccountCeremony is the shared start for step-up and reauth: a
 // non-discoverable ceremony scoped to the acting account's credentials.
-func (s *Auth) beginAccountCeremony(ctx context.Context, presented, purpose, operationBinding, environmentID string) ([]byte, error) {
+func (s *Auth) beginAccountCeremony(ctx context.Context, presented, purpose, operationBinding, environmentID string, environmentIDs []string) ([]byte, error) {
 	if err := s.requireRP(); err != nil {
 		return nil, err
 	}
@@ -779,8 +817,8 @@ func (s *Auth) beginAccountCeremony(ctx context.Context, presented, purpose, ope
 		//
 		// An empty environment id is the ACCOUNT ceremonies (enrol, step-up):
 		// they address no environment, so there is nothing to authorize.
-		if environmentID != "" {
-			if err := authorizeEnvironmentRead(ctx, az, id, environmentID); err != nil {
+		for _, authorizedEnvironmentID := range environmentIDs {
+			if err := authorizeEnvironmentRead(ctx, az, id, authorizedEnvironmentID); err != nil {
 				return err
 			}
 		}
@@ -1465,4 +1503,45 @@ func operationBinding(op ReauthPurpose, environmentID string, keyIDs []string) (
 		return "", err
 	}
 	return string(b), nil
+}
+
+type adapterReauthBinding struct {
+	Purpose        string   `json:"purpose"`
+	Operation      string   `json:"operation"`
+	EnvironmentID  string   `json:"environment_id"`
+	EnvironmentIDs []string `json:"environment_ids"`
+}
+
+func adapterOperationBinding(operation authz.Operation, environmentID string, environmentIDs []string) (string, error) {
+	if !adapterReauthOperation(operation) || environmentID == "" {
+		return "", ErrReauthUnitMismatch
+	}
+	environmentIDs = adapterEnvironmentSet(environmentIDs)
+	if !slices.Contains(environmentIDs, environmentID) {
+		return "", ErrReauthUnitMismatch
+	}
+	b, err := json.Marshal(adapterReauthBinding{
+		Purpose: string(PurposeAdapter), Operation: string(operation),
+		EnvironmentID: environmentID, EnvironmentIDs: environmentIDs,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func parseAdapterOperationBinding(raw string) (adapterReauthBinding, bool, error) {
+	var binding adapterReauthBinding
+	if err := json.Unmarshal([]byte(raw), &binding); err != nil {
+		return adapterReauthBinding{}, false, err
+	}
+	if binding.Purpose == "" {
+		return adapterReauthBinding{}, false, nil
+	}
+	if binding.Purpose != string(PurposeAdapter) || !adapterReauthOperation(authz.Operation(binding.Operation)) ||
+		binding.EnvironmentID == "" || !slices.Contains(binding.EnvironmentIDs, binding.EnvironmentID) ||
+		CanonicalEnvironmentSet(binding.EnvironmentIDs) == "" {
+		return adapterReauthBinding{}, false, ErrReauthUnitMismatch
+	}
+	return binding, true, nil
 }

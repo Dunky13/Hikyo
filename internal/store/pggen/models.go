@@ -17,6 +17,173 @@ type Account struct {
 	WebauthnUserHandle []byte
 }
 
+type Adapter struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	Provider             string
+	Origin               string
+	CredentialCiphertext []byte
+	CredentialSetAt      pgtype.Timestamptz
+	AuthorityPrincipalID string
+	State                string
+	CreatedAt            pgtype.Timestamptz
+}
+
+type AdapterConflict struct {
+	ID               string
+	ArtifactID       string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	JobID            pgtype.Text
+	DestinationID    int64
+	TargetGeneration int64
+	Surface          string
+	EffectiveName    string
+	CreatedAt        pgtype.Timestamptz
+	AdoptedAt        pgtype.Timestamptz
+}
+
+type AdapterEffect struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	TargetID       string
+	JobID          string
+	Surface        string
+	EffectiveName  string
+	Disposition    string
+	IntentAuditID  string
+	OutcomeAuditID pgtype.Text
+	Outcome        pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	FinishedAt     pgtype.Timestamptz
+}
+
+type AdapterLedger struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	TargetID       string
+	ProviderOrigin string
+	DestinationID  int64
+	Surface        string
+	EffectiveName  string
+	NormalizedName string
+	State          string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+type AdapterOutbox struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	TargetID             string
+	Kind                 string
+	RouteMoveID          pgtype.Text
+	AuthorityPrincipalID string
+	Generation           int64
+	DedupKey             string
+	AttemptCount         int32
+	NextAttemptAt        pgtype.Timestamptz
+	LeaseOwner           pgtype.Text
+	LeaseExpiresAt       pgtype.Timestamptz
+	State                string
+	CreatedAt            pgtype.Timestamptz
+	FinishedAt           pgtype.Timestamptz
+}
+
+type AdapterRouteMove struct {
+	ID                          string
+	OrgID                       string
+	ProjectID                   string
+	AdapterID                   string
+	TargetID                    pgtype.Text
+	Kind                        string
+	PendingOrigin               pgtype.Text
+	PendingCredentialCiphertext []byte
+	AuthorityPrincipalID        string
+	State                       string
+	KeepRemote                  bool
+	CreatedAt                   pgtype.Timestamptz
+}
+
+type AdapterRouteMoveClaim struct {
+	MoveID           string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	KeyID            pgtype.Text
+	ProviderOrigin   string
+	DestinationKind  string
+	DestinationOwner string
+	DestinationName  string
+	Surface          string
+	EffectiveName    string
+	NormalizedName   string
+}
+
+type AdapterRouteMoveKey struct {
+	MoveID        string
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	TargetID      string
+	KeyID         string
+}
+
+type AdapterRouteMoveTarget struct {
+	MoveID           string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	DestinationKind  string
+	DestinationOwner string
+	DestinationName  string
+	DestinationID    int64
+	NamePrefix       string
+	OrphanedNames    []byte
+}
+
+type AdapterTarget struct {
+	ID                     string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	AdapterID              string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationID          int64
+	NamePrefix             string
+	Generation             int64
+	State                  string
+	SyncStatus             string
+	FailureNames           []byte
+	ConvergedRevision      pgtype.Int8
+	ActiveJobID            pgtype.Text
+	ProviderLeaseJobID     pgtype.Text
+	ProviderLeaseEffectID  pgtype.Text
+	ProviderLeaseExpiresAt pgtype.Timestamptz
+	CreatedAt              pgtype.Timestamptz
+}
+
+type AdapterTargetKey struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	TargetID      string
+	AdapterID     string
+	KeyID         string
+}
+
 type AuditInstanceEvent struct {
 	Seq               int64
 	ID                string
@@ -73,6 +240,22 @@ type AuthInstanceState struct {
 	UpdatedAt       pgtype.Timestamptz
 	RestoreEpoch    int64
 	ReactivatedAt   pgtype.Timestamptz
+}
+
+type CliReauthHandoff struct {
+	ID              string
+	StateVerifier   []byte
+	CodeVerifier    []byte
+	SessionID       string
+	PrincipalID     string
+	Operation       string
+	EnvironmentSet  string
+	PkceChallenge   string
+	RedirectUri     string
+	ApprovedWindows []byte
+	CreatedAt       pgtype.Timestamptz
+	ExpiresAt       pgtype.Timestamptz
+	ConsumedAt      pgtype.Timestamptz
 }
 
 type CredentialAuthority struct {
@@ -358,20 +541,22 @@ type ProjectSchemaRevision struct {
 }
 
 type ReauthWindow struct {
-	ID              string
-	SessionID       string
-	EnvironmentID   string
-	CeremonyID      string
-	FactorClass     string
-	SingleDecision  int64
-	AuthenticatedAt pgtype.Timestamptz
-	WindowExpiresAt pgtype.Timestamptz
-	HardExpiresAt   pgtype.Timestamptz
-	CredentialEpoch int64
-	ConsumedAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	BoundOperation  string
-	BoundKeySet     string
+	ID                  string
+	SessionID           string
+	EnvironmentID       string
+	CeremonyID          string
+	FactorClass         string
+	SingleDecision      int64
+	AuthenticatedAt     pgtype.Timestamptz
+	WindowExpiresAt     pgtype.Timestamptz
+	HardExpiresAt       pgtype.Timestamptz
+	CredentialEpoch     int64
+	ConsumedAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	BoundOperation      string
+	BoundKeySet         string
+	BoundPurpose        string
+	BoundEnvironmentSet string
 }
 
 type RecoveryCode struct {

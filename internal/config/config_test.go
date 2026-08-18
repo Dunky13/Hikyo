@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -255,6 +257,46 @@ func TestDevAdmissionOverrideAppliesInDevMode(t *testing.T) {
 	}
 	if cfg.DevAdmissionPerIPPerMinute != 200 {
 		t.Fatalf("override = %d, want 200", cfg.DevAdmissionPerIPPerMinute)
+	}
+}
+
+func TestAdapterEgressPolicyIsOriginScopedAndCanonical(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "adapter-egress.json")
+	if err := os.WriteFile(path, []byte(`{"https://git.internal.example":["10.42.0.0/16","fd00:42::/64"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, warnings, err := Load("server", []string{"--dev"},
+		env("HIKYO_ADAPTER_EGRESS_POLICY_FILE", path),
+		environFrom("HIKYO_ADAPTER_EGRESS_POLICY_FILE", path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("policy key must be recognized: %v", warnings)
+	}
+	prefixes := cfg.AdapterEgressPolicy["https://git.internal.example"]
+	if len(prefixes) != 2 || prefixes[0].String() != "10.42.0.0/16" || prefixes[1].String() != "fd00:42::/64" {
+		t.Fatalf("policy = %#v", cfg.AdapterEgressPolicy)
+	}
+}
+
+func TestAdapterEgressPolicyRefusesNonCanonicalOriginAndMalformedCIDR(t *testing.T) {
+	for name, body := range map[string]string{
+		"path":  `{"https://git.internal.example/api":["10.0.0.0/8"]}`,
+		"slash": `{"https://git.internal.example/":["10.0.0.0/8"]}`,
+		"http":  `{"http://git.internal.example":["10.0.0.0/8"]}`,
+		"cidr":  `{"https://git.internal.example":["not-a-cidr"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "policy.json")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err := Load("server", []string{"--dev"}, env("HIKYO_ADAPTER_EGRESS_POLICY_FILE", path), nil)
+			if err == nil || !strings.Contains(err.Error(), "HIKYO_ADAPTER_EGRESS_POLICY_FILE") {
+				t.Fatalf("Load() = %v, want named refusal", err)
+			}
+		})
 	}
 }
 

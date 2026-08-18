@@ -376,6 +376,46 @@ func (q *Queries) InsertProjectSchemaRevision(ctx context.Context, arg InsertPro
 	return err
 }
 
+const listAdapterPinsForKey = `-- name: ListAdapterPinsForKey :many
+SELECT adapter_id, target_id FROM adapter_target_keys
+WHERE org_id = ? AND project_id = ? AND key_id = ?
+ORDER BY adapter_id, target_id
+`
+
+type ListAdapterPinsForKeyParams struct {
+	OrgID     string
+	ProjectID string
+	KeyID     string
+}
+
+type ListAdapterPinsForKeyRow struct {
+	AdapterID string
+	TargetID  string
+}
+
+func (q *Queries) ListAdapterPinsForKey(ctx context.Context, arg ListAdapterPinsForKeyParams) ([]ListAdapterPinsForKeyRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAdapterPinsForKey, arg.OrgID, arg.ProjectID, arg.KeyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAdapterPinsForKeyRow
+	for rows.Next() {
+		var i ListAdapterPinsForKeyRow
+		if err := rows.Scan(&i.AdapterID, &i.TargetID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKeyGroups = `-- name: ListKeyGroups :many
 SELECT id, org_id, project_id, name, created_at FROM key_groups
 WHERE org_id = ? AND project_id = ? ORDER BY name

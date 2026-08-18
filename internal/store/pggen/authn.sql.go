@@ -79,6 +79,77 @@ func (q *Queries) AdvanceTOTPStep(ctx context.Context, arg AdvanceTOTPStepParams
 	return result.RowsAffected(), nil
 }
 
+const approveCLIReauthHandoff = `-- name: ApproveCLIReauthHandoff :execrows
+UPDATE cli_reauth_handoffs SET code_verifier=$1,approved_windows=$2 WHERE id=$3 AND code_verifier IS NULL AND consumed_at IS NULL
+`
+
+type ApproveCLIReauthHandoffParams struct {
+	CodeVerifier    []byte
+	ApprovedWindows []byte
+	ID              string
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ApproveCLIReauthHandoff(ctx context.Context, arg ApproveCLIReauthHandoffParams) (int64, error) {
+	result, err := q.db.Exec(ctx, approveCLIReauthHandoff, arg.CodeVerifier, arg.ApprovedWindows, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const cLIReauthHandoffByCode = `-- name: CLIReauthHandoffByCode :one
+SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at FROM cli_reauth_handoffs WHERE code_verifier = $1
+`
+
+// hikyo:authn-resolution
+func (q *Queries) CLIReauthHandoffByCode(ctx context.Context, codeVerifier []byte) (CliReauthHandoff, error) {
+	row := q.db.QueryRow(ctx, cLIReauthHandoffByCode, codeVerifier)
+	var i CliReauthHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.StateVerifier,
+		&i.CodeVerifier,
+		&i.SessionID,
+		&i.PrincipalID,
+		&i.Operation,
+		&i.EnvironmentSet,
+		&i.PkceChallenge,
+		&i.RedirectUri,
+		&i.ApprovedWindows,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
+const cLIReauthHandoffByState = `-- name: CLIReauthHandoffByState :one
+SELECT id, state_verifier, code_verifier, session_id, principal_id, operation, environment_set, pkce_challenge, redirect_uri, approved_windows, created_at, expires_at, consumed_at FROM cli_reauth_handoffs WHERE state_verifier = $1
+`
+
+// hikyo:authn-resolution
+func (q *Queries) CLIReauthHandoffByState(ctx context.Context, stateVerifier []byte) (CliReauthHandoff, error) {
+	row := q.db.QueryRow(ctx, cLIReauthHandoffByState, stateVerifier)
+	var i CliReauthHandoff
+	err := row.Scan(
+		&i.ID,
+		&i.StateVerifier,
+		&i.CodeVerifier,
+		&i.SessionID,
+		&i.PrincipalID,
+		&i.Operation,
+		&i.EnvironmentSet,
+		&i.PkceChallenge,
+		&i.RedirectUri,
+		&i.ApprovedWindows,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const confirmTOTP = `-- name: ConfirmTOTP :execrows
 UPDATE totp_credentials
 SET confirmed_at = $1, last_step = $2, row_version = row_version + 1
@@ -104,6 +175,24 @@ func (q *Queries) ConfirmTOTP(ctx context.Context, arg ConfirmTOTPParams) (int64
 		arg.RowVersion,
 		arg.LastStep_2,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const consumeCLIReauthHandoff = `-- name: ConsumeCLIReauthHandoff :execrows
+UPDATE cli_reauth_handoffs SET consumed_at=$1 WHERE id=$2 AND code_verifier IS NOT NULL AND consumed_at IS NULL
+`
+
+type ConsumeCLIReauthHandoffParams struct {
+	ConsumedAt pgtype.Timestamptz
+	ID         string
+}
+
+// hikyo:authn-resolution
+func (q *Queries) ConsumeCLIReauthHandoff(ctx context.Context, arg ConsumeCLIReauthHandoffParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeCLIReauthHandoff, arg.ConsumedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -887,7 +976,8 @@ func (q *Queries) GetProviderForCallback(ctx context.Context, id string) (OidcPr
 const getReauthWindow = `-- name: GetReauthWindow :one
 SELECT id, session_id, environment_id, ceremony_id, factor_class, single_decision,
        authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-       consumed_at, created_at, bound_operation, bound_key_set
+       consumed_at, created_at, bound_operation, bound_key_set, bound_purpose,
+       bound_environment_set
 FROM reauth_windows WHERE session_id = $1 AND environment_id = $2
 `
 
@@ -921,6 +1011,8 @@ func (q *Queries) GetReauthWindow(ctx context.Context, arg GetReauthWindowParams
 		&i.CreatedAt,
 		&i.BoundOperation,
 		&i.BoundKeySet,
+		&i.BoundPurpose,
+		&i.BoundEnvironmentSet,
 	)
 	return i, err
 }
@@ -1090,6 +1182,41 @@ func (q *Queries) InsertAccount(ctx context.Context, arg InsertAccountParams) er
 		arg.Username,
 		arg.DisplayName,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertCLIReauthHandoff = `-- name: InsertCLIReauthHandoff :exec
+INSERT INTO cli_reauth_handoffs (id,state_verifier,session_id,principal_id,operation,environment_set,pkce_challenge,redirect_uri,created_at,expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+`
+
+type InsertCLIReauthHandoffParams struct {
+	ID             string
+	StateVerifier  []byte
+	SessionID      string
+	PrincipalID    string
+	Operation      string
+	EnvironmentSet string
+	PkceChallenge  string
+	RedirectUri    string
+	CreatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
+}
+
+// hikyo:authn-resolution
+func (q *Queries) InsertCLIReauthHandoff(ctx context.Context, arg InsertCLIReauthHandoffParams) error {
+	_, err := q.db.Exec(ctx, insertCLIReauthHandoff,
+		arg.ID,
+		arg.StateVerifier,
+		arg.SessionID,
+		arg.PrincipalID,
+		arg.Operation,
+		arg.EnvironmentSet,
+		arg.PkceChallenge,
+		arg.RedirectUri,
+		arg.CreatedAt,
+		arg.ExpiresAt,
 	)
 	return err
 }
@@ -1300,8 +1427,9 @@ const insertReauthWindow = `-- name: InsertReauthWindow :exec
 INSERT INTO reauth_windows
     (id, session_id, environment_id, ceremony_id, factor_class, single_decision,
      authenticated_at, window_expires_at, hard_expires_at, credential_epoch,
-     consumed_at, created_at, bound_operation, bound_key_set)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13)
+     consumed_at, created_at, bound_operation, bound_key_set, bound_purpose,
+     bound_environment_set)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, $13, $14, $15)
 ON CONFLICT (session_id, environment_id) DO UPDATE SET
     id = excluded.id,
     ceremony_id = excluded.ceremony_id,
@@ -1314,23 +1442,27 @@ ON CONFLICT (session_id, environment_id) DO UPDATE SET
     consumed_at = NULL,
     created_at = excluded.created_at,
     bound_operation = excluded.bound_operation,
-    bound_key_set = excluded.bound_key_set
+    bound_key_set = excluded.bound_key_set,
+    bound_purpose = excluded.bound_purpose,
+    bound_environment_set = excluded.bound_environment_set
 `
 
 type InsertReauthWindowParams struct {
-	ID              string
-	SessionID       string
-	EnvironmentID   string
-	CeremonyID      string
-	FactorClass     string
-	SingleDecision  int64
-	AuthenticatedAt pgtype.Timestamptz
-	WindowExpiresAt pgtype.Timestamptz
-	HardExpiresAt   pgtype.Timestamptz
-	CredentialEpoch int64
-	CreatedAt       pgtype.Timestamptz
-	BoundOperation  string
-	BoundKeySet     string
+	ID                  string
+	SessionID           string
+	EnvironmentID       string
+	CeremonyID          string
+	FactorClass         string
+	SingleDecision      int64
+	AuthenticatedAt     pgtype.Timestamptz
+	WindowExpiresAt     pgtype.Timestamptz
+	HardExpiresAt       pgtype.Timestamptz
+	CredentialEpoch     int64
+	CreatedAt           pgtype.Timestamptz
+	BoundOperation      string
+	BoundKeySet         string
+	BoundPurpose        string
+	BoundEnvironmentSet string
 }
 
 // A FRESH CEREMONY SUPERSEDES THE PAIR'S PREVIOUS WINDOW (#58).
@@ -1371,6 +1503,8 @@ func (q *Queries) InsertReauthWindow(ctx context.Context, arg InsertReauthWindow
 		arg.CreatedAt,
 		arg.BoundOperation,
 		arg.BoundKeySet,
+		arg.BoundPurpose,
+		arg.BoundEnvironmentSet,
 	)
 	return err
 }
@@ -1496,6 +1630,19 @@ func (q *Queries) InsertTOTP(ctx context.Context, arg InsertTOTPParams) error {
 		arg.CreatedStep,
 		arg.CreatedAt,
 	)
+	return err
+}
+
+const invalidateRestoredAdapterCredentials = `-- name: InvalidateRestoredAdapterCredentials :exec
+UPDATE adapters SET credential_ciphertext = NULL, credential_set_at = NULL
+`
+
+// Restored provider PATs are never trusted: unlike Hikyo authentication
+// artifacts they carry no local epoch the provider checks, so restore must
+// destroy custody and require operator re-entry.
+// hikyo:authn-resolution
+func (q *Queries) InvalidateRestoredAdapterCredentials(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, invalidateRestoredAdapterCredentials)
 	return err
 }
 

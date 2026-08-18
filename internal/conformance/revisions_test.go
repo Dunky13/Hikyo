@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hikyo-Org/hikyo/internal/adapter"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/schema"
@@ -51,9 +52,149 @@ func init() {
 		scenario{"secret_classification_survives_payload_collection", scenarioSecretClassificationSurvivesCollection},
 		scenario{"per_key_restore_refuses_reused_key_identity", scenarioRestoreReusedKeyIdentity},
 		scenario{"schema_failing_restore_blocks_loud", scenarioSchemaFailingRestore},
+		scenario{"adapter_crash_reservation_release_is_generation_fenced", scenarioAdapterCrashReservationRelease},
+		scenario{"publish_enqueues_adapter_sync_with_recorded_authority", scenarioPublishEnqueuesAdapterSync},
 		scenario{"pin_lifecycle_quota_and_expiry_refusals_by_name", scenarioPinLifecycle},
 		scenario{"delivery_retry_clears_rolled_back_pin_metadata", scenarioDeliveryRetryClearsPinMetadata},
 	)
+}
+
+func scenarioAdapterCrashReservationRelease(t *testing.T, db *store.DB) {
+	who, scope, _, envs, _ := valueFixture(t, db, "adapterreserve")
+	env := mustEnv(t, envs, service.LocalPrincipal(who), scope, "prod")
+	seed(t, db, []string{
+		fmt.Sprintf(`INSERT INTO adapters (id,org_id,project_id,provider,origin,authority_principal_id,state,created_at) VALUES ('adp_reservation_release','%s','%s','forgejo','https://git.example/adapterreserve','%s','active','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, who),
+		fmt.Sprintf(`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,active_job_id,created_at) VALUES ('tgt_reservation_release','%s','%s','%s','adp_reservation_release','repository','acme','app',4201,'',1,'active','converging','job_reservation_old','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, env.Env),
+		fmt.Sprintf(`INSERT INTO adapter_outbox (id,org_id,project_id,environment_id,target_id,kind,authority_principal_id,generation,dedup_key,attempt_count,next_attempt_at,state,lease_owner,lease_expires_at,created_at) VALUES ('job_reservation_old','%s','%s','%s','tgt_reservation_release','converge','%s',1,'tgt_reservation_release',1,'2026-08-17T00:00:00Z','running','worker_old','2099-08-17T00:00:00Z','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, env.Env, who),
+	})
+	runtime := store.NewAdapterRuntime(db, func(context.Context, adapter.Job, adapter.Effect) error { return nil })
+	oldJob := adapter.Job{ID: "job_reservation_old", OrgID: string(scope.Org), ProjectID: string(scope.Project), EnvironmentID: string(env.Env), TargetID: "tgt_reservation_release", Kind: adapter.Converge, AuthorityPrincipal: string(who), Generation: 1, LeaseOwner: "worker_old"}
+	effect := adapter.Effect{Surface: adapter.Secret, EffectiveName: "STALE", Disposition: adapter.Create}
+	oldJournal := runtime.Journal(oldJob)
+	if state, err := oldJournal.Reserve(t.Context(), effect); err != nil || state != adapter.Reserved {
+		t.Fatalf("Reserve() = %q, %v", state, err)
+	}
+	newJob, err := runtime.Enqueue(t.Context(), adapter.Job{OrgID: string(scope.Org), ProjectID: string(scope.Project), EnvironmentID: string(env.Env), TargetID: oldJob.TargetID, Kind: adapter.Converge, AuthorityPrincipal: string(who)}, time.Date(2026, 8, 17, 0, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oldJournal.ReleaseReservation(t.Context(), effect); !errors.Is(err, adapter.ErrSuperseded) {
+		t.Fatalf("old generation release = %v, want superseded", err)
+	}
+	newJob.LeaseOwner = "worker_new"
+	if db.Engine() == store.EnginePostgres {
+		if _, err := db.PG().Exec(t.Context(), `UPDATE adapter_outbox SET state='running',lease_owner=$1,lease_expires_at='2099-08-17T00:00:00Z' WHERE id=$2`, newJob.LeaseOwner, newJob.ID); err != nil {
+			t.Fatal(err)
+		}
+	} else if _, err := db.SQLiteWrite().ExecContext(t.Context(), `UPDATE adapter_outbox SET state='running',lease_owner=?,lease_expires_at='2099-08-17T00:00:00Z' WHERE id=?`, newJob.LeaseOwner, newJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Journal(newJob).ReleaseReservation(t.Context(), adapter.Effect{Surface: adapter.Secret, EffectiveName: "STALE", Disposition: adapter.Delete}); err != nil {
+		t.Fatal(err)
+	}
+	var ledger, conflicts, effects int
+	if db.Engine() == store.EnginePostgres {
+		if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*) FROM adapter_ledger WHERE target_id=$1`, oldJob.TargetID).Scan(&ledger); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*) FROM adapter_conflicts WHERE target_id=$1`, oldJob.TargetID).Scan(&conflicts); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*) FROM adapter_effects WHERE target_id=$1`, oldJob.TargetID).Scan(&effects); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM adapter_ledger WHERE target_id=?`, oldJob.TargetID).Scan(&ledger); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM adapter_conflicts WHERE target_id=?`, oldJob.TargetID).Scan(&conflicts); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM adapter_effects WHERE target_id=?`, oldJob.TargetID).Scan(&effects); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ledger != 0 || conflicts != 0 || effects != 0 {
+		t.Fatalf("ledger=%d conflicts=%d effects=%d, want local reservation release only", ledger, conflicts, effects)
+	}
+}
+
+func scenarioPublishEnqueuesAdapterSync(t *testing.T, db *store.DB) {
+	who, scope, values, envs, keys := valueFixture(t, db, "adapterpublish")
+	actor := service.LocalPrincipal(who)
+	dev := mustEnv(t, envs, actor, scope, "dev")
+	prod := mustEnv(t, envs, actor, scope, "prod")
+	key := mustKey(t, keys, actor, scope, "SYNCED", string(schema.Config), schema.DefaultPresenceRules())
+	seed(t, db, []string{
+		fmt.Sprintf(`INSERT INTO adapters (id,org_id,project_id,provider,origin,authority_principal_id,state,created_at) VALUES ('adp_publish_hook','%s','%s','forgejo','https://git.example/adapterpublish','%s','active','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, who),
+		fmt.Sprintf(`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_publish_dev','%s','%s','%s','adp_publish_hook','repository','acme','dev',4101,'DEV_',1,'active','never','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, dev.Env),
+		fmt.Sprintf(`INSERT INTO adapter_targets (id,org_id,project_id,environment_id,adapter_id,destination_kind,destination_owner,destination_name,destination_id,name_prefix,generation,state,sync_status,created_at) VALUES ('tgt_publish_prod','%s','%s','%s','adp_publish_hook','repository','acme','prod',4102,'PROD_',1,'active','never','2026-08-17T00:00:00Z')`, scope.Org, scope.Project, prod.Env),
+	})
+
+	staged, err := values.Set(t.Context(), actor, dev, "SYNCED", "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalNow := time.Date(2026, 8, 17, 12, 34, 56, 0, time.UTC)
+	revisions := &service.Revisions{DB: db, Keyring: sharedKeyring(t, db), Now: func() time.Time { return canonicalNow }}
+	if _, err := revisions.Publish(t.Context(), actor, dev, []string{staged.VersionID}); err != nil {
+		t.Fatal(err)
+	}
+	assertAdapterPublishState(t, db, "tgt_publish_dev", 2, 1, string(who), canonicalNow)
+	assertAdapterPublishState(t, db, "tgt_publish_prod", 1, 0, string(who), time.Time{})
+
+	if _, err := keys.Rename(t.Context(), actor, scope, key.ID, "SYNCED_RENAMED"); err != nil {
+		t.Fatal(err)
+	}
+	assertAdapterPublishState(t, db, "tgt_publish_dev", 3, 2, string(who), time.Time{})
+	assertAdapterPublishState(t, db, "tgt_publish_prod", 2, 1, string(who), time.Time{})
+}
+
+func assertAdapterPublishState(t *testing.T, db *store.DB, targetID string, wantGeneration int64, wantAudits int, wantAuthority string, wantCreatedAt time.Time) {
+	t.Helper()
+	var generation int64
+	var jobCount, auditCount int
+	var authority string
+	var created any
+	if db.Engine() == store.EnginePostgres {
+		if err := db.PG().QueryRow(t.Context(), `SELECT generation FROM adapter_targets WHERE id=$1`, targetID).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*),COALESCE(MAX(authority_principal_id),''),MAX(created_at) FROM adapter_outbox WHERE target_id=$1`, targetID).Scan(&jobCount, &authority, &created); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.PG().QueryRow(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE type='adapter.sync_requested' AND object_id=$1 AND authority_id=$2 AND (payload::jsonb)->>'trigger'='on-publish'`, targetID, wantAuthority).Scan(&auditCount); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT generation FROM adapter_targets WHERE id=?`, targetID).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*),COALESCE(MAX(authority_principal_id),''),MAX(created_at) FROM adapter_outbox WHERE target_id=?`, targetID).Scan(&jobCount, &authority, &created); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SQLiteRead().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_tenant_events WHERE type='adapter.sync_requested' AND object_id=? AND authority_id=? AND json_extract(payload,'$.trigger')='on-publish'`, targetID, wantAuthority).Scan(&auditCount); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if generation != wantGeneration || jobCount != wantAudits || auditCount != wantAudits || (wantAudits > 0 && authority != wantAuthority) {
+		t.Fatalf("target %s: generation=%d jobs=%d audits=%d authority=%q", targetID, generation, jobCount, auditCount, authority)
+	}
+	if wantCreatedAt.IsZero() || wantAudits == 0 {
+		return
+	}
+	var got time.Time
+	switch value := created.(type) {
+	case time.Time:
+		got = value.UTC()
+	case string:
+		got, _ = time.Parse(time.RFC3339Nano, value)
+	case []byte:
+		got, _ = time.Parse(time.RFC3339Nano, string(value))
+	}
+	if !got.Equal(wantCreatedAt) {
+		t.Fatalf("target %s created_at=%T(%v) parsed=%v, want transaction clock %v", targetID, created, created, got, wantCreatedAt)
+	}
 }
 
 func scenarioPendingDraftPreview(t *testing.T, db *store.DB) {

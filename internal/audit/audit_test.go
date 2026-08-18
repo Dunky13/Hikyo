@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,14 +88,125 @@ func TestRegistryWellFormed(t *testing.T) {
 		}
 		// Outcome licensing (invariant 12): intent / unknown / disconnected
 		// only where the envelope section licenses them.
-		if spec.Outcomes[OutcomeIntent] && typ != EventAuditExportStarted {
+		if spec.Outcomes[OutcomeIntent] && typ != EventAuditExportStarted && typ != EventAdapterPushIntent {
 			t.Errorf("%s: intent outcome licensed outside the INTENT-phase set", typ)
 		}
-		if spec.Outcomes[OutcomeUnknown] {
-			t.Errorf("%s: unknown outcome licensed — reserved for external-effect terminal outcomes (adapter OUTCOME, #28)", typ)
+		if spec.Outcomes[OutcomeUnknown] && typ != EventAdapterPushOutcome {
+			t.Errorf("%s: unknown outcome licensed outside adapter.push_outcome", typ)
 		}
 		if spec.Outcomes[OutcomeDisconnected] && typ != EventAuditExportCompleted {
 			t.Errorf("%s: disconnected outcome licensed outside audit.export_completed", typ)
+		}
+	}
+}
+
+func TestAdapterCatalogueIsClosedAndLicensesExternalEffectPhases(t *testing.T) {
+	want := map[EventType]bool{
+		EventAdapterConfigure: true, EventAdapterCredentialReplace: true, EventAdapterCredentialRevoke: true,
+		EventAdapterAdopt: true, EventAdapterInspect: true, EventAdapterPlan: true, EventAdapterTest: true,
+		EventAdapterSyncRequested: true, EventAdapterPushIntent: true, EventAdapterPushOutcome: true,
+		EventAdapterKeyDelivered: true, EventAdapterAbort: true, EventAdapterScrub: true, EventAdapterSuperseded: true,
+	}
+	for _, typ := range Types() {
+		if typ.Category() == "adapter" {
+			if !want[typ] {
+				t.Errorf("unexpected adapter event %q", typ)
+			}
+			delete(want, typ)
+		}
+	}
+	for missing := range want {
+		t.Errorf("missing adapter event %q", missing)
+	}
+	intent, _ := Spec(EventAdapterPushIntent)
+	outcome, _ := Spec(EventAdapterPushOutcome)
+	if len(intent.Outcomes) != 1 || !intent.Outcomes[OutcomeIntent] {
+		t.Errorf("push intent outcomes = %v", intent.Outcomes)
+	}
+	if !outcome.Outcomes[OutcomeUnknown] || outcome.Outcomes[OutcomeIntent] {
+		t.Errorf("push outcome outcomes = %v", outcome.Outcomes)
+	}
+	exact := map[EventType][]Outcome{
+		EventAdapterConfigure:         {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterCredentialReplace: {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterCredentialRevoke:  {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterAdopt:             {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterInspect:           {OutcomeSuccess, OutcomeDenied},
+		EventAdapterPlan:              {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterTest:              {OutcomeSuccess, OutcomeDenied, OutcomeFailure},
+		EventAdapterSyncRequested:     {OutcomeSuccess, OutcomeDenied},
+		EventAdapterPushIntent:        {OutcomeIntent},
+		EventAdapterPushOutcome:       {OutcomeSuccess, OutcomeFailure, OutcomeUnknown},
+		EventAdapterKeyDelivered:      {OutcomeSuccess},
+		EventAdapterAbort:             {OutcomeFailure},
+		EventAdapterScrub:             {OutcomeSuccess, OutcomeFailure},
+		EventAdapterSuperseded:        {OutcomeSuccess},
+	}
+	for typ, allowed := range exact {
+		spec, _ := Spec(typ)
+		if len(spec.Outcomes) != len(allowed) {
+			t.Errorf("%s outcomes = %v, want exactly %v", typ, spec.Outcomes, allowed)
+			continue
+		}
+		for _, value := range allowed {
+			if !spec.Outcomes[value] {
+				t.Errorf("%s outcomes = %v, missing %s", typ, spec.Outcomes, value)
+			}
+		}
+	}
+}
+
+func TestAdapterAuthorityAuditSchemasAreClosed(t *testing.T) {
+	credential, _ := Spec(EventAdapterCredentialReplace)
+	wantCredential := map[string]bool{"credential_present": true, "previous_authority": true, "authority": true}
+	if len(credential.Schema) != len(wantCredential) {
+		t.Fatalf("credential_replace fields=%v, want exactly %v", credential.Schema, wantCredential)
+	}
+	for field := range wantCredential {
+		got, ok := credential.Schema[field]
+		if !ok || !got.Required {
+			t.Errorf("credential_replace field %q=%+v, want required", field, got)
+		}
+	}
+	configure, _ := Spec(EventAdapterConfigure)
+	if got := configure.Schema["previous_authority"]; got.Required {
+		t.Fatalf("configure previous_authority=%+v, narrowing must be able to omit it", got)
+	}
+	if got := configure.Schema["authority"]; !got.Required {
+		t.Fatalf("configure authority=%+v, want required", got)
+	}
+}
+
+func TestCLIReauthHandoffAuditSchemaIsClosed(t *testing.T) {
+	spec, ok := Spec(EventAuthCLIReauthHandoff)
+	if !ok {
+		t.Fatal("auth.cli_reauth_handoff is not registered")
+	}
+	if len(spec.Outcomes) != 2 || !spec.Outcomes[OutcomeSuccess] || !spec.Outcomes[OutcomeFailure] {
+		t.Fatalf("outcomes=%v, want exactly success|failure", spec.Outcomes)
+	}
+	want := map[string]bool{
+		"phase": true, "handoff_id": false, "operation": false,
+		"environment_ids": false, "cause": false,
+	}
+	if len(spec.Schema) != len(want) {
+		t.Fatalf("fields=%v, want exactly %v", spec.Schema, want)
+	}
+	for field, required := range want {
+		got, ok := spec.Schema[field]
+		if !ok || got.Required != required {
+			t.Errorf("field %q=%+v, required=%t", field, got, required)
+		}
+	}
+	if got := spec.Schema["phase"].Enum; !slices.Equal(got, []string{"start", "inspect", "approve", "redeem"}) {
+		t.Errorf("phase enum=%v", got)
+	}
+	if got := spec.Schema["cause"].Enum; !slices.Equal(got, []string{"invalid_request", "unauthenticated", "unauthorized", "invalid_or_expired", "reauth_required", "pkce_mismatch", "already_consumed"}) {
+		t.Errorf("cause enum=%v", got)
+	}
+	for _, forbidden := range []string{"state", "code", "verifier", "bearer", "credential"} {
+		if _, ok := spec.Schema[forbidden]; ok {
+			t.Errorf("forbidden handoff payload field %q is registered", forbidden)
 		}
 	}
 }

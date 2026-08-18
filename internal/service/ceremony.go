@@ -285,13 +285,17 @@ const (
 	// the same reason the others are — a ceremony given to "mint a token for
 	// production" must not be spendable on reading production.
 	PurposeMint ReauthPurpose = "mint"
+	// PurposeAdapter is the signed adapter-routing decision. It cannot reuse
+	// PurposeMint: consent to mint a machine credential is not consent to
+	// adopt and overwrite a provider-side name.
+	PurposeAdapter ReauthPurpose = "adapter"
 )
 
 // Valid reports membership of the closed set. An unknown purpose is refused
 // rather than defaulted: a binding nobody can name is a binding nobody checks.
 func (p ReauthPurpose) Valid() bool {
 	switch p {
-	case PurposeReveal, PurposeCopy, PurposePublish, PurposeMint:
+	case PurposeReveal, PurposeCopy, PurposePublish, PurposeMint, PurposeAdapter:
 		return true
 	}
 	return false
@@ -310,6 +314,8 @@ func operationForReauthPurpose(p ReauthPurpose) authz.Operation {
 		return authz.OpValueCopyDestination
 	case PurposeMint:
 		return authz.OpCredentialMint
+	case PurposeAdapter:
+		return authz.OpAdapterAdopt
 	}
 	panic("service: unhandled reauthentication purpose")
 }

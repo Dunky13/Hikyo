@@ -14,6 +14,206 @@ export type Id = string;
  */
 export type Timestamp = string;
 
+export type AdapterDestinationKind = 'repository' | 'organization';
+
+export type AdapterTargetInput = {
+    environment_id: Id;
+    destination_kind: AdapterDestinationKind;
+    destination_owner: string;
+    /**
+     * Repository name; empty for organization destinations.
+     */
+    destination_name: string;
+    name_prefix: string;
+    key_ids: Array<Id>;
+};
+
+export type CreateAdapterRequest = {
+    origin: string;
+    /**
+     * Write-only Forgejo PAT. Never returned.
+     */
+    credential: string;
+    target: AdapterTargetInput;
+};
+
+export type UpdateAdapterOriginRequest = {
+    origin: string;
+    /**
+     * Write-only credential for the pending origin.
+     */
+    credential: string;
+    keep_remote?: boolean;
+};
+
+export type SetAdapterCredentialRequest = {
+    credential: string;
+};
+
+export type UpdateAdapterTargetRequest = {
+    environment_id: Id;
+    destination_kind: AdapterDestinationKind;
+    destination_owner: string;
+    destination_name: string;
+    name_prefix: string;
+    key_ids: Array<Id>;
+    expected_generation: number;
+    keep_remote?: boolean;
+};
+
+export type ResumeAdapterMoveRequest = ResumeAdapterOriginMoveRequest | ResumeAdapterTargetMoveRequest;
+
+export type ResumeAdapterOriginMoveRequest = {
+    origin: string;
+    /**
+     * Write-only replacement for the pending origin credential.
+     */
+    credential: string;
+};
+
+export type ResumeAdapterTargetMoveRequest = {
+    target_id: Id;
+    environment_id: Id;
+    destination_kind: AdapterDestinationKind;
+    destination_owner: string;
+    destination_name: string;
+    name_prefix: string;
+    key_ids: Array<Id>;
+};
+
+export type AdapterTarget = {
+    id: Id;
+    adapter_id: Id;
+    environment_id: Id;
+    destination_kind: AdapterDestinationKind;
+    destination_owner: string;
+    destination_name: string;
+    destination_id: number;
+    name_prefix: string;
+    generation: number;
+    state: 'active' | 'moving' | 'tombstoned';
+    sync_status: 'never' | 'converging' | 'converged' | 'failed';
+    converged_revision?: number | null;
+    failure_names: Array<string>;
+    /**
+     * Pending exact conflict artifacts eligible for adoption on this target.
+     */
+    conflicts: Array<AdapterConflictArtifact>;
+};
+
+export type AdapterTargetList = {
+    items: Array<AdapterTarget>;
+};
+
+export type Adapter = {
+    id: Id;
+    provider: 'forgejo';
+    origin: string;
+    credential_present: boolean;
+    credential_set_at?: string | null;
+    authority_principal_id: Id;
+    state: 'active' | 'moving' | 'tombstoned';
+    created_at: Timestamp;
+    targets: Array<AdapterTarget>;
+};
+
+export type AdapterList = {
+    items: Array<Adapter>;
+};
+
+export type AdapterConflictEntry = {
+    surface: 'secret' | 'variable';
+    effective_name: string;
+};
+
+export type AdapterConflictArtifact = {
+    id: Id;
+    destination_id: number;
+    target_generation: number;
+    entries: Array<AdapterConflictEntry>;
+    created_at: Timestamp;
+};
+
+export type AdapterMappingEntry = {
+    key_id: Id;
+    canonical_name: string;
+    surface: 'secret' | 'variable';
+    effective_name: string;
+};
+
+export type AdapterTargetDetail = {
+    target: AdapterTarget;
+    conflicts: Array<AdapterConflictArtifact>;
+    mapping: Array<AdapterMappingEntry>;
+};
+
+export type AdapterChange = {
+    surface: 'secret' | 'variable';
+    effective_name: string;
+    disposition: 'create' | 'update' | 'delete' | 'conflict' | 'refused';
+    reason?: string;
+};
+
+export type AdapterPlan = {
+    artifact_id: Id;
+    changes: Array<AdapterChange>;
+};
+
+export type AdapterAdoptionRequest = {
+    artifact_id: Id;
+    target_generation: number;
+    destination_id: number;
+    entries: Array<AdapterConflictEntry>;
+};
+
+export type AdapterJob = {
+    job_id: Id;
+    generation: number;
+};
+
+export type AdapterConnection = {
+    version: string;
+    destination_id: number;
+};
+
+export type AdapterTeardown = {
+    orphaned: Array<string>;
+    jobs: Array<AdapterJob>;
+};
+
+export type AdapterMoveJob = {
+    id: Id;
+    target_id: Id;
+    kind: 'scrub' | 'activate' | 'converge';
+    state: 'queued' | 'running' | 'retry' | 'succeeded' | 'failed' | 'superseded';
+};
+
+export type AdapterMoveTarget = {
+    target_id: Id;
+    environment_id: Id;
+    destination_kind: AdapterDestinationKind;
+    destination_owner: string;
+    destination_name: string;
+    destination_id: number;
+    name_prefix: string;
+    orphaned_names: Array<string>;
+    jobs: Array<AdapterMoveJob>;
+};
+
+/**
+ * Durable route transition status. Credentials are never represented.
+ */
+export type AdapterMove = {
+    id: Id;
+    adapter_id: Id;
+    kind: 'target' | 'origin';
+    state: 'scrubbing' | 'activating' | 'attention_required' | 'completed' | 'canceled';
+    keep_remote: boolean;
+    pending_origin: string;
+    targets: Array<AdapterMoveTarget>;
+    created_at: Timestamp;
+};
+
 export type Error = {
     error: {
         code: ErrorCode;
@@ -158,11 +358,77 @@ export type TotpCodeRequest = {
  *
  */
 export type TotpReauthRequest = {
-    environment_id: Id;
+    environment_id?: Id;
+    purpose?: ReauthPurpose;
+    operation?: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    environment_ids?: Array<Id>;
     /**
      * A TOTP code from the enrolled authenticator.
      */
     code: string;
+};
+
+export type CliReauthStartRequest = {
+    purpose: 'adapter';
+    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    environment_ids: Array<Id>;
+    pkce_challenge: string;
+    /**
+     * Exact ephemeral loopback callback, http://127.0.0.1:PORT/callback or the bracketed ::1 equivalent.
+     */
+    redirect_uri: string;
+};
+
+export type CliReauthStart = {
+    state: string;
+    expires_at: Timestamp;
+};
+
+export type CliReauthApproveRequest = {
+    state: string;
+};
+
+export type CliReauthApproved = {
+    /**
+     * Single-use front-channel authorization code; never a session bearer.
+     */
+    code: string;
+    /**
+     * Exact opaque state supplied by the initiating CLI.
+     */
+    state: string;
+    /**
+     * Exact server-bound loopback callback URI.
+     */
+    redirect_uri: string;
+};
+
+export type CliReauthEnvironmentPolicy = {
+    environment_id: Id;
+    effective_window_seconds: number;
+    requires_webauthn: boolean;
+};
+
+export type CliReauthTransaction = {
+    state: string;
+    operation: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    environments: Array<CliReauthEnvironmentPolicy>;
+    redirect_uri: string;
+    expires_at: Timestamp;
+};
+
+export type CliReauthRedeemRequest = {
+    code: string;
+    pkce_verifier: string;
+};
+
+export type CliReauthRedeemed = {
+    session_id: Id;
+    /**
+     * Rotated CLI bearer. Client stores it silently and never prints or logs it.
+     */
+    session_token: string;
+    windows: Array<ReauthResult>;
 };
 
 export type TotpProofRequest = {
@@ -2135,6 +2401,8 @@ export type WebauthnReauthStartRequest = {
      * The credential ids the reauthentication is bound to.
      */
     key_ids: Array<string>;
+    adapter_operation?: 'adapter.configure' | 'adapter.credential-set' | 'adapter.adopt' | 'adapter.sync';
+    environment_ids?: Array<Id>;
 };
 
 /**
@@ -2144,7 +2412,7 @@ export type WebauthnReauthStartRequest = {
  * unit, a different decision, and the human agreed to only one of them.
  *
  */
-export type ReauthPurpose = 'reveal' | 'copy' | 'publish' | 'mint';
+export type ReauthPurpose = 'reveal' | 'copy' | 'publish' | 'mint' | 'adapter';
 
 /**
  * The account-security proof for removing a credential — the pre-existing
@@ -2158,8 +2426,13 @@ export type WebauthnCredentialProofRequest = {
 };
 
 export type ReauthResult = {
+    /**
+     * Rotated bearer returned only to Authorization-header callers; cookie-authenticated browser callers receive the rotated HttpOnly cookie and this field is omitted.
+     */
+    session_token?: string;
     session_id: Id;
     environment_id: string;
+    environment_ids?: Array<Id>;
     /**
      * True where the effective window is zero — the window authorizes exactly one decision.
      */
@@ -2837,6 +3110,10 @@ export type ProjectId = Id;
  */
 export type EnvironmentId = Id;
 
+export type AdapterId = Id;
+
+export type AdapterTargetId = Id;
+
 /**
  * Folder identifier.
  */
@@ -3428,6 +3705,208 @@ export type ReauthTotpResponses = {
 };
 
 export type ReauthTotpResponse = ReauthTotpResponses[keyof ReauthTotpResponses];
+
+export type StartCliReauthData = {
+    body: CliReauthStartRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/cli-reauth/start';
+};
+
+export type StartCliReauthErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The instance-wide admission budget or a per-source limit is
+     * exhausted. Uniform on every path, with no unbounded work performed.
+     *
+     */
+    429: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type StartCliReauthError = StartCliReauthErrors[keyof StartCliReauthErrors];
+
+export type StartCliReauthResponses = {
+    /**
+     * Opaque state for the browser handoff.
+     */
+    201: CliReauthStart;
+};
+
+export type StartCliReauthResponse = StartCliReauthResponses[keyof StartCliReauthResponses];
+
+export type ShowCliReauthTransactionData = {
+    body?: never;
+    path: {
+        state: string;
+    };
+    query?: never;
+    url: '/api/v1/auth/cli-reauth/transactions/{state}';
+};
+
+export type ShowCliReauthTransactionErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowCliReauthTransactionError = ShowCliReauthTransactionErrors[keyof ShowCliReauthTransactionErrors];
+
+export type ShowCliReauthTransactionResponses = {
+    /**
+     * Live transaction metadata without ids, bearers, or verifiers.
+     */
+    200: CliReauthTransaction;
+};
+
+export type ShowCliReauthTransactionResponse = ShowCliReauthTransactionResponses[keyof ShowCliReauthTransactionResponses];
+
+export type ApproveCliReauthData = {
+    body: CliReauthApproveRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/cli-reauth/approve';
+};
+
+export type ApproveCliReauthErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ApproveCliReauthError = ApproveCliReauthErrors[keyof ApproveCliReauthErrors];
+
+export type ApproveCliReauthResponses = {
+    /**
+     * Single-use authorization code.
+     */
+    200: CliReauthApproved;
+};
+
+export type ApproveCliReauthResponse = ApproveCliReauthResponses[keyof ApproveCliReauthResponses];
+
+export type RedeemCliReauthData = {
+    body: CliReauthRedeemRequest;
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/cli-reauth/redeem';
+};
+
+export type RedeemCliReauthErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RedeemCliReauthError = RedeemCliReauthErrors[keyof RedeemCliReauthErrors];
+
+export type RedeemCliReauthResponses = {
+    /**
+     * Rotated bearer disclosed once to the initiating shell.
+     */
+    200: CliReauthRedeemed;
+};
+
+export type RedeemCliReauthResponse = RedeemCliReauthResponses[keyof RedeemCliReauthResponses];
 
 export type RemoveTotpData = {
     body: TotpProofRequest;
@@ -15617,3 +16096,1233 @@ export type RotateTokenKeyResponses = {
 };
 
 export type RotateTokenKeyResponse = RotateTokenKeyResponses[keyof RotateTokenKeyResponses];
+
+export type ListAdaptersData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters';
+};
+
+export type ListAdaptersErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListAdaptersError = ListAdaptersErrors[keyof ListAdaptersErrors];
+
+export type ListAdaptersResponses = {
+    /**
+     * Adapter list.
+     */
+    200: AdapterList;
+};
+
+export type ListAdaptersResponse = ListAdaptersResponses[keyof ListAdaptersResponses];
+
+export type CreateAdapterData = {
+    body: CreateAdapterRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters';
+};
+
+export type CreateAdapterErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CreateAdapterError = CreateAdapterErrors[keyof CreateAdapterErrors];
+
+export type CreateAdapterResponses = {
+    /**
+     * Fully valid adapter.
+     */
+    201: Adapter;
+};
+
+export type CreateAdapterResponse = CreateAdapterResponses[keyof CreateAdapterResponses];
+
+export type DeleteAdapterData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: {
+        keep_remote?: boolean;
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}';
+};
+
+export type DeleteAdapterErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type DeleteAdapterError = DeleteAdapterErrors[keyof DeleteAdapterErrors];
+
+export type DeleteAdapterResponses = {
+    /**
+     * Teardown result.
+     */
+    200: AdapterTeardown;
+};
+
+export type DeleteAdapterResponse = DeleteAdapterResponses[keyof DeleteAdapterResponses];
+
+export type ShowAdapterData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}';
+};
+
+export type ShowAdapterErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowAdapterError = ShowAdapterErrors[keyof ShowAdapterErrors];
+
+export type ShowAdapterResponses = {
+    /**
+     * Adapter.
+     */
+    200: Adapter;
+};
+
+export type ShowAdapterResponse = ShowAdapterResponses[keyof ShowAdapterResponses];
+
+export type UpdateAdapterOriginData = {
+    body: UpdateAdapterOriginRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}';
+};
+
+export type UpdateAdapterOriginErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateAdapterOriginError = UpdateAdapterOriginErrors[keyof UpdateAdapterOriginErrors];
+
+export type UpdateAdapterOriginResponses = {
+    /**
+     * Durable scrub-before-switch move.
+     */
+    202: AdapterMove;
+};
+
+export type UpdateAdapterOriginResponse = UpdateAdapterOriginResponses[keyof UpdateAdapterOriginResponses];
+
+export type CancelAdapterMoveData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        move: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}';
+};
+
+export type CancelAdapterMoveErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type CancelAdapterMoveError = CancelAdapterMoveErrors[keyof CancelAdapterMoveErrors];
+
+export type CancelAdapterMoveResponses = {
+    /**
+     * Move canceled and old-route converge queued.
+     */
+    202: AdapterMove;
+};
+
+export type CancelAdapterMoveResponse = CancelAdapterMoveResponses[keyof CancelAdapterMoveResponses];
+
+export type ShowAdapterMoveData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        move: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}';
+};
+
+export type ShowAdapterMoveErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowAdapterMoveError = ShowAdapterMoveErrors[keyof ShowAdapterMoveErrors];
+
+export type ShowAdapterMoveResponses = {
+    /**
+     * Move state.
+     */
+    200: AdapterMove;
+};
+
+export type ShowAdapterMoveResponse = ShowAdapterMoveResponses[keyof ShowAdapterMoveResponses];
+
+export type ResumeAdapterMoveData = {
+    body: ResumeAdapterMoveRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        move: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-moves/{move}';
+};
+
+export type ResumeAdapterMoveErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ResumeAdapterMoveError = ResumeAdapterMoveErrors[keyof ResumeAdapterMoveErrors];
+
+export type ResumeAdapterMoveResponses = {
+    /**
+     * Updated move resumed.
+     */
+    202: AdapterMove;
+};
+
+export type ResumeAdapterMoveResponse = ResumeAdapterMoveResponses[keyof ResumeAdapterMoveResponses];
+
+export type RevokeAdapterCredentialData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential';
+};
+
+export type RevokeAdapterCredentialErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RevokeAdapterCredentialError = RevokeAdapterCredentialErrors[keyof RevokeAdapterCredentialErrors];
+
+export type RevokeAdapterCredentialResponses = {
+    /**
+     * Credential revoked. No job was enqueued.
+     */
+    204: void;
+};
+
+export type RevokeAdapterCredentialResponse = RevokeAdapterCredentialResponses[keyof RevokeAdapterCredentialResponses];
+
+export type SetAdapterCredentialData = {
+    body: SetAdapterCredentialRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/credential';
+};
+
+export type SetAdapterCredentialErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SetAdapterCredentialError = SetAdapterCredentialErrors[keyof SetAdapterCredentialErrors];
+
+export type SetAdapterCredentialResponses = {
+    /**
+     * Credential replaced. No job was enqueued.
+     */
+    204: void;
+};
+
+export type SetAdapterCredentialResponse = SetAdapterCredentialResponses[keyof SetAdapterCredentialResponses];
+
+export type ListAdapterTargetsData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets';
+};
+
+export type ListAdapterTargetsErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ListAdapterTargetsError = ListAdapterTargetsErrors[keyof ListAdapterTargetsErrors];
+
+export type ListAdapterTargetsResponses = {
+    /**
+     * Targets.
+     */
+    200: AdapterTargetList;
+};
+
+export type ListAdapterTargetsResponse = ListAdapterTargetsResponses[keyof ListAdapterTargetsResponses];
+
+export type AddAdapterTargetData = {
+    body: AdapterTargetInput;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        adapter: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapters/{adapter}/targets';
+};
+
+export type AddAdapterTargetErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type AddAdapterTargetError = AddAdapterTargetErrors[keyof AddAdapterTargetErrors];
+
+export type AddAdapterTargetResponses = {
+    /**
+     * Target.
+     */
+    201: AdapterTarget;
+};
+
+export type AddAdapterTargetResponse = AddAdapterTargetResponses[keyof AddAdapterTargetResponses];
+
+export type RemoveAdapterTargetData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: {
+        keep_remote?: boolean;
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}';
+};
+
+export type RemoveAdapterTargetErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type RemoveAdapterTargetError = RemoveAdapterTargetErrors[keyof RemoveAdapterTargetErrors];
+
+export type RemoveAdapterTargetResponses = {
+    /**
+     * Teardown result.
+     */
+    200: AdapterTeardown;
+};
+
+export type RemoveAdapterTargetResponse = RemoveAdapterTargetResponses[keyof RemoveAdapterTargetResponses];
+
+export type ShowAdapterTargetData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: {
+        format?: 'detail' | 'workflow';
+    };
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}';
+};
+
+export type ShowAdapterTargetErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type ShowAdapterTargetError = ShowAdapterTargetErrors[keyof ShowAdapterTargetErrors];
+
+export type ShowAdapterTargetResponses = {
+    /**
+     * Target detail or names-only workflow YAML.
+     */
+    200: AdapterTargetDetail;
+};
+
+export type ShowAdapterTargetResponse = ShowAdapterTargetResponses[keyof ShowAdapterTargetResponses];
+
+export type UpdateAdapterTargetData = {
+    body: UpdateAdapterTargetRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}';
+};
+
+export type UpdateAdapterTargetErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type UpdateAdapterTargetError = UpdateAdapterTargetErrors[keyof UpdateAdapterTargetErrors];
+
+export type UpdateAdapterTargetResponses = {
+    /**
+     * In-place key subset or prefix update with replacement converge queued.
+     */
+    200: AdapterTarget;
+    /**
+     * Durable scrub-before-switch move.
+     */
+    202: AdapterMove;
+};
+
+export type UpdateAdapterTargetResponse = UpdateAdapterTargetResponses[keyof UpdateAdapterTargetResponses];
+
+export type PlanAdapterTargetData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/plan';
+};
+
+export type PlanAdapterTargetErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type PlanAdapterTargetError = PlanAdapterTargetErrors[keyof PlanAdapterTargetErrors];
+
+export type PlanAdapterTargetResponses = {
+    /**
+     * Plan.
+     */
+    200: AdapterPlan;
+};
+
+export type PlanAdapterTargetResponse = PlanAdapterTargetResponses[keyof PlanAdapterTargetResponses];
+
+export type SyncAdapterTargetData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/sync';
+};
+
+export type SyncAdapterTargetErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type SyncAdapterTargetError = SyncAdapterTargetErrors[keyof SyncAdapterTargetErrors];
+
+export type SyncAdapterTargetResponses = {
+    /**
+     * Queued job.
+     */
+    202: AdapterJob;
+};
+
+export type SyncAdapterTargetResponse = SyncAdapterTargetResponses[keyof SyncAdapterTargetResponses];
+
+export type TestAdapterTargetData = {
+    body?: never;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/test';
+};
+
+export type TestAdapterTargetErrors = {
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type TestAdapterTargetError = TestAdapterTargetErrors[keyof TestAdapterTargetErrors];
+
+export type TestAdapterTargetResponses = {
+    /**
+     * Connection result.
+     */
+    200: AdapterConnection;
+};
+
+export type TestAdapterTargetResponse = TestAdapterTargetResponses[keyof TestAdapterTargetResponses];
+
+export type AdoptAdapterTargetNamesData = {
+    body: AdapterAdoptionRequest;
+    path: {
+        /**
+         * Organisation identifier.
+         */
+        org: Id;
+        /**
+         * Project identifier.
+         */
+        project: Id;
+        target: Id;
+    };
+    query?: never;
+    url: '/api/v1/orgs/{org}/projects/{project}/adapter-targets/{target}/adoptions';
+};
+
+export type AdoptAdapterTargetNamesErrors = {
+    /**
+     * The request does not satisfy this document. Decided before any tenant
+     * resolution, so `detail` leaks nothing about tenancy — it is the only
+     * error response permitted to carry one.
+     *
+     */
+    400: Error;
+    /**
+     * No usable authentication artifact was presented. Uniform: absent,
+     * malformed, unknown, expired, revoked and epoch-superseded artifacts
+     * are indistinguishable.
+     *
+     */
+    401: Error;
+    /**
+     * Either the principal does not hold the operation's formula at instance
+     * scope — instance-class operations have no tenant object whose
+     * nonexistence could be mimicked, so the probe contract there is grant
+     * refusal, not tenancy — or the principal DOES hold it and the acting
+     * session's assurance is inadequate for an MFA-mandatory operation.
+     *
+     * The second case is why two tenant-scoped operations (`renameOrg`,
+     * `deleteOrg`) declare this status: their formula atom `instance-config`
+     * is MFA-mandatory, and the refusal fires only AFTER the grant check
+     * succeeded. A caller who reaches it can already reach the object, so
+     * naming the step-up discloses nothing the uniform 404 was protecting —
+     * and hiding it would tell a capability holder the object is missing.
+     * Grant refusal on a tenant-scoped operation is always the 404.
+     *
+     */
+    403: Error;
+    /**
+     * The addressed object does not exist **or** the principal may not reach
+     * it — indistinguishable by design, byte-identical in status and body.
+     *
+     */
+    404: Error;
+    /**
+     * The caller is authorized, but the current state refuses: a name already
+     * in use among live siblings, a parent that still has children (deletes
+     * never cascade), or a structural bound reached (`limit_exceeded`, whose
+     * message names the bound). Decided after authorization, so it discloses
+     * nothing a caller could not already read.
+     *
+     */
+    409: Error;
+    /**
+     * An unexpected server fault. The cause is logged, never returned.
+     */
+    500: Error;
+};
+
+export type AdoptAdapterTargetNamesError = AdoptAdapterTargetNamesErrors[keyof AdoptAdapterTargetNamesErrors];
+
+export type AdoptAdapterTargetNamesResponses = {
+    /**
+     * Adoption committed and converge queued.
+     */
+    202: AdapterJob;
+};
+
+export type AdoptAdapterTargetNamesResponse = AdoptAdapterTargetNamesResponses[keyof AdoptAdapterTargetNamesResponses];

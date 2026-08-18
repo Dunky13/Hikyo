@@ -17,6 +17,173 @@ type Account struct {
 	WebauthnUserHandle []byte
 }
 
+type Adapter struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	Provider             string
+	Origin               string
+	CredentialCiphertext []byte
+	CredentialSetAt      sql.NullString
+	AuthorityPrincipalID string
+	State                string
+	CreatedAt            string
+}
+
+type AdapterConflict struct {
+	ID               string
+	ArtifactID       string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	JobID            sql.NullString
+	DestinationID    int64
+	TargetGeneration int64
+	Surface          string
+	EffectiveName    string
+	CreatedAt        string
+	AdoptedAt        sql.NullString
+}
+
+type AdapterEffect struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	TargetID       string
+	JobID          string
+	Surface        string
+	EffectiveName  string
+	Disposition    string
+	IntentAuditID  string
+	OutcomeAuditID sql.NullString
+	Outcome        sql.NullString
+	CreatedAt      string
+	FinishedAt     sql.NullString
+}
+
+type AdapterLedger struct {
+	ID             string
+	OrgID          string
+	ProjectID      string
+	EnvironmentID  string
+	TargetID       string
+	ProviderOrigin string
+	DestinationID  int64
+	Surface        string
+	EffectiveName  string
+	NormalizedName string
+	State          string
+	UpdatedAt      string
+}
+
+type AdapterOutbox struct {
+	ID                   string
+	OrgID                string
+	ProjectID            string
+	EnvironmentID        string
+	TargetID             string
+	Kind                 string
+	RouteMoveID          sql.NullString
+	AuthorityPrincipalID string
+	Generation           int64
+	DedupKey             string
+	AttemptCount         int64
+	NextAttemptAt        string
+	LeaseOwner           sql.NullString
+	LeaseExpiresAt       sql.NullString
+	State                string
+	CreatedAt            string
+	FinishedAt           sql.NullString
+}
+
+type AdapterRouteMove struct {
+	ID                          string
+	OrgID                       string
+	ProjectID                   string
+	AdapterID                   string
+	TargetID                    sql.NullString
+	Kind                        string
+	PendingOrigin               sql.NullString
+	PendingCredentialCiphertext []byte
+	AuthorityPrincipalID        string
+	State                       string
+	KeepRemote                  int64
+	CreatedAt                   string
+}
+
+type AdapterRouteMoveClaim struct {
+	MoveID           string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	KeyID            sql.NullString
+	ProviderOrigin   string
+	DestinationKind  string
+	DestinationOwner string
+	DestinationName  string
+	Surface          string
+	EffectiveName    string
+	NormalizedName   string
+}
+
+type AdapterRouteMoveKey struct {
+	MoveID        string
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	TargetID      string
+	KeyID         string
+}
+
+type AdapterRouteMoveTarget struct {
+	MoveID           string
+	OrgID            string
+	ProjectID        string
+	EnvironmentID    string
+	TargetID         string
+	DestinationKind  string
+	DestinationOwner string
+	DestinationName  string
+	DestinationID    int64
+	NamePrefix       string
+	OrphanedNames    string
+}
+
+type AdapterTarget struct {
+	ID                     string
+	OrgID                  string
+	ProjectID              string
+	EnvironmentID          string
+	AdapterID              string
+	DestinationKind        string
+	DestinationOwner       string
+	DestinationName        string
+	DestinationID          int64
+	NamePrefix             string
+	Generation             int64
+	State                  string
+	SyncStatus             string
+	FailureNames           string
+	ConvergedRevision      sql.NullInt64
+	ActiveJobID            sql.NullString
+	ProviderLeaseJobID     sql.NullString
+	ProviderLeaseEffectID  sql.NullString
+	ProviderLeaseExpiresAt sql.NullString
+	CreatedAt              string
+}
+
+type AdapterTargetKey struct {
+	OrgID         string
+	ProjectID     string
+	EnvironmentID string
+	TargetID      string
+	AdapterID     string
+	KeyID         string
+}
+
 type AuditInstanceEvent struct {
 	Seq               int64
 	ID                string
@@ -71,6 +238,22 @@ type AuthInstanceState struct {
 	UpdatedAt       string
 	RestoreEpoch    int64
 	ReactivatedAt   sql.NullString
+}
+
+type CliReauthHandoff struct {
+	ID              string
+	StateVerifier   []byte
+	CodeVerifier    []byte
+	SessionID       string
+	PrincipalID     string
+	Operation       string
+	EnvironmentSet  string
+	PkceChallenge   string
+	RedirectUri     string
+	ApprovedWindows string
+	CreatedAt       string
+	ExpiresAt       string
+	ConsumedAt      sql.NullString
 }
 
 type CredentialAuthority struct {
@@ -356,20 +539,22 @@ type ProjectSchemaRevision struct {
 }
 
 type ReauthWindow struct {
-	ID              string
-	SessionID       string
-	EnvironmentID   string
-	CeremonyID      string
-	FactorClass     string
-	SingleDecision  int64
-	AuthenticatedAt string
-	WindowExpiresAt string
-	HardExpiresAt   string
-	CredentialEpoch int64
-	ConsumedAt      sql.NullString
-	CreatedAt       string
-	BoundOperation  string
-	BoundKeySet     string
+	ID                  string
+	SessionID           string
+	EnvironmentID       string
+	CeremonyID          string
+	FactorClass         string
+	SingleDecision      int64
+	AuthenticatedAt     string
+	WindowExpiresAt     string
+	HardExpiresAt       string
+	CredentialEpoch     int64
+	ConsumedAt          sql.NullString
+	CreatedAt           string
+	BoundOperation      string
+	BoundKeySet         string
+	BoundPurpose        string
+	BoundEnvironmentSet string
 }
 
 type RecoveryCode struct {

@@ -144,6 +144,22 @@ func (r *Resolver) AdvanceRestoreEpoch(ctx context.Context, now time.Time) error
 	return nil
 }
 
+// InvalidateRestoredAdapterCredentials destroys custody of every restored
+// outbound provider credential. A PAT is checked by Forgejo, not Hikyo's
+// credential epoch, so an epoch bump alone cannot make a restored PAT inert.
+func (r *Resolver) InvalidateRestoredAdapterCredentials(ctx context.Context) error {
+	if r.sq != nil {
+		if err := r.sq.InvalidateRestoredAdapterCredentials(ctx); err != nil {
+			return fmt.Errorf("authn: invalidate restored adapter credentials: %w", err)
+		}
+		return nil
+	}
+	if err := r.pg.InvalidateRestoredAdapterCredentials(ctx); err != nil {
+		return fmt.Errorf("authn: invalidate restored adapter credentials: %w", err)
+	}
+	return nil
+}
+
 // maxSaneEpoch bounds the epoch a restore will accept from restored state.
 // The stamps are archive data — attacker-writable — and an int64 stamp at
 // MaxInt64 would wrap the +1 to MinInt64, an epoch value an attacker can also

@@ -5,12 +5,15 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"math"
 	"net"
+	"net/netip"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -46,6 +49,11 @@ type Config struct {
 	// traffic. https only — the CONNECT request names the remote host, so a
 	// plaintext proxy publishes the fleet topology to the path.
 	DirectoryProxy string
+
+	// AdapterEgressPolicy is loaded once at startup from the operator-owned
+	// policy file. Entries are keyed by an exact canonical HTTPS origin; a
+	// private address is usable only for the origin whose entry contains it.
+	AdapterEgressPolicy map[string][]netip.Prefix
 
 	// ExternalOrigin is the instance's public origin (scheme + host), used to
 	// build per-provider OIDC redirect URIs (A1). Never derived from a request
@@ -94,17 +102,18 @@ type Config struct {
 
 // knownEnv is the closed set of HIKYO_* keys this build understands.
 var knownEnv = map[string]bool{
-	"HIKYO_DB":                   true,
-	"HIKYO_LISTEN":               true,
-	"HIKYO_EXTERNAL_ORIGIN":      true,
-	"HIKYO_TRUSTED_PROXY_CIDRS":  true,
-	"HIKYO_ROOT_KEY":             true,
-	"HIKYO_ARGON2_MEMORY_KIB":    true,
-	"HIKYO_ARGON2_TIME":          true,
-	"HIKYO_ARGON2_PARALLELISM":   true,
-	"HIKYO_ADMISSION_BUDGET_MIB": true,
-	"HIKYO_BACKUP_RECIPIENTS":    true,
-	"HIKYO_BACKUP_DIR":           true,
+	"HIKYO_DB":                         true,
+	"HIKYO_LISTEN":                     true,
+	"HIKYO_EXTERNAL_ORIGIN":            true,
+	"HIKYO_TRUSTED_PROXY_CIDRS":        true,
+	"HIKYO_ROOT_KEY":                   true,
+	"HIKYO_ARGON2_MEMORY_KIB":          true,
+	"HIKYO_ARGON2_TIME":                true,
+	"HIKYO_ARGON2_PARALLELISM":         true,
+	"HIKYO_ADMISSION_BUDGET_MIB":       true,
+	"HIKYO_BACKUP_RECIPIENTS":          true,
+	"HIKYO_BACKUP_DIR":                 true,
+	"HIKYO_ADAPTER_EGRESS_POLICY_FILE": true,
 
 	// Development-only. Named so the deployment it does not belong in is
 	// obvious at a glance, and refused at boot outside --dev regardless.
@@ -244,6 +253,11 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 			}
 			cfg.DirectoryProxy = raw
 		}
+		policy, err := loadAdapterEgressPolicy(getenv("HIKYO_ADAPTER_EGRESS_POLICY_FILE"))
+		if err != nil {
+			return nil, nil, err
+		}
+		cfg.AdapterEgressPolicy = policy
 	}
 
 	if err := loadBackupPolicy(cfg, getenv); err != nil {
@@ -264,6 +278,35 @@ func Load(subcommand string, args []string, getenv func(string) string, environ 
 		return nil, nil, fmt.Errorf("no datastore configured: set HIKYO_DB (sqlite:PATH or postgres://...) or pass --dev for zero-config sqlite evaluation")
 	}
 	return cfg, warnings, nil
+}
+
+func loadAdapterEgressPolicy(path string) (map[string][]netip.Prefix, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("HIKYO_ADAPTER_EGRESS_POLICY_FILE: read policy: %w", err)
+	}
+	var encoded map[string][]string
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, fmt.Errorf("HIKYO_ADAPTER_EGRESS_POLICY_FILE: invalid JSON: %w", err)
+	}
+	out := make(map[string][]netip.Prefix, len(encoded))
+	for origin, cidrs := range encoded {
+		u, err := url.Parse(origin)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || origin != "https://"+u.Host {
+			return nil, fmt.Errorf("HIKYO_ADAPTER_EGRESS_POLICY_FILE: origin %q is not an exact canonical HTTPS origin", origin)
+		}
+		for _, rawCIDR := range cidrs {
+			prefix, err := netip.ParsePrefix(rawCIDR)
+			if err != nil {
+				return nil, fmt.Errorf("HIKYO_ADAPTER_EGRESS_POLICY_FILE: origin %q has invalid CIDR %q", origin, rawCIDR)
+			}
+			out[origin] = append(out[origin], prefix.Masked())
+		}
+	}
+	return out, nil
 }
 
 // loadBackupPolicy resolves the export recipient set and destination. Both
