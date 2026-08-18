@@ -117,6 +117,15 @@ if [ -n "$remote_font_matches" ]; then
 	exit 1
 fi
 
+unsafe_dom_matches=$(grep -R -n -E --include='*.html' \
+	"(blastsub|sidevarlabel)[^;]*\.innerHTML[[:space:]]*=" \
+	"$site_root/prototypes/app-chrome" 2>/dev/null || true)
+if [ -n "$unsafe_dom_matches" ]; then
+	printf 'docs PWA gate: prototype HTML reinterprets DOM-derived text as HTML\n%s\n' \
+		"$unsafe_dom_matches" >&2
+	exit 1
+fi
+
 stale_license_matches=$(grep -R -n -E --include='*.html' \
 	'AGPL|MIT licensed' \
 	"$site_root/prototypes" 2>/dev/null || true)

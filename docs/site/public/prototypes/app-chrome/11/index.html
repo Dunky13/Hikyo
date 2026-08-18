@@ -1073,7 +1073,11 @@ function submitGrant(){
   if(scope.startsWith('org:')){
     S.pendingGrant=gs;
     const projs=visProjects(curOrg());
-    $('blastsub').innerHTML=`<b>${p}</b> gets <b class="cap">${caps.join('</b>, <b class="cap">')}</b> — ${caps.length>1?caps.length+' separate grant lines, each':'one grant line,'} on <b>every project and environment in ${curOrg().name}</b>, current and future:`;
+    const summary=$('blastsub'), principal=document.createElement('b'), capabilityList=document.createDocumentFragment(), scope=document.createElement('b');
+    principal.textContent=p;
+    caps.forEach((cap,index)=>{if(index) capabilityList.append(', ');const capability=document.createElement('b');capability.className='cap';capability.textContent=cap;capabilityList.append(capability)});
+    scope.textContent=`every project and environment in ${curOrg().name}`;
+    summary.replaceChildren(principal,' gets ',capabilityList,` — ${caps.length>1?caps.length+' separate grant lines, each':'one grant line,'} on `,scope,', current and future:');
     $('blastlist').innerHTML=projs.map(pr=>`<div class="bl"><span class="p">${pr.name}</span><span>development · staging · production${pr.id==='demo'?' (protected)':''} · preview</span></div>`).join('')
       +'<div class="bl"><span class="p">+ any project created later</span><span>inherits automatically</span></div>';
     document.body.classList.add('modal');$('blastmodal').classList.add('open');

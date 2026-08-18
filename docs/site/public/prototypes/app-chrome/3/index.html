@@ -1018,7 +1018,11 @@ function submitGrant(){
   if(g.scope.startsWith('org:')){
     S.pendingGrant=g;
     const projs=visProjects(curOrg());
-    $('blastsub').innerHTML=`<b>${g.p}</b> gets <b class="cap">${g.cap}</b> on <b>every project and environment in ${curOrg().name}</b> — current and future:`;
+    const summary=$('blastsub'), principal=document.createElement('b'), capability=document.createElement('b'), scope=document.createElement('b');
+    principal.textContent=g.p;
+    capability.className='cap'; capability.textContent=g.cap;
+    scope.textContent=`every project and environment in ${curOrg().name}`;
+    summary.replaceChildren(principal,' gets ',capability,' on ',scope,' — current and future:');
     $('blastlist').innerHTML=projs.map(p=>`<div class="bl"><span class="p">${p.name}</span><span>development · staging · production${p.id==='demo'?' (protected)':''} · preview</span></div>`).join('')
       +'<div class="bl"><span class="p">+ any project created later</span><span>inherits automatically</span></div>';
     document.body.classList.add('modal');$('blastmodal').classList.add('open');
