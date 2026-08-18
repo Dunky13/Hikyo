@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hikyo: self-hosted secrets &amp; config across environments</title>
+<!--
+  PROTOTYPE — landing-opus-4.8 / iteration 2 (frozen once announced).
+  Rebuilt on the LOCKED hikyo design language (DESIGN.md): dark-default graphite tinted
+  teal, system-ui + ui-monospace, radius roles (6/4/3), 999px pill reserved for matrix
+  state + counts + avatars, restrained OKLCH, AAA contrast, state pills carry a glyph.
+  Structure follows Kaneo's restraint + Plane's sellability: short value prop → the
+  env matrix as the hero (the product's signature surface) → provenance/reveal/validate
+  feature rows → self-hosted band → why → final CTA → real footer.
+  Single committed design (the A/B/C explorer was iteration 1). No build, no deps.
+-->
+<style>
+  :root{
+    /* dark (default) — DESIGN.md tokens */
+    --bg:oklch(0.19 0.012 220);
+    --bg-raise:oklch(0.225 0.014 220);
+    --bg-sink:oklch(0.165 0.011 220);
+    --line:oklch(0.34 0.016 220);
+    --line-soft:oklch(0.27 0.014 220);
+    --tx:oklch(0.94 0.008 200);
+    --tx-dim:oklch(0.77 0.01 210);
+    --tx-faint:oklch(0.62 0.012 215);
+    --accent:oklch(0.82 0.09 195);
+    --accent-quiet:oklch(0.82 0.09 195 / .12);
+    --on-accent:oklch(0.2 0.02 220);
+    --danger:oklch(0.72 0.13 25);
+    --danger-quiet:oklch(0.72 0.13 25 / .14);
+    --warn:oklch(0.82 0.1 85);
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:system-ui,-apple-system,sans-serif;
+    --r6:6px; --r4:4px; --r3:3px;
+    --maxw:1120px;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:oklch(0.965 0.008 200);
+      --bg-raise:oklch(0.995 0.004 200);
+      --bg-sink:oklch(0.93 0.008 200);
+      --line:oklch(0.86 0.012 210);
+      --line-soft:oklch(0.9 0.01 210);
+      --tx:oklch(0.25 0.03 225);
+      --tx-dim:oklch(0.42 0.025 220);
+      --tx-faint:oklch(0.55 0.02 218);
+      --accent:oklch(0.55 0.09 205);
+      --accent-quiet:oklch(0.55 0.09 205 / .1);
+      --on-accent:oklch(0.99 0.01 200);
+      --danger:oklch(0.5 0.15 30);
+      --danger-quiet:oklch(0.5 0.15 30 / .1);
+      --warn:oklch(0.62 0.12 75);
+    }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+  body{
+    background:var(--bg);color:var(--tx);font-family:var(--sans);
+    line-height:1.55;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    font-size:16px;letter-spacing:-.006em;
+  }
+  a{color:inherit;text-decoration:none}
+  ::selection{background:var(--accent-quiet);color:var(--tx)}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(18px,4vw,40px)}
+  .mono{font-family:var(--mono)}
+  .r6{border-radius:var(--r6)} .r4{border-radius:var(--r4)} .r3{border-radius:var(--r3)}
+
+  /* ---- entrance ---- */
+  .rise{opacity:0;transform:translateY(14px);animation:rise .7s var(--ease) forwards}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .d1{animation-delay:.05s}.d2{animation-delay:.12s}.d3{animation-delay:.19s}.d4{animation-delay:.26s}.d5{animation-delay:.34s}
+
+  /* ---------- nav ---------- */
+  header{position:sticky;top:0;z-index:50;background:color-mix(in oklab,var(--bg) 82%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line-soft)}
+  nav{display:flex;align-items:center;gap:22px;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;letter-spacing:-.02em}
+  .brand .glyph{width:24px;height:24px;border-radius:var(--r6);background:var(--accent);color:var(--on-accent);
+    display:grid;place-items:center;font-weight:800;font-size:14px;font-family:var(--mono)}
+  .navlinks{display:flex;gap:22px;margin-left:12px;color:var(--tx-dim);font-size:14px;font-weight:500}
+  .navlinks a{padding:4px 0;border-bottom:1px solid transparent;transition:color .15s}
+  .navlinks a:hover{color:var(--tx)}
+  .navright{margin-left:auto;display:flex;align-items:center;gap:16px;font-size:14px;font-weight:500}
+  .stars{display:flex;align-items:center;gap:7px;color:var(--tx-dim);font-family:var(--mono);font-size:13px}
+  .stars b{color:var(--tx);font-weight:600}
+  .signin{color:var(--tx-dim)}.signin:hover{color:var(--tx)}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:14px;
+    padding:8px 15px;border-radius:var(--r4);transition:transform .15s var(--ease),background .15s,border-color .15s}
+  .btn-primary{background:var(--accent);color:var(--on-accent)}
+  .btn-primary:hover{transform:translateY(-1px)}
+  .btn-line{border:1px solid var(--line);color:var(--tx);background:transparent}
+  .btn-line:hover{border-color:var(--accent);color:var(--tx)}
+
+  /* ---------- hero ---------- */
+  .hero{padding:clamp(56px,9vw,104px) 0 clamp(30px,5vw,46px)}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12.5px;
+    color:var(--tx-dim);border:1px solid var(--line-soft);background:var(--bg-raise);
+    padding:5px 12px 5px 9px;border-radius:var(--r3);margin-bottom:24px}
+  .eyebrow .live{width:7px;height:7px;border-radius:999px;background:var(--accent);
+    box-shadow:0 0 0 3px var(--accent-quiet)}
+  h1{font-size:clamp(38px,6.4vw,68px);line-height:1.015;letter-spacing:-.035em;font-weight:800;
+    max-width:15ch}
+  h1 .fade{color:var(--tx-dim);font-weight:700}
+  .lede{margin-top:22px;font-size:clamp(16px,2vw,19px);color:var(--tx-dim);max-width:60ch;
+    font-weight:440;line-height:1.6;letter-spacing:-.008em}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:32px}
+  .cta .btn{padding:11px 19px;font-size:15px}
+  .install{display:inline-flex;align-items:center;gap:12px;font-family:var(--mono);font-size:13.5px;
+    color:var(--tx-dim);border:1px solid var(--line);border-radius:var(--r4);padding:9px 10px 9px 15px;background:var(--bg-raise)}
+  .install .p{color:var(--accent)}
+  .install .cp{border:1px solid var(--line);color:var(--tx-faint);border-radius:var(--r3);
+    padding:3px 9px;font-family:var(--sans);font-size:11px;cursor:pointer;transition:color .15s,border-color .15s}
+  .install .cp:hover{color:var(--tx);border-color:var(--accent)}
+  .subtrust{margin-top:18px;color:var(--tx-faint);font-size:13px}
+  .subtrust b{color:var(--tx-dim);font-weight:600}
+
+  /* ---------- product hero: the env matrix ---------- */
+  .surface{margin-top:clamp(34px,5vw,54px);border:1px solid var(--line);border-radius:var(--r6);
+    overflow:hidden;background:var(--bg-raise);box-shadow:0 40px 80px -50px oklch(0 0 0 / .7)}
+  .surface-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);
+    background:var(--bg-sink)}
+  .crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx-dim)}
+  .crumb .av{width:20px;height:20px;border-radius:999px;background:var(--accent-quiet);color:var(--accent);
+    display:grid;place-items:center;font-size:10px;font-weight:700;font-family:var(--mono)}
+  .crumb b{color:var(--tx);font-weight:600}
+  .crumb .sep{color:var(--tx-faint)}
+  .chips{margin-left:auto;display:flex;gap:6px}
+  .chip{font-family:var(--mono);font-size:11px;color:var(--tx-dim);border:1px solid var(--line);
+    border-radius:var(--r3);padding:3px 8px;background:var(--bg-raise)}
+  .chip.off{opacity:.42;text-decoration:line-through}
+  .mwrap{overflow-x:auto}
+  table.matrix{width:100%;border-collapse:collapse;font-size:13px;min-width:660px}
+  .matrix thead th{position:sticky;top:0;text-align:left;padding:11px 16px;font-weight:600;font-size:11px;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--tx-faint);border-bottom:1px solid var(--line);
+    background:var(--bg-raise)}
+  .matrix thead th.env{text-align:left}
+  .matrix tbody td{padding:9px 16px;border-bottom:1px solid var(--line-soft);white-space:nowrap;vertical-align:middle}
+  .matrix tbody tr:hover{background:color-mix(in oklab,var(--accent) 4%,transparent)}
+  .matrix tbody tr:last-child td{border-bottom:0}
+  .k{font-family:var(--mono);font-size:12.5px;color:var(--tx)}
+  .grp td{background:var(--bg-sink);color:var(--tx-faint);font-family:var(--mono);font-size:11px;
+    letter-spacing:.06em;text-transform:uppercase;padding:7px 16px}
+  .grp td .cnt{display:inline-grid;place-items:center;min-width:18px;height:16px;border-radius:999px;
+    background:var(--line);color:var(--tx-dim);font-size:10px;margin-left:8px;padding:0 5px}
+  /* state pills — 999px is allowed here (matrix vocabulary) */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;
+    padding:3px 9px;border-radius:999px;line-height:1.3}
+  .pill.set{background:var(--accent);color:var(--on-accent);font-weight:600}
+  .pill.inh{border:1px solid var(--line);color:var(--tx-dim)}
+  .pill.def{background:var(--accent-quiet);color:var(--accent)}
+  .pill.mask{color:var(--tx-dim);background:var(--bg-sink);border:1px solid var(--line);
+    background-image:repeating-linear-gradient(135deg,transparent 0 4px,color-mix(in oklab,var(--tx-faint) 22%,transparent) 4px 5px)}
+  .pill.miss{background:var(--danger-quiet);color:var(--danger);font-weight:600}
+  .pill .o{opacity:.72;font-size:10.5px}
+  .surface-foot{display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid var(--line);
+    background:var(--bg-sink);font-size:12px;color:var(--tx-faint);font-family:var(--mono);flex-wrap:wrap}
+  .legend{display:inline-flex;align-items:center;gap:6px}
+  .legend .sw{width:9px;height:9px;border-radius:999px}
+  .sw.set{background:var(--accent)} .sw.inh{border:1px solid var(--line)} .sw.def{background:var(--accent-quiet)}
+  .sw.mask{background:var(--tx-faint)} .sw.miss{background:var(--danger)}
+
+  /* ---------- boring-stack strip ---------- */
+  .stack{border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);margin-top:clamp(48px,7vw,80px)}
+  .stack .wrap{display:flex;align-items:center;gap:clamp(16px,4vw,42px);padding:20px 0;flex-wrap:wrap}
+  .stack p{font-size:12px;color:var(--tx-faint);letter-spacing:.05em;text-transform:uppercase;font-weight:600}
+  .stack .items{display:flex;gap:clamp(14px,3vw,30px);flex-wrap:wrap;color:var(--tx-dim);
+    font-family:var(--mono);font-size:14px}
+
+  /* ---------- section scaffold ---------- */
+  section.block{padding:clamp(56px,9vw,104px) 0}
+  .kicker{font-family:var(--mono);font-size:12.5px;color:var(--accent);letter-spacing:.02em;margin-bottom:14px}
+  h2{font-size:clamp(28px,3.8vw,42px);line-height:1.08;letter-spacing:-.028em;font-weight:750;max-width:20ch}
+  .h2sub{margin-top:14px;color:var(--tx-dim);font-size:clamp(15px,1.7vw,17px);max-width:56ch;line-height:1.6}
+
+  /* alternating feature rows (asymmetric, not a card grid) */
+  .row{display:grid;grid-template-columns:1fr 1.05fr;gap:clamp(28px,5vw,68px);align-items:center;
+    padding:clamp(40px,6vw,72px) 0;border-top:1px solid var(--line-soft)}
+  .row.flip .copy{order:2}
+  .row h3{font-size:clamp(20px,2.6vw,27px);letter-spacing:-.02em;font-weight:700;line-height:1.15}
+  .row p{margin-top:12px;color:var(--tx-dim);font-size:15.5px;line-height:1.62;max-width:46ch}
+  .row .note{margin-top:16px;display:flex;align-items:center;gap:9px;font-family:var(--mono);
+    font-size:12.5px;color:var(--tx-faint)}
+  .row .note .tick{color:var(--accent)}
+
+  /* artifact frames */
+  .frame{border:1px solid var(--line);border-radius:var(--r6);background:var(--bg-raise);overflow:hidden}
+  .frame-head{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--line);
+    background:var(--bg-sink);font-family:var(--mono);font-size:11.5px;color:var(--tx-faint)}
+  .tl{width:10px;height:10px;border-radius:999px;background:var(--line)}
+  .frame-body{padding:16px}
+
+  /* provenance chain artifact */
+  .prov{display:flex;flex-direction:column;gap:0}
+  .prov .head{display:flex;align-items:center;justify-content:space-between;padding:2px 0 12px}
+  .prov .head .key{font-family:var(--mono);font-size:13px;color:var(--tx)}
+  .prov .head .env{font-family:var(--mono);font-size:11px;color:var(--tx-faint);border:1px solid var(--line);
+    border-radius:var(--r3);padding:2px 8px}
+  .step{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 12px;
+    border:1px solid var(--line-soft);border-radius:var(--r4);margin-bottom:8px;background:var(--bg-sink)}
+  .step.active{border-color:var(--accent);background:var(--accent-quiet)}
+  .step .lvl{font-family:var(--mono);font-size:10.5px;color:var(--tx-faint);text-transform:uppercase;letter-spacing:.05em}
+  .step.active .lvl{color:var(--accent)}
+  .step .val{font-family:var(--mono);font-size:12.5px;color:var(--tx-dim)}
+  .step.active .val{color:var(--tx)}
+  .step .flag{font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+  .step.active .flag{color:var(--accent)}
+  .prov .rule{padding-left:12px;color:var(--tx-faint);font-family:var(--mono);font-size:11px;margin-top:2px}
+
+  /* reveal ceremony artifact */
+  .reveal .stage{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line-soft);
+    border-radius:var(--r4);background:var(--bg-sink);margin-bottom:10px}
+  .reveal .stage .kk{font-family:var(--mono);font-size:12.5px;color:var(--tx);flex:1}
+  .reveal .val{font-family:var(--mono);font-size:12.5px}
+  .reveal .val.masked{color:var(--tx-faint)}
+  .reveal .val.shown{color:var(--accent)}
+  .reveal .count{font-family:var(--mono);font-size:11px;color:var(--warn);display:flex;align-items:center;gap:6px}
+  .reveal .gate{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--line);
+    border-radius:var(--r4);font-size:12.5px;color:var(--tx-dim)}
+  .reveal .gate .lock{color:var(--accent)}
+  .reveal .gate .m{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--tx-faint)}
+
+  /* cli transcript artifact */
+  pre.cli{font-family:var(--mono);font-size:12.5px;line-height:1.85;color:var(--tx-dim);
+    padding:16px;overflow-x:auto}
+  pre.cli .p{color:var(--accent)} pre.cli .c{color:var(--tx)} pre.cli .f{color:var(--tx-faint)}
+  pre.cli .ok{color:var(--accent)} pre.cli .w{color:var(--warn)} pre.cli .b{color:var(--danger)}
+
+  /* validate / doctor artifact */
+  .doctor{display:flex;flex-direction:column;gap:8px}
+  .drow{display:grid;grid-template-columns:auto 1fr auto;gap:11px;align-items:center;padding:9px 12px;
+    border:1px solid var(--line-soft);border-radius:var(--r4);background:var(--bg-sink);font-size:12.5px}
+  .drow .ic{width:18px;height:18px;border-radius:var(--r3);display:grid;place-items:center;font-size:11px;font-weight:700}
+  .drow .ic.ok{background:var(--accent-quiet);color:var(--accent)}
+  .drow .ic.bad{background:var(--danger-quiet);color:var(--danger)}
+  .drow .msg{font-family:var(--mono);color:var(--tx-dim)}
+  .drow .msg b{color:var(--tx)}
+  .drow .tag{font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+
+  /* ---------- self-host band ---------- */
+  .band{background:var(--bg-sink);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .band .grid{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(28px,5vw,60px);align-items:center;
+    padding:clamp(48px,8vw,90px) 0}
+  .specs{display:grid;gap:1px;background:var(--line-soft);border:1px solid var(--line-soft);border-radius:var(--r6);overflow:hidden}
+  .spec{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:baseline;padding:15px 18px;background:var(--bg-raise)}
+  .spec dt{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap}
+  .spec dd{color:var(--tx-dim);font-size:14px;line-height:1.5}
+  .spec dd b{color:var(--tx);font-weight:600}
+
+  /* ---------- why ---------- */
+  .why{max-width:64ch;margin:0 auto;text-align:left}
+  .why h2{max-width:22ch}
+  .why .body{margin-top:22px;display:flex;flex-direction:column;gap:16px;color:var(--tx-dim);
+    font-size:clamp(16px,1.9vw,18.5px);line-height:1.65}
+  .why .body b{color:var(--tx);font-weight:600}
+  .why .sig{margin-top:26px;font-family:var(--mono);font-size:13px;color:var(--tx-faint)}
+
+  /* ---------- final cta ---------- */
+  .final{text-align:center;padding:clamp(64px,10vw,120px) 0}
+  .final h2{margin:0 auto;max-width:18ch}
+  .final .lede{margin:18px auto 0}
+  .final .cta{justify-content:center;margin-top:30px}
+
+  /* ---------- footer ---------- */
+  footer.site{border-top:1px solid var(--line);background:var(--bg-sink)}
+  .fgrid{display:grid;grid-template-columns:1.6fr repeat(3,1fr);gap:clamp(24px,4vw,48px);padding:clamp(40px,6vw,64px) 0 30px}
+  .fbrand .brand{margin-bottom:14px}
+  .fbrand p{color:var(--tx-faint);font-size:13.5px;max-width:34ch;line-height:1.6}
+  .fcol h4{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-faint);
+    font-weight:600;margin-bottom:14px;font-family:var(--mono)}
+  .fcol a{display:block;color:var(--tx-dim);font-size:14px;padding:5px 0;transition:color .15s}
+  .fcol a:hover{color:var(--tx)}
+  .fbar{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:18px 0;
+    border-top:1px solid var(--line-soft);color:var(--tx-faint);font-size:12.5px;flex-wrap:wrap}
+  .fbar .mono{font-family:var(--mono)}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:900px){
+    .row,.band .grid,.fgrid{grid-template-columns:1fr}
+    .row.flip .copy{order:0}
+    .row .art{order:2}
+    .fgrid{gap:32px}
+    .band .grid .art{order:2}
+  }
+  @media (max-width:680px){
+    .navlinks,.stars,.signin{display:none}
+    .navright{margin-left:auto}
+    h1{font-size:clamp(33px,10vw,44px)}
+    .install{width:100%;justify-content:space-between}
+    .cta{gap:10px}
+    .cta .btn,.install{flex:1 1 auto}
+    .fgrid{grid-template-columns:1fr 1fr}
+    .fbrand{grid-column:1/-1}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap"><nav>
+    <a class="brand"><span class="glyph">h</span> hikyo</a>
+    <div class="navlinks">
+      <a href="#matrix">Product</a>
+      <a href="#self-host">Self-hosting</a>
+      <a href="#why">Why</a>
+      <a href="#">Docs</a>
+      <a href="#">Pricing</a>
+    </div>
+    <div class="navright">
+      <a class="stars" href="#">★ <b>4,210</b></a>
+      <a class="signin" href="#">Sign in</a>
+      <a class="btn btn-primary" href="#">Get started</a>
+    </div>
+  </nav></div>
+</header>
+
+<main>
+  <!-- ===== hero ===== -->
+  <section class="hero"><div class="wrap">
+    <span class="eyebrow rise d1"><span class="live"></span> v0.4 · one signed binary · self-hosted</span>
+    <h1 class="rise d2">See every value.<br><span class="fade">Trust every source.</span></h1>
+    <p class="lede rise d3">hikyo is a self-hosted control plane for validated, inherited secrets and configuration across environments. From a single <span class="mono">.env</span> to Compose and Kubernetes, every resolved value can tell you exactly where it came from.</p>
+    <div class="cta rise d4">
+      <a class="btn btn-primary" href="#">Start self-hosting</a>
+      <span class="install"><span><span class="p">$</span> curl -fsSL hikyo.dev/install | sh</span><span class="cp" data-copy="curl -fsSL hikyo.dev/install | sh">copy</span></span>
+      <a class="btn btn-line" href="#">★ GitHub</a>
+    </div>
+    <p class="subtrust rise d4"><b>MPL-2.0 licensed.</b> No account required. sqlite for dev, postgres for prod, the same binary.</p>
+
+    <!-- the env matrix: signature surface as the hero -->
+    <div class="surface rise d5" id="matrix">
+      <div class="surface-bar">
+        <div class="crumb"><span class="av">AC</span> <b>acme</b><span class="sep">/</span> payments-api</div>
+        <div class="chips"><span class="chip">dev</span><span class="chip">staging</span><span class="chip">prod</span><span class="chip off">preview</span></div>
+      </div>
+      <div class="mwrap">
+      <table class="matrix">
+        <thead><tr>
+          <th>Key</th><th class="env">dev</th><th class="env">staging</th><th class="env">prod</th>
+        </tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="4">database <span class="cnt">3</span></td></tr>
+          <tr>
+            <td class="k">DATABASE_URL</td>
+            <td><span class="pill set">postgres://…</span></td>
+            <td><span class="pill set">postgres://…</span></td>
+            <td><span class="pill set">postgres://…</span></td>
+          </tr>
+          <tr>
+            <td class="k">DATABASE_POOL_MAX</td>
+            <td><span class="pill def">10 <span class="o">◂ def</span></span></td>
+            <td><span class="pill def">10 <span class="o">◂ def</span></span></td>
+            <td><span class="pill set">40</span></td>
+          </tr>
+          <tr>
+            <td class="k">DATABASE_SSLMODE</td>
+            <td><span class="pill inh">disable</span></td>
+            <td><span class="pill set">verify-full</span></td>
+            <td><span class="pill set">verify-full</span></td>
+          </tr>
+          <tr class="grp"><td colspan="4">observability <span class="cnt">2</span></td></tr>
+          <tr>
+            <td class="k">LOG_LEVEL</td>
+            <td><span class="pill set">debug</span></td>
+            <td><span class="pill inh">info <span class="o">◂ base</span></span></td>
+            <td><span class="pill set">info</span></td>
+          </tr>
+          <tr>
+            <td class="k">SENTRY_DSN</td>
+            <td><span class="pill inh">unset</span></td>
+            <td><span class="pill set">https://…</span></td>
+            <td><span class="pill miss">! required</span></td>
+          </tr>
+          <tr class="grp"><td colspan="4">secrets <span class="cnt">2</span></td></tr>
+          <tr>
+            <td class="k">STRIPE_SECRET_KEY</td>
+            <td><span class="pill mask">∅ masked</span></td>
+            <td><span class="pill mask">∅ masked</span></td>
+            <td><span class="pill mask">∅ masked</span></td>
+          </tr>
+          <tr>
+            <td class="k">SESSION_SIGNING_KEY</td>
+            <td><span class="pill mask">∅ masked</span></td>
+            <td><span class="pill mask">∅ masked</span></td>
+            <td><span class="pill mask">∅ masked</span></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="surface-foot">
+        <span class="legend"><span class="sw set"></span> set here</span>
+        <span class="legend"><span class="sw inh"></span> inherited</span>
+        <span class="legend"><span class="sw def"></span> from defaults</span>
+        <span class="legend"><span class="sw mask"></span> masked</span>
+        <span class="legend"><span class="sw miss"></span> required, unset</span>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===== boring stack strip ===== -->
+  <div class="stack"><div class="wrap">
+    <p>Runs on the stack you already trust</p>
+    <div class="items"><span>Go 1.26</span><span>SQLite</span><span>Postgres</span><span>Docker Compose</span><span>Kubernetes</span><span>cosign</span></div>
+  </div></div>
+
+  <!-- ===== features ===== -->
+  <section class="block"><div class="wrap">
+    <div class="kicker">// minimal surface, maximum provenance</div>
+    <h2>A dense surface that stays honest.</h2>
+    <p class="h2sub">Fifty keys across four environments should stay scannable, and no value should ever surprise you. hikyo shows you the resolved config and, for every cell, the exact reason it resolved that way.</p>
+
+    <!-- 1 provenance -->
+    <div class="row">
+      <div class="copy">
+        <h3>Every value explains its origin.</h3>
+        <p>Config inherits: project defaults, then a base environment, then the environment you are looking at. Click any cell and hikyo shows the full chain, so you never guess whether prod is overriding staging or quietly falling through to a default.</p>
+        <div class="note"><span class="tick">▸</span> Resolution: defaults ▸ base ▸ environment, left to right.</div>
+      </div>
+      <div class="art">
+        <div class="frame">
+          <div class="frame-head"><span class="tl"></span><span class="tl"></span><span class="tl"></span> &nbsp;provenance · DATABASE_POOL_MAX @ prod</div>
+          <div class="frame-body">
+            <div class="prov">
+              <div class="head"><span class="key">DATABASE_POOL_MAX</span><span class="env">prod</span></div>
+              <div class="step"><span class="lvl">defaults</span><span class="val">10</span><span class="flag">◂ def</span></div>
+              <div class="step"><span class="lvl">base · shared</span><span class="val">10</span><span class="flag">inherited</span></div>
+              <div class="step active"><span class="lvl">prod</span><span class="val">40</span><span class="flag">set here ✓</span></div>
+              <div class="rule">resolved: <b style="color:var(--tx)">40</b> (set in prod, overrides the default of 10)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 reveal ceremony -->
+    <div class="row flip">
+      <div class="copy">
+        <h3>Revealing a secret is a ceremony.</h3>
+        <p>Secrets stay masked until you ask, and asking is deliberate: reauth with a passkey or TOTP, a reveal window that remasks itself on a countdown, and clipboard copies recorded as audited disclosures. Editing without ever revealing is a first-class path.</p>
+        <div class="note"><span class="tick">▸</span> Write-only edits never decrypt the current value.</div>
+      </div>
+      <div class="art">
+        <div class="frame">
+          <div class="frame-head"><span class="tl"></span><span class="tl"></span><span class="tl"></span> &nbsp;reveal · STRIPE_SECRET_KEY @ prod</div>
+          <div class="frame-body">
+            <div class="reveal">
+              <div class="gate"><span class="lock">⛨</span> Reauth required to reveal <span class="m">passkey · TOTP</span></div>
+              <div class="stage"><span class="kk">before</span><span class="val masked mono">∅ ••••••••••••</span></div>
+              <div class="stage"><span class="kk">after reauth</span><span class="val shown mono">sk_live_51Kp…9aQ</span><span class="count">⧗ remask 0:18</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 validate / doctor -->
+    <div class="row">
+      <div class="copy">
+        <h3>Gaps and drift caught before deploy.</h3>
+        <p>Mark keys required or give them a schema, and hikyo refuses to let an environment ship incomplete. <span class="mono">hikyo doctor</span> runs in CI and exits non-zero on a missing required value or a policy violation, so a broken prod config fails the pipeline, not the pager.</p>
+        <div class="note"><span class="tick">▸</span> Non-zero exit on any required-but-unset or invalid value.</div>
+      </div>
+      <div class="art">
+        <div class="frame">
+          <div class="frame-head"><span class="tl"></span><span class="tl"></span><span class="tl"></span> &nbsp;$ hikyo doctor --env prod</div>
+          <div class="frame-body">
+            <div class="doctor">
+              <div class="drow"><span class="ic ok">✓</span><span class="msg">17 of 18 keys resolved</span><span class="tag">ok</span></div>
+              <div class="drow"><span class="ic bad">!</span><span class="msg"><b>SENTRY_DSN</b> required, unset in prod</span><span class="tag">violation</span></div>
+              <div class="drow"><span class="ic ok">✓</span><span class="msg">DATABASE_SSLMODE = verify-full</span><span class="tag">policy</span></div>
+              <div class="drow"><span class="ic bad">✕</span><span class="msg">exit 1, pipeline blocked</span><span class="tag">ci</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 render targets -->
+    <div class="row flip">
+      <div class="copy">
+        <h3>Compose and Kubernetes, first class.</h3>
+        <p>Point your app at hikyo and run. <span class="mono">hikyo run</span> injects the resolved env into a child process with nothing written to disk. <span class="mono">hikyo render</span> writes a dotenv, a Compose fragment, or a sealed Kubernetes Secret, whichever your target speaks.</p>
+        <div class="note"><span class="tick">▸</span> Access is proof-carrying: unauthorized is indistinguishable from nonexistent.</div>
+      </div>
+      <div class="art">
+        <div class="frame">
+          <div class="frame-head"><span class="tl"></span><span class="tl"></span><span class="tl"></span> &nbsp;~/payments-api</div>
+<pre class="cli"><span class="f"># run your app with prod config injected, nothing on disk</span>
+<span class="p">$</span> <span class="c">hikyo run</span> --env prod -- ./server
+  <span class="ok">✓</span> authorize() ok <span class="f">· 18 keys resolved</span>
+  <span class="f">→ cascade: prod ▸ shared ▸ defaults</span>
+  <span class="w">⚠</span> SENTRY_DSN required, unset <span class="f">(hikyo doctor)</span>
+
+<span class="f"># or hand a target the shape it wants</span>
+<span class="p">$</span> <span class="c">hikyo render</span> --env prod --as k8s-secret
+  <span class="ok">✓</span> wrote Secret/payments-api <span class="f">· 18 keys · sealed</span></pre>
+        </div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===== self-host band ===== -->
+  <section class="band" id="self-host"><div class="wrap"><div class="grid">
+    <div class="copy">
+      <div class="kicker">// runs where you do</div>
+      <h2>Own the keys. Own the data.</h2>
+      <p class="h2sub">hikyo is not a SaaS with a self-host tier bolted on. Self-hosting is the product. Every value is envelope-encrypted with a per-tenant data key, so your database backups are ciphertext and no plaintext secret is ever stored, not even by you.</p>
+      <div class="cta"><a class="btn btn-primary" href="#">Read the deploy guide</a><a class="btn btn-line" href="#">Compare to Vault &amp; Doppler</a></div>
+    </div>
+    <div class="art">
+      <dl class="specs">
+        <div class="spec"><dt>one binary</dt><dd><b>sqlite</b> for dev, <b>postgres</b> for prod, the same signed build. Refuses a non-TLS postgres by design.</dd></div>
+        <div class="spec"><dt>encryption</dt><dd>Envelope, <b>per-tenant DEK</b>. Decrypted only in memory, only after authorize.</dd></div>
+        <div class="spec"><dt>verifiable</dt><dd>Releases are <b>cosign-signed</b> with an SBOM and offline trust. Verify what you run.</dd></div>
+        <div class="spec"><dt>deploy</dt><dd>Docker Compose or Kubernetes, first class. Under <b>5 minutes</b> to a running instance.</dd></div>
+      </dl>
+    </div>
+  </div></div></section>
+
+  <!-- ===== why ===== -->
+  <section class="block" id="why"><div class="wrap"><div class="why">
+    <div class="kicker">// why hikyo exists</div>
+    <h2>Secrets tooling forces a bad trade.</h2>
+    <div class="body">
+      <p>Every option asks you to give something up. A managed service means your production secrets live on someone else's infrastructure, behind an SSO tax and a per-seat bill. A pile of <span class="mono">.env</span> files means no inheritance, no validation, and no honest answer to "why is this value what it is in prod?"</p>
+      <p>hikyo is the tool I wanted for my own homelab: <b>self-hosted from the first commit</b>, calm enough to run production through, and precise about provenance. The environment matrix is the whole idea. Everything resolves to a value, and every value can show its work.</p>
+      <p>No drama. No badge walls. No fear-based copy. Just infrastructure you can reason about.</p>
+    </div>
+    <div class="sig">Built in the open. MPL-2.0 licensed.</div>
+  </div></div></section>
+
+  <!-- ===== final cta ===== -->
+  <section class="final"><div class="wrap">
+    <h2>Config you can actually reason about.</h2>
+    <p class="lede">Self-hosted, encrypted, and boring on purpose. Stand up an instance in the time it took to read this page.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#">Start self-hosting</a>
+      <span class="install"><span><span class="p">$</span> curl -fsSL hikyo.dev/install | sh</span><span class="cp" data-copy="curl -fsSL hikyo.dev/install | sh">copy</span></span>
+    </div>
+  </div></section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="fgrid">
+      <div class="fbrand">
+        <a class="brand"><span class="glyph">h</span> hikyo</a>
+        <p>A self-hosted control plane for validated, inherited secrets and configuration across environments.</p>
+      </div>
+      <div class="fcol"><h4>Product</h4><a href="#">Overview</a><a href="#">The matrix</a><a href="#">Self-hosting</a><a href="#">Pricing</a><a href="#">Changelog</a></div>
+      <div class="fcol"><h4>Resources</h4><a href="#">Documentation</a><a href="#">Deploy guide</a><a href="#">GitHub</a><a href="#">License (MIT)</a><a href="#">Security model</a></div>
+      <div class="fcol"><h4>Community</h4><a href="#">Discord</a><a href="#">Sponsor</a><a href="#">Contributing</a><a href="#">Status</a></div>
+    </div>
+    <div class="fbar">
+      <span class="mono">© 2026 hikyo · MIT · self-hostable</span>
+      <span class="mono">Privacy · Terms</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // copy buttons — the only JS this page needs
+  for (const el of document.querySelectorAll('.cp')) {
+    el.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(el.dataset.copy); const t = el.textContent; el.textContent = 'copied'; setTimeout(() => el.textContent = t, 1400); } catch (e) {}
+    });
+  }
+</script>
+</body>
+</html>

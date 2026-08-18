@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App chrome — iterations</title>
+<style>
+  :root{
+    --bg:oklch(0.19 0.012 220);--bg2:oklch(0.225 0.014 220);--line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);--tx-dim:oklch(0.76 0.01 210);--tx-faint:oklch(0.6 0.012 215);
+    --accent:oklch(0.82 0.09 195);--on-accent:oklch(0.2 0.02 220);--mono:ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;
+    min-height:100vh;padding:clamp(24px,6vw,64px) clamp(18px,6vw,64px)}
+  .back{font-size:12.5px;color:var(--tx-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  h1{font-size:clamp(22px,4vw,30px);font-weight:700;letter-spacing:-0.01em;margin:10px 0 4px}
+  h1 span{color:var(--accent)}
+  .q{font-size:13.5px;color:var(--tx-dim);max-width:60ch;line-height:1.6;margin-bottom:32px}
+  ul{list-style:none;display:grid;gap:10px;max-width:760px}
+  li a{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;text-decoration:none;color:inherit;
+    padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--bg2);transition:border-color .15s}
+  li a:hover{border-color:var(--accent)}
+  li a:hover .name{color:var(--accent)}
+  .num{font-family:var(--mono);font-size:13px;color:var(--tx-faint);min-width:22px}
+  .name{font-size:15.5px;font-weight:600}
+  .latest{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--on-accent);
+    background:var(--accent);border-radius:999px;padding:2px 9px}
+  .desc{flex-basis:100%;font-size:12.5px;color:var(--tx-dim);line-height:1.5;margin-top:2px}
+  footer{margin-top:34px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
+  footer a{color:var(--tx-dim)}
+</style>
+</head>
+<body>
+  <a class="back" href="../">‹ all prototypes</a>
+  <h1>app chrome <span>/</span> iterations</h1>
+  <p class="q">How do the surfaces around the matrix hang together — org switching, account &amp; security, project settings, membership &amp; grants, instance administration? Wayfinder ticket #29.</p>
+  <ul>
+    <li><a href="18/">
+      <span class="num">18</span><span class="name">Sidebar hierarchy — e combined</span><span class="latest">LOCKED</span>
+      <span class="desc">Alex likes b and d both: variant e combines them — 30px breathing room between sections plus sub-items on a hairline left rule (accent on active). Default view; a–d kept for side-by-side comparison. LOCKED as the reference sidebar treatment (amends it-15); retention UI (it-16) locked with it.</span>
+    </a></li>
+    <li><a href="17/">
+      <span class="num">17</span><span class="name">Sidebar hierarchy variants</span>
+      <span class="desc">Alex's nitpick: section labels and sub-items blur at the small indent. Four CSS-only treatments switchable via ?side= + floating bar (arrows cycle): a baseline · b breathing room (space between sections) · c mild separator (dull 1px half-width centered bar, Alex's sketch) · d structural indent (items on a hairline left rule, accent on the active row).</span>
+    </a></li>
+    <li><a href="16/">
+      <span class="num">16</span><span class="name">Revision retention in settings</span>
+      <span class="desc">Wayfinder #30 spillover: retention belongs in settings, not the history drawer. Project settings › Policy gains "Revision retention" (inherit org default / custom ≤ org, set-time refusal, capped-by-org state); Org settings gains a Policy card with the org default + per-project state list. Semantics from revision-history it-5; changes audited.</span>
+    </a></li>
+    <li><a href="15/">
+      <span class="num">15</span><span class="name">Project policy + danger zone</span>
+      <span class="desc">The project-settings capability's real contents (#15) land: per-env protected toggles (live matrix header update), reveal reauth window, definitions_source db|git — plus a danger zone (slug rename, typed-name project deletion) and a zero-project empty state. Policy and danger gated off for non-holders.</span>
+    </a></li>
+    <li><a href="14/">
+      <span class="num">14</span><span class="name">Org settings — identity, members entry, danger zone</span>
+      <span class="desc">Confirmed shape brief: panel entry for org admins only; jump index over Identity (hue/image propagating to the rail circles), Members entry point, and a danger zone (slug rename warning, typed-name org deletion). Deleting your last org lands on a new zero-org empty state instead of crashing. Toast hidden-attribute bug fixed in 13+14.</span>
+    </a></li>
+    <li><a href="13/">
+      <span class="num">13</span><span class="name">Critique fixes — contrast, safe defaults, undo</span>
+      <span class="desc">/impeccable critique (25/40, not-slop verdict) implemented: tx-faint to AA+ contrast, text+aria validation errors, grant scope narrow→wide with staging default, blast warning "back, change scope" preserving composition, undo toasts on revoke/grant/invite, modal h3s, sticky mobile modal footer, em-dash sweep.</span>
+    </a></li>
+    <li><a href="12/">
+      <span class="num">12</span><span class="name">Grant explanations behind (?)</span>
+      <span class="desc">Single-line capability rows with a (?) per row: tap toggles the permission-ADR explanation inline (touch-friendly), title gives desktop hover. Member-table chips carry the same text.</span>
+    </a></li>
+    <li><a href="11/">
+      <span class="num">11</span><span class="name">Grant modal — capability explanations</span>
+      <span class="desc">Always-visible explanation sub-lines under every capability (superseded by 12's (?) toggle).</span>
+    </a></li>
+    <li><a href="10/">
+      <span class="num">10</span><span class="name">Project identity — custom hue + image upload</span>
+      <span class="desc">Custom-hue slider (live preview, pinned to the brand oklch formula so any hue stays on-palette) and image upload (shown in header avatar and rail tile, removable) alongside monogram, preset hues and glyphs. Priority: image &gt; glyph &gt; monogram.</span>
+    </a></li>
+    <li><a href="9/">
+      <span class="num">9</span><span class="name">Jump index on every settings surface</span>
+      <span class="desc">The sticky jump index (decided for Account &amp; security) generalized via one shared helper: project settings (Identity · Metadata · Access), members (Who can…? · Members), instance administration (Organizations · Settings · Keys &amp; crypto · Instances).</span>
+    </a></li>
+    <li><a href="8/">
+      <span class="num">8</span><span class="name">Shape role-scale baked in · Codex placement audit</span>
+      <span class="desc">Shape decided: c, the role scale — containers 6px / controls 4px / badges 3px, the 999px pill reserved for org circles, count badges and matrix cell states (DESIGN.md amended). Codex audit findings on pill/button/interaction placement implemented.</span>
+    </a></li>
+    <li><a href="7/">
+      <span class="num">7</span><span class="name">Account layout c locked · four shape treatments</span>
+      <span class="desc">Account layout decided: c, the sticky jump index. New exploration app-wide via <code>?shape=</code>: <b>a</b> baseline (soft radii + pills) · <b>b</b> squared — everything 2px, pills become rectangles · <b>c</b> role scale — containers 6px / controls 4px / badges 3px, 999px reserved for org circles + count badges + matrix cell states · <b>d</b> flat — de-carded hairline-ruled sections, tags as colored mono text, radius only on overlays.</span>
+    </a></li>
+    <li><a href="6/">
+      <span class="num">6</span><span class="name">Account & security — five layout approaches</span>
+      <span class="desc">Added Profile (email = delivery only) and Preferences (theme, expiry-warning transports, always-on security alerts). Five structural layouts for the account surface via bottom bar / ← → / <code>?account=</code>: <b>a</b> tabs · <b>b</b> side-panel nav · <b>c</b> sticky jump index · <b>d</b> accordion with live summary lines · <b>e</b> overview tiles with drill-in.</span>
+    </a></li>
+    <li><a href="5/">
+      <span class="num">5</span><span class="name">Grant modal — capability checklist</span>
+      <span class="desc">New-grant modal takes a capability checklist instead of a single select: any number at once, each checked capability landing as its own revocable grant line (what role templates do with a preset checklist); empty selection refused; the org-scope blast warning enumerates the checked capabilities as separate lines.</span>
+    </a></li>
+    <li><a href="4/">
+      <span class="num">4</span><span class="name">Verdicts applied — rail owns orgs; instance surface with CLI↔UI parity</span>
+      <span class="desc">Org placement decided: variant A (rail monograms above projects, drawer org section on mobile) — switcher and variants b/c removed. Instance administration decided into the v1 UI with full CLI↔UI parity (every row shows its CLI-verb twin; the SystemProof local set stays UI-less by locked ADR). Plus a "Connected instances" exploration card (Portainer-style main instance) feeding its own wayfinder ticket.</span>
+    </a></li>
+    <li><a href="3/">
+      <span class="num">3</span><span class="name">Org variants differentiated on mobile</span>
+      <span class="desc">a = drawer owns orgs · b = compact crumb + full-width sheet with scrim · c = header monogram opens full-screen overlay; single-row mobile header.</span>
+    </a></li>
+    <li><a href="2/">
+      <span class="num">2</span><span class="name">Merged sidebar, mobile org switching, grouped members, invites</span>
+      <span class="desc">Round-1 feedback: the side panel is now the env-matrix-31 panel (condensed real matrix + group/problem rows) so chrome and matrix share ONE sidebar; the mobile drawer carries an organizations section in every variant (a/b/c converge on phones) and variant b's popover becomes a full-width sheet; members grouped one row per (member, scope) with individually revocable capability chips; org-level invite flow (binds to capability set, email is delivery only, pending invites revocable).</span>
+    </a></li>
+    <li><a href="1/">
+      <span class="num">1</span><span class="name">Baseline — three org-placement shapes + all five surfaces</span>
+      <span class="desc">Org placement via bottom bar / ← → / <code>?variant=</code>: <b>a</b> rail owns orgs (monograms above projects) · <b>b</b> crumb owns org (breadcrumb popover) · <b>c</b> Slack-style org overlay. Persona simulator shows "unauthorized ≡ nonexistent": single-org users get zero org chrome, sam (external) sees one project. Surfaces: account (sessions browser vs CLI, factors, display-once recovery codes, passkey-only preconditions, identity linking), members &amp; grants (per-line revoke, who-can-do-what inspection, org-scope blast-radius warning), project settings (hue + optional glyph over monogram), instance admin (option A/B question posed in-UI). Blue "confirm it's you" step-up deliberately distinct from the teal reveal ceremony.</span>
+    </a></li>
+  </ul>
+  <footer>every change is a new numbered iteration — published ones never mutate · <a href="../env-matrix/31/">env-matrix reference (frozen)</a></footer>
+</body>
+</html>

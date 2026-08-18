@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE — Hikyo machine access (ticket #31)</title>
+<!--
+  THROWAWAY PROTOTYPE — wayfinder ticket #31, iteration 1.
+
+  Question: how do the workload-integration setup and service-account /
+  credential screens look and behave — against the locked machine-identity
+  (#17), Compose (#18) and Kubernetes (#19) ADRs, in the env-matrix-31
+  design language with the app-chrome reference chrome (15+16+18) and the
+  #21 ceremony vocabulary.
+
+  Three STRUCTURAL variants, switchable via ?variant= / floating bar / arrows:
+    a — inventory: tabbed admin console (Service accounts / Federation /
+        Kubernetes targets), expandable credential sub-rows.
+    b — journey board: one card per SA organized around the five-step
+        journey (#18); the failing step speaks in the CLI/CR-condition
+        voice verbatim.
+    c — master-detail: compact SA list left, detail pane right with the
+        sticky jump index (app-chrome it9 pattern).
+
+  Shared: scenario simulator (normal / expiring / post-restore — the last
+  swaps the surface into the #17 restore-reconciliation screen), display-once
+  mint ceremony, grant-mutation warning naming the newly-reachable plaintext
+  set, per-project machine-reveal opt-in warning, federation binding form
+  with the pull_request refusal, K8s CR-condition vocabulary reading the
+  same in kubectl and the UI.
+-->
+<style>
+  :root{
+    --mono:ui-monospace,monospace;
+    --sans:system-ui,sans-serif;
+    --bg:oklch(0.19 0.012 220);
+    --bg2:oklch(0.225 0.014 220);
+    --bg3:oklch(0.27 0.016 220);
+    --line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);
+    --tx-dim:oklch(0.76 0.01 210);
+    --tx-faint:oklch(0.71 0.012 215);
+    --accent:oklch(0.82 0.09 195);
+    --on-accent:oklch(0.2 0.02 220);
+    --accent-soft:oklch(0.82 0.09 195/.14);
+    --bad:oklch(0.74 0.13 25);
+    --bad-soft:oklch(0.74 0.13 25/.14);
+    --warn:oklch(0.82 0.11 85);
+    --warn-soft:oklch(0.82 0.11 85/.14);
+    --ok:oklch(0.8 0.1 155);
+    --ok-soft:oklch(0.8 0.1 155/.14);
+    --stepup:oklch(0.78 0.09 250);          /* blue "confirm it's you" — #21/#29 */
+    --stepup-soft:oklch(0.78 0.09 250/.14);
+    --rowalt:oklch(0.93 0.008 200/.045);
+    --sheet-shadow:0 12px 40px oklch(0 0 0/.5);
+  }
+  [data-theme=light]{
+    --bg:oklch(0.965 0.008 200);
+    --bg2:oklch(0.935 0.01 200);
+    --bg3:oklch(0.895 0.012 200);
+    --line:oklch(0.82 0.014 210);
+    --tx:oklch(0.25 0.03 225);
+    --tx-dim:oklch(0.4 0.025 220);
+    --tx-faint:oklch(0.46 0.02 218);
+    --accent:oklch(0.45 0.085 210);
+    --on-accent:oklch(0.97 0.008 200);
+    --accent-soft:oklch(0.45 0.085 210/.1);
+    --bad:oklch(0.48 0.14 30);
+    --bad-soft:oklch(0.48 0.14 30/.1);
+    --warn:oklch(0.55 0.12 80);
+    --warn-soft:oklch(0.55 0.12 80/.12);
+    --ok:oklch(0.5 0.11 155);
+    --ok-soft:oklch(0.5 0.11 155/.12);
+    --stepup:oklch(0.48 0.1 255);
+    --stepup-soft:oklch(0.48 0.1 255/.12);
+    --rowalt:oklch(0.25 0.03 225/.07);
+    --sheet-shadow:0 12px 40px oklch(0.3 0.02 220/.25);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px;
+    -webkit-font-smoothing:antialiased;height:100dvh;display:flex;flex-direction:column;
+    overflow:hidden;padding-bottom:env(safe-area-inset-bottom)}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  input,select{font:inherit}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  :is(button,select,input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  code,.mono{font-family:var(--mono)}
+
+  /* ---------- app shell (app-chrome 15/18e, simplified) ---------- */
+  #app{display:grid;grid-template-columns:56px 218px 1fr;height:100dvh;overflow:hidden}
+  #rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 0 12px;
+    border-right:1px solid var(--line);background:var(--bg2)}
+  .orgav{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:11px;background:var(--bg3);outline:2px solid var(--accent);outline-offset:2px}
+  .raildiv{width:26px;border-top:1px solid var(--line);margin:4px 0}
+  .pav{width:36px;height:36px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:12px;color:var(--tx-dim);border:1px solid transparent}
+  .pav.act{background:var(--accent);color:var(--on-accent)}
+  #rail .spacer{flex:1}
+  #rail .me{width:36px;height:36px;border-radius:50%;background:var(--bg3);color:var(--tx);
+    font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center}
+
+  #side{display:flex;flex-direction:column;overflow-y:auto;border-right:1px solid var(--line);
+    background:var(--bg2);padding:6px 0 20px}
+  #side .stitle{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--tx-faint);
+    padding:30px 16px 6px;font-weight:700}
+  #side .stitle:first-child{padding-top:16px}
+  /* sidebar treatment e (locked, app-chrome 18): sub-items on hairline left rule */
+  #side .srow{display:flex;align-items:center;gap:8px;text-align:left;font-size:13px;color:var(--tx-dim);
+    min-height:38px;padding:9px 16px 9px 13px;margin-left:19px;width:calc(100% - 19px);
+    border-left:1px solid oklch(from var(--line) l c h/.75)}
+  #side .srow:hover{color:var(--tx);background:var(--bg3)}
+  #side .srow.act{color:var(--tx);background:var(--accent-soft);font-weight:600;border-left-color:var(--accent)}
+  #side .srow .cnt{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+
+  #main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+  #hdr{display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid var(--line);flex:none}
+  #hdr .crumb{font-size:14px;font-weight:600;display:flex;align-items:baseline;gap:8px;min-width:0}
+  #hdr .crumb .sep{color:var(--tx-faint);font-weight:400}
+  #hdr .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .hsel{background:var(--bg2);border:1px solid var(--line);border-radius:4px;color:var(--tx);
+    font-size:12px;padding:6px 8px}
+  .hbtn{border:1px solid var(--line);border-radius:4px;padding:6px 10px;font-size:12px;color:var(--tx-dim)}
+  .hbtn:hover{color:var(--tx);border-color:var(--tx-faint)}
+  #content{flex:1;overflow-y:auto;padding:22px 22px 96px}
+
+  /* ---------- shared bits ---------- */
+  .kind{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;font-weight:600;border-radius:3px;
+    padding:2.5px 7px;white-space:nowrap;border:1px solid var(--line);color:var(--tx-dim)}
+  .kind.workload{color:var(--accent);border-color:oklch(from var(--accent) l c h/.5);background:var(--accent-soft)}
+  .kind.automation{color:var(--stepup);border-color:oklch(from var(--stepup) l c h/.5);background:var(--stepup-soft)}
+  .envchip{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border-radius:3px;
+    padding:2px 7px;color:var(--tx-dim);white-space:nowrap}
+  .envchip.reveal{border-color:oklch(from var(--accent) l c h/.6);color:var(--accent)}
+  .envchip.reveal::after{content:" ◆";font-size:9px}
+  .badge{font-family:var(--mono);font-size:10px;font-weight:600;border-radius:3px;padding:2px 7px;white-space:nowrap}
+  .badge.ok{color:var(--ok);background:var(--ok-soft)}
+  .badge.warn{color:var(--warn);background:var(--warn-soft)}
+  .badge.bad{color:var(--bad);background:var(--bad-soft)}
+  .badge.dim{color:var(--tx-faint);border:1px solid var(--line)}
+  .badge.dead{color:var(--bad);border:1px solid oklch(from var(--bad) l c h/.5);text-decoration:line-through}
+  .btn{border:1px solid var(--line);border-radius:4px;padding:7px 13px;font-size:12.5px;font-weight:500;color:var(--tx-dim)}
+  .btn:hover{color:var(--tx);border-color:var(--tx-faint)}
+  .btn.pri{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600}
+  .btn.pri:hover{filter:brightness(1.06)}
+  .btn.danger{color:var(--bad);border-color:oklch(from var(--bad) l c h/.5)}
+  .btn.stepup{background:var(--stepup);color:var(--bg);border-color:transparent;font-weight:600}
+  .btn.sm{padding:4px 9px;font-size:11.5px}
+  .note{font-size:12px;color:var(--tx-dim);line-height:1.55}
+  .note.faint{color:var(--tx-faint);font-size:11.5px}
+  .callout{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:6px;
+    padding:12px 14px;font-size:12.5px;line-height:1.55;color:var(--tx-dim);background:var(--bg2)}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.bad{border-left-color:var(--bad)}
+  .callout.stepup{border-left-color:var(--stepup)}
+  .callout code{font-size:11.5px;color:var(--tx)}
+  .keyset{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .keyset code{border:1px solid var(--line);border-radius:3px;padding:2px 7px;font-size:11px;background:var(--bg3)}
+
+  /* condition chips (K8s CR vocabulary) */
+  .cond{font-family:var(--mono);font-size:10px;font-weight:600;border-radius:3px;padding:2.5px 8px;
+    white-space:nowrap;cursor:pointer;border:1px solid transparent}
+  .cond.ok{color:var(--ok);background:var(--ok-soft)}
+  .cond.bad{color:var(--bad);background:var(--bad-soft)}
+  .cond.warn{color:var(--warn);background:var(--warn-soft)}
+  .cond:hover{border-color:currentColor}
+
+  /* ---------- variant a: inventory ---------- */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px}
+  .tab{padding:9px 16px;font-size:13px;color:var(--tx-dim);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab:hover{color:var(--tx)}
+  .tab.act{color:var(--tx);font-weight:600;border-bottom-color:var(--accent)}
+  .tab .cnt{font-family:var(--mono);font-size:10.5px;color:var(--tx-faint);margin-left:6px}
+  table.inv{width:100%;border-collapse:collapse;font-size:13px}
+  table.inv th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--tx-faint);font-weight:700;padding:8px 10px;border-bottom:1px solid var(--line)}
+  table.inv td{padding:10px;border-bottom:1px solid oklch(from var(--line) l c h/.5);vertical-align:middle}
+  table.inv tr.sarow{cursor:pointer}
+  table.inv tr.sarow:hover td{background:var(--rowalt)}
+  table.inv tr.sub td{background:oklch(from var(--bg2) l c h/.6);font-size:12.5px;padding:8px 10px 8px 26px}
+  .chev{display:inline-block;transition:transform .15s;color:var(--tx-faint);margin-right:8px;font-size:10px}
+  .open .chev{transform:rotate(90deg)}
+  .cell-envs{display:flex;flex-wrap:wrap;gap:5px}
+
+  /* ---------- variant b: journey board ---------- */
+  .board{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .jcard{border:1px solid var(--line);border-radius:6px;background:var(--bg2);padding:16px;display:flex;flex-direction:column;gap:12px}
+  .jcard .jhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .jcard .jhead .nm{font-weight:600;font-size:14.5px;font-family:var(--mono)}
+  .steps{display:flex;flex-direction:column;gap:0}
+  .step{display:flex;gap:12px;position:relative;padding:7px 0}
+  .step .dot{width:18px;height:18px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;border:1.5px solid var(--line);color:var(--tx-faint);background:var(--bg);z-index:1;margin-top:1px}
+  .step.done .dot{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+  .step.fail .dot{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+  .step.next .dot{border-color:var(--accent);color:var(--accent)}
+  .step:not(:last-child)::before{content:'';position:absolute;left:8.5px;top:26px;bottom:-8px;width:1px;
+    background:oklch(from var(--line) l c h/.75)}
+  .step .stx{font-size:12.5px;color:var(--tx-dim);line-height:1.45;min-width:0}
+  .step.done .stx{color:var(--tx-faint)}
+  .step.fail .stx,.step.next .stx{color:var(--tx)}
+  .step .stx .who{font-family:var(--mono);font-size:10px;color:var(--tx-faint)}
+  .errblock{font-family:var(--mono);font-size:11px;line-height:1.6;background:var(--bg);
+    border:1px solid oklch(from var(--bad) l c h/.4);border-radius:4px;padding:10px 12px;margin-top:6px;
+    color:var(--tx-dim);white-space:pre-wrap;word-break:break-word}
+  .errblock b{color:var(--bad);font-weight:600}
+  .jcard .credline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--tx-dim)}
+  .jcard .tgts{display:flex;flex-direction:column;gap:6px}
+  .jcard .tgt{display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap}
+  .jcard .tgt code{font-size:11px;color:var(--tx-dim)}
+
+  /* ---------- variant c: master-detail ---------- */
+  .md{display:grid;grid-template-columns:250px 1fr;gap:0;border:1px solid var(--line);border-radius:6px;
+    overflow:hidden;min-height:calc(100dvh - 190px)}
+  .mdlist{border-right:1px solid var(--line);background:var(--bg2);overflow-y:auto}
+  .mdrow{display:flex;flex-direction:column;gap:4px;width:100%;text-align:left;padding:12px 14px;
+    border-bottom:1px solid oklch(from var(--line) l c h/.5)}
+  .mdrow:hover{background:var(--bg3)}
+  .mdrow.act{background:var(--accent-soft)}
+  .mdrow .r1{display:flex;align-items:center;gap:8px}
+  .mdrow .r1 .nm{font-family:var(--mono);font-size:12.5px;font-weight:600}
+  .mdrow .r2{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .mddetail{padding:18px 22px;overflow-y:auto}
+  .jump{position:sticky;top:-18px;margin:-18px -22px 14px;padding:12px 22px;background:var(--bg);
+    border-bottom:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;z-index:5}
+  .jchip{font-size:11.5px;border:1px solid var(--line);border-radius:3px;padding:4px 10px;color:var(--tx-dim)}
+  .jchip:hover{color:var(--tx);border-color:var(--tx-faint)}
+  .dsec{margin:0 0 26px}
+  .dsec h3{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--tx-faint);margin-bottom:10px}
+  .kv{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:12.5px}
+  .kv dt{color:var(--tx-faint)}
+  .kv dd{color:var(--tx);font-family:var(--mono);font-size:12px}
+
+  /* credential rows (shared a-sub/c) */
+  .credrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 0;
+    border-bottom:1px solid oklch(from var(--line) l c h/.4);font-size:12.5px}
+  .credrow:last-child{border-bottom:none}
+  .credrow code.pfx{font-size:11.5px;color:var(--tx)}
+  .credrow .meta{color:var(--tx-faint);font-size:11.5px}
+  .credrow .acts{margin-left:auto;display:flex;gap:6px}
+
+  /* binding rows */
+  .bindrow{border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:10px;background:var(--bg2)}
+  .bindrow .b1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .bindrow .kv{grid-template-columns:90px 1fr}
+
+  /* section headers on the surface */
+  .shead{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}
+  .shead h2{font-size:16px;font-weight:700}
+  .shead .right{margin-left:auto;display:flex;gap:8px}
+  .policy{border:1px solid var(--line);border-radius:6px;background:var(--bg2);padding:14px 16px;
+    display:flex;align-items:flex-start;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+  .policy .ptx{flex:1;min-width:240px}
+  .policy .ptx .t{font-weight:600;font-size:13px;margin-bottom:3px}
+  .toggle{width:40px;height:22px;border-radius:999px;border:1px solid var(--line);background:var(--bg3);
+    position:relative;flex:none;margin-top:2px}
+  .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;
+    background:var(--tx-faint);transition:left .15s,background .15s}
+  .toggle.on{background:var(--accent-soft);border-color:var(--accent)}
+  .toggle.on::after{left:20px;background:var(--accent)}
+
+  /* ---------- restore reconciliation ---------- */
+  .recban{border:1px solid oklch(from var(--bad) l c h/.55);background:var(--bad-soft);border-radius:6px;
+    padding:14px 16px;margin-bottom:18px;font-size:13px;line-height:1.55}
+  .recban b{color:var(--bad)}
+  .recrow{border:1px solid var(--line);border-radius:6px;background:var(--bg2);padding:14px 16px;margin-bottom:12px}
+  .recrow .r1{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .recrow .r1 .nm{font-family:var(--mono);font-weight:600;font-size:13.5px}
+  .recrow ul{list-style:none;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--tx-dim);margin:6px 0 10px}
+  .recrow li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .recrow.done{border-color:oklch(from var(--ok) l c h/.5)}
+
+  /* ---------- modal ---------- */
+  #ovl{position:fixed;inset:0;background:oklch(0 0 0/.55);display:none;align-items:center;justify-content:center;
+    z-index:40;padding:18px}
+  #ovl.show{display:flex}
+  #modal{background:var(--bg);border:1px solid var(--line);border-radius:6px;box-shadow:var(--sheet-shadow);
+    width:min(560px,100%);max-height:88dvh;display:flex;flex-direction:column}
+  #modal .mh{padding:16px 20px 0}
+  #modal .mh h3{font-size:15px;font-weight:700}
+  #modal .mh .sub{font-size:12px;color:var(--tx-faint);margin-top:3px}
+  #modal .mb{padding:14px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+  #modal .mf{padding:12px 20px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line)}
+  .tokbox{font-family:var(--mono);font-size:12.5px;background:var(--bg2);border:1px solid var(--accent);
+    border-radius:4px;padding:14px;word-break:break-all;line-height:1.6;color:var(--tx)}
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-faint);font-weight:700}
+  .field input,.field select{background:var(--bg2);border:1px solid var(--line);border-radius:4px;
+    color:var(--tx);padding:8px 10px;font-size:13px;width:100%}
+  .field input.mono{font-family:var(--mono);font-size:12px}
+  .chk{display:flex;gap:10px;align-items:flex-start;font-size:12.5px;color:var(--tx-dim);line-height:1.5;cursor:pointer}
+  .chk input{margin-top:2px;accent-color:var(--accent)}
+  .presets{display:flex;gap:6px;flex-wrap:wrap}
+  .preset{font-size:11.5px;border:1px solid var(--line);border-radius:3px;padding:4px 10px;color:var(--tx-dim)}
+  .preset:hover{border-color:var(--accent);color:var(--tx)}
+  .yaml{font-family:var(--mono);font-size:11px;line-height:1.65;background:var(--bg2);border:1px solid var(--line);
+    border-radius:4px;padding:12px 14px;white-space:pre-wrap;word-break:break-word;color:var(--tx-dim)}
+  .yaml .k{color:var(--accent)}
+  .yaml .bad{color:var(--bad)}
+
+  /* toast */
+  #toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);background:var(--bg3);
+    border:1px solid var(--line);border-radius:6px;padding:10px 16px;font-size:12.5px;display:none;z-index:60;
+    box-shadow:var(--sheet-shadow)}
+  #toast.show{display:block}
+
+  /* ---------- floating variant bar ---------- */
+  #vbar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:4px;
+    background:var(--bg3);border:1px solid var(--tx-faint);border-radius:999px;padding:5px 8px;z-index:50;
+    box-shadow:var(--sheet-shadow);font-size:12px}
+  #vbar button{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    color:var(--tx-dim);font-size:14px}
+  #vbar button:hover{background:var(--bg2);color:var(--tx)}
+  #vbar .lbl{font-family:var(--mono);font-size:11px;padding:0 8px;min-width:150px;text-align:center;color:var(--tx)}
+
+  @media (max-width:860px){
+    #app{grid-template-columns:56px 1fr}
+    #side{display:none}
+    .md{grid-template-columns:1fr}
+    .mdlist{max-height:200px;border-right:none;border-bottom:1px solid var(--line)}
+    .board{grid-template-columns:1fr}
+    .kv{grid-template-columns:120px 1fr}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="rail" aria-label="Organizations and projects">
+    <div class="orgav" title="example.com">WI</div>
+    <div class="raildiv"></div>
+    <div class="pav act" title="example-app">DB</div>
+    <div class="pav" title="sample-catalog">PT</div>
+    <div class="spacer"></div>
+    <div class="me" title="Alex">MW</div>
+  </nav>
+  <nav id="side" aria-label="Project sections">
+    <div class="stitle">example-app</div>
+    <button class="srow">Environment matrix</button>
+    <button class="srow">Version history</button>
+    <button class="srow act">Machine access <span class="cnt" id="side-cnt">5</span></button>
+    <button class="srow">Project settings</button>
+    <div class="stitle">Organization</div>
+    <button class="srow">Members &amp; grants</button>
+    <button class="srow">Org settings</button>
+  </nav>
+  <div id="main">
+    <header id="hdr">
+      <div class="crumb"><span>example-app</span><span class="sep">/</span><span>Machine access</span></div>
+      <div class="right">
+        <label class="note faint" for="scen">scenario</label>
+        <select id="scen" class="hsel" aria-label="Scenario simulator">
+          <option value="normal">normal</option>
+          <option value="expiring">expiring credentials</option>
+          <option value="restore">post-restore</option>
+        </select>
+        <button class="hbtn" id="themebtn" aria-label="Toggle theme">◐</button>
+      </div>
+    </header>
+    <div id="content"></div>
+  </div>
+</div>
+
+<div id="ovl" role="dialog" aria-modal="true"><div id="modal"></div></div>
+<div id="toast" role="status"></div>
+
+<div id="vbar" aria-label="Prototype variant switcher">
+  <button id="vprev" aria-label="Previous variant">←</button>
+  <div class="lbl" id="vlbl"></div>
+  <button id="vnext" aria-label="Next variant">→</button>
+</div>
+
+<script>
+/* ============ demo data (in-memory only — PROTOTYPE) ============ */
+const ENV_SECRETS = { // secret keys per environment — the "newly reachable plaintext set"
+  production:['DATABASE_URL','SMTP_PASSWORD','S3_SECRET_KEY','SESSION_PEPPER'],
+  staging:['DATABASE_URL','S3_SECRET_KEY'],
+  development:['DATABASE_URL'],
+};
+const state = {
+  variant:'a', tab:'sa', scenario:'normal', selected:'k3s-cluster', openRows:{},
+  revealOptIn:true,          // per-project machine-reveal opt-in (#18)
+  reactivated:{},            // restore scenario
+  minted:{},                 // sa -> fresh cred minted post-restore
+};
+const SAS = [
+  {id:'api-workload', kind:'workload', created:'2026-07-02', read:['production'], reveal:['production'],
+   creds:[{pfx:'hik_1_wl_9fK2mQ', created:'2026-07-02', expiry:'2026-10-01', days:57, last:'2 min ago'}],
+   bindings:[], targets:[]},
+  {id:'staging-runner', kind:'workload', created:'2026-06-18', read:['staging'], reveal:['staging'],
+   creds:[{pfx:'hik_1_wl_x7Rq0d', created:'2026-06-18', expiry:'2026-08-19', days:14, last:'41 min ago'},
+          {pfx:'hik_1_wl_p2Vn8s', created:'2026-08-01', expiry:'2026-11-01', days:88, last:'never'}],
+   bindings:[], targets:[]},
+  {id:'worker-beta', kind:'workload', created:'2026-08-04', read:['staging'], reveal:[],
+   creds:[{pfx:'hik_1_wl_c4Ht2z', created:'2026-08-04', expiry:'2026-11-04', days:91, last:'6 min ago'}],
+   bindings:[], targets:[]},
+  {id:'k3s-cluster', kind:'workload', created:'2026-05-30', read:['production','staging'], reveal:['production'],
+   creds:[],
+   bindings:[{issuer:'https://kubernetes.default.svc.cluster.local',
+              subject:'system:serviceaccount:hikyo-system:hikyo-fetch',
+              audience:'hikyo.example.com/main', expiry:'2026-11-30', days:117}],
+   targets:[
+     {name:'apps/api-env', ns:'apps', envK:'production',
+      conds:[{t:'Synced', s:'ok', reason:'converged@rev41'},{t:'RolloutRequested', s:'ok', reason:'Completed'}]},
+     {name:'apps/worker-env', ns:'apps', envK:'staging',
+      conds:[{t:'SyncRefused', s:'bad', reason:'UndeliverableKeys'}]},
+     {name:'batch/report-env', ns:'batch', envK:'staging',
+      conds:[{t:'SyncRefused', s:'bad', reason:'LoaderControlAckRequired'}]},
+     {name:'apps/api-env (canary)', ns:'apps', envK:'production',
+      conds:[{t:'Synced', s:'ok', reason:'converged@rev41'},{t:'RolloutRequested', s:'warn', reason:'Stalled'}]},
+     {name:'legacy/import-env', ns:'legacy', envK:'staging',
+      conds:[{t:'NotReconciled', s:'bad', reason:'DesignationMissing'}]},
+   ]},
+  {id:'ci-export', kind:'automation', created:'2026-06-01', read:['production'], reveal:[], caps:['read','audit-read'],
+   creds:[{pfx:'hik_1_au_m3Wb5k', created:'2026-06-01', expiry:'2026-09-01', days:27, last:'3 h ago'}],
+   bindings:[{issuer:'https://token.actions.githubusercontent.com',
+              subject:'repo:example-user/example-app:ref:refs/heads/main',
+              audience:'hikyo.example.com/main', expiry:'2026-08-07', days:2}],
+   targets:[]},
+];
+const CONDS = { // CR-condition vocabulary (#19) — kubectl YAML + the same sentence as UI copy
+  'UndeliverableKeys':{sev:'bad', ui:(sa,t)=>`Nothing was synced: the resolved manifest contains secret keys this service account cannot reveal. Delivery is all-or-nothing — partial sync would surface as the application's own crash three layers away.`,
+    keys:['DATABASE_URL','S3_SECRET_KEY'],
+    fix:`Grant <code>reveal(staging)</code> to <code>k3s-cluster</code> — requires <code>manage-identities(example-app)</code> ∧ <code>reveal</code> over the whole post-state, plus reauthentication.`,
+    yaml:(t)=>`status:
+  conditions:
+  - type: <span class="k">SyncRefused</span>
+    status: "True"
+    reason: <span class="bad">UndeliverableKeys</span>
+    message: >-
+      refusing to sync: manifest contains secret occurrences this
+      principal cannot reveal: DATABASE_URL, S3_SECRET_KEY.
+      delivery is all-or-nothing. required: machine-reveal opt-in
+      on project example-app + reveal(staging) on service account
+      k3s-cluster.`},
+  'LoaderControlAckRequired':{sev:'bad', ui:()=>`The mapping delivers <code>PATH</code>, a key on the loader-control baseline. The refusal is enforced at delivery, consumption-agnostic — even a volume-mount-only Secret needs the acknowledgement, because delivery time cannot know how a key is consumed.`,
+    keys:['PATH'],
+    fix:`Add the acknowledgement to the <code>HikyoSecret</code> listing exactly these keys. The acknowledged list is carried on the fetch and recorded in Hikyo's audit event (#24) — regardless of cluster audit posture.`,
+    yaml:()=>`status:
+  conditions:
+  - type: <span class="k">SyncRefused</span>
+    status: "True"
+    reason: <span class="bad">LoaderControlAckRequired</span>
+    message: >-
+      mapping delivers loader-control baseline key: PATH.
+      add spec.loaderControlAck listing exactly these keys.
+      the acknowledged list is carried on every fetch and
+      recorded in the server audit log.`},
+  'Stalled':{sev:'warn', ui:()=>`The Secret is delivered and current, but the workload controller has not completed the rollout — this Deployment is paused. Delivered-but-not-rolled is a visible state, never a silent success; the operator claims completion only from the workload controller's own status.`,
+    keys:[], fix:`Resume the Deployment (<code>kubectl rollout resume</code>), or accept that pods roll on the next controller-driven restart.`,
+    yaml:()=>`status:
+  conditions:
+  - type: <span class="k">RolloutRequested</span>
+    status: "False"
+    reason: <span class="bad">Stalled</span>
+    message: >-
+      secret delivered (converged@rev41) but deployment
+      apps/api-canary is paused; rollout has not completed.
+      completion is claimed only from the workload
+      controller's own status.`},
+  'DesignationMissing':{sev:'bad', ui:()=>`The referenced bootstrap Secret is not designated for Hikyo delivery use. Designation is an act by someone holding <b>write</b> on that Secret — a strictly greater right than reading it — and must name the <code>HikyoInstance</code> it may be presented to.`,
+    keys:[], fix:`Label the bootstrap Secret with the designation naming <code>HikyoInstance/main</code> (spelling per #25), applied by a principal with write on the Secret.`,
+    yaml:()=>`status:
+  conditions:
+  - type: <span class="k">NotReconciled</span>
+    status: "True"
+    reason: <span class="bad">DesignationMissing</span>
+    message: >-
+      referenced Secret legacy/hikyo-bootstrap is not
+      designated for hikyo delivery use, or its designation
+      does not name HikyoInstance/main. designate it with
+      write authority on the Secret.`},
+};
+
+/* ============ helpers ============ */
+const $=s=>document.querySelector(s);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3200)}
+function expiryBadge(days,label){ // in-product-first expiry signal (#17)
+  const hot=state.scenario==='expiring';
+  const d=hot?Math.max(1,Math.round(days/7)):days;
+  if(d<=7) return `<span class="badge bad">expires in ${d}d</span>`;
+  if(d<=30) return `<span class="badge warn">expires in ${d}d</span>`;
+  return `<span class="badge dim">${label||'expires'} ${d}d</span>`;
+}
+function journey(sa){ // five-step journey state (#18)
+  const s=[];
+  s.push({t:`Service account minted <span class="who">kind: ${sa.kind} — immutable at creation</span>`, st:'done'});
+  s.push({t:`<code>read</code> granted — ${sa.read.map(e=>`<code>${e}</code>`).join(', ')} <span class="who">delivers config + secret-presence only</span>`, st:sa.read.length?'done':'next'});
+  const missing=sa.read.filter(e=>!sa.reveal.includes(e));
+  const failing=missing.length&&sa.kind==='workload';
+  s.push({t:failing?`Delivery fails, naming what it could not deliver`:`First delivery succeeded`, st:failing?'fail':'done',
+    err:failing?(sa.targets.length?`HikyoSecret apps/worker-env — SyncRefused
+<b>reason:</b> UndeliverableKeys
+manifest contains secret occurrences this principal
+cannot reveal: ${ENV_SECRETS[missing[0]].join(', ')}
+delivery is all-or-nothing; nothing was synced.
+required: reveal(${missing[0]}) on ${sa.id}`
+:`$ hikyo run --project example-app --env ${missing[0]} -- node worker.js
+<b>refused:</b> manifest contains secret occurrences this principal
+cannot reveal: ${ENV_SECRETS[missing[0]].join(', ')}
+delivery is all-or-nothing; nothing was started.
+required: reveal(${missing[0]}) on ${sa.id}`):null});
+  s.push({t:`Project machine-reveal opt-in ${state.revealOptIn?'acknowledged':'<b>not acknowledged</b>'} <span class="who">a credential holding reveal is a standing decryption capability</span>`, st:state.revealOptIn?'done':(failing?'next':'done')});
+  s.push({t:missing.length?`Grant <code>reveal</code> on ${missing.map(e=>`<code>${e}</code>`).join(', ')} <span class="who">manage-identities ∧ reveal over the post-state + reauth</span>`:`<code>reveal</code> granted — full delivery`, st:missing.length?(state.revealOptIn?'next':''):'done'});
+  return s;
+}
+function credRow(sa,c){
+  return `<div class="credrow">
+    <code class="pfx">${c.pfx}…</code>
+    <span class="badge dim">bearer</span>
+    ${expiryBadge(c.days)}
+    <span class="meta">created ${c.created} · last used ${c.last}</span>
+    <span class="acts">
+      <button class="btn sm" onclick="openMint('${sa.id}',true)">Rotate</button>
+      <button class="btn sm danger" onclick="toast('Revoked — bites at the next fetch, never at expiry (#15). Undo…')">Revoke</button>
+    </span>
+  </div>`;
+}
+function bindRow(sa,b){
+  return `<div class="bindrow">
+    <div class="b1"><span class="badge dim">federated</span>${expiryBadge(b.days,'binding expires')}
+      <span class="note faint">byte-for-byte match — no wildcards, no case folding · renewal is a mint</span></div>
+    <dl class="kv">
+      <dt>issuer</dt><dd>${b.issuer}</dd>
+      <dt>subject</dt><dd>${b.subject}</dd>
+      <dt>audience</dt><dd>${b.audience}</dd>
+    </dl>
+  </div>`;
+}
+function condChips(sa,t){
+  return t.conds.map(c=>{
+    const key=CONDS[c.reason]?c.reason:null;
+    return `<span class="cond ${c.s}" ${key?`onclick="openCond('${sa.id}','${esc(t.name)}','${key}')"`:''} role="${key?'button':'status'}">${c.t}: ${c.reason}</span>`;
+  }).join(' ');
+}
+
+/* ============ variant a — inventory ============ */
+function renderA(){
+  const tabs=`<div class="tabs" role="tablist">
+    <button class="tab ${state.tab==='sa'?'act':''}" onclick="state.tab='sa';render()">Service accounts<span class="cnt">${SAS.length}</span></button>
+    <button class="tab ${state.tab==='fed'?'act':''}" onclick="state.tab='fed';render()">Federation<span class="cnt">${SAS.flatMap(s=>s.bindings).length}</span></button>
+    <button class="tab ${state.tab==='k8s'?'act':''}" onclick="state.tab='k8s';render()">Kubernetes targets<span class="cnt">${SAS.flatMap(s=>s.targets).length}</span></button>
+  </div>`;
+  if(state.tab==='sa'){
+    const rows=SAS.map(sa=>{
+      const open=state.openRows[sa.id];
+      const worst=Math.min(...sa.creds.map(c=>c.days),...sa.bindings.map(b=>b.days),999);
+      const miss=sa.read.filter(e=>!sa.reveal.includes(e));
+      const setup=sa.kind!=='workload'?'<span class="badge dim">n/a</span>':
+        miss.length?`<span class="badge bad">step ${state.revealOptIn?5:4} of 5</span>`:'<span class="badge ok">complete</span>';
+      let h=`<tr class="sarow ${open?'open':''}" onclick="state.openRows['${sa.id}']=!${!!open};render()">
+        <td><span class="chev">▶</span><code>${sa.id}</code></td>
+        <td><span class="kind ${sa.kind}">${sa.kind}</span></td>
+        <td><span class="cell-envs">${sa.read.map(e=>`<span class="envchip ${sa.reveal.includes(e)?'reveal':''}">${e}</span>`).join('')}</span></td>
+        <td>${sa.creds.length+sa.bindings.length} ${worst<999?expiryBadge(worst):''}</td>
+        <td class="mono" style="font-size:11.5px;color:var(--tx-faint)">${sa.creds[0]?.last??(sa.bindings.length?'via federation':'—')}</td>
+        <td>${setup}</td></tr>`;
+      if(open){
+        h+=`<tr class="sub"><td colspan="6">
+          ${sa.creds.map(c=>credRow(sa,c)).join('')||'<div class="note faint" style="padding:6px 0">No bearer credentials — authenticates by federation only.</div>'}
+          ${sa.bindings.map(b=>bindRow(sa,b)).join('')}
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn sm pri" onclick="openMint('${sa.id}')">Mint credential</button>
+            <button class="btn sm" onclick="openBinding('${sa.id}')">Add federated binding</button>
+            <button class="btn sm" onclick="openGrant('${sa.id}')">Add environment grant…</button>
+          </div>
+        </td></tr>`;
+      }
+      return h;
+    }).join('');
+    return tabs+policyStrip()+`<table class="inv" aria-label="Service accounts">
+      <thead><tr><th>service account</th><th>kind</th><th>read scope <span style="text-transform:none;letter-spacing:0">(◆ = reveal)</span></th><th>credentials</th><th>last used</th><th>setup</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <p class="note faint" style="margin-top:12px">Credential list is metadata only — prefix, kind, scope, expiry, last-used. Values are write-only: displayed exactly once at mint, never retrievable, rotation never returns the prior value (#17).</p>`;
+  }
+  if(state.tab==='fed'){
+    const rows=SAS.flatMap(sa=>sa.bindings.map(b=>({sa,b})));
+    return tabs+`<div class="shead"><h2>Federated bindings</h2><div class="right"><button class="btn pri" onclick="openBinding('k3s-cluster')">New binding</button></div></div>
+      <p class="note" style="margin-bottom:14px">An external OIDC identity is bound to exactly one service account by a byte-exact <code>(issuer, subject)</code> pair — no wildcards, no JIT provisioning. An unbound identity is not a login. A binding is a standing permission to present tokens and expires on the same terms as a bearer credential; renewal is a mint.</p>
+      ${rows.map(({sa,b})=>`<div class="bindrow"><div class="b1"><code style="font-size:12px;font-weight:600">${sa.id}</code><span class="kind ${sa.kind}">${sa.kind}</span>${expiryBadge(b.days,'binding expires')}</div>
+        <dl class="kv"><dt>issuer</dt><dd>${b.issuer}</dd><dt>subject</dt><dd>${b.subject}</dd><dt>audience</dt><dd>${b.audience}</dd></dl></div>`).join('')}`;
+  }
+  const trows=SAS.flatMap(sa=>sa.targets.map(t=>({sa,t})));
+  return tabs+`<div class="shead"><h2>Kubernetes delivery targets</h2></div>
+    <p class="note" style="margin-bottom:14px">One <code>HikyoSecret</code> per managed Secret. Conditions read the same here and in <code>kubectl describe</code> — click one for both voices.</p>
+    <table class="inv" aria-label="Kubernetes targets"><thead><tr><th>hikyosecret</th><th>service account</th><th>environment</th><th>conditions</th></tr></thead>
+    <tbody>${trows.map(({sa,t})=>`<tr><td><code>${t.name}</code></td><td><code style="font-size:11.5px">${sa.id}</code></td>
+      <td><span class="envchip">${t.envK}</span></td><td style="display:flex;gap:5px;flex-wrap:wrap">${condChips(sa,t)}</td></tr>`).join('')}</tbody></table>`;
+}
+function policyStrip(){
+  return `<div class="policy">
+    <button class="toggle ${state.revealOptIn?'on':''}" role="switch" aria-checked="${state.revealOptIn}" aria-label="Machine reveal opt-in" onclick="openOptIn()"></button>
+    <div class="ptx"><div class="t">Machine secret delivery (per-project opt-in)</div>
+    <div class="note">${state.revealOptIn
+      ?'Acknowledged: workload credentials granted <code>reveal</code> are a standing decryption capability. Fresh service accounts still deliver config + secret-presence only until <code>reveal</code> is granted per account.'
+      :'Off: every workload delivery on this project is config + secret-presence only. <b>hikyo run on a fresh service account delivers no secrets</b> — this is step 4 of the setup journey.'}</div></div>
+  </div>`;
+}
+
+/* ============ variant b — journey board ============ */
+function renderB(){
+  const cards=SAS.map(sa=>{
+    const steps=sa.kind==='workload'?journey(sa):null;
+    return `<div class="jcard">
+      <div class="jhead"><span class="nm">${sa.id}</span><span class="kind ${sa.kind}">${sa.kind}</span>
+        ${sa.caps?`<span class="badge dim">${sa.caps.join(' · ')}</span>`:''}</div>
+      ${steps?`<div class="steps">${steps.map((s,i)=>`
+        <div class="step ${s.st}"><div class="dot">${s.st==='done'?'✓':s.st==='fail'?'✕':i+1}</div>
+        <div class="stx">${s.t}${s.err?`<div class="errblock">${s.err}</div>`:''}
+        ${s.st==='next'&&i===4?`<div style="margin-top:8px"><button class="btn sm pri" onclick="openGrant('${sa.id}',true)">Grant reveal…</button></div>`:''}
+        ${s.st==='next'&&i===3?`<div style="margin-top:8px"><button class="btn sm pri" onclick="openOptIn()">Review opt-in…</button></div>`:''}
+        </div></div>`).join('')}</div>`
+      :`<p class="note">Automation principal — runs off-box on a schedule or in CI. Capability allowlist: <code>${(sa.caps||['read']).join(', ')}</code>; never <code>manage-*</code>, never instance capabilities (#15).</p>`}
+      <div class="credline">
+        ${sa.creds.map(c=>`<code>${c.pfx}…</code> ${expiryBadge(c.days)}`).join(' ')}
+        ${sa.bindings.map(b=>`<span class="badge dim">federated</span> ${expiryBadge(b.days,'binding')}`).join(' ')}
+        ${!sa.creds.length&&!sa.bindings.length?'<span class="note faint">no credentials</span>':''}
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn sm" onclick="openMint('${sa.id}')">Mint</button>
+          <button class="btn sm" onclick="openBinding('${sa.id}')">Bind</button>
+        </span>
+      </div>
+      ${sa.targets.length?`<div class="tgts">${sa.targets.map(t=>`<div class="tgt"><code>${t.name}</code>${condChips(sa,t)}</div>`).join('')}</div>`:''}
+    </div>`;
+  }).join('');
+  return `<div class="shead"><h2>Machine access — setup journeys</h2>
+    <div class="right"><button class="btn pri" onclick="openMint('worker-beta')">New service account</button></div></div>
+    ${policyStrip()}<div class="board">${cards}</div>`;
+}
+
+/* ============ variant c — master-detail ============ */
+function renderC(){
+  const sa=SAS.find(s=>s.id===state.selected)||SAS[0];
+  const miss=sa.read.filter(e=>!sa.reveal.includes(e));
+  const list=SAS.map(s=>{
+    const worst=Math.min(...s.creds.map(c=>c.days),...s.bindings.map(b=>b.days),999);
+    return `<button class="mdrow ${s.id===sa.id?'act':''}" onclick="state.selected='${s.id}';render()">
+      <span class="r1"><span class="nm">${s.id}</span><span class="kind ${s.kind}">${s.kind}</span></span>
+      <span class="r2">${s.read.map(e=>`<span class="envchip ${s.reveal.includes(e)?'reveal':''}">${e}</span>`).join('')}${worst<999?expiryBadge(worst):''}</span>
+    </button>`;
+  }).join('');
+  const detail=`
+    <div class="jump">${['Identity & grants','Credentials','Federation','Delivery targets'].map((n,i)=>`<button class="jchip" onclick="document.getElementById('dsec${i}').scrollIntoView({behavior:'smooth'})">${n}</button>`).join('')}</div>
+    <section class="dsec" id="dsec0"><h3>Identity &amp; grants</h3>
+      <dl class="kv"><dt>name</dt><dd>${sa.id}</dd><dt>kind</dt><dd>${sa.kind} <span class="note faint">(immutable — guessed wrong = second service account)</span></dd>
+      <dt>created</dt><dd>${sa.created}</dd>
+      <dt>capabilities</dt><dd>${(sa.caps||['read']).join(', ')} <span class="note faint">(${sa.kind} allowlist, #15)</span></dd>
+      <dt>read scope</dt><dd>${sa.read.map(e=>`<span class="envchip">${e}</span>`).join(' ')}</dd>
+      <dt>reveal scope</dt><dd>${sa.reveal.length?sa.reveal.map(e=>`<span class="envchip reveal">${e}</span>`).join(' '):'<span class="note faint">none — delivers config + secret-presence only</span>'}</dd></dl>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn sm" onclick="openGrant('${sa.id}')">Add environment grant…</button>
+        ${miss.length&&sa.kind==='workload'?`<button class="btn sm pri" onclick="openGrant('${sa.id}',true)">Grant reveal on ${miss.join(', ')}…</button>`:''}
+      </div>
+      ${miss.length&&sa.kind==='workload'?`<div class="callout bad" style="margin-top:12px"><b>Delivery is failing.</b> The resolved manifest for ${miss.map(e=>`<code>${e}</code>`).join(', ')} contains ${miss.flatMap(e=>ENV_SECRETS[e]).filter((v,i,a)=>a.indexOf(v)===i).map(k=>`<code>${k}</code>`).join(', ')} — secret occurrences this account cannot reveal. All-or-nothing: nothing syncs until reveal is granted or the mapping goes config-only.</div>`:''}
+    </section>
+    <section class="dsec" id="dsec1"><h3>Credentials <span style="text-transform:none;letter-spacing:0">— write-only: metadata, never the value</span></h3>
+      ${sa.creds.map(c=>credRow(sa,c)).join('')||'<p class="note faint">No bearer credentials.</p>'}
+      <div style="margin-top:10px"><button class="btn sm pri" onclick="openMint('${sa.id}')">Mint credential</button></div>
+    </section>
+    <section class="dsec" id="dsec2"><h3>Federated bindings</h3>
+      ${sa.bindings.map(b=>bindRow(sa,b)).join('')||'<p class="note faint">None. An external OIDC identity (Kubernetes, Forgejo/GitHub Actions) can authenticate this account with no at-rest credential.</p>'}
+      <div style="margin-top:6px"><button class="btn sm" onclick="openBinding('${sa.id}')">Add binding</button></div>
+    </section>
+    <section class="dsec" id="dsec3"><h3>Delivery targets</h3>
+      ${sa.targets.length?`<table class="inv"><thead><tr><th>hikyosecret</th><th>env</th><th>conditions</th></tr></thead><tbody>
+        ${sa.targets.map(t=>`<tr><td><code>${t.name}</code></td><td><span class="envchip">${t.envK}</span></td><td style="display:flex;gap:5px;flex-wrap:wrap">${condChips(sa,t)}</td></tr>`).join('')}</tbody></table>`
+      :'<p class="note faint">No Kubernetes targets fetch under this account.</p>'}
+    </section>`;
+  return `<div class="shead"><h2>Machine access</h2><div class="right"><button class="btn pri" onclick="openMint('worker-beta')">New service account</button></div></div>
+    ${policyStrip()}<div class="md"><div class="mdlist">${list}</div><div class="mddetail">${detail}</div></div>`;
+}
+
+/* ============ restore reconciliation (#17) ============ */
+function renderRestore(){
+  const rows=SAS.map(sa=>{
+    const re=state.reactivated[sa.id];
+    return `<div class="recrow ${re?'done':''}">
+      <div class="r1"><span class="nm">${sa.id}</span><span class="kind ${sa.kind}">${sa.kind}</span>
+        ${re?'<span class="badge ok">re-activated</span>':'<span class="badge warn">inert</span>'}</div>
+      <ul>
+        <li><span class="note faint" style="width:90px">grants</span>${sa.read.map(e=>`<span class="envchip ${sa.reveal.includes(e)?'reveal':''}">${e}</span>`).join(' ')} <span class="note faint">${re?'restored':'inert until re-activation'}</span></li>
+        ${sa.creds.map(c=>`<li><span class="note faint" style="width:90px">bearer</span><code>${c.pfx}…</code><span class="badge dead">permanently dead</span><span class="note faint">values never survive restore — re-establish by minting fresh</span></li>`).join('')}
+        ${sa.bindings.map(b=>`<li><span class="note faint" style="width:90px">federated</span><code style="font-size:11px">${b.subject}</code><span class="badge warn">quarantined</span><span class="note faint">binding survives; quarantined until the clock-skew window passes (ops spec)</span></li>`).join('')}
+      </ul>
+      ${re?`${state.minted[sa.id]?'<span class="badge ok">fresh credential minted</span>':(sa.creds.length?`<button class="btn sm pri" onclick="openMint('${sa.id}')">Mint fresh credential</button>`:'<span class="note faint">federation-only — no mint needed</span>')}`
+          :`<button class="btn sm stepup" onclick="state.reactivated['${sa.id}']=true;render();toast('${sa.id} re-activated — identity, kind and grants restored. Audited.')">Re-activate ${sa.id}</button>`}
+    </div>`;
+  }).join('');
+  return `<div class="recban"><b>RECOVERY MODE — reconciliation commit open.</b>
+    This instance was restored from the 2026-08-04 02:00 backup. Restore is a fail-closed security event (#8):
+    every service account below is <b>inert</b> until you re-activate it, explicitly, per principal.
+    <b>There is no bulk-accept</b> — each re-activation is an individual, audited decision.
+    Bearer credential values never survive restore; federated bindings do, under quarantine.</div>${rows}`;
+}
+
+/* ============ modals ============ */
+const ovl=$('#ovl'), modal=$('#modal');
+function openModal(html){modal.innerHTML=html;ovl.classList.add('show');modal.querySelector('button')?.focus()}
+function closeModal(){ovl.classList.remove('show')}
+ovl.addEventListener('click',e=>{if(e.target===ovl)closeModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+/* display-once mint ceremony (#17): reauth step-up -> token shown exactly once */
+function openMint(said,rotate){
+  const sa=SAS.find(s=>s.id===said);
+  const envs=sa.reveal.length?sa.reveal:sa.read;
+  openModal(`<div class="mh"><h3>${rotate?'Rotate':'Mint'} credential — ${sa.id}</h3>
+    <div class="sub">${sa.kind} · scope ${sa.read.join(', ')}</div></div>
+  <div class="mb">
+    <div class="callout stepup"><b>Confirm it's you.</b> ${rotate?'Rotation':'Minting'} delivers the token display-once <b>to you</b> — the formula covers every environment reachable in the resulting post-state${envs.length?` (${envs.map(e=>`<code>${e}</code>`).join(', ')})`:''}, not just added ones. A replacement credential is not a smaller act than a new one (#17 amendment).</div>
+    ${rotate?'<p class="note">The prior value is never returned. The old credential keeps working until you revoke it — rotation and revocation are separate, deliberate acts.</p>':''}
+  </div>
+  <div class="mf"><button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn stepup" onclick="showToken('${said}')">Use passkey</button></div>`);
+}
+function showToken(said){
+  const sa=SAS.find(s=>s.id===said);
+  const t=`hik_1_${sa.kind==='workload'?'wl':'au'}_${randB62(43)}k7Qx`;
+  openModal(`<div class="mh"><h3>Credential minted — shown exactly once</h3>
+    <div class="sub">${sa.id} · expires 2026-11-05 (instance default)</div></div>
+  <div class="mb">
+    <div class="tokbox" id="tokval">${t}</div>
+    <button class="btn" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('tokval').textContent);toast('Copied. The clipboard is now the only copy outside your target.')">Copy to clipboard</button>
+    <div class="callout warn"><b>This value is never retrievable again.</b> The list shows metadata only; rotation never returns this value. Store it in the consuming system now — if it is lost, revoke and mint a fresh one.</div>
+    <label class="chk"><input type="checkbox" id="stored"> I have stored this credential in its target system.</label>
+  </div>
+  <div class="mf"><button class="btn pri" onclick="if(document.getElementById('stored').checked){state.minted['${said}']=true;closeModal();render();toast('Minted. Audited: credential.minted, actor alex, display-once delivery.')}else{toast('Confirm you stored it — there is no second look.')}">Done</button></div>`);
+}
+function randB62(n){const a='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';let s='';const r=crypto.getRandomValues(new Uint8Array(n));for(const b of r)s+=a[b%62];return s}
+
+/* grant-mutation warning (#17 amends #15): names the newly-reachable plaintext set */
+function openGrant(said,revealMode){
+  const sa=SAS.find(s=>s.id===said);
+  const addable=revealMode?sa.read.filter(e=>!sa.reveal.includes(e))
+                          :Object.keys(ENV_SECRETS).filter(e=>!sa.read.includes(e));
+  const env=addable[0]||'production';
+  const newKeys=ENV_SECRETS[env]||[];
+  const nCreds=sa.creds.length+sa.bindings.length;
+  openModal(`<div class="mh"><h3>${revealMode?'Grant reveal':'Add environment grant'} — ${sa.id}</h3>
+    <div class="sub">grants attach to the service account, never to a credential</div></div>
+  <div class="mb">
+    <div class="field"><label>${revealMode?'reveal on environment':'environment (read)'}</label>
+      <select id="genv">${addable.map(e=>`<option>${e}</option>`).join('')}</select></div>
+    <div class="callout warn"><b>This grant re-scopes every credential already in circulation.</b>
+      ${sa.id} has <b>${nCreds} live credential${nCreds===1?'':'s'}</b>${sa.bindings.length?' (including federated bindings)':''} — each one ${revealMode?'gains standing decryption of':'gains read (secret-presence) on'} <code>${env}</code> the moment this lands. Newly reachable plaintext set:
+      <span class="keyset">${newKeys.map(k=>`<code>${k}</code>`).join('')}</span></div>
+    <p class="note faint">Formula: <code>manage-identities(example-app)</code> ∧ <code>reveal(${env})</code> — over the newly reachable set for a grant mutation — plus reauthentication.</p>
+  </div>
+  <div class="mf"><button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn stepup" onclick="closeModal();${revealMode?`SAS.find(s=>s.id==='${said}').reveal.push(document.getElementById('genv').value)`:`SAS.find(s=>s.id==='${said}').read.push(document.getElementById('genv').value)`};render();toast('Granted after reauth. Audited: grant.widened, newly-reachable set recorded. Undo…')">Use passkey &amp; grant</button></div>`);
+}
+
+/* per-project machine-reveal opt-in (#18) */
+function openOptIn(){
+  const on=state.revealOptIn;
+  const workloads=SAS.filter(s=>s.kind==='workload'&&s.reveal.length);
+  openModal(`<div class="mh"><h3>${on?'Withdraw':'Acknowledge'} machine secret delivery — example-app</h3>
+    <div class="sub">per-project operator decision, step 4 of the setup journey</div></div>
+  <div class="mb">
+    ${on?`<div class="callout bad"><b>Withdrawing stops secret plaintext to every workload credential on this project at its next fetch.</b>
+      Currently delivering secrets: ${workloads.map(w=>`<code>${w.id}</code>`).join(', ')||'none'}.
+      Their deliveries become all-or-nothing refusals naming the undeliverable keys — workloads consuming secrets will fail loudly at next restart.</div>`
+    :`<div class="callout warn"><b>A workload credential granted <code>reveal</code> is a standing decryption capability.</b>
+      Anyone holding such a credential file can read those secrets for as long as it lives — this acknowledgement is what makes that a decision rather than an accident.
+      Granting reveal per account still requires the post-state formula + reauth afterwards.</div>`}
+  </div>
+  <div class="mf"><button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn ${on?'danger':'stepup'}" onclick="state.revealOptIn=!${on};closeModal();render();toast('${on?'Withdrawn — refusals begin at next fetch. Audited.':'Acknowledged after reauth. Audited: project.machine-reveal enabled.'}')">${on?'Withdraw opt-in':'Use passkey & acknowledge'}</button></div>`);
+}
+
+/* federation binding form (#17/#19): byte-exact, audience mandatory, pull_request refusal */
+function openBinding(said){
+  openModal(`<div class="mh"><h3>Add federated binding — ${said}</h3>
+    <div class="sub">byte-exact (issuer, subject) → exactly one service account · audience mandatory</div></div>
+  <div class="mb">
+    <div class="presets">
+      <button class="preset" onclick="fedPreset('k8s')">Kubernetes SA token</button>
+      <button class="preset" onclick="fedPreset('forgejo')">Forgejo Actions</button>
+      <button class="preset" onclick="fedPreset('gha')">GitHub Actions</button>
+    </div>
+    <div class="field"><label>issuer</label><input class="mono" id="fiss" placeholder="https://…" oninput="fedCheck()"></div>
+    <div class="field"><label>subject (matched byte-for-byte)</label><input class="mono" id="fsub" placeholder="system:serviceaccount:ns:name" oninput="fedCheck()"></div>
+    <div class="field"><label>audience</label><input class="mono" id="faud" value="hikyo.example.com/main" oninput="fedCheck()"></div>
+    <div class="field"><label>binding lifetime</label><select id="flt"><option>90 days (instance default)</option><option>180 days</option><option disabled>indefinite — requires allow_indefinite (off)</option></select></div>
+    <div id="fedwarn"></div>
+    <p class="note faint">No wildcards, no namespace patterns, no case folding — canonicalization merges distinct external identities. An unbound identity is not a login. Renewal is a mint; expiry warnings follow the in-product-first path.</p>
+  </div>
+  <div class="mf"><button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn stepup" id="fedgo" onclick="fedSubmit()">Use passkey &amp; bind</button></div>`);
+}
+function fedPreset(k){
+  const iss=$('#fiss'),sub=$('#fsub');
+  if(k==='k8s'){iss.value='https://kubernetes.default.svc.cluster.local';sub.value='system:serviceaccount:hikyo-system:hikyo-fetch'}
+  if(k==='forgejo'){iss.value='https://git.example.com';sub.value='repo:example-org/example-app:ref:refs/heads/main'}
+  if(k==='gha'){iss.value='https://token.actions.githubusercontent.com';sub.value='repo:example-user/example-app:pull_request'}
+  fedCheck();
+}
+function fedCheck(){
+  const sub=$('#fsub').value, aud=$('#faud').value, w=$('#fedwarn'), go=$('#fedgo');
+  const pr=/:pull_request(_target)?\b/.test(sub);
+  const deliberate=$('#prbind')?.checked;
+  if(pr){
+    w.innerHTML=`<div class="callout bad"><b>Refused: subject binds <code>${sub.match(/pull_request(_target)?/)[0]}</code>.</b>
+      A pull-request workflow runs third-party code — binding it hands every PR author this service account's fetch authority.
+      Refused unless deliberately bound.</div>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="prbind" onchange="fedCheck()"> I am deliberately binding a pull-request identity and accept that PR authors reach this account's scope.</label>`;
+    go.disabled=!deliberate; go.style.opacity=deliberate?'1':'.45';
+  } else if(!aud){
+    w.innerHTML=`<div class="callout bad"><b>Audience is mandatory.</b> A token minted for another consumer must not authenticate here.</div>`;
+    go.disabled=true; go.style.opacity='.45';
+  } else { w.innerHTML=''; go.disabled=false; go.style.opacity='1'; }
+}
+function fedSubmit(){
+  closeModal();
+  toast('Bound after reauth. Audited: binding.created — issuer, subject, audience, lifetime recorded.');
+}
+
+/* K8s CR-condition detail (#19): the same condition in kubectl and UI voice */
+function openCond(said,tname,key){
+  const c=CONDS[key];
+  openModal(`<div class="mh"><h3><code style="font-size:13px">${tname}</code> — ${key}</h3>
+    <div class="sub">the condition reads the same in kubectl and in the UI</div></div>
+  <div class="mb">
+    <div class="callout ${c.sev==='warn'?'warn':'bad'}">${c.ui(said,tname)}
+      ${c.keys.length?`<span class="keyset">${c.keys.map(k=>`<code>${k}</code>`).join('')}</span>`:''}</div>
+    <div><div class="note faint" style="margin-bottom:6px">kubectl describe hikyosecret ${tname.split('/').pop()}</div>
+    <div class="yaml">${c.yaml(tname)}</div></div>
+    <div class="callout"><b>Next step:</b> ${c.fix}</div>
+  </div>
+  <div class="mf"><button class="btn pri" onclick="closeModal()">Close</button></div>`);
+}
+
+/* ============ shell ============ */
+const VARIANTS={a:'inventory',b:'journey board',c:'master-detail'};
+function render(){
+  const c=$('#content');
+  if(state.scenario==='restore'){c.innerHTML=renderRestore();}
+  else c.innerHTML=state.variant==='a'?renderA():state.variant==='b'?renderB():renderC();
+  $('#vlbl').textContent=`${state.variant} — ${VARIANTS[state.variant]}`;
+  const u=new URL(location);u.searchParams.set('variant',state.variant);history.replaceState(null,'',u);
+}
+function cycle(d){
+  const keys=Object.keys(VARIANTS);
+  state.variant=keys[(keys.indexOf(state.variant)+d+keys.length)%keys.length];
+  render();
+}
+$('#vprev').onclick=()=>cycle(-1);
+$('#vnext').onclick=()=>cycle(1);
+document.addEventListener('keydown',e=>{
+  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;
+  if(e.key==='ArrowLeft')cycle(-1);
+  if(e.key==='ArrowRight')cycle(1);
+});
+$('#scen').onchange=e=>{state.scenario=e.target.value;render()};
+$('#themebtn').onclick=()=>{
+  const b=document.documentElement;
+  b.dataset.theme=b.dataset.theme==='light'?'':'light';
+};
+const qp=new URL(location).searchParams.get('variant');
+if(qp&&VARIANTS[qp])state.variant=qp;
+render();
+</script>
+</body>
+</html>

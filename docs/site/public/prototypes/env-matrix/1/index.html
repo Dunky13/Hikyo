@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE — Hikyo environment matrix (ticket #20)</title>
+<!--
+  THROWAWAY PROTOTYPE — wayfinder ticket #20.
+  Question: does a side-by-side environment matrix communicate inheritance,
+  overrides, gaps, validation, and drift legibly?
+  Three variants on one page, switchable via ?variant=a|b|c or the floating bar (← / →).
+
+  Design context (derived from positioning ADR #3, not inferred from code):
+  audience = self-hosting developers first, platform engineers second;
+  job = see the whole config surface across environments at a glance, spot
+  gaps/violations/drift, edit safely; tone = open-source craft, deliberately
+  NOT a generic cloud console.
+
+  Domain rules honoured (inheritance ADR #10, schema ADR #12, revision ADR #11):
+  layers project-defaults → base chain → environment, nearest-ancestor-wins;
+  value states set | absent | masked; secret/config classification on the key;
+  secrets masked by default; production carries the protected-environment flag.
+  Deep reveal/reauth UX is ticket #21 — only a placeholder gesture here.
+-->
+<style>
+  :root{
+    --mono:ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  input,select{font:inherit}
+  #root{min-height:100%}
+
+  /* ============ floating switcher (not part of the design) ============ */
+  #switcher{
+    position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:99;
+    display:flex;align-items:center;gap:2px;
+    background:oklch(0.2 0.02 280);color:oklch(0.97 0.01 90);
+    border-radius:999px;padding:6px 10px;
+    box-shadow:0 6px 24px oklch(0 0 0/.35);
+    font:13px/1 system-ui,sans-serif;letter-spacing:.02em;
+  }
+  #switcher button{padding:4px 10px;border-radius:999px;font-size:15px}
+  #switcher button:hover{background:oklch(0.32 0.03 280)}
+  #switcher .lbl{padding:0 10px;min-width:150px;text-align:center}
+  #switcher .lbl b{font-weight:600}
+
+  /* =====================================================================
+     VARIANT A — "Ledger". Editorial print. Paper, ink, ruled hairlines,
+     serif headings, footnote provenance. Dense spreadsheet.
+  ===================================================================== */
+  .vA{
+    --paper:oklch(0.962 0.014 85);
+    --ink:oklch(0.26 0.022 60);
+    --ink-soft:oklch(0.26 0.022 60/.55);
+    --ink-faint:oklch(0.26 0.022 60/.34);
+    --rule:oklch(0.26 0.022 60/.16);
+    --oxblood:oklch(0.44 0.13 25);
+    --pencil:oklch(0.5 0.1 250);
+    --amber-ink:oklch(0.55 0.12 70);
+    background:var(--paper);color:var(--ink);
+    font-family:Georgia,serif;
+    padding:0 0 120px;
+  }
+  .vA .masthead{
+    padding:clamp(20px,4vw,44px) clamp(16px,4vw,56px) 10px;
+    display:flex;align-items:baseline;justify-content:space-between;gap:24px;flex-wrap:wrap;
+    border-bottom:2px solid var(--ink);
+  }
+  .vA .masthead h1{
+    font-size:clamp(26px,3.4vw,40px);font-weight:560;letter-spacing:-0.015em;
+    font-variation-settings:"opsz" 100;
+  }
+  .vA .masthead h1 em{font-style:italic;font-weight:400;color:var(--ink-soft)}
+  .vA .masthead .tally{
+    font-size:14px;font-style:italic;color:var(--ink-soft);text-align:right;
+  }
+  .vA .masthead .tally b{font-style:normal;font-weight:600;color:var(--ink)}
+  .vA .masthead .tally .bad{color:var(--oxblood)}
+  .vA .footnotebar{
+    position:sticky;top:0;z-index:5;
+    background:var(--paper);
+    border-bottom:1px solid var(--rule);
+    padding:8px clamp(16px,4vw,56px);
+    font-size:13px;font-style:italic;color:var(--ink-soft);
+    min-height:34px;display:flex;align-items:center;gap:8px;
+  }
+  .vA .footnotebar .fchain{font-style:normal;font-family:var(--mono);font-size:11.5px}
+  .vA .footnotebar .win{color:var(--oxblood);font-weight:500}
+  .vA table{border-collapse:collapse;width:100%;font-size:13px}
+  .vA thead th{
+    position:sticky;top:34px;z-index:4;background:var(--paper);
+    text-align:left;font-weight:600;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    padding:12px 14px 8px;border-bottom:1.5px solid var(--ink);
+  }
+  .vA thead th .base{display:block;font-weight:400;text-transform:none;letter-spacing:0;
+    font-style:italic;font-size:11.5px;color:var(--ink-faint)}
+  .vA thead th.prot .flag{color:var(--oxblood);font-style:normal}
+  .vA .keycol{width:270px;padding-left:clamp(16px,4vw,56px)!important}
+  .vA tbody tr{border-bottom:1px solid var(--rule)}
+  .vA tr.folder td{
+    padding:26px 14px 6px;padding-left:clamp(16px,4vw,56px);
+    font-size:17px;font-weight:560;font-style:italic;letter-spacing:.01em;
+    border-bottom:1px solid var(--ink);
+  }
+  .vA tr.folder td .cnt{font-size:12px;font-style:normal;color:var(--ink-faint);margin-left:8px}
+  .vA td{padding:7px 14px;vertical-align:baseline}
+  .vA td.key{padding-left:clamp(16px,4vw,56px);font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .vA td.key .sec{color:var(--oxblood);margin-right:6px;font-family:Georgia,serif;font-weight:700}
+  .vA td.key .typ{color:var(--ink-faint);font-size:10.5px;margin-left:8px;font-style:italic;font-family:Georgia,serif}
+  .vA td.key .diffmark{color:var(--pencil);margin-left:6px;font-weight:600}
+  .vA td.cell{font-family:var(--mono);font-size:12px;cursor:default;position:relative}
+  .vA .cell .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;display:inline-block;vertical-align:bottom}
+  .vA .cell.own .v{font-weight:600}
+  .vA .cell.inh .v{color:var(--ink-soft)}
+  .vA .cell .orig{
+    font-family:Georgia,serif;font-style:italic;font-size:10.5px;color:var(--ink-faint);
+    margin-left:6px;vertical-align:super}
+  .vA .cell.absent .v{color:var(--ink-faint)}
+  .vA .cell.masked .v{color:var(--ink-soft);font-style:italic;font-family:Georgia,serif}
+  .vA .cell.missing .v{color:var(--oxblood);font-style:italic;font-family:Georgia,serif;font-weight:500}
+  .vA .cell.invalid .v{
+    text-decoration:underline wavy var(--oxblood) 1px;text-underline-offset:3px}
+  .vA .cell .delta{color:var(--pencil);font-weight:700;margin-left:5px;font-size:11px}
+  .vA .cell .note{color:var(--oxblood);font-weight:700;margin-left:4px;font-family:Georgia,serif}
+  .vA .cell .sdot{letter-spacing:2px}
+  .vA tr.adder td{padding:8px 14px 14px;padding-left:clamp(16px,4vw,56px)}
+  .vA tr.adder button.ghost{
+    font-style:italic;color:var(--ink-faint);font-size:13px}
+  .vA tr.adder button.ghost:hover{color:var(--oxblood)}
+  .vA .addform{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:12px}
+  .vA .addform input,.vA .addform select{
+    border:none;border-bottom:1px solid var(--ink-soft);background:none;padding:3px 2px;
+    font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .vA .addform button.go{border:1px solid var(--ink);padding:3px 12px;font-family:Georgia,serif;font-style:italic}
+  .vA .addform button.go:hover{background:var(--ink);color:var(--paper)}
+  .vA .legend{
+    margin:34px clamp(16px,4vw,56px) 0;padding-top:12px;border-top:2px solid var(--ink);
+    font-size:12.5px;font-style:italic;color:var(--ink-soft);
+    display:flex;flex-wrap:wrap;gap:6px 26px}
+  .vA .legend .m{font-family:var(--mono);font-style:normal;font-size:11.5px;color:var(--ink)}
+
+  /* =====================================================================
+     VARIANT B — "Panel". Industrial dark master–detail. Key list with a
+     per-environment state strip; provenance chain in the detail panel.
+  ===================================================================== */
+  .vB{
+    --bg:oklch(0.21 0.012 260);
+    --bg2:oklch(0.245 0.014 260);
+    --bg3:oklch(0.29 0.016 260);
+    --line:oklch(0.36 0.02 260);
+    --tx:oklch(0.91 0.012 85);
+    --tx-dim:oklch(0.91 0.012 85/.55);
+    --tx-faint:oklch(0.91 0.012 85/.32);
+    --amber:oklch(0.8 0.13 75);
+    --red:oklch(0.62 0.17 25);
+    --ok:oklch(0.72 0.09 150);
+    --inh:oklch(0.6 0.02 260);
+    background:var(--bg);color:var(--tx);
+    font-family:system-ui,sans-serif;
+    display:grid;grid-template-rows:auto 1fr;height:100vh;overflow:hidden;
+  }
+  .vB header{
+    display:flex;align-items:center;gap:18px;padding:14px 22px;
+    border-bottom:1px solid var(--line);flex-wrap:wrap;
+  }
+  .vB header h1{font-size:17px;font-weight:600;letter-spacing:.01em}
+  .vB header h1 span{color:var(--amber)}
+  .vB header .env-tags{display:flex;gap:6px;font-size:11.5px;color:var(--tx-dim)}
+  .vB header .env-tags i{font-style:normal;border:1px solid var(--line);padding:2px 8px;border-radius:3px}
+  .vB header .env-tags i.prot{border-color:var(--amber);color:var(--amber)}
+  .vB header .grow{flex:1}
+  .vB header input.search{
+    background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+    padding:6px 12px;border-radius:3px;font-size:13px;width:220px}
+  .vB header label.prob{font-size:12.5px;color:var(--tx-dim);display:flex;align-items:center;gap:6px;cursor:pointer}
+  .vB header button.addkey{
+    border:1px solid var(--amber);color:var(--amber);padding:6px 14px;border-radius:3px;
+    font-size:12.5px;font-weight:600;letter-spacing:.04em}
+  .vB header button.addkey:hover{background:var(--amber);color:var(--bg)}
+  .vB .cols{display:grid;grid-template-columns:minmax(380px,46%) 1fr;overflow:hidden}
+  .vB .list{overflow-y:auto;border-right:1px solid var(--line)}
+  .vB .list .flabel{
+    position:sticky;top:0;background:var(--bg);z-index:2;
+    padding:16px 22px 6px;font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--tx-faint);border-bottom:1px solid var(--line)}
+  .vB .krow{
+    display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+    padding:8px 22px;border-bottom:1px solid oklch(0.36 0.02 260/.4)}
+  .vB .krow:hover{background:var(--bg2)}
+  .vB .krow.sel{background:var(--bg3)}
+  .vB .krow .name{font-family:var(--mono);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vB .krow .name .sec{color:var(--amber);margin-right:6px}
+  .vB .krow .name .draft{color:var(--tx-faint);font-size:10px;margin-left:6px;letter-spacing:.1em}
+  .vB .krow .strip{display:flex;gap:3px}
+  .vB .strip i{width:22px;height:14px;border-radius:2px;display:block}
+  .vB .strip i.own{background:var(--ok)}
+  .vB .strip i.inh{background:var(--inh)}
+  .vB .strip i.absent{background:var(--bg3)}
+  .vB .strip i.masked{background:repeating-linear-gradient(45deg,var(--bg3) 0 3px,var(--inh) 3px 5px)}
+  .vB .strip i.missing{background:var(--red)}
+  .vB .strip i.invalid{background:var(--red);outline:2px solid var(--red);outline-offset:1px}
+  .vB .strip i.chg{box-shadow:inset 0 -3px 0 var(--amber)}
+  .vB .krow .diffm{font-size:11px;color:var(--amber);width:14px}
+  .vB .detail{overflow-y:auto;padding:22px 26px 140px}
+  .vB .detail .dhead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+  .vB .detail .dhead h2{font-family:var(--mono);font-size:16px;font-weight:500}
+  .vB .detail .dhead .meta{font-size:12px;color:var(--tx-dim)}
+  .vB .detail .dhead .meta b{color:var(--amber);font-weight:600}
+  .vB .detail .desc{font-size:12.5px;color:var(--tx-faint);margin-bottom:18px}
+  .vB .envsec{border-top:1px solid var(--line);padding:14px 0}
+  .vB .envsec .erow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .vB .envsec .ename{font-size:13px;font-weight:600;width:110px}
+  .vB .envsec .ename .p{color:var(--amber);font-size:10px;display:block;font-weight:500;letter-spacing:.08em}
+  .vB .envsec .val{font-family:var(--mono);font-size:13px;flex:1;min-width:200px}
+  .vB .envsec .val.dim{color:var(--tx-dim)}
+  .vB .envsec .val.bad{color:var(--red)}
+  .vB .envsec .val.maskedtxt{color:var(--tx-dim);font-style:italic;font-family:system-ui,sans-serif}
+  .vB .envsec .stx{font-size:11px;letter-spacing:.06em;color:var(--tx-faint);width:150px;text-align:right}
+  .vB .envsec .stx.chg{color:var(--amber)}
+  .vB .chain{
+    display:flex;align-items:center;gap:0;margin-top:9px;font-size:11px;color:var(--tx-faint);
+    font-family:var(--mono)}
+  .vB .chain .hop{padding:3px 9px;border:1px solid var(--line);border-radius:2px}
+  .vB .chain .hop.win{border-color:var(--ok);color:var(--ok)}
+  .vB .chain .hop.stop{border-color:var(--tx-dim);color:var(--tx-dim);text-decoration:line-through}
+  .vB .chain .arr{padding:0 7px;color:var(--tx-faint)}
+  .vB .chain .verdict{margin-left:12px;font-family:system-ui,sans-serif}
+  .vB .envsec .err{margin-top:8px;font-size:12px;color:var(--red);font-family:var(--mono)}
+  .vB .legend{padding:16px 22px;border-top:1px solid var(--line);font-size:11.5px;color:var(--tx-dim);
+    display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+  .vB .legend i{width:16px;height:11px;border-radius:2px;display:inline-block;vertical-align:-1px;margin-right:5px}
+  .vB .addbar{padding:12px 22px;border-bottom:1px solid var(--line);background:var(--bg2);
+    display:flex;gap:10px;align-items:center;font-size:13px}
+  .vB .addbar input,.vB .addbar select{
+    background:var(--bg);border:1px solid var(--line);color:var(--tx);padding:5px 10px;border-radius:3px;font-family:var(--mono);font-size:12px}
+  .vB .addbar button.go{border:1px solid var(--ok);color:var(--ok);padding:5px 14px;border-radius:3px}
+  .vB .empty{color:var(--tx-faint);font-size:14px;padding:60px 0;text-align:center}
+
+  /* =====================================================================
+     VARIANT C — "Cascade". Inheritance-first lanes on cool linen; columns
+     ordered by base chain; inherited cells point back at their origin.
+  ===================================================================== */
+  .vC{
+    --linen:oklch(0.965 0.008 200);
+    --ink:oklch(0.27 0.03 230);
+    --ink-dim:oklch(0.27 0.03 230/.6);
+    --ink-faint:oklch(0.27 0.03 230/.35);
+    --teal:oklch(0.46 0.085 210);
+    --teal-soft:oklch(0.46 0.085 210/.12);
+    --rust:oklch(0.5 0.14 35);
+    --rust-soft:oklch(0.5 0.14 35/.1);
+    --chg:oklch(0.55 0.11 260);
+    --lane:oklch(0.94 0.012 200);
+    background:var(--linen);color:var(--ink);
+    font-family:system-ui,sans-serif;
+    padding:0 0 130px;
+  }
+  .vC .top{
+    padding:clamp(18px,3.5vw,40px) clamp(16px,3.5vw,48px) 18px;
+    display:flex;align-items:flex-end;gap:30px;flex-wrap:wrap;
+  }
+  .vC .top h1{font-size:clamp(24px,3vw,34px);font-weight:750;letter-spacing:-0.02em}
+  .vC .top h1 .w{color:var(--teal)}
+  .vC .top .sub{font-size:13px;color:var(--ink-dim);max-width:420px}
+  .vC .legend{margin-left:auto;display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-dim)}
+  .vC .legend .pill{display:inline-block;padding:2px 9px;border-radius:999px;margin-right:4px;font-family:var(--mono);font-size:10.5px}
+  .vC .matrix{overflow-x:auto}
+  .vC table{border-collapse:separate;border-spacing:0;width:100%;min-width:1080px}
+  .vC thead th{
+    position:sticky;top:0;z-index:4;background:var(--linen);
+    text-align:left;padding:10px 10px 12px;vertical-align:bottom;
+  }
+  .vC thead th.keyh{padding-left:clamp(16px,3.5vw,48px);font-size:11px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--ink-faint);font-weight:700}
+  .vC thead .lanehead{min-width:215px}
+  .vC thead .lanehead .lname{font-size:15px;font-weight:750}
+  .vC thead .lanehead .lname .p{color:var(--rust);font-size:10px;vertical-align:super;margin-left:4px;letter-spacing:.08em}
+  .vC thead .lanehead .basefrom{font-size:11px;color:var(--ink-faint);font-weight:500}
+  .vC thead .lanehead .basefrom b{color:var(--teal);font-weight:700}
+  .vC tbody td{padding:4px 10px;vertical-align:middle}
+  .vC td.lane{background:var(--lane)}
+  .vC td.lane.first{border-left:1px solid oklch(0.27 0.03 230/.09)}
+  .vC tr.folder td{
+    padding:28px 10px 8px;padding-left:clamp(16px,3.5vw,48px);
+    font-size:13px;font-weight:750;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);
+    background:var(--linen)!important}
+  .vC tr.folder td button.addk{margin-left:14px;font-size:11px;letter-spacing:.05em;
+    color:var(--ink-faint);border:1px dashed var(--ink-faint);border-radius:999px;padding:2px 10px}
+  .vC tr.folder td button.addk:hover{color:var(--teal);border-color:var(--teal)}
+  .vC td.key{padding-left:clamp(16px,3.5vw,48px);font-family:var(--mono);font-size:12px;white-space:nowrap}
+  .vC td.key .sec{color:var(--rust);margin-right:5px}
+  .vC td.key .req{color:var(--ink-faint);font-size:10px;margin-left:7px}
+  .vC tr.diffrow td.lane{background:oklch(0.93 0.025 75/.55)}
+  .vC .pill{
+    display:inline-flex;align-items:center;gap:6px;max-width:230px;
+    font-family:var(--mono);font-size:11.5px;
+    padding:3px 10px;border-radius:999px;white-space:nowrap;overflow:hidden}
+  .vC .pill .tx{overflow:hidden;text-overflow:ellipsis}
+  .vC .pill.own{background:var(--teal);color:oklch(0.97 0.008 200)}
+  .vC .pill.inh{background:none;border:1px solid oklch(0.27 0.03 230/.22);color:var(--ink-dim)}
+  .vC .pill.inh .from{color:var(--teal);font-weight:600;font-size:10px}
+  .vC .pill.def{background:var(--teal-soft);color:var(--ink-dim);border:none}
+  .vC .pill.absent{border:1px dashed oklch(0.27 0.03 230/.25);color:var(--ink-faint)}
+  .vC .pill.masked{background:repeating-linear-gradient(45deg,transparent 0 4px,oklch(0.27 0.03 230/.08) 4px 7px);
+    border:1px solid oklch(0.27 0.03 230/.2);color:var(--ink-dim);font-style:italic}
+  .vC .pill.missing{background:var(--rust-soft);border:1px solid var(--rust);color:var(--rust);font-weight:500}
+  .vC .pill.invalid{border:2px solid var(--rust);color:var(--rust)}
+  .vC .pill .d{color:var(--chg);font-weight:700}
+  .vC .pill.own .d{color:oklch(0.97 0.008 200)}
+  .vC td .viol{display:block;font-size:10.5px;color:var(--rust);margin-top:2px;font-family:var(--mono)}
+  .vC .addform{display:flex;gap:8px;align-items:center;font-size:12px;padding:6px 0}
+  .vC .addform input,.vC .addform select{
+    border:1px solid oklch(0.27 0.03 230/.25);background:oklch(1 0 0/.6);border-radius:6px;
+    padding:4px 9px;font-family:var(--mono);font-size:12px}
+  .vC .addform button.go{background:var(--teal);color:oklch(0.97 0.008 200);border-radius:999px;padding:4px 14px;font-weight:600}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="switcher">
+  <button id="sw-prev" title="previous variant (←)">‹</button>
+  <span class="lbl" id="sw-lbl"></span>
+  <button id="sw-next" title="next variant (→)">›</button>
+</div>
+
+<script>
+/* ============================ domain data ============================ */
+const ENVS=[
+  {id:'dev',name:'development',base:null},
+  {id:'stg',name:'staging',base:'dev'},
+  {id:'prd',name:'production',base:'stg',protected:true},
+  {id:'pre',name:'preview',base:'stg'},
+];
+const envById=id=>ENVS.find(e=>e.id===id);
+
+/* key: {folder,name,type,secret,required:'all'|'none'|[ids],
+         defaults?:string, layers:{env:{v}|{masked:true}},
+         invalid:{env:msg}, changed:[envIds], draft?:bool} */
+const K=(folder,name,type,secret,required,defaults,layers,invalid,changed,desc)=>(
+  {folder,name,type,secret,required,defaults,layers:layers||{},invalid:invalid||{},changed:changed||[],desc});
+
+const KEYS=[
+  K('app','APP_NAME','string',false,'all','Hikyo Demo',{},{},[],'Display name, shared everywhere.'),
+  K('app','APP_URL','url',false,'all','http://localhost:8080',
+    {stg:{v:'https://stg.hikyo.dev'},prd:{v:'https://hikyo.dev'},pre:{v:'https://pr-{n}.preview.hikyo.dev'}},{},['prd'],
+    'Public base URL. Overridden per deployed environment.'),
+  K('app','PORT','int',false,'all','8080',{},{},[]),
+  K('app','LOG_LEVEL','string',false,'all','info',{dev:{v:'debug'}},{},[]),
+  K('app','FEATURE_MATRIX_V2','bool',false,'none','false',{pre:{v:'true'}},{},['pre']),
+  K('database','DATABASE_URL','url',true,'all',undefined,
+    {dev:{v:'postgres://hikyo:hikyo@localhost:5432/hikyo'},stg:{v:'postgres://hikyo@db.stg:5432/hikyo'},prd:{v:'postgres://hikyo@db.prd:5432/hikyo'}},{},[],
+    'Preview inherits staging’s database on purpose.'),
+  K('database','DB_POOL_SIZE','int',false,'all','10',
+    {stg:{v:'ten'},prd:{v:'40'}},{stg:'expected int64, got "ten"'},[]),
+  K('database','DB_SSL_MODE','string',false,['prd'],undefined,{prd:{v:'verify-full'}},{},[]),
+  K('database','DB_MIGRATIONS_AUTO','bool',false,'all','true',{prd:{v:'false'}},{},[]),
+  K('auth','SESSION_SECRET','string',true,'all',undefined,
+    {dev:{v:'dev-only-not-secret'},stg:{v:'s3cr3t-stg-9f2e'},prd:{v:'s3cr3t-prd-77aa'}},{},['stg']),
+  K('auth','OIDC_ISSUER','url',false,['stg','prd'],'https://id.example.dev',
+    {pre:{v:'localhost:8080'}},{pre:'url must be absolute'},[]),
+  K('auth','OIDC_CLIENT_ID','string',false,['stg','prd'],undefined,
+    {stg:{v:'ew-stg'},prd:{v:'ew-prd'}},{},[]),
+  K('auth','OIDC_CLIENT_SECRET','string',true,['stg','prd'],undefined,
+    {stg:{v:'oidc-stg-secret'}},{},[],'Required in production but never set — the gap to spot.'),
+  K('mail','SMTP_HOST','string',false,'none','mail.internal',{prd:{v:'smtp.eu.mailer.dev'}},{},[]),
+  K('mail','SMTP_PORT','int',false,'none','587',{},{},[]),
+  K('mail','SMTP_PASSWORD','string',true,'none',undefined,
+    {dev:{masked:true},stg:{v:'stg-smtp-pass'},prd:{v:'prd-smtp-pass'}},{},[],
+    'Deliberately masked in development: no mail from dev boxes.'),
+  K('integrations','FORGEJO_TOKEN','string',true,'none',undefined,{prd:{v:'hik_1_at_x9k2m4'}},{},[]),
+  K('integrations','S3_ACCESS_KEY_ID','string',true,'all','AKIADEFAULT0000',
+    {prd:{v:'AKIAPRODONLY9999'}},{},['prd']),
+  K('integrations','S3_SECRET_ACCESS_KEY','string',true,'all','wJalrXUtnFEMI/DEMO',
+    {prd:{masked:true}},{},[],'Masked in production while required: publish is blocked.'),
+  K('observability','SENTRY_DSN','url',false,'none',undefined,
+    {stg:{v:'https://s1@sentry.io/11'},prd:{v:'https://s2@sentry.io/12'}},{},[]),
+  K('observability','OTEL_ENDPOINT','url',false,'none','http://otel.internal:4317',{},{},[]),
+];
+
+/* deterministic filler to reach 50+ keys (density test) */
+(function fill(){
+  let s=42; const rnd=()=>((s=(Math.imul(48271,s)>>>0)%2147483647)/2147483647);
+  const names={
+    app:['APP_TIMEZONE','APP_LOCALE','MAX_UPLOAD_MB','REQUEST_TIMEOUT_MS','CORS_ORIGINS','TRUSTED_PROXIES','SESSION_IDLE_MIN','SESSION_ABS_HOURS','RATE_LIMIT_RPS','MAINTENANCE_MODE'],
+    database:['DB_STATEMENT_TIMEOUT_MS','DB_IDLE_TIMEOUT_S','DB_MAX_LIFETIME_MIN','DB_LOG_QUERIES','DB_SCHEMA'],
+    auth:['PASSWORD_MIN_LENGTH','TOTP_ISSUER_LABEL','WEBAUTHN_RP_ID','RECOVERY_CODE_COUNT','INVITE_TTL_HOURS','JIT_PROVISIONING'],
+    mail:['SMTP_FROM','SMTP_STARTTLS','MAIL_REPLY_TO'],
+    integrations:['WEBHOOK_SIGNING_KEY','FORGEJO_BASE_URL','S3_BUCKET','S3_REGION','S3_ENDPOINT','GH_APP_ID'],
+    observability:['METRICS_ENABLED','TRACE_SAMPLE_RATE','LOG_FORMAT','AUDIT_EXPORT_PATH','HEALTHCHECK_PATH','PPROF_ENABLED','SLOW_QUERY_MS'],
+  };
+  const samples={int:['30','120','5','8','60'],bool:['true','false'],string:['on','off','eu-west-1','v1','main'],url:['http://svc.internal:9090']};
+  for(const folder in names) for(const n of names[folder]){
+    const r=rnd();
+    const type=/(_MS|_S|_MIN|_HOURS|_MB|_RPS|_COUNT|_ID$|RATE|LENGTH)/.test(n)?'int':/(ENABLED|MODE|STARTTLS|QUERIES|PROVISIONING)/.test(n)?'bool':/(URL|ENDPOINT|PATH)/.test(n)?'url':'string';
+    const secret=/(KEY|TOKEN|SECRET)/.test(n);
+    const val=type==='url'?samples.url[0]:samples[type][Math.floor(rnd()*samples[type].length)];
+    const k=K(folder,n,type,secret,'none',val,{},{},[]);
+    if(r<0.2){const e=ENVS[Math.floor(rnd()*4)].id;k.layers[e]={v:type==='int'?String(Math.floor(rnd()*90)+10):val};}
+    if(r>0.93)k.changed=[ENVS[Math.floor(rnd()*4)].id];
+    KEYS.push(k);
+  }
+})();
+
+const FOLDERS=[...new Set(KEYS.map(k=>k.folder))];
+
+/* ============================ resolution ============================ */
+function chainOf(envId){const c=[];let e=envById(envId);while(e){c.push(e.id);e=e.base?envById(e.base):null}return c}
+function resolve(key,envId){
+  for(const id of chainOf(envId)){
+    const l=key.layers[id];
+    if(l){ if(l.masked)return{state:'masked',origin:id};
+      return{state:id===envId?'own':'inh',origin:id,value:l.v}; }
+  }
+  if(key.defaults!==undefined)return{state:'def',origin:'defaults',value:key.defaults};
+  return{state:'absent'};
+}
+const isRequired=(k,e)=>k.required==='all'||(Array.isArray(k.required)&&k.required.includes(e));
+function cellInfo(k,envId){
+  const r=resolve(k,envId);
+  const required=isRequired(k,envId);
+  const invalid=k.invalid[envId];
+  const missing=required&&(r.state==='absent'||r.state==='masked');
+  const changed=k.changed.includes(envId);
+  return{...r,required,invalid,missing,changed};
+}
+function rowDiff(k){
+  const vals=ENVS.map(e=>resolve(k,e.id)).filter(r=>r.value!==undefined).map(r=>r.value);
+  return new Set(vals).size>1;
+}
+function problems(){
+  let inv=0,miss=0;
+  for(const k of KEYS)for(const e of ENVS){const c=cellInfo(k,e.id);if(c.invalid)inv++;else if(c.missing)miss++}
+  return{inv,miss};
+}
+function provChain(k,envId){ /* [{layer,has,masked,win}] project-defaults → …base… → env */
+  const ids=chainOf(envId).reverse(); // defaults first
+  const hops=[{layer:'defaults',has:k.defaults!==undefined}];
+  for(const id of ids)hops.push({layer:id,has:!!k.layers[id],masked:!!(k.layers[id]&&k.layers[id].masked)});
+  const r=resolve(k,envId);
+  for(const h of hops)h.win=(h.layer===(r.origin||''));
+  return{hops,r};
+}
+
+/* ============================ shared ui state ============================ */
+const S={
+  revealed:new Set(),      // `${key.name}:${envId}`
+  selected:KEYS[12].name,  // variant B selection (OIDC_CLIENT_SECRET)
+  adding:null,             // folder currently showing the add form (A, C) or '_top' (B)
+  search:'', probOnly:false,
+  footnote:null,           // variant A hovered-cell provenance
+};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const MASK='••••••••';
+function displayValue(k,envId,c){
+  if(c.value===undefined)return'';
+  if(!k.secret)return c.value;
+  return S.revealed.has(k.name+':'+envId)?c.value:MASK;
+}
+function toggleReveal(name,envId){
+  const k=KEYS.find(x=>x.name===name);const env=envById(envId);
+  const id=name+':'+envId;
+  if(S.revealed.has(id)){S.revealed.delete(id);render();return}
+  if(env.protected&&!confirm('production is a protected environment — reveal requires re-authentication.\n\n(prototype stand-in; the real ceremony is ticket #21)\n\nProceed?'))return;
+  S.revealed.add(id);render();
+  setTimeout(()=>{if(S.revealed.delete(id))render()},6000); // auto-remask
+}
+function addKey(folder,name,type,secret){
+  if(!name||KEYS.some(k=>k.name===name))return;
+  const k=K(folder,name.toUpperCase().replace(/[^A-Z0-9_]/g,'_'),type,secret,'none',undefined,{},{},[]);
+  k.draft=true;
+  const last=KEYS.map(x=>x.folder).lastIndexOf(folder);
+  KEYS.splice(last+1,0,k);
+  S.adding=null;S.selected=k.name;render();
+}
+function addFormHTML(folder,cls){
+  return `<span class="addform ${cls||''}">
+    <input id="nk-name" placeholder="KEY_NAME" size="18" autofocus>
+    <select id="nk-type"><option>string</option><option>int</option><option>bool</option><option>url</option><option>json</option></select>
+    <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="nk-sec">secret</label>
+    <button class="go" onclick="addKey('${folder}',document.getElementById('nk-name').value,document.getElementById('nk-type').value,document.getElementById('nk-sec').checked)">declare</button>
+    <button onclick="S.adding=null;render()" style="opacity:.5">cancel</button>
+  </span>`;
+}
+
+/* ============================ variant A — Ledger ============================ */
+function renderA(){
+  const p=problems();
+  const head=ENVS.map(e=>`<th class="${e.protected?'prot':''}">${e.name}${e.protected?' <span class="flag">✳ protected</span>':''}
+      <span class="base">${e.base?'after '+envById(e.base).name:'after project defaults'}</span></th>`).join('');
+  let rows='';
+  for(const f of FOLDERS){
+    const ks=KEYS.filter(k=>k.folder===f);
+    rows+=`<tr class="folder"><td colspan="5">${f} /<span class="cnt">${ks.length} keys</span></td></tr>`;
+    for(const k of ks){
+      const diff=rowDiff(k);
+      rows+=`<tr><td class="key">${k.secret?'<span class="sec" title="secret">§</span>':''}${esc(k.name)}<span class="typ">${k.type}${k.draft?' · draft':''}</span>${diff?'<span class="diffmark" title="values differ across environments">≠</span>':''}</td>`;
+      for(const e of ENVS){
+        const c=cellInfo(k,e.id);
+        let cls='cell',body='';
+        if(c.invalid){cls+=' invalid own';body=`<span class="v">${esc(displayValue(k,e.id,c))}</span><span class="note" title="${esc(c.invalid)}">†</span>`}
+        else if(c.missing){cls+=' missing';body=`<span class="v">required — ${c.state==='masked'?'masked':'unset'}</span>`}
+        else if(c.state==='masked'){cls+=' masked';body=`<span class="v">∅ masked</span>`}
+        else if(c.state==='absent'){cls+=' absent';body=`<span class="v">—</span>`}
+        else{
+          cls+=c.state==='own'?' own':' inh';
+          const orig=c.state==='own'?'':`<span class="orig">${c.origin==='defaults'?'≡ defaults':'↑ '+c.origin}</span>`;
+          const v=displayValue(k,e.id,c);
+          body=`<span class="v ${k.secret&&!S.revealed.has(k.name+':'+e.id)?'sdot':''}">${esc(v)}</span>${orig}`;
+        }
+        if(c.changed)body+=`<span class="delta" title="changed since last published revision">Δ</span>`;
+        const rv=k.secret&&c.value!==undefined?`onclick="toggleReveal('${k.name}','${e.id}')" style="cursor:pointer" title="click to reveal (auto-remasks)"`:'';
+        rows+=`<td class="${cls}" data-fn="${k.name}|${e.id}" ${rv}>${body}</td>`;
+      }
+      rows+='</tr>';
+    }
+    rows+=`<tr class="adder"><td colspan="5">${S.adding===f?addFormHTML(f):`<button class="ghost" onclick="S.adding='${f}';render()">+ declare a key in ${f}/ …</button>`}</td></tr>`;
+  }
+  const fn=S.footnote?footnoteA(S.footnote):`<span>hover a cell for its provenance — where the value resolves from, layer by layer.</span>`;
+  return `
+  <div class="masthead">
+    <h1>acme / <em>hikyo-demo</em> — configuration ledger</h1>
+    <div class="tally"><b>${KEYS.length}</b> keys · <b>4</b> environments ·
+      <b class="bad">${p.inv}</b> violations · <b class="bad">${p.miss}</b> required unset</div>
+  </div>
+  <div class="footnotebar" id="fnbar">${fn}</div>
+  <table>
+    <thead><tr><th class="keycol">key</th>${head}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="legend">
+    <span><span class="m">bold</span> set here</span>
+    <span><span class="m">faded ↑env / ≡ defaults</span> inherited, with origin</span>
+    <span><span class="m">∅ masked</span> deliberately unset</span>
+    <span><span class="m">—</span> absent (optional)</span>
+    <span><span class="m">†</span> schema violation (see footnote)</span>
+    <span><span class="m">Δ</span> changed since last publish</span>
+    <span><span class="m">≠</span> differs across environments</span>
+    <span><span class="m">§</span> secret — click to reveal</span>
+  </div>`;
+}
+function footnoteA(fnKey){
+  const[name,envId]=fnKey.split('|');
+  const k=KEYS.find(x=>x.name===name);if(!k)return'';
+  const{hops,r}=provChain(k,envId);
+  const chain=hops.map(h=>{
+    const t=h.layer==='defaults'?'project-defaults':h.layer;
+    if(h.win)return`<span class="win">${t} ◀ resolves here</span>`;
+    if(h.masked)return`<s>${t} (mask)</s>`;
+    return h.has?`${t} (set)`:`<span style="opacity:.45">${t} (—)</span>`;
+  }).join(' → ');
+  const extra=k.invalid[envId]?` &nbsp;† ${esc(k.invalid[envId])}`:(r.state==='absent'?' — no layer sets this key':'');
+  return`<span class="fchain"><b>${esc(name)}</b> in ${envById(envId).name}: ${chain}${extra}</span>`;
+}
+
+/* ============================ variant B — Panel ============================ */
+function renderB(){
+  const q=S.search.toLowerCase();
+  const visible=KEYS.filter(k=>{
+    if(q&&!k.name.toLowerCase().includes(q))return false;
+    if(S.probOnly&&!ENVS.some(e=>{const c=cellInfo(k,e.id);return c.invalid||c.missing}))return false;
+    return true;
+  });
+  let list='';
+  for(const f of FOLDERS){
+    const ks=visible.filter(k=>k.folder===f);
+    if(!ks.length)continue;
+    list+=`<div class="flabel">${f} /</div>`;
+    for(const k of ks){
+      const strip=ENVS.map(e=>{
+        const c=cellInfo(k,e.id);
+        let s=c.invalid?'invalid':c.missing?'missing':c.state==='own'?'own':c.state==='masked'?'masked':c.state==='absent'?'absent':'inh';
+        return`<i class="${s} ${c.changed?'chg':''}" title="${e.name}: ${s}${c.changed?' · changed':''}"></i>`;
+      }).join('');
+      list+=`<button class="krow ${S.selected===k.name?'sel':''}" onclick="S.selected='${k.name}';render()">
+        <span class="name">${k.secret?'<span class="sec">§</span>':''}${esc(k.name)}${k.draft?'<span class="draft">DRAFT</span>':''}</span>
+        <span class="diffm">${rowDiff(k)?'≠':''}</span>
+        <span class="strip">${strip}</span></button>`;
+    }
+  }
+  const k=KEYS.find(x=>x.name===S.selected);
+  let detail='<div class="empty">select a key</div>';
+  if(k){
+    let secs='';
+    for(const e of ENVS){
+      const c=cellInfo(k,e.id);
+      const{hops}=provChain(k,e.id);
+      const chain=hops.map((h,i)=>{
+        const t=h.layer==='defaults'?'defaults':h.layer;
+        const cls=h.win?'win':h.masked?'stop':'';
+        const inner=h.masked?`${t} ∅`:h.has?t:`<span style="opacity:.4">${t}</span>`;
+        return`${i?'<span class="arr">→</span>':''}<span class="hop ${cls}">${inner}</span>`;
+      }).join('');
+      let vhtml,stx='';
+      if(c.invalid){vhtml=`<span class="val bad">${esc(displayValue(k,e.id,c))}</span>`;stx='SCHEMA VIOLATION'}
+      else if(c.missing){vhtml=`<span class="val bad">required — ${c.state==='masked'?'masked':'unset'}</span>`;stx='BLOCKS PUBLISH'}
+      else if(c.state==='masked'){vhtml=`<span class="val maskedtxt">deliberately masked</span>`;stx='MASKED'}
+      else if(c.state==='absent'){vhtml=`<span class="val dim">—</span>`;stx='ABSENT'}
+      else{
+        const v=displayValue(k,e.id,c);
+        const rv=k.secret?` style="cursor:pointer" onclick="toggleReveal('${k.name}','${e.id}')" title="click to reveal"`:'';
+        vhtml=`<span class="val ${c.state!=='own'?'dim':''}"${rv}>${esc(v)}</span>`;
+        stx=c.state==='own'?'SET HERE':'INHERITED · '+(c.origin==='defaults'?'DEFAULTS':c.origin.toUpperCase());
+      }
+      secs+=`<div class="envsec">
+        <div class="erow">
+          <span class="ename">${e.name}${e.protected?'<span class="p">PROTECTED</span>':''}</span>
+          ${vhtml}
+          <span class="stx ${c.changed?'chg':''}">${c.changed?'Δ CHANGED · ':''}${stx}</span>
+        </div>
+        <div class="chain">${chain}</div>
+        ${c.invalid?`<div class="err">✕ ${esc(c.invalid)}</div>`:''}
+      </div>`;
+    }
+    detail=`<div class="dhead"><h2>${k.secret?'§ ':''}${esc(k.name)}</h2>
+      <span class="meta">${k.folder}/ · ${k.type} · <b>${k.secret?'secret':'config'}</b> · required: ${k.required==='all'?'everywhere':k.required==='none'?'nowhere':k.required.join(', ')}</span></div>
+      ${k.desc?`<div class="desc">${esc(k.desc)}</div>`:''}
+      ${secs}`;
+  }
+  return `
+  <header>
+    <h1>hikyo<span>/</span>acme<span>/</span>hikyo-demo</h1>
+    <span class="env-tags">${ENVS.map(e=>`<i class="${e.protected?'prot':''}">${e.id}${e.base?'←'+e.base:''}</i>`).join('')}</span>
+    <span class="grow"></span>
+    <input class="search" placeholder="filter keys…" value="${esc(S.search)}" oninput="S.search=this.value;render();this.focus();this.setSelectionRange(this.value.length,this.value.length)">
+    <label class="prob"><input type="checkbox" ${S.probOnly?'checked':''} onchange="S.probOnly=this.checked;render()"> problems only</label>
+    <button class="addkey" onclick="S.adding=S.adding?null:'_top';render()">+ key</button>
+  </header>
+  <div style="display:flex;flex-direction:column;overflow:hidden">
+    ${S.adding?`<div class="addbar">declare in <select id="nk-folder">${FOLDERS.map(f=>`<option>${f}</option>`).join('')}</select> ${addFormHTML('','').replace(`addKey('',`,`addKey(document.getElementById('nk-folder').value,`)}</div>`:''}
+    <div class="cols">
+      <div class="list">${list||'<div class="empty">no keys match</div>'}</div>
+      <div class="detail">${detail}</div>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--ok)"></i>set here</span>
+      <span><i style="background:var(--inh)"></i>inherited</span>
+      <span><i style="background:var(--bg3)"></i>absent</span>
+      <span><i style="background:repeating-linear-gradient(45deg,var(--bg3) 0 3px,var(--inh) 3px 5px)"></i>masked</span>
+      <span><i style="background:var(--red)"></i>missing / violation</span>
+      <span><i style="background:var(--bg3);box-shadow:inset 0 -3px 0 var(--amber)"></i>changed</span>
+      <span>≠ differs across envs · § secret</span>
+    </div>
+  </div>`;
+}
+
+/* ============================ variant C — Cascade ============================ */
+function renderC(){
+  const order=['dev','stg','prd','pre']; // base-chain order, prd/pre both fed by stg
+  const head=order.map((id,i)=>{const e=envById(id);
+    return`<th class="lanehead"><div class="lname">${e.name}${e.protected?'<span class="p">PROTECTED</span>':''}</div>
+      <div class="basefrom">${e.base?`inherits <b>◂ ${envById(e.base).name}</b>`:'inherits <b>◂ project defaults</b>'}</div></th>`}).join('');
+  let rows='';
+  for(const f of FOLDERS){
+    rows+=`<tr class="folder"><td colspan="5">${f}
+      ${S.adding===f?'':`<button class="addk" onclick="S.adding='${f}';render()">+ key</button>`}</td></tr>`;
+    if(S.adding===f)rows+=`<tr><td colspan="5" style="padding-left:clamp(16px,3.5vw,48px)">${addFormHTML(f)}</td></tr>`;
+    for(const k of KEYS.filter(k=>k.folder===f)){
+      const diff=rowDiff(k);
+      rows+=`<tr class="${diff?'diffrow':''}"><td class="key">${k.secret?'<span class="sec">§</span>':''}${esc(k.name)}<span class="req">${k.required==='all'?'req·all':Array.isArray(k.required)?'req·'+k.required.join(','):''}${k.draft?' draft':''}</span></td>`;
+      order.forEach((id,i)=>{
+        const c=cellInfo(k,id);
+        let pill;
+        const d=c.changed?`<span class="d" title="changed since last publish">Δ</span>`:'';
+        if(c.invalid)pill=`<span class="pill invalid"><span class="tx">${esc(displayValue(k,id,c))}</span>${d}</span><span class="viol">✕ ${esc(c.invalid)}</span>`;
+        else if(c.missing)pill=`<span class="pill missing"><span class="tx">required · ${c.state==='masked'?'masked':'unset'}</span>${d}</span>`;
+        else if(c.state==='masked')pill=`<span class="pill masked"><span class="tx">∅ masked</span>${d}</span>`;
+        else if(c.state==='absent')pill=`<span class="pill absent"><span class="tx">·</span></span>`;
+        else{
+          const v=esc(displayValue(k,id,c));
+          const rv=k.secret&&c.value!==undefined?` style="cursor:pointer" onclick="toggleReveal('${k.name}','${id}')" title="click to reveal"`:'';
+          if(c.state==='own')pill=`<span class="pill own"${rv}><span class="tx">${v}</span>${d}</span>`;
+          else if(c.state==='def')pill=`<span class="pill def"${rv}><span class="from">◂ def</span><span class="tx">${v}</span>${d}</span>`;
+          else pill=`<span class="pill inh"${rv}><span class="from">◂ ${c.origin}</span><span class="tx">${v}</span>${d}</span>`;
+        }
+        rows+=`<td class="lane ${i===0?'first':''}">${pill}</td>`;
+      });
+      rows+='</tr>';
+    }
+  }
+  return `
+  <div class="top">
+    <div><h1>hikyo-demo <span class="w">— the weave</span></h1>
+    <div class="sub">Values flow left to right along each environment's base chain. A filled pill is set in that lane; a ghost pill points back at where it comes from.</div></div>
+    <div class="legend">
+      <span><span class="pill own">value</span>set here</span>
+      <span><span class="pill inh"><span class="from">◂ stg</span>value</span>inherited</span>
+      <span><span class="pill def"><span class="from">◂ def</span>value</span>from defaults</span>
+      <span><span class="pill masked">∅ masked</span></span>
+      <span><span class="pill missing">required · unset</span></span>
+      <span>amber row = drift · Δ changed · § secret</span>
+    </div>
+  </div>
+  <div class="matrix"><table>
+    <thead><tr><th class="keyh">key</th>${head}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+/* ============================ switcher & boot ============================ */
+const VARIANTS=[
+  {key:'a',name:'Ledger',fn:renderA,cls:'vA'},
+  {key:'b',name:'Panel',fn:renderB,cls:'vB'},
+  {key:'c',name:'Cascade',fn:renderC,cls:'vC'},
+];
+let current=(()=>{try{return new URLSearchParams(location.search).get('variant')||'a'}catch(_){return'a'}})();
+if(!VARIANTS.some(v=>v.key===current))current='a';
+
+function render(){
+  const v=VARIANTS.find(x=>x.key===current);
+  const root=document.getElementById('root');
+  root.className=v.cls;
+  root.innerHTML=v.fn();
+  document.getElementById('sw-lbl').innerHTML=`<b>${v.key.toUpperCase()}</b> — ${v.name}`;
+  if(current==='a'){
+    root.querySelectorAll('[data-fn]').forEach(td=>{
+      td.addEventListener('mouseenter',()=>{S.footnote=td.dataset.fn;
+        document.getElementById('fnbar').innerHTML=footnoteA(S.footnote)});
+    });
+  }
+}
+function cycle(d){
+  const i=VARIANTS.findIndex(v=>v.key===current);
+  current=VARIANTS[(i+d+VARIANTS.length)%VARIANTS.length].key;
+  try{history.replaceState(null,'','?variant='+current)}catch(_){/* file:// or sandboxed */}
+  S.adding=null;render();
+}
+document.getElementById('sw-prev').onclick=()=>cycle(-1);
+document.getElementById('sw-next').onclick=()=>cycle(1);
+document.addEventListener('keydown',e=>{
+  const t=e.target;
+  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable))return;
+  if(e.key==='ArrowLeft')cycle(-1);
+  if(e.key==='ArrowRight')cycle(1);
+});
+render();
+</script>
+</body>
+</html>

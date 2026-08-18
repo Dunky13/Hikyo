@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Environment matrix — iterations</title>
+<style>
+  :root{
+    --bg:oklch(0.19 0.012 220);--bg2:oklch(0.225 0.014 220);--line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);--tx-dim:oklch(0.76 0.01 210);--tx-faint:oklch(0.6 0.012 215);
+    --accent:oklch(0.82 0.09 195);--on-accent:oklch(0.2 0.02 220);--mono:ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;
+    min-height:100vh;padding:clamp(24px,6vw,64px) clamp(18px,6vw,64px)}
+  .back{font-size:12.5px;color:var(--tx-faint);text-decoration:none}
+  .back:hover{color:var(--accent)}
+  h1{font-size:clamp(22px,4vw,30px);font-weight:700;letter-spacing:-0.01em;margin:10px 0 4px}
+  h1 span{color:var(--accent)}
+  .q{font-size:13.5px;color:var(--tx-dim);max-width:60ch;line-height:1.6;margin-bottom:32px}
+  ul{list-style:none;display:grid;gap:10px;max-width:760px}
+  li a{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;text-decoration:none;color:inherit;
+    padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--bg2);transition:border-color .15s}
+  li a:hover{border-color:var(--accent)}
+  li a:hover .name{color:var(--accent)}
+  .num{font-family:var(--mono);font-size:13px;color:var(--tx-faint);min-width:22px}
+  .name{font-size:15.5px;font-weight:600}
+  .latest{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--on-accent);
+    background:var(--accent);border-radius:999px;padding:2px 9px}
+  .desc{flex-basis:100%;font-size:12.5px;color:var(--tx-dim);line-height:1.5;margin-top:2px}
+  footer{margin-top:34px;font-family:var(--mono);font-size:11px;color:var(--tx-faint);line-height:1.8}
+  footer a{color:var(--tx-dim)}
+</style>
+</head>
+<body>
+  <a class="back" href="../">‹ all prototypes</a>
+  <h1>environment matrix <span>/</span> iterations</h1>
+  <p class="q">Question (ticket #20): does a side-by-side environment matrix communicate inheritance, overrides, gaps, validation, and drift legibly? Newest first; each earlier iteration is kept runnable.</p>
+  <ul>
+    <li><a href="31/">
+      <span class="num">31</span><span class="name">Filter survives navigation, visibly</span><span class="latest">LATEST</span>
+      <span class="desc">Alex: keep the filter when jumping to a group, but show what's active — a filter bar above the matrix ("filter active: problems — showing n of m keys · ✕ show all"), groups the filter hides render dimmed and inert in the panel.</span>
+    </a></li>
+    <li><a href="30/">
+      <span class="num">30</span><span class="name">Problems view no longer traps you</span>
+      <span class="desc">Tester feedback: in problems view every other nav row went dead. Now group links clear the filter and jump, the drafts row is visibly disabled at zero drafts, and the active problems row carries an explicit ✕.</span>
+    </a></li>
+    <li><a href="29/">
+      <span class="num">29</span><span class="name">Group creation everywhere</span>
+      <span class="desc">Groups were only creatable from the empty state — now the panel has "+ group", and the create modal's group field is always live: prefilled from "+ key", editable, with a datalist of existing groups; an unseen name creates that group.</span>
+    </a></li>
+    <li><a href="28/">
+      <span class="num">28</span><span class="name">Modal locked</span>
+      <span class="desc">Alex picked the centered modal — bottom sheet retired: switcher, ?sheet= param, grab handle and drag-to-dismiss all removed. ✕, backdrop and Escape close; no parameters left again.</span>
+    </a></li>
+    <li><a href="27/">
+      <span class="num">27</span><span class="name">Bottom sheet vs centered modal</span>
+      <span class="desc">Compare the create/edit surface as a bottom sheet or a centered modal — toggle live with the bottom-right "sheet:" pill or ?sheet=bottom|modal, even while one is open. Modal gets a ✕ (no drag), sheet keeps the grab handle.</span>
+    </a></li>
+    <li><a href="26/">
+      <span class="num">26</span><span class="name">Sheet grab handle drags for real</span>
+      <span class="desc">The pill at the top of every bottom sheet implied drag-to-dismiss but did nothing — now the sheet follows the finger (full-width hit zone), snaps back under 110px, dismisses beyond. All three sheets: cell, create, publish.</span>
+    </a></li>
+    <li><a href="25/">
+      <span class="num">25</span><span class="name">Schema builder — no JSON Schema knowledge needed</span>
+      <span class="desc">json keys get a structured "value shape" builder: property rows (name · type · required), an "other properties" rule, and one-click "infer from current value". Raw JSON Schema moves behind an advanced disclosure; schemas beyond the builder subset fall back to it automatically.</span>
+    </a></li>
+    <li><a href="24/">
+      <span class="num">24</span><span class="name">Schema defined where the key lives</span>
+      <span class="desc">The sheet's schema disclosure is an editor now: per-type constraints (pattern · length · int range · url schemes · JSON Schema textarea) applied as schema drafts that re-validate every environment. Create sheet takes an optional JSON Schema. Value rules on secrets stay reveal-gated (ADR #12 oracle).</span>
+    </a></li>
+    <li><a href="23/">
+      <span class="num">23</span><span class="name">JSON keys — multiline editor + schema validator</span>
+      <span class="desc">The json type is real now (schema ADR #12): keys carry an inline JSON Schema, cells show a compact one-line preview, the sheet gets a pretty-printed view and a multiline editor (⌘↵ saves), and the validator reports paths for config keys but redacts instance details on secrets.</span>
+    </a></li>
+    <li><a href="22/">
+      <span class="num">22</span><span class="name">Pencil affordance locked</span>
+      <span class="desc">Alex picked pencil: every editable slot carries a faint trailing ✎ (accent on hover). Affordance switcher and the other three options removed; no parameters left.</span>
+    </a></li>
+    <li><a href="21/">
+      <span class="num">21</span><span class="name">Cell-affordance options</span>
+      <span class="desc">Underline judged too subtle — four selectable strengths via the bottom-right pill or ?cell=: underline · well (filled input slot) · baseline (solid bottom edge) · pencil (trailing ✎). Shell selector removed — rail + panel is the shell.</span>
+    </a></li>
+    <li><a href="20/?variant=c">
+      <span class="num">20</span><span class="name">Editable-slot underline</span>
+      <span class="desc">Plain-text cells read as input fields again: quiet dotted underline under every value (accent on hover) — the inline-edit convention, visible on mobile, no border chrome returned.</span>
+    </a></li>
+    <li><a href="19/?variant=c">
+      <span class="num">19</span><span class="name">Normalize — problems filter, one button system</span>
+      <span class="desc">Problems view is a real filter (badge with total, matrix shows only problem keys, calm all-valid state); pending/error badges vanish at zero; one .btn vocabulary replaces three duplicate rule-sets.</span>
+    </a></li>
+    <li><a href="18/?variant=c">
+      <span class="num">18</span><span class="name">Empty state + real projects</span>
+      <span class="desc">Projects hold their own keys — switching to an un-seeded one shows a real empty state: value prop, declare-first-key (create sheet gains a group field), .env import stub (scaffold flow).</span>
+    </a></li>
+    <li><a href="17/?variant=c">
+      <span class="num">17</span><span class="name">Polish pass</span>
+      <span class="desc">Unified focus rings; req badge survives key truncation; monogram hues via golden angle; stronger light zebra; optically equal icon buttons; inline favicon (console now clean); dead CSS removed.</span>
+    </a></li>
+    <li><a href="16/?variant=c">
+      <span class="num">16</span><span class="name">Clarify pass</span>
+      <span class="desc">Reveal is a real button ("reveal value"); confirms name the action + consequence; validation messages human with examples; icon buttons get aria-labels and clearer titles.</span>
+    </a></li>
+    <li><a href="15/?variant=c">
+      <span class="num">15</span><span class="name">Distilled sheet</span>
+      <span class="desc">Teaching paragraph gone (the ? legend owns vocabulary); required-in collapses to a one-line schema disclosure; redundant close button dropped; hint copy halved. Create + publish sheets trimmed the same way.</span>
+    </a></li>
+    <li><a href="14/?variant=c">
+      <span class="num">14</span><span class="name">Distilled cells</span>
+      <span class="desc">Ordinary values are plain mono text — border chrome reserved for missing/invalid (228 pills → 4). Per-cell 🔒 dropped (key column carries it); secrets are dim dots; hover tint + focus ring keep the tap affordance.</span>
+    </a></li>
+    <li><a href="13/?variant=c">
+      <span class="num">13</span><span class="name">Drawer backdrop + mobile project select</span>
+      <span class="desc">Tapping outside an open drawer closes it (backdrop swallows the tap — no more accidental cell opens); small screens get a project switcher: customizable &lt;select&gt; (appearance:base-select, graceful fallback) atop the panel.</span>
+    </a></li>
+    <li><a href="12/?variant=c">
+      <span class="num">12</span><span class="name">Zebra rows, drift tint removed</span>
+      <span class="desc">Every other data row gets a slightly raised hue; the amber tint on rows with differing values is gone (with its machinery).</span>
+    </a></li>
+    <li><a href="11/?variant=c">
+      <span class="num">11</span><span class="name">Legend as header tooltip</span>
+      <span class="desc">The footer legend is gone — its content lives in a "?" icon popover in the header. One more row of matrix on every screen.</span>
+    </a></li>
+    <li><a href="10/?variant=c">
+      <span class="num">10</span><span class="name">Env picker in header</span>
+      <span class="desc">The environment chips bar is gone — show/hide moves into the matrix header: an "envs n/m ▾" checkbox popover in the sticky corner cell.</span>
+    </a></li>
+    <li><a href="9/?variant=c">
+      <span class="num">9</span><span class="name">Rail + panel de-duped</span>
+      <span class="desc">Variant C refined: rail owns project switching (two-letter monogram avatars, per-project hue); panel navigates inside the current project — name header, groups, views, ⚙ settings placeholder. Project config = later prototype (map fog).</span>
+    </a></li>
+    <li><a href="8/">
+      <span class="num">8</span><span class="name">App-shell variants</span>
+      <span class="desc">Desktop layout question: A sidebar (projects, group links with problem badges, views) · B centered content + horizontal jump bar · C icon rail + group panel. ?variant=a|b|c, floating switcher, hamburger drawer on mobile.</span>
+    </a></li>
+    <li><a href="7/">
+      <span class="num">7</span><span class="name">Publish, required-in, create sheet</span>
+      <span class="desc">Key creation in the bottom sheet (same language as editing); publish review sheet — per-env atomic revisions, selective publish, protected confirm, violation veto; per-key required-in editor riding publish as schema drafts.</span>
+    </a></li>
+    <li><a href="6/">
+      <span class="num">6</span><span class="name">No inheritance</span>
+      <span class="desc">Flat model trial: no base chains, no project defaults — every value explicit per env. Declare-into-N-envs on key creation, per-cell copy-across (secret copy needs reveal of the source). Supersedes ADR #10 pending formal amendment.</span>
+    </a></li>
+    <li><a href="5/">
+      <span class="num">5</span><span class="name">Opaque inheritance, sticky headers</span>
+      <span class="desc">Grid shows only resolved values — provenance moves entirely into the cell sheet (still permission-gated). Env header row and group headers stay pinned while scrolling.</span>
+    </a></li>
+    <li><a href="4/">
+      <span class="num">4</span><span class="name">Sharp origin rule</span>
+      <span class="desc">Config keys always show provenance; secret cells show origin only where you hold reveal (uniform 🔒 pill otherwise); secret-row drift gated the same way.</span>
+    </a></li>
+    <li><a href="3/">
+      <span class="num">3</span><span class="name">Inheritance admin-only, hidden envs</span>
+      <span class="desc">First cut at the comparison-oracle fix (flat: origin admin-only) + the external role showing whole-environment hiding.</span>
+    </a></li>
+    <li><a href="2/">
+      <span class="num">2</span><span class="name">Cascade, dark, mobile-first</span>
+      <span class="desc">Cascade chosen as the base; dark default + light theme, bottom-sheet in-place editing, permission-gated reveal, env chips, collapsible groups.</span>
+    </a></li>
+    <li><a href="1/?variant=c">
+      <span class="num">1</span><span class="name">Three variants — Ledger · Panel · Cascade</span>
+      <span class="desc">Round 1 exploration, switch with the floating bar or ?variant=a|b|c. Editorial (Ledger) later rejected.</span>
+    </a></li>
+  </ul>
+  <footer>
+    frozen reference · <a href="/prototypes/">all prototypes</a>
+  </footer>
+</body>
+</html>

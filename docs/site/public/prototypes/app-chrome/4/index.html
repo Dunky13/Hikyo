@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PROTOTYPE — Hikyo app chrome (ticket #29)</title>
+<!--
+  THROWAWAY PROTOTYPE — wayfinder ticket #29, iteration 4.
+
+  Question: how do the surfaces AROUND the matrix hang together — org
+  switching in the chrome, account/profile, project settings, membership &
+  roles, instance administration — in the env-matrix-31 design language.
+
+  Iteration 4 (Alex's round-3 verdicts):
+  - ORG PLACEMENT DECIDED: variant A — the rail owns orgs (monograms above
+    the project squares; mobile drawer opens with an organizations section).
+    Variants b/c and the switcher are removed.
+  - INSTANCE SURFACE DECIDED IN: full CLI<->UI feature parity for instance
+    management (#25's parity principle extended to the instance scope) —
+    hikyo may run local/VPS/k8s/docker while managing orgs and projects
+    hosted elsewhere, so the CLI is not always the convenient surface. The
+    one exception stays: the SystemProof local set (init, migrate, restore
+    reconciliation, break-glass) is local host authority by locked ADR #23/
+    #25 and deliberately has no UI.
+  - NEW EXPLORATION (open question, own wayfinder ticket): Portainer-style
+    multi-instance management — one MAIN instance connects to and manages
+    other hikyo instances. Sketched as a "Connected instances" card on
+    the instance surface to react to; the decision itself is out of this
+    ticket's scope.
+
+  Persona simulator (header): alex = 2 orgs + org admin + instance admin;
+  dana = single org, developer; sam = external, sees ONE project.
+  "Unauthorized ≡ nonexistent" (permission ADR #15): single-org personas get
+  NO org-switching chrome at all; sam's rail shows only the project he holds
+  a grant on.
+
+  Step-up (account security, blue, "confirm it's you") is deliberately a
+  different ceremony from reveal reauth (teal, "disclosure", enumerated keys,
+  ticket #21) — ADR #16 requires them distinguishable.
+
+  Design context: PRODUCT.md / DESIGN.md at repo root; reference design
+  prototype/env-matrix/31.
+-->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231d2b33'/%3E%3Cpath d='M8 12h16M8 16h16M8 20h10' stroke='%237fd0cd' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --mono:ui-monospace,monospace;
+    --sans:system-ui,sans-serif;
+    --bg:oklch(0.19 0.012 220);
+    --bg2:oklch(0.225 0.014 220);
+    --bg3:oklch(0.27 0.016 220);
+    --line:oklch(0.34 0.016 220);
+    --tx:oklch(0.93 0.008 200);
+    --tx-dim:oklch(0.76 0.01 210);
+    --tx-faint:oklch(0.60 0.012 215);
+    --accent:oklch(0.82 0.09 195);
+    --on-accent:oklch(0.2 0.02 220);
+    --accent-soft:oklch(0.82 0.09 195/.14);
+    --bad:oklch(0.74 0.13 25);
+    --bad-soft:oklch(0.74 0.13 25/.14);
+    --chg:oklch(0.8 0.06 250);
+    --chg-soft:oklch(0.8 0.06 250/.14);
+    --rowalt:oklch(0.93 0.008 200/.045);
+    --sheet-shadow:0 -12px 40px oklch(0 0 0/.5);
+  }
+  [data-theme=light]{
+    --bg:oklch(0.965 0.008 200);
+    --bg2:oklch(0.935 0.01 200);
+    --bg3:oklch(0.895 0.012 200);
+    --line:oklch(0.82 0.014 210);
+    --tx:oklch(0.25 0.03 225);
+    --tx-dim:oklch(0.4 0.025 220);
+    --tx-faint:oklch(0.52 0.02 218);
+    --accent:oklch(0.45 0.085 210);
+    --on-accent:oklch(0.97 0.008 200);
+    --accent-soft:oklch(0.45 0.085 210/.1);
+    --bad:oklch(0.48 0.14 30);
+    --bad-soft:oklch(0.48 0.14 30/.1);
+    --chg:oklch(0.45 0.08 255);
+    --chg-soft:oklch(0.45 0.08 255/.12);
+    --rowalt:oklch(0.25 0.03 225/.07);
+    --sheet-shadow:0 -12px 40px oklch(0.3 0.02 220/.25);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    background:var(--bg);color:var(--tx);font-family:var(--sans);
+    font-size:14px;-webkit-font-smoothing:antialiased;
+    height:100dvh;display:flex;flex-direction:column;overflow:hidden;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  input,select{font:inherit}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  :is(button,select,input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------------- app shell ---------------- */
+  #app{display:grid;grid-template-columns:56px 218px 1fr;height:100dvh;overflow:hidden}
+  #main{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+  /* rail */
+  #rail{display:flex;flex-direction:column;align-items:center;gap:8px;
+    padding:14px 0 12px;border-right:1px solid var(--line);background:var(--bg2)}
+  .pav{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
+    justify-content:center;font-weight:700;font-size:12px;letter-spacing:.02em;color:var(--tx-dim);
+    border:1px solid transparent;position:relative;flex:none}
+  .pav:hover{border-color:var(--line);color:var(--tx)}
+  .pav.act{background:var(--accent);color:var(--on-accent)}
+  .pav.orgav{border-radius:50%;font-size:11px}
+  .pav.orgav.act{outline:2px solid var(--accent);outline-offset:2px;background:var(--bg3);color:var(--tx)}
+  #rail .raildiv{width:26px;border-top:1px solid var(--line);margin:4px 0;flex:none}
+  #rail .spacer{flex:1}
+  #rail .railbtn{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    color:var(--tx-faint);font-size:15px;flex:none;border:1px solid transparent}
+  #rail .railbtn:hover{color:var(--tx);border-color:var(--line)}
+  #rail .railbtn.act{color:var(--accent);border-color:var(--accent)}
+  #rail .me{border-radius:50%;background:var(--bg3);color:var(--tx);font-weight:700;font-size:11px}
+
+  /* side panel */
+  #side{display:flex;flex-direction:column;overflow-y:auto;
+    border-right:1px solid var(--line);background:var(--bg2);padding:6px 0 20px}
+  #side .stitle{font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--tx-faint);padding:16px 16px 6px;font-weight:700}
+  #side .srow{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    padding:9px 16px;font-size:13px;color:var(--tx-dim);min-height:38px}
+  #side .srow:hover{color:var(--tx);background:var(--bg3)}
+  #side .srow.act{color:var(--tx);background:var(--accent-soft);font-weight:600}
+  #side .srow .cnt{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--tx-faint)}
+  #side .srow .pb{margin-left:auto;font-size:10px;font-weight:600;color:var(--bad);
+    background:var(--bad-soft);border-radius:999px;padding:2px 8px}
+  #side .orghead{display:flex;align-items:center;gap:10px;padding:12px 16px 4px}
+  #side .orghead .oname{font-weight:700;font-size:14px}
+  #side .orghead .orole{font-size:10.5px;color:var(--tx-faint);font-family:var(--mono)}
+
+  /* header */
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg);flex:none}
+  header .crumb{font-weight:600;font-size:15px;letter-spacing:.01em;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  header .crumb .sep{color:var(--accent)}
+  header .crumb .dimseg{color:var(--tx-dim);font-weight:500}
+  header .grow{flex:1}
+  header .ctl{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--tx-dim)}
+  header select{background:var(--bg2);border:1px solid var(--line);color:var(--tx);
+    padding:7px 10px;border-radius:6px;font-size:13px}
+  header .iconbtn{border:1px solid var(--line);border-radius:6px;padding:7px 0;font-size:13px;color:var(--tx-dim);
+    min-height:36px;min-width:38px;display:inline-flex;align-items:center;justify-content:center}
+  header .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  #menubtn{display:none}
+
+  /* content */
+  .wrap{flex:1;overflow:auto;overscroll-behavior:contain;padding:clamp(16px,3vw,32px)}
+  .page{max-width:860px;margin:0 auto;display:grid;gap:18px}
+  .page h2{font-size:19px;font-weight:700;letter-spacing:-.01em}
+  .page .sub{font-size:13px;color:var(--tx-dim);margin-top:-12px;line-height:1.55;max-width:64ch}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h3{font-size:13px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--tx-faint);margin-bottom:12px}
+  .card .note{font-size:12.5px;color:var(--tx-faint);line-height:1.55;margin-top:10px}
+  .qcard{border-style:dashed;background:transparent}
+  .qcard b{color:var(--chg)}
+  .rowline{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+  .rowline:first-of-type{border-top:none}
+  .rowline .main{display:grid;gap:2px;min-width:0}
+  .rowline .t{font-size:13.5px;font-weight:600}
+  .rowline .d{font-size:12px;color:var(--tx-faint);font-family:var(--mono)}
+  .rowline .grow{flex:1}
+  .tag{font-size:10px;letter-spacing:.07em;font-weight:700;text-transform:uppercase;
+    border-radius:999px;padding:3px 9px;border:1px solid var(--line);color:var(--tx-dim);white-space:nowrap}
+  .tag.acc{color:var(--accent);border-color:var(--accent)}
+  .tag.blue{color:var(--chg);border-color:var(--chg)}
+  .tag.bad{color:var(--bad);border-color:var(--bad)}
+  .tag.mono{font-family:var(--mono);text-transform:none;letter-spacing:0}
+  .btn{border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:13px;color:var(--tx);
+    min-height:36px;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+  .btn.primary:hover{filter:brightness(1.08);color:var(--on-accent)}
+  .btn.danger{color:var(--bad)}
+  .btn.danger:hover{border-color:var(--bad)}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .btn.blue{color:var(--chg)}
+  .btn.blue:hover{border-color:var(--chg)}
+  .xbtn{color:var(--tx-faint);font-size:15px;min-width:34px;min-height:34px;display:inline-flex;
+    align-items:center;justify-content:center;border-radius:7px;border:1px solid transparent}
+  .xbtn:hover{color:var(--bad);border-color:var(--bad)}
+  .field{display:grid;gap:5px}
+  .field label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-faint);font-weight:700}
+  .field input[type=text],.field select{background:var(--bg);border:1px solid var(--line);color:var(--tx);
+    padding:10px 12px;border-radius:8px;font-size:13.5px;min-height:42px;width:100%}
+  .fgrid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+  .mini{font-size:11px;color:var(--tx-faint);font-family:var(--mono)}
+
+  /* condensed matrix (shell-integration fidelity, not full env-matrix/31) */
+  .mxwrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--bg2)}
+  table.mx{border-collapse:collapse;width:100%;font-size:12.5px;min-width:640px}
+  .mx thead th{position:sticky;top:0;background:var(--bg2);text-align:left;font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--tx-faint);padding:10px 12px;
+    border-bottom:1px solid var(--line);font-weight:700;white-space:nowrap}
+  .mx thead th .prot{color:var(--bad);margin-left:6px;letter-spacing:.06em}
+  .mx td{padding:7px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .mx tr:last-child td{border-bottom:none}
+  .mx td.key{font-family:var(--mono);font-size:11.5px;color:var(--tx);position:sticky;left:0;background:var(--bg2)}
+  .mx td.key .sec{color:var(--tx-faint);margin-left:6px}
+  .mx tr.grp td{background:var(--bg3);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--tx-faint);font-weight:700;padding:6px 12px;position:sticky;left:0}
+  .mx td.val{font-family:var(--mono);font-size:11.5px;color:var(--tx-dim);max-width:180px;
+    overflow:hidden;text-overflow:ellipsis}
+  .mx td.val .pen{color:var(--tx-faint);opacity:.45;margin-left:5px}
+  .mx tr:hover td.val .pen{opacity:1;color:var(--accent)}
+  .mx td.val.bad{color:var(--bad);border-bottom:1px solid var(--bad)}
+  .mx td.val .dots{letter-spacing:.18em}
+  .mxnote{font-size:11.5px;color:var(--tx-faint);font-family:var(--mono);margin-top:10px}
+  .mxnote a{color:var(--accent)}
+
+  /* grouped capability chips */
+  .capchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;
+    border:1px solid var(--line);border-radius:6px;padding:3px 8px;color:var(--tx);margin:2px 4px 2px 0;
+    white-space:nowrap}
+  .capchip .rm{color:var(--tx-faint);font-size:12px;line-height:1;padding:0 1px}
+  .capchip .rm:hover{color:var(--bad)}
+  .capchip.pend{border-style:dashed;color:var(--chg);border-color:var(--chg)}
+
+  /* icon picker */
+  .iconrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .bigav{width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:19px;color:var(--on-accent)}
+  .hues{display:flex;gap:8px;flex-wrap:wrap}
+  .hue{width:30px;height:30px;border-radius:50%;border:2px solid transparent}
+  .hue.act{border-color:var(--tx)}
+  .glyphs{display:flex;gap:6px;flex-wrap:wrap}
+  .glyph{width:38px;height:38px;border-radius:9px;border:1px solid var(--line);display:flex;
+    align-items:center;justify-content:center;font-size:16px}
+  .glyph.act{border-color:var(--accent);background:var(--accent-soft)}
+
+  /* grants table */
+  .grants{width:100%;border-collapse:collapse;font-size:13px}
+  .grants th{text-align:left;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx-faint);
+    padding:8px 10px;border-bottom:1px solid var(--line);font-weight:700}
+  .grants td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  .grants tr:last-child td{border-bottom:none}
+  .grants tr:hover td{background:var(--rowalt)}
+  .cap{font-family:var(--mono);font-size:12px;color:var(--tx)}
+  .scopechip{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:6px;padding:2px 7px;color:var(--tx-dim);white-space:nowrap}
+  .scopechip.org{color:var(--chg);border-color:var(--chg)}
+  .scopechip.prot{color:var(--bad);border-color:var(--bad)}
+  .inspect{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:14px}
+  .answerbox{background:var(--accent-soft);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;
+    font-size:13px;margin-bottom:14px}
+  .answerbox b{font-family:var(--mono)}
+
+  /* modals */
+  #scrim{position:fixed;inset:0;z-index:40;background:oklch(0 0 0/.45);display:none}
+  body.modal #scrim{display:block}
+  .modal-box{position:fixed;z-index:41;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(480px,calc(100vw - 32px));max-height:85dvh;overflow:auto;
+    background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:20px;display:none;
+    box-shadow:0 18px 60px oklch(0 0 0/.5)}
+  .modal-box.open{display:block}
+  .modal-box h4{font-size:15px;font-weight:700;display:flex;align-items:center;gap:9px}
+  .modal-box .msub{font-size:12.5px;color:var(--tx-dim);line-height:1.55;margin:8px 0 14px}
+  .modal-box .mrow{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+  .modal-box.stepup{border-color:var(--chg)}
+  .modal-box.stepup h4{color:var(--chg)}
+  .modal-box.stepup .banner{background:var(--chg-soft);border:1px solid var(--chg);border-radius:8px;
+    padding:9px 12px;font-size:12px;color:var(--tx);line-height:1.5;margin-bottom:12px}
+  .modal-box.blast{border-color:var(--bad)}
+  .modal-box.blast h4{color:var(--bad)}
+  .codes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}
+  .codes code{font-family:var(--mono);font-size:13px;background:var(--bg);border:1px solid var(--line);
+    border-radius:7px;padding:8px 10px;text-align:center;letter-spacing:.06em}
+  .oncewarn{background:var(--bad-soft);border:1px solid var(--bad);border-radius:8px;padding:9px 12px;
+    font-size:12.5px;line-height:1.5;margin-bottom:6px}
+  .blastlist{margin:10px 0;display:grid;gap:5px;font-family:var(--mono);font-size:12px;color:var(--tx-dim)}
+  .blastlist .bl{display:flex;gap:8px;align-items:baseline}
+  .blastlist .bl .p{color:var(--tx)}
+
+  .oav{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:10px;color:var(--on-accent);flex:none}
+
+  /* mobile */
+  @media (max-width:700px){
+    #app{grid-template-columns:1fr}
+    #rail{display:none}
+    header{flex-wrap:nowrap;gap:8px;padding:10px 12px}
+    header .crumb{font-size:13.5px;min-width:0;overflow:hidden;white-space:nowrap;flex-wrap:nowrap}
+    header .crumb .dimseg,header .crumb span:not(.sep){overflow:hidden;text-overflow:ellipsis}
+    header .ctl select{max-width:104px;text-overflow:ellipsis}
+    #side{position:fixed;top:0;bottom:0;left:0;width:min(300px,80vw);z-index:25;
+      transform:translateX(-105%);transition:transform .2s cubic-bezier(.25,1,.5,1);
+      box-shadow:12px 0 40px oklch(0 0 0/.4)}
+    #side.open{transform:none}
+    #menubtn{display:inline-flex}
+    header .ctl .lbl{display:none}
+    .codes{grid-template-columns:1fr 1fr}
+  }
+  #sidescrim{position:fixed;inset:0;z-index:24;background:oklch(0 0 0/.35);display:none}
+  body.sideopen #sidescrim{display:block}
+  /* rail carries projects/account/instance on desktop; panel repeats them only on mobile */
+  #side .mobileonly{display:none}
+  .m-only{display:none!important}
+  @media (max-width:700px){
+    #side div.mobileonly{display:block}
+    #side button.mobileonly{display:flex}
+    .m-only{display:inline-flex!important}
+    header .crumb .hidemobile{display:none}
+  }
+</style>
+</head>
+<body data-theme="dark">
+<div id="app">
+<div id="rail"></div>
+<aside id="side"></aside>
+<div id="main">
+<header>
+  <button class="iconbtn" id="menubtn" onclick="toggleSide()" title="menu" aria-label="open navigation">☰</button>
+  <span class="crumb" id="crumb"></span>
+  <span class="grow"></span>
+  <span class="ctl"><span class="lbl">acting as</span>
+    <select id="persona" aria-label="simulated persona" title="simulated persona — decides which orgs and projects exist for you">
+      <option value="alex">alex · 2 orgs · org+instance admin</option>
+      <option value="dana">dana · 1 org · developer</option>
+      <option value="sam">sam · external · 1 project</option>
+    </select>
+  </span>
+  <button class="iconbtn" id="themebtn" title="switch light / dark" aria-label="switch light or dark theme">◐</button>
+</header>
+<div class="wrap" id="content"></div>
+</div>
+</div>
+
+<div id="sidescrim" onclick="toggleSide(false)"></div>
+<div id="scrim" onclick="closeModals()"></div>
+
+<!-- account-security step-up: deliberately NOT the reveal ceremony -->
+<div class="modal-box stepup" id="stepup" role="dialog" aria-modal="true" aria-label="account security step-up">
+  <h4>🛡 Confirm it's you</h4>
+  <div class="banner">Account-security change: <b id="stepup-what"></b>. This asks for your possession factor.
+    It is <b>not</b> a secret disclosure — revealing values is a separate, teal ceremony that names the keys it covers.</div>
+  <div class="msub">Passwords don't count here — a stolen session implies the password. Recovery codes restore access, never authorize changes.</div>
+  <div class="mrow">
+    <button class="btn" onclick="closeModals()">cancel</button>
+    <button class="btn blue" onclick="stepupOk('totp')">enter TOTP</button>
+    <button class="btn blue" onclick="stepupOk('passkey')">use passkey</button>
+  </div>
+</div>
+
+<div class="modal-box" id="codesmodal" role="dialog" aria-modal="true" aria-label="recovery codes">
+  <h4>Recovery codes</h4>
+  <div class="oncewarn"><b>Shown once.</b> Hikyo stores only hashes — after this dialog closes these codes
+    cannot be displayed again, only replaced.</div>
+  <div class="codes" id="codesgrid"></div>
+  <label style="display:flex;gap:9px;align-items:center;font-size:13px;margin-top:6px;cursor:pointer">
+    <input type="checkbox" id="codesack"> I saved these somewhere safe
+  </label>
+  <div class="mrow">
+    <button class="btn" onclick="copyCodes(this)">copy all</button>
+    <button class="btn primary" onclick="closeCodes()">done</button>
+  </div>
+</div>
+
+<div class="modal-box blast" id="blastmodal" role="dialog" aria-modal="true" aria-label="org-scope grant warning">
+  <h4>⚠ Org-scoped grant — check the blast radius</h4>
+  <div class="msub" id="blastsub"></div>
+  <div class="blastlist" id="blastlist"></div>
+  <div class="msub">Absence is the only denial — there is no per-project exception under an org grant.
+    Narrower option: grant per project or per environment instead.</div>
+  <div class="mrow">
+    <button class="btn" onclick="closeModals()">cancel</button>
+    <button class="btn danger" onclick="confirmGrant()">grant at org scope</button>
+  </div>
+</div>
+
+<div class="modal-box" id="invitemodal" role="dialog" aria-modal="true" aria-label="invite member">
+  <h4>Invite member</h4>
+  <div class="msub">The invitation carries the capability set below and binds to <b>whoever redeems it</b> —
+    the email is delivery, never a linking key (an email match is not an identity).</div>
+  <div style="display:grid;gap:12px">
+    <div class="field"><label>email (delivery only)</label>
+      <input type="text" id="iv-email" placeholder="person@example.org"></div>
+    <div class="field"><label>role template</label>
+      <select id="iv-tpl"><option>viewer</option><option selected>developer</option><option>admin</option></select></div>
+    <div class="field"><label>scope</label>
+      <select id="iv-scope">
+        <option value="project:demo">project · demo</option>
+        <option value="org:acme">org · acme (all projects)</option>
+      </select></div>
+  </div>
+  <div class="mrow">
+    <button class="btn" onclick="closeModals()">cancel</button>
+    <button class="btn primary" onclick="submitInvite()">create invitation</button>
+  </div>
+</div>
+
+<div class="modal-box" id="grantmodal" role="dialog" aria-modal="true" aria-label="new grant">
+  <h4>New grant</h4>
+  <div class="msub">One capability, one scope, one revocable line. Roles are templates that expand into lines like this.</div>
+  <div style="display:grid;gap:12px">
+    <div class="field"><label>principal</label>
+      <select id="g-principal"><option>dana</option><option>sam</option><option>priya</option></select></div>
+    <div class="field"><label>capability</label>
+      <select id="g-cap"><option>read</option><option>edit</option><option>publish</option><option>reveal</option><option>reveal-history</option><option>definitions-edit</option><option>project-settings</option><option>manage-members</option><option>audit-read</option></select></div>
+    <div class="field"><label>scope</label>
+      <select id="g-scope">
+        <option value="env:production">env · production (protected)</option>
+        <option value="env:staging">env · staging</option>
+        <option value="project:demo">project · demo</option>
+        <option value="org:acme">org · acme (all projects)</option>
+      </select></div>
+  </div>
+  <div class="mrow">
+    <button class="btn" onclick="closeModals()">cancel</button>
+    <button class="btn primary" onclick="submitGrant()">grant</button>
+  </div>
+</div>
+
+<script>
+/* ============================ demo data ============================ */
+const ORGS=[
+  {id:'acme',name:'acme',hue:195,projects:[
+    {id:'demo',name:'demo',hue:195},
+    {id:'website',name:'website',hue:280},
+    {id:'mobile',name:'mobile-app',hue:60},
+  ]},
+  {id:'sample-org',name:'sample-org',hue:280,projects:[
+    {id:'sandbox',name:'sandbox',hue:140},
+    {id:'poke',name:'sample-catalog',hue:20},
+  ]},
+];
+const PERSONAS={
+  alex:{label:'alex',orgs:['acme','sample-org'],orgAdmin:['acme','sample-org'],instanceAdmin:true,
+        projectFilter:null,roleIn:o=>'org admin'},
+  dana:{label:'dana',orgs:['acme'],orgAdmin:[],instanceAdmin:false,
+        projectFilter:null,roleIn:o=>'developer'},
+  sam:{label:'sam',orgs:['acme'],orgAdmin:[],instanceAdmin:false,
+        projectFilter:{acme:['demo']},roleIn:o=>'external'},
+};
+/* grants: each line independently revocable (permission ADR #15) */
+let GRANTS=[
+  {p:'alex', cap:'manage-members', scope:'org:acme', via:'admin template'},
+  {p:'alex', cap:'reveal',         scope:'org:acme', via:'admin template'},
+  {p:'alex', cap:'reveal-history', scope:'org:acme', via:'admin template'},
+  {p:'alex', cap:'audit-read',     scope:'org:acme', via:'admin template'},
+  {p:'dana', cap:'read',           scope:'project:demo', via:'developer template'},
+  {p:'dana', cap:'edit',           scope:'project:demo', via:'developer template'},
+  {p:'dana', cap:'publish',        scope:'env:staging',  via:'developer template'},
+  {p:'dana', cap:'reveal',         scope:'env:staging',  via:'direct'},
+  {p:'sam',  cap:'read',           scope:'project:demo', via:'direct'},
+  {p:'priya',cap:'read',           scope:'project:demo', via:'viewer template'},
+  {p:'priya',cap:'reveal',         scope:'env:production',via:'direct'},
+];
+/* condensed matrix demo data (subset of env-matrix/31's) */
+const MXENVS=[{id:'dev',n:'development'},{id:'stg',n:'staging'},{id:'prd',n:'production',prot:true},{id:'pre',n:'preview'}];
+const MXKEYS=[
+  {g:'app',k:'APP_NAME',v:{dev:'Hikyo Demo',stg:'Hikyo Demo',prd:'Hikyo',pre:'Hikyo Demo'}},
+  {g:'app',k:'APP_URL',v:{dev:'http://localhost:8080',stg:'https://stg.hikyo.dev',prd:'https://hikyo.dev',pre:'https://pr-{n}.preview.dev'}},
+  {g:'app',k:'PORT',v:{dev:'8080',stg:'8080',prd:'8080',pre:'8080'}},
+  {g:'db',k:'DATABASE_URL',sec:true,v:{dev:'•',stg:'•',prd:'•',pre:'•'}},
+  {g:'db',k:'DB_POOL_SIZE',v:{dev:'5',stg:'10',prd:'25',pre:'5'}},
+  {g:'auth',k:'SESSION_SECRET',sec:true,v:{dev:'•',stg:'•',prd:'•',pre:'•'}},
+  {g:'auth',k:'OIDC_ISSUER',v:{dev:'https://git.example.com',stg:'https://git.example.com',prd:'',pre:'https://git.example.com'},bad:{prd:'required, unset'}},
+];
+let INVITES=[];
+const SESSIONS=[
+  {type:'browser',label:'Safari · macOS',detail:'193.28.x.x · Amsterdam',last:'now',current:true},
+  {type:'browser',label:'Firefox · Fedora',detail:'193.28.x.x · Amsterdam',last:'2 days ago'},
+  {type:'cli',label:'hikyo CLI',detail:'laptop.example · device authorization',last:'25 min ago'},
+  {type:'cli',label:'hikyo CLI',detail:'example-cluster-0 · device authorization',last:'6 days ago'},
+];
+let FACTORS={passkeys:[{n:'MacBook Touch ID',added:'2026-05-12'},{n:'YubiKey 5C',added:'2026-05-12'}],
+  totp:true,password:true,codesGenerated:false,passkeyOnly:false};
+const IDENTITIES=[{issuer:'git.example.com',subject:'alex',linked:'2026-06-02'}];
+
+/* ============================ state ============================ */
+/* org placement decided: A — the rail owns orgs (iteration 4) */
+let S={persona:'alex',org:'acme',project:'demo',view:'matrix',theme:'dark',
+       inspectCap:'reveal',inspectScope:'env:production',pendingGrant:null,
+       projHue:195,projGlyph:null};
+
+const $=id=>document.getElementById(id);
+const me=()=>PERSONAS[S.persona];
+const myOrgs=()=>ORGS.filter(o=>me().orgs.includes(o.id));
+const curOrg=()=>ORGS.find(o=>o.id===S.org)||myOrgs()[0];
+const visProjects=o=>{const f=me().projectFilter;
+  return o.projects.filter(p=>!f||!f[o.id]||f[o.id].includes(p.id));};
+const mono=n=>n.slice(0,2).toUpperCase();
+const hueBg=h=>`oklch(0.62 0.11 ${h})`;
+const scopeLabel=s=>s.replace(':',' · ');
+const isOrgAdmin=()=>me().orgAdmin.includes(S.org);
+
+/* ============================ shell render ============================ */
+function ensureValidContext(){
+  if(!me().orgs.includes(S.org)) S.org=me().orgs[0];
+  const vp=visProjects(curOrg());
+  if(!vp.some(p=>p.id===S.project)) S.project=vp[0]?.id;
+  if(!me().instanceAdmin&&S.view==='instance') S.view='matrix';
+  if(!isOrgAdmin()&&S.view==='orgmembers') S.view='matrix';
+}
+
+function renderRail(){
+  const r=$('rail');r.innerHTML='';
+  const multiOrg=myOrgs().length>1;
+  if(multiOrg){
+    for(const o of myOrgs()){
+      const b=document.createElement('button');
+      b.className='pav orgav'+(o.id===S.org?' act':'');
+      b.style.background=o.id===S.org?'':'transparent';
+      b.style.borderColor='var(--line)';
+      b.title=`organization ${o.name}`;b.textContent=mono(o.name);
+      b.onclick=()=>{S.org=o.id;S.project=null;S.view='matrix';update();};
+      r.appendChild(b);
+    }
+    r.insertAdjacentHTML('beforeend','<div class="raildiv"></div>');
+  }
+  for(const p of visProjects(curOrg())){
+    const b=document.createElement('button');
+    b.className='pav'+(p.id===S.project&&!['account','instance'].includes(S.view)?' act':'');
+    b.title=`project ${p.name}`;b.textContent=mono(p.name);
+    if(!(p.id===S.project)) b.style.background=hueBg(p.hue).replace(')','/.18)');
+    b.onclick=()=>{S.project=p.id;S.view='matrix';update();};
+    r.appendChild(b);
+  }
+  r.insertAdjacentHTML('beforeend','<div class="spacer"></div>');
+  if(me().instanceAdmin){
+    const g=document.createElement('button');
+    g.className='railbtn'+(S.view==='instance'?' act':'');
+    g.title='instance administration';g.textContent='⚙';
+    g.onclick=()=>{S.view='instance';update();};
+    r.appendChild(g);
+  }
+  const a=document.createElement('button');
+  a.className='railbtn me'+(S.view==='account'?' act':'');
+  a.title='account & security';a.textContent=mono(me().label);
+  a.onclick=()=>{S.view='account';update();};
+  r.appendChild(a);
+}
+
+function renderSide(){
+  const s=$('side');s.innerHTML='';
+  const o=curOrg();
+  const role=me().orgAdmin.includes(o.id)?'org admin':me().roleIn(o);
+  s.insertAdjacentHTML('beforeend',
+    `<div class="orghead"><span class="oav" style="background:${hueBg(o.hue)}">${mono(o.name)}</span>
+     <div><div class="oname">${o.name}</div><div class="orole">${role}</div></div></div>`);
+  /* mobile: the rail is hidden, so the drawer opens with the org section */
+  if(myOrgs().length>1){
+    s.insertAdjacentHTML('beforeend','<div class="stitle mobileonly">organizations</div>');
+    for(const oo of myOrgs()){
+      const b=document.createElement('button');
+      b.className='srow mobileonly'+(oo.id===S.org?' act':'');
+      b.innerHTML=`<span class="oav" style="background:${hueBg(oo.hue)};width:22px;height:22px;font-size:9px">${mono(oo.name)}</span> ${oo.name}`
+        +(oo.id===S.org?'<span class="cnt">✓</span>':'');
+      b.onclick=()=>{S.org=oo.id;S.project=null;S.view='matrix';update();toggleSide(false);};
+      s.appendChild(b);
+    }
+  }
+  const proj=visProjects(o).find(p=>p.id===S.project);
+  if(proj){
+    /* env-matrix-31 panel: the matrix's own nav lives HERE — one sidebar, merged */
+    s.insertAdjacentHTML('beforeend','<div class="stitle">project · '+proj.name+'</div>');
+    const mb=document.createElement('button');
+    mb.className='srow'+(S.view==='matrix'?' act':'');
+    mb.innerHTML='Environment matrix';
+    mb.onclick=()=>{S.view='matrix';update();toggleSide(false);};
+    s.appendChild(mb);
+    if(S.view==='matrix'){
+      const groups={};MXKEYS.forEach(K=>{groups[K.g]=groups[K.g]||{n:0,bad:0};groups[K.g].n++;
+        if(K.bad)groups[K.g].bad+=Object.keys(K.bad).length;});
+      for(const [g,info] of Object.entries(groups)){
+        const b=document.createElement('button');
+        b.className='srow';b.style.paddingLeft='28px';
+        b.innerHTML=`${g}${info.bad?`<span class="pb">${info.bad}</span>`:`<span class="cnt">${info.n}</span>`}`;
+        b.onclick=()=>{toggleSide(false);};
+        s.appendChild(b);
+      }
+      const pv=document.createElement('button');
+      pv.className='srow';pv.style.paddingLeft='28px';
+      pv.innerHTML='problems<span class="pb">1</span>';
+      pv.onclick=()=>{toggleSide(false);};
+      s.appendChild(pv);
+    }
+    for(const [v,l] of [['members','Members & access'],['settings','Project settings']]){
+      const b=document.createElement('button');
+      b.className='srow'+(S.view===v?' act':'');b.textContent=l;
+      b.onclick=()=>{S.view=v;update();toggleSide(false);};
+      s.appendChild(b);
+    }
+  }
+  if(isOrgAdmin()){
+    s.insertAdjacentHTML('beforeend','<div class="stitle">organization</div>');
+    const b=document.createElement('button');
+    b.className='srow'+(S.view==='orgmembers'?' act':'');b.textContent='Org members & grants';
+    b.onclick=()=>{S.view='orgmembers';update();toggleSide(false);};
+    s.appendChild(b);
+  }
+  /* mobile-only: projects list + account/instance (rail is hidden) */
+  s.insertAdjacentHTML('beforeend','<div class="stitle mobileonly" style="margin-top:8px">projects</div>');
+  for(const p of visProjects(o)){
+    const b=document.createElement('button');
+    b.className='srow mobileonly'+(p.id===S.project?' act':'');
+    b.textContent=p.name;
+    b.onclick=()=>{S.project=p.id;S.view='matrix';update();toggleSide(false);};
+    s.appendChild(b);
+  }
+  s.insertAdjacentHTML('beforeend','<div class="stitle mobileonly">you</div>');
+  const acc=document.createElement('button');
+  acc.className='srow mobileonly'+(S.view==='account'?' act':'');acc.textContent='Account & security';
+  acc.onclick=()=>{S.view='account';update();toggleSide(false);};
+  s.appendChild(acc);
+  if(me().instanceAdmin){
+    const ins=document.createElement('button');
+    ins.className='srow mobileonly'+(S.view==='instance'?' act':'');ins.textContent='Instance administration';
+    ins.onclick=()=>{S.view='instance';update();toggleSide(false);};
+    s.appendChild(ins);
+  }
+}
+
+function renderCrumb(){
+  const c=$('crumb');c.innerHTML='';
+  const o=curOrg();
+  const seg=[];
+  seg.push('<span class="hidemobile">hikyo</span>');
+  seg.push('<span class="sep hidemobile">/</span>');
+  seg.push(`<span class="dimseg">${o.name}</span>`);
+  const proj=visProjects(o).find(p=>p.id===S.project);
+  if(['matrix','members','settings'].includes(S.view)&&proj){
+    seg.push('<span class="sep">/</span>');
+    seg.push(`<span>${proj.name}</span>`);
+  }else if(S.view==='account'){
+    seg.push('<span class="sep">/</span><span>account</span>');
+  }else if(S.view==='instance'){
+    seg.push('<span class="sep">/</span><span>instance</span>');
+  }else if(S.view==='orgmembers'){
+    seg.push('<span class="sep">/</span><span>members</span>');
+  }
+  c.innerHTML=seg.join(' ');
+}
+
+/* ============================ pages ============================ */
+function pageMatrix(){
+  const proj=visProjects(curOrg()).find(p=>p.id===S.project);
+  let rows='',lastG='';
+  for(const K of MXKEYS){
+    if(K.g!==lastG){lastG=K.g;
+      rows+=`<tr class="grp"><td colspan="${MXENVS.length+1}">${K.g}</td></tr>`;}
+    rows+=`<tr><td class="key">${K.k}${K.sec?'<span class="sec" title="secret">🔒</span>':''}</td>`
+      +MXENVS.map(e=>{
+        const bad=K.bad&&K.bad[e.id];
+        const val=K.sec?'<span class="dots">••••••</span>':(K.v[e.id]||(bad?'—':''));
+        return `<td class="val${bad?' bad':''}" title="${bad||''}">${val}<span class="pen">✎</span></td>`;
+      }).join('')+'</tr>';
+  }
+  return `<div class="page" style="max-width:1080px">
+    <h2>${proj?proj.name:'no project'} — environment matrix</h2>
+    <div class="mxwrap"><table class="mx">
+      <thead><tr><th>key</th>${MXENVS.map(e=>`<th>${e.n}${e.prot?'<span class="prot">PROTECTED</span>':''}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="mxnote">condensed — full behaviour is <a href="../../env-matrix/31/" target="_blank">env-matrix/31</a> (frozen reference);
+      shown here so the chrome and the matrix share ONE panel, one shell.</div>
+  </div>`;
+}
+
+function pageSettings(){
+  const proj=visProjects(curOrg()).find(p=>p.id===S.project);
+  const glyphs=['🚀','🔐','🌿','📦','🛰','🧪'];
+  const hues=[195,280,60,140,20,320];
+  const face=S.projGlyph??mono(proj.name);
+  return `<div class="page">
+    <h2>Project settings — ${proj.name}</h2>
+    <p class="sub">Project identity and metadata. Access management is its own surface — one entry point, no second permission editor here.</p>
+    <div class="card"><h3>Identity</h3>
+      <div class="iconrow">
+        <span class="bigav" style="background:${hueBg(S.projHue)}">${face}</span>
+        <div style="display:grid;gap:10px">
+          <div class="hues">${hues.map(h=>`<button class="hue${h===S.projHue?' act':''}" style="background:${hueBg(h)}" title="hue ${h}" onclick="S.projHue=${h};update()"></button>`).join('')}</div>
+          <div class="glyphs">
+            <button class="glyph${S.projGlyph===null?' act':''}" title="monogram" onclick="S.projGlyph=null;update()">${mono(proj.name)}</button>
+            ${glyphs.map(g=>`<button class="glyph${S.projGlyph===g?' act':''}" onclick="S.projGlyph='${g}';update()">${g}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="note">Monogram + hue is the default; a glyph is opt-in. Iteration 9 of the matrix prototype showed monograms alone collapse at scale — hue carries most of the distinction in the rail.</div>
+    </div>
+    <div class="card"><h3>Metadata</h3>
+      <div class="fgrid">
+        <div class="field"><label>name</label><input type="text" value="${proj.name}"></div>
+        <div class="field"><label>description</label><input type="text" value="Demo project for the spec prototypes" placeholder="what is this project?"></div>
+      </div>
+    </div>
+    <div class="card"><h3>Access</h3>
+      <div class="rowline"><div class="main"><span class="t">Members & grants</span>
+        <span class="d">${GRANTS.filter(g=>g.scope.includes('demo')||g.scope.startsWith('env:')).length} grant lines on this project</span></div>
+        <span class="grow"></span>
+        <button class="btn" onclick="S.view='members';update()">open members →</button></div>
+      <div class="note">Entry point only — granting, revoking and inspection live on the members surface.</div>
+    </div>
+  </div>`;
+}
+
+function groupedRows(list,canManage){
+  const m=new Map();
+  for(const g of list){
+    const k=g.p+'|'+g.scope;
+    if(!m.has(k))m.set(k,{p:g.p,scope:g.scope,items:[]});
+    m.get(k).items.push(g);
+  }
+  return `<table class="grants"><thead><tr><th>member</th><th>scope</th><th>capabilities</th></tr></thead>
+  <tbody>${[...m.values()].map(row=>{
+    const cls=row.scope.startsWith('org:')?'org':(row.scope==='env:production'?'prot':'');
+    return `<tr><td style="font-weight:600">${row.p}</td>
+      <td><span class="scopechip ${cls}">${scopeLabel(row.scope)}</span></td>
+      <td>${row.items.map(g=>`<span class="capchip" title="via ${g.via}">${g.cap}${canManage?`<button class="rm" title="revoke ${g.cap} on ${scopeLabel(g.scope)}" onclick="revoke(${GRANTS.indexOf(g)})">✕</button>`:''}</span>`).join('')}</td>
+    </tr>`;}).join('')}
+  ${INVITES.map((iv,i)=>`<tr><td style="font-weight:600">${iv.email} <span class="tag blue">invited</span></td>
+    <td><span class="scopechip ${iv.scope.startsWith('org:')?'org':''}">${scopeLabel(iv.scope)}</span></td>
+    <td><span class="capchip pend" title="pending — binds when redeemed">${iv.tpl} template${canManage?`<button class="rm" title="revoke invitation" onclick="revokeInvite(${i})">✕</button>`:''}</span></td>
+  </tr>`).join('')}
+  </tbody></table>`;
+}
+
+function pageMembers(orgLevel){
+  const canManage=isOrgAdmin();
+  const scopeMatch=g=>orgLevel?true:(g.scope.includes(':demo')||g.scope.startsWith('env:'));
+  const list=GRANTS.filter(scopeMatch);
+  /* inspection query */
+  const q=GRANTS.filter(g=>g.cap===S.inspectCap&&coveredBy(S.inspectScope,g.scope));
+  return `<div class="page">
+    <h2>${orgLevel?'Org members & grants — '+curOrg().name:'Members & access — demo'}</h2>
+    <p class="sub">One row per member per scope; each capability chip is still its own revocable grant —
+      roles are templates that expand at grant time, so revoking a chip never drags a bundle with it.</p>
+    <div class="card"><h3>Who can…? — answer by inspection</h3>
+      <div class="inspect">
+        <div class="field"><label>capability</label>
+          <select onchange="S.inspectCap=this.value;update()">${['reveal','read','publish','edit','manage-members','audit-read'].map(c=>`<option${c===S.inspectCap?' selected':''}>${c}</option>`).join('')}</select></div>
+        <div class="field"><label>on scope</label>
+          <select onchange="S.inspectScope=this.value;update()">
+            <option value="env:production"${S.inspectScope==='env:production'?' selected':''}>env · production</option>
+            <option value="env:staging"${S.inspectScope==='env:staging'?' selected':''}>env · staging</option>
+            <option value="project:demo"${S.inspectScope==='project:demo'?' selected':''}>project · demo</option>
+          </select></div>
+      </div>
+      <div class="answerbox"><b>${S.inspectCap}</b> on <b>${scopeLabel(S.inspectScope)}</b> →
+        ${q.length?q.map(g=>`<b>${g.p}</b> <span class="mini">(via ${scopeLabel(g.scope)})</span>`).join(', '):'nobody'}</div>
+    </div>
+    <div class="card"><h3>Members</h3>
+      ${groupedRows(list,canManage)}
+      ${canManage?`<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn primary" onclick="openGrant()">+ new grant</button>
+        ${orgLevel?`<button class="btn" onclick="openInvite()">✉ invite member</button>`:''}
+      </div>`:
+      `<div class="note">You hold no manage-members here — this list shows only what you're allowed to see.</div>`}
+    </div>
+  </div>`;
+}
+
+function coveredBy(target,grantScope){
+  if(grantScope===target)return true;
+  if(grantScope.startsWith('org:'))return true;                     /* org covers everything below (demo simplification) */
+  if(grantScope==='project:demo'&&target.startsWith('env:'))return true;
+  return false;
+}
+
+function pageAccount(){
+  const canPasskeyOnly=FACTORS.passkeys.length>=2&&FACTORS.codesGenerated;
+  return `<div class="page">
+    <h2>Account & security</h2>
+    <p class="sub">Everything here that changes how you authenticate asks for a possession factor first — the blue
+      "confirm it's you" step-up. It looks nothing like the teal reveal ceremony on purpose.</p>
+
+    <div class="card"><h3>Active sessions</h3>
+      ${SESSIONS.map((s,i)=>`<div class="rowline">
+        <div class="main"><span class="t">${s.label} ${s.current?'<span class="tag acc">this session</span>':''}</span>
+        <span class="d">${s.detail} · last active ${s.last}</span></div>
+        <span class="grow"></span>
+        <span class="tag ${s.type==='cli'?'blue mono':'mono'}">${s.type==='cli'?'CLI artifact':'browser'}</span>
+        ${s.current?'':`<button class="xbtn" title="revoke session" onclick="alert('revoked (demo)')">✕</button>`}
+      </div>`).join('')}
+      <div class="note">Browser sessions and CLI sessions are distinct artifact types with their own lifetimes —
+        revoking one never touches the other kind.</div>
+    </div>
+
+    <div class="card"><h3>Sign-in factors</h3>
+      ${FACTORS.passkeys.map(pk=>`<div class="rowline">
+        <div class="main"><span class="t">🔑 ${pk.n}</span><span class="d">passkey · added ${pk.added}</span></div>
+        <span class="grow"></span><button class="xbtn" onclick="stepupThen('remove passkey ${pk.n}',()=>alert('removed (demo)'))">✕</button></div>`).join('')}
+      <div class="rowline"><div class="main"><span class="t">Authenticator app</span>
+        <span class="d">TOTP · single-use per step</span></div><span class="grow"></span>
+        <span class="tag">enrolled</span></div>
+      <div class="rowline"><div class="main"><span class="t">Password</span>
+        <span class="d">signs you in — never authorizes security changes</span></div><span class="grow"></span>
+        <button class="btn" onclick="stepupThen('change password',()=>alert('changed (demo)'))">change</button></div>
+      <div class="rowline"><div class="main"><span class="t">Add passkey</span>
+        <span class="d">a new credential never authorizes its own enrolment</span></div><span class="grow"></span>
+        <button class="btn" onclick="stepupThen('add a passkey',()=>{FACTORS.passkeys.push({n:'New device',added:'today'});update()})">+ add</button></div>
+    </div>
+
+    <div class="card"><h3>Recovery</h3>
+      <div class="rowline"><div class="main"><span class="t">Recovery codes</span>
+        <span class="d">${FACTORS.codesGenerated?'generated · shown once at creation':'not generated yet'}</span></div>
+        <span class="grow"></span>
+        <button class="btn" onclick="stepupThen('generate recovery codes',showCodes)">${FACTORS.codesGenerated?'replace':'generate'}</button></div>
+      <div class="rowline"><div class="main"><span class="t">Passkey-only sign-in</span>
+        <span class="d">requires recovery codes + at least 2 passkeys</span></div>
+        <span class="grow"></span>
+        <button class="btn" ${canPasskeyOnly?'':'disabled title="needs recovery codes and ≥2 passkeys"'}
+          onclick="stepupThen('enable passkey-only sign-in',()=>{FACTORS.passkeyOnly=true;update()})">
+          ${FACTORS.passkeyOnly?'enabled':'enable'}</button></div>
+      ${canPasskeyOnly?'':`<div class="note">Locked until preconditions are met: ${FACTORS.passkeys.length}/2 passkeys · recovery codes ${FACTORS.codesGenerated?'✓':'✗'}. Codes restore <i>access</i>; they never satisfy a disclosure reauth.</div>`}
+    </div>
+
+    <div class="card"><h3>Linked identities</h3>
+      ${IDENTITIES.map(id=>`<div class="rowline">
+        <div class="main"><span class="t">${id.issuer}</span>
+        <span class="d">(issuer, subject) = (${id.issuer}, ${id.subject}) · linked ${id.linked}</span></div>
+        <span class="grow"></span><button class="xbtn" onclick="stepupThen('unlink ${id.issuer}',()=>alert('unlinked (demo)'))">✕</button></div>`).join('')}
+      <div class="rowline"><div class="main"><span class="t">Link another identity</span>
+        <span class="d">explicit binding — an unknown identity at sign-in is never a login, email never links</span></div>
+        <span class="grow"></span>
+        <button class="btn" onclick="stepupThen('link a new identity',()=>alert('provider round-trip with binding purpose = link (demo)'))">link…</button></div>
+    </div>
+  </div>`;
+}
+
+function pageInstance(){
+  const cli=v=>`<span class="tag mono" title="same operation on the CLI">$ ${v}</span>`;
+  return `<div class="page">
+    <h2>Instance administration</h2>
+    <p class="sub">Full CLI ↔ UI parity (decided round 3): hikyo may run locally, on a VPS, in k8s or docker while
+      managing orgs and projects hosted elsewhere — the CLI is not always the convenient surface. Every operation here
+      is the same grant-evaluated network operation the CLI verb calls; nothing is UI-special (#25).</p>
+
+    <div class="card"><h3>Organizations</h3>
+      ${ORGS.map(o=>`<div class="rowline">
+        <div class="main"><span class="t">${o.name}</span><span class="d">${o.projects.length} projects</span></div>
+        <span class="grow"></span><span class="tag mono">active</span></div>`).join('')}
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" onclick="alert('org created (demo)')">+ create organization</button>
+        ${cli('hikyo org create')}</div>
+    </div>
+
+    <div class="card"><h3>Instance settings <span class="mini" style="text-transform:none;letter-spacing:0">· instance-config</span></h3>
+      <div class="rowline"><div class="main"><span class="t">Server URL / RP ID</span><span class="d">immutable after install — shown, never editable (any surface)</span></div><span class="grow"></span><span class="tag mono">hikyo.example.com</span></div>
+      <div class="rowline"><div class="main"><span class="t">Audit retention</span><span class="d">security / access classes (audit ADR)</span></div><span class="grow"></span>
+        <span class="tag mono">security: unlimited</span><button class="btn" onclick="alert('edit (demo)')">edit</button></div>
+      <div class="rowline"><div class="main"><span class="t">Machine-credential ceiling</span><span class="d">clamps every org value</span></div><span class="grow"></span>
+        <span class="tag mono">90d</span><button class="btn" onclick="alert('edit (demo)')">edit</button></div>
+      <div class="note">Same operations as ${'`'}hikyo instance-config${'`'} — one permission language, one audit trail.</div>
+    </div>
+
+    <div class="card"><h3>Keys & crypto</h3>
+      <div class="rowline"><div class="main"><span class="t">Master key</span><span class="d">rotated 2026-06-20 · all tier-3 keys wrapped current</span></div>
+        <span class="grow"></span>${cli('hikyo rotate-master-key')}<button class="btn" onclick="alert('rotation started (demo)')">rotate</button></div>
+      <div class="rowline"><div class="main"><span class="t">Change-token key</span><span class="d">warned operation: every client cursor invalidates, next fetch is full — no restart wave</span></div>
+        <span class="grow"></span>${cli('hikyo rotate-token-key')}<button class="btn" onclick="alert('warned + started (demo)')">rotate</button></div>
+      <div class="rowline"><div class="main"><span class="t">Re-encryption</span><span class="d">background, resumable, per-row</span></div>
+        <span class="grow"></span><span class="tag">idle</span></div>
+      <div class="note">Root-key rotation, ${'`'}init${'`'}, ${'`'}migrate${'`'}, restore reconciliation and break-glass are
+        <b>local host authority</b> (SystemProof, #23/#25) — deliberately absent from every network surface, UI and API alike.
+        That set is the one parity exception, and it is CLI-at-the-box, not CLI-over-network.</div>
+    </div>
+
+    <div class="card qcard"><h3>Connected instances — exploration</h3>
+      <div class="rowline"><div class="main"><span class="t">this instance</span>
+        <span class="d">hikyo.example.com · v1.0</span></div><span class="grow"></span><span class="tag acc">main</span></div>
+      <div class="rowline"><div class="main"><span class="t">example-cluster</span>
+        <span class="d">hikyo.k3s.internal · v1.0 · reachable · 1 org, 4 projects</span></div>
+        <span class="grow"></span><span class="tag mono">connected</span></div>
+      <div class="rowline"><div class="main"><span class="t">hetzner-vps</span>
+        <span class="d">ew.example.dev · v0.9 · unreachable 2h — last known state shown</span></div>
+        <span class="grow"></span><span class="tag bad">unreachable</span></div>
+      <div style="margin-top:12px"><button class="btn" onclick="alert('exploration only — see the multi-instance wayfinder ticket')">+ connect instance</button></div>
+      <div class="note" style="margin-top:10px"><b>Open question, own wayfinder ticket</b> — Portainer-style: one MAIN instance
+        connects to and manages others. Undecided: what "manage" means (proxy the API? sync orgs? just deep-link?),
+        the credential model (#17 federation? per-instance context pins from #25?), tenant-isolation and threat-model
+        consequences, and whether it is v1 at all (→ MVP boundary). This card exists to react to, not a decision.</div>
+    </div>
+  </div>`;
+}
+
+/* ============================ modals ============================ */
+let afterStepup=null;
+function stepupThen(what,fn){afterStepup=fn;$('stepup-what').textContent=what;
+  document.body.classList.add('modal');$('stepup').classList.add('open');}
+function stepupOk(how){closeModals();const fn=afterStepup;afterStepup=null;fn&&fn();}
+function closeModals(){document.body.classList.remove('modal');
+  for(const id of['stepup','codesmodal','blastmodal','grantmodal','invitemodal'])$(id).classList.remove('open');}
+
+function openInvite(){document.body.classList.add('modal');$('invitemodal').classList.add('open');}
+function submitInvite(){
+  const email=$('iv-email').value.trim();
+  if(!email){$('iv-email').style.borderColor='var(--bad)';return;}
+  INVITES.push({email,tpl:$('iv-tpl').value,scope:$('iv-scope').value});
+  closeModals();update();
+}
+function revokeInvite(i){INVITES.splice(i,1);update();}
+
+function showCodes(){
+  const grid=$('codesgrid');grid.innerHTML='';
+  for(let i=0;i<10;i++){const c=document.createElement('code');
+    c.textContent=Math.random().toString(36).slice(2,7)+'-'+Math.random().toString(36).slice(2,7);
+    grid.appendChild(c);}
+  $('codesack').checked=false;
+  document.body.classList.add('modal');$('codesmodal').classList.add('open');
+}
+function closeCodes(){
+  if(!$('codesack').checked){$('codesack').closest('label').style.color='var(--bad)';return;}
+  FACTORS.codesGenerated=true;closeModals();update();
+}
+function copyCodes(btn){navigator.clipboard?.writeText([...$('codesgrid').children].map(c=>c.textContent).join('\n'));
+  btn.textContent='copied ✓';setTimeout(()=>btn.textContent='copy all',1200);}
+
+function openGrant(){document.body.classList.add('modal');$('grantmodal').classList.add('open');}
+function submitGrant(){
+  const g={p:$('g-principal').value,cap:$('g-cap').value,scope:$('g-scope').value,via:'direct'};
+  closeModals();
+  if(g.scope.startsWith('org:')){
+    S.pendingGrant=g;
+    const projs=visProjects(curOrg());
+    $('blastsub').innerHTML=`<b>${g.p}</b> gets <b class="cap">${g.cap}</b> on <b>every project and environment in ${curOrg().name}</b> — current and future:`;
+    $('blastlist').innerHTML=projs.map(p=>`<div class="bl"><span class="p">${p.name}</span><span>development · staging · production${p.id==='demo'?' (protected)':''} · preview</span></div>`).join('')
+      +'<div class="bl"><span class="p">+ any project created later</span><span>inherits automatically</span></div>';
+    document.body.classList.add('modal');$('blastmodal').classList.add('open');
+    return;
+  }
+  GRANTS.push(g);update();
+}
+function confirmGrant(){GRANTS.push(S.pendingGrant);S.pendingGrant=null;closeModals();update();}
+function revoke(i){GRANTS.splice(i,1);update();}
+
+/* ============================ plumbing ============================ */
+function toggleSide(force){
+  const open=force!==undefined?force:!$('side').classList.contains('open');
+  $('side').classList.toggle('open',open);
+  document.body.classList.toggle('sideopen',open);
+}
+addEventListener('keydown',e=>{
+  if(e.key==='Escape')closeModals();
+});
+$('persona').onchange=e=>{S.persona=e.target.value;update();};
+$('themebtn').onclick=()=>{S.theme=S.theme==='dark'?'light':'dark';
+  document.body.dataset.theme=S.theme;};
+
+function update(){
+  ensureValidContext();
+  renderRail();renderSide();renderCrumb();
+  const views={matrix:pageMatrix,settings:pageSettings,members:()=>pageMembers(false),
+    orgmembers:()=>pageMembers(true),account:pageAccount,instance:pageInstance};
+  $('content').innerHTML=(views[S.view]||pageMatrix)();
+}
+
+/* init */
+if(matchMedia('(prefers-color-scheme: light)').matches){S.theme='light';document.body.dataset.theme='light';}
+update();
+</script>
+</body>
+</html>
