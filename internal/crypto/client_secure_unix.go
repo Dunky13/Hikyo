@@ -4,9 +4,11 @@ package crypto
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -16,87 +18,104 @@ import (
 // no-symlink-follow descriptors. Violations are REFUSED, never chmod-repaired —
 // the caller surfaces them as a doctor finding.
 //
-// Two symlink hazards are closed here rather than by a path stat:
-//   - a symlinked STATE DIR: the directory is opened with O_NOFOLLOW|O_DIRECTORY,
-//     which fails on a symlinked final component, and its mode/owner are then
-//     read through that descriptor (f.Stat()), never a separate os.Stat that a
-//     rename could race.
-//   - a symlinked KEY: local.key is Lstat'd through the directory root before
-//     opening, so a symlink in its place is refused (os.Root follows in-root
-//     symlinks and ignores O_NOFOLLOW on some platforms, so the Lstat is the
-//     real guard).
+// The state dir is opened EXACTLY ONCE, as an os.Root, and every check runs
+// through that one descriptor — no validate-a-path-then-reopen-it TOCTOU:
+//   - mode and owner are read with root.Stat(".") (fd-relative fstatat), never a
+//     path stat a rename could race between check and use.
+//   - os.OpenRoot follows a symlinked ROOT path (the root itself is not confined
+//     — only lookups WITHIN it are), so after OpenRoot succeeds we os.Lstat the
+//     path once and refuse a symlink. That Lstat comes AFTER the open, so a race
+//     can only cause a spurious refusal, never a spurious acceptance — the fd we
+//     actually use is already pinned.
+//   - local.key is opened O_RDONLY|O_NOFOLLOW and its mode/owner/regularity read
+//     from that fd (f.Stat()); there is no Lstat→open gap. An escaping symlink is
+//     refused by os.Root itself ("path escapes"); an in-root, non-escaping key
+//     symlink is platform-dependent (Linux ELOOP on O_NOFOLLOW, darwin follows)
+//     and harmless — it can only resolve inside the 0700 dir the euid owns.
 
 // loadOrCreateMasterKey returns the 32-byte local key from dir/local.key,
 // creating the directory (0700) and key (0600, O_EXCL) on first use.
 func loadOrCreateMasterKey(dir string) ([]byte, error) {
-	root, err := openStateDirNoFollow(dir)
+	root, err := openStateDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
 
-	fi, err := root.Lstat(localKeyName)
+	f, err := root.OpenFile(localKeyName, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	switch {
 	case err == nil:
-		if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
-			return nil, fmt.Errorf("crypto: %s/%s is not a regular file (symlink or special); refusing", dir, localKeyName)
-		}
-		return readKeyFileRoot(root, dir)
-	case os.IsNotExist(err):
+		defer f.Close()
+		return readVerifiedKey(f, dir)
+	case errors.Is(err, os.ErrNotExist):
 		return createKeyFileRoot(root, dir)
 	default:
-		return nil, fmt.Errorf("crypto: stat %s/%s: %w", dir, localKeyName, err)
+		return nil, fmt.Errorf("crypto: open %s/%s: %w", dir, localKeyName, err)
 	}
 }
 
-// openStateDirNoFollow creates dir 0700 if absent, then opens it with
-// O_NOFOLLOW|O_DIRECTORY (refusing a symlinked dir), verifies exact 0700 and
-// euid ownership through the descriptor, and returns an os.Root confined to it.
-func openStateDirNoFollow(dir string) (*os.Root, error) {
-	if _, err := os.Lstat(dir); os.IsNotExist(err) {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return nil, fmt.Errorf("crypto: create state dir %s: %w", dir, err)
+// openStateDir creates dir 0700 if absent (chmod-on-create only, never
+// repairing an existing dir's mode), opens it ONCE as an os.Root, refuses a
+// symlinked dir with a post-open Lstat, and verifies exact 0700 + euid
+// ownership through the root descriptor.
+func openStateDir(dir string) (*os.Root, error) {
+	// Create parents permissively, then the leaf itself with os.Mkdir so a
+	// successful create is distinguishable from a pre-existing dir: only a dir we
+	// just created is chmod'd (to counter umask); an existing one is verified and
+	// refused if loose, never silently repaired.
+	if parent := filepath.Dir(dir); parent != dir {
+		if err := os.MkdirAll(parent, 0o700); err != nil {
+			return nil, fmt.Errorf("crypto: create state dir parents %s: %w", parent, err)
 		}
-		// MkdirAll honours umask, so tighten explicitly to 0700.
+	}
+	switch err := os.Mkdir(dir, 0o700); {
+	case err == nil:
 		if err := os.Chmod(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("crypto: chmod state dir %s: %w", dir, err)
 		}
+	case errors.Is(err, os.ErrExist):
+		// Pre-existing: verified below, never repaired.
+	default:
+		return nil, fmt.Errorf("crypto: create state dir %s: %w", dir, err)
 	}
 
-	df, err := os.OpenFile(dir, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, fmt.Errorf("crypto: open state dir %s (symlink or not a directory?): %w", dir, err)
-	}
-	info, err := df.Stat()
-	df.Close()
-	if err != nil {
-		return nil, fmt.Errorf("crypto: stat state dir %s: %w", dir, err)
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("crypto: state path %s is not a directory", dir)
-	}
-	if perm := info.Mode().Perm(); perm != 0o700 {
-		return nil, fmt.Errorf("crypto: state dir %s has mode %04o, want 0700; refusing", dir, perm)
-	}
-	if err := checkOwner(dir, info); err != nil {
-		return nil, err
-	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, fmt.Errorf("crypto: open state root %s: %w", dir, err)
 	}
+	// os.OpenRoot follows a symlinked root path; refuse a symlinked state dir with
+	// a single post-open Lstat (see file header: post-open ⇒ no acceptance race).
+	if li, err := os.Lstat(dir); err != nil {
+		root.Close()
+		return nil, fmt.Errorf("crypto: lstat state dir %s: %w", dir, err)
+	} else if li.Mode()&os.ModeSymlink != 0 {
+		root.Close()
+		return nil, fmt.Errorf("crypto: state dir %s is a symlink; refusing", dir)
+	}
+	info, err := root.Stat(".")
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("crypto: stat state dir %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		root.Close()
+		return nil, fmt.Errorf("crypto: state path %s is not a directory", dir)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		root.Close()
+		return nil, fmt.Errorf("crypto: state dir %s has mode %04o, want 0700; refusing", dir, perm)
+	}
+	if err := checkOwner(dir, info); err != nil {
+		root.Close()
+		return nil, err
+	}
 	return root, nil
 }
 
-// readKeyFileRoot opens local.key relative to root, verifies exact 0600 and euid
-// ownership through the descriptor, and returns its 32 bytes. A short or
-// oversized file is corruption, never a shorter key.
-func readKeyFileRoot(root *os.Root, dir string) ([]byte, error) {
-	f, err := root.OpenFile(localKeyName, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, fmt.Errorf("crypto: open %s/%s: %w", dir, localKeyName, err)
-	}
-	defer f.Close()
+// readVerifiedKey verifies an already-open local.key (regular, 0600, euid-owned,
+// all through its descriptor) and returns its 32 bytes. A short or oversized
+// file is corruption, never a shorter key.
+func readVerifiedKey(f *os.File, dir string) ([]byte, error) {
 	if err := checkSecureFile(f); err != nil {
 		return nil, err
 	}

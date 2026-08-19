@@ -13,7 +13,7 @@ func snapAAD(issued, expires string) crypto.SnapshotAAD {
 	return crypto.SnapshotAAD{
 		InstanceOrigin: "https://hikyo.example",
 		OrgID:          "org_1", ProjectID: "prj_1", EnvironmentID: "env_1",
-		CredentialID: "cred_1", PinnedRevision: 3,
+		CredentialID: "cred_1", PinnedRevision: 3, ChangeToken: "v1:manifest-token",
 		Projection: []string{"read", "reveal"}, ConfigOnly: false,
 		TargetNames: []string{"api"},
 		IssuedAt:    issued, ExpiresAt: expires,
@@ -137,18 +137,24 @@ func TestSnapshotHWMRollbackRefusedOnLoad(t *testing.T) {
 }
 
 // TestSnapshotSameIssuanceRollback: a second snapshot bearing the SAME server
-// issuance timestamp but a different identity must not resurrect a superseded
-// generation (#8). The HWM digest differs, so load refuses it.
+// issuance timestamp but different content must not resurrect a superseded
+// generation (#8). The two snapshots are BOTH unpinned "current" (PinnedRevision
+// 0 is not on the wire, so it cannot distinguish them); their content identity
+// is the ChangeToken. A different token ⇒ different header ⇒ different HWM digest
+// ⇒ load refuses it (#7+#8).
 func TestSnapshotSameIssuanceRollback(t *testing.T) {
 	state, keys := snapState(t)
 	issued := "2026-08-19T10:00:00Z"
 	first := snapAAD(issued, "2026-08-26T10:00:00Z")
+	first.PinnedRevision = 0
 	if err := SaveSnapshot(state, keys, first, SnapshotPayload{Rows: []SnapshotRow{{Name: "A", Value: "1"}}}); err != nil {
 		t.Fatal(err)
 	}
-	// A different snapshot (different revision) sharing the timestamp.
+	// A different current snapshot sharing the timestamp: same (unpinned) revision,
+	// different delivered content ⇒ different ChangeToken.
 	second := snapAAD(issued, "2026-08-26T10:00:00Z")
-	second.PinnedRevision = 99
+	second.PinnedRevision = 0
+	second.ChangeToken = "v1:manifest-token-superseding"
 	hdr, err := second.Canonical()
 	if err != nil {
 		t.Fatal(err)

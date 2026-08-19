@@ -123,11 +123,28 @@ func EligibleCursor(state *CursorState, want CursorBinding, currentStamps map[st
 	if !state.Binding.Equal(want) {
 		return "", false
 	}
-	// The target set is authoritative from the binding; the cursor must carry a
-	// generation for exactly those targets.
+	// The target set is authoritative from the binding. The cursor and the
+	// managed-block stamps must each cover EXACTLY those targets — no more, no
+	// fewer. The loop below proves want.TargetKeyIDs ⊆ (GenerationStamps with
+	// matching values) and want.TargetKeyIDs ⊆ (currentStamps with matching
+	// values); equal cardinality closes the other direction, so an EXTRA entry in
+	// either map (a target the cursor was not issued for) makes the sets unequal
+	// and the cursor ineligible.
 	if len(state.GenerationStamps) != len(want.TargetKeyIDs) {
 		return "", false
 	}
+	if len(currentStamps) != len(want.TargetKeyIDs) {
+		return "", false
+	}
+	// All generation checks run through ONE os.Root confined to the runtime dir,
+	// so a crafted stamp/target cannot escape and the <target>.env check is
+	// fd-relative (root.Lstat does not follow the final component: a dir or a
+	// symlink in place of the regular file is refused).
+	root, err := os.OpenRoot(runtimeDir)
+	if err != nil {
+		return "", false
+	}
+	defer root.Close()
 	for target := range want.TargetKeyIDs {
 		stamp, ok := state.GenerationStamps[target]
 		if !ok {
@@ -139,10 +156,11 @@ func EligibleCursor(state *CursorState, want CursorBinding, currentStamps map[st
 		if currentStamps[target] != stamp {
 			return "", false
 		}
-		if _, complete := GenerationState(runtimeDir, stamp); !complete {
+		if _, complete := generationStateRoot(root, stamp); !complete {
 			return "", false
 		}
-		if _, err := os.Stat(filepath.Join(runtimeDir, stamp, target+".env")); err != nil {
+		fi, err := root.Lstat(stamp + "/" + target + ".env")
+		if err != nil || !fi.Mode().IsRegular() {
 			return "", false
 		}
 	}

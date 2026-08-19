@@ -88,6 +88,53 @@ func TestLoadOrCreateLocalKeyRejectsShortKey(t *testing.T) {
 	}
 }
 
+// TestLoadOrCreateLocalKeyRefusesSymlinkedDir: a symlinked state dir is refused
+// even when its target is a conforming 0700 dir — os.OpenRoot follows a
+// symlinked root, so the post-open Lstat is what closes it (#9).
+func TestLoadOrCreateLocalKeyRefusesSymlinkedDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics are the unix leg")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "state")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateLocalKey(link); err == nil {
+		t.Fatal("expected refusal for a symlinked state dir")
+	}
+}
+
+// TestLoadOrCreateLocalKeyRefusesEscapingKeySymlink: local.key being a symlink
+// that points OUT of the state dir is refused by os.Root (path escapes) — the
+// platform-uniform, security-relevant symlink case. An in-root, non-escaping key
+// symlink is platform-dependent (Linux ELOOP, darwin follows) and harmless
+// inside the 0700 dir the euid owns, so it is not asserted here (#9).
+func TestLoadOrCreateLocalKeyRefusesEscapingKeySymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics are the unix leg")
+	}
+	base := t.TempDir()
+	dir := filepath.Join(base, "state")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(base, "outside.key")
+	if err := os.WriteFile(outside, make([]byte, KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "local.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateLocalKey(dir); err == nil {
+		t.Fatal("expected refusal for a local.key symlink escaping the state dir")
+	}
+}
+
 func TestStampShapeAndGrammar(t *testing.T) {
 	k := loadKeys(t)
 	s := k.Stamp([]byte("hello"))
@@ -119,6 +166,7 @@ func baseSnapshotAAD() SnapshotAAD {
 		EnvironmentID:  "env_1",
 		CredentialID:   "cred_1",
 		PinnedRevision: 7,
+		ChangeToken:    "v1:manifest-token-1",
 		Projection:     []string{"read", "reveal"},
 		ConfigOnly:     false,
 		TargetNames:    []string{"api", "worker"},
@@ -178,17 +226,18 @@ func TestSnapshotAADTamperTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*SnapshotAAD){
-		"instance":    func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
-		"org":         func(a *SnapshotAAD) { a.OrgID = "org_2" },
-		"project":     func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
-		"environment": func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
-		"credential":  func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
-		"revision":    func(a *SnapshotAAD) { a.PinnedRevision = 8 },
-		"projection":  func(a *SnapshotAAD) { a.Projection = []string{"read"} },
-		"config_only": func(a *SnapshotAAD) { a.ConfigOnly = true },
-		"targets":     func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
-		"issued_at":   func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
-		"expires_at":  func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
+		"instance":     func(a *SnapshotAAD) { a.InstanceOrigin = "https://evil.example" },
+		"org":          func(a *SnapshotAAD) { a.OrgID = "org_2" },
+		"project":      func(a *SnapshotAAD) { a.ProjectID = "prj_2" },
+		"environment":  func(a *SnapshotAAD) { a.EnvironmentID = "env_2" },
+		"credential":   func(a *SnapshotAAD) { a.CredentialID = "cred_2" },
+		"revision":     func(a *SnapshotAAD) { a.PinnedRevision = 8 },
+		"change_token": func(a *SnapshotAAD) { a.ChangeToken = "v1:manifest-token-2" },
+		"projection":   func(a *SnapshotAAD) { a.Projection = []string{"read"} },
+		"config_only":  func(a *SnapshotAAD) { a.ConfigOnly = true },
+		"targets":      func(a *SnapshotAAD) { a.TargetNames = []string{"api"} },
+		"issued_at":    func(a *SnapshotAAD) { a.IssuedAt = "2026-08-19T10:00:01Z" },
+		"expires_at":   func(a *SnapshotAAD) { a.ExpiresAt = "2026-08-27T10:00:00Z" },
 		// Injectivity across the list boundary: moving an element between the
 		// two list fields must NOT decrypt.
 		"list-shift": func(a *SnapshotAAD) {

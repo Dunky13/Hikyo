@@ -1,6 +1,9 @@
 package compose
 
-import "unicode/utf16"
+import (
+	"strings"
+	"unicode/utf16"
+)
 
 // ARG_MAX preflight for `hikyo run --` (compose-integration ADR /
 // ops-spec § 6: "the client sums the rendered environment, the inherited
@@ -48,23 +51,96 @@ func ExecSizePOSIX(env, argv []string, argMax int) (total int, ok bool) {
 
 // ExecSizeWindows counts the command line and the environment block in UTF-16
 // code units the way CreateProcess does, and reports whether EACH fits under
-// 32767 (no margin). The command line is argv joined by single spaces plus a
-// terminating NUL; the environment block is each "name=value\0" plus a final
-// terminating NUL.
+// 32767 (no margin). The command line is the argv AFTER per-argument quoting
+// (escapeArg, the syscall.EscapeArg rule Go's os/exec applies) joined by single
+// spaces, plus a terminating NUL — joining the RAW argv undercounts every
+// argument that gains surrounding quotes or doubled backslashes. The environment
+// block is each "name=value\0" plus a final terminating NUL.
 func ExecSizeWindows(env, argv []string) (cmdlineUnits, envUnits int, ok bool) {
-	for i, a := range argv {
-		if i > 0 {
-			cmdlineUnits++ // separating space
-		}
-		cmdlineUnits += utf16Len(a)
-	}
-	cmdlineUnits++ // terminating NUL
+	cmdlineUnits = utf16Len(windowsCommandLine(argv)) + 1 // + terminating NUL
 	for _, e := range env {
 		envUnits += utf16Len(e) + 1 // "name=value" + NUL
 	}
 	envUnits++ // block terminator
 	ok = cmdlineUnits <= windowsMaxUTF16 && envUnits <= windowsMaxUTF16
 	return cmdlineUnits, envUnits, ok
+}
+
+// windowsCommandLine builds the command line Windows actually receives: each
+// argument quoted per escapeArg, joined by single spaces.
+func windowsCommandLine(argv []string) string {
+	var b strings.Builder
+	for i, a := range argv {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(escapeArg(a))
+	}
+	return b.String()
+}
+
+// escapeArg quotes one argument exactly as syscall.EscapeArg does (a pure port
+// so it runs on any OS, for preflight and testing): quote when the argument is
+// empty or contains a space/tab/quote/backslash; inside quotes a run of
+// backslashes immediately before a '"' (or the closing quote) is doubled, and a
+// literal '"' is backslash-escaped. An argument with none of those characters is
+// returned verbatim.
+func escapeArg(s string) string {
+	if len(s) == 0 {
+		return `""`
+	}
+	n := len(s)
+	hasSpace := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"', '\\':
+			n++
+		case ' ', '\t':
+			hasSpace = true
+		}
+	}
+	if hasSpace {
+		n += 2 // surrounding quotes
+	}
+	if n == len(s) {
+		return s
+	}
+
+	qs := make([]byte, n)
+	j := 0
+	if hasSpace {
+		qs[j] = '"'
+		j++
+	}
+	slashes := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		default:
+			slashes = 0
+			qs[j] = s[i]
+		case '\\':
+			slashes++
+			qs[j] = s[i]
+		case '"':
+			for ; slashes > 0; slashes-- {
+				qs[j] = '\\'
+				j++
+			}
+			qs[j] = '\\'
+			j++
+			qs[j] = s[i]
+		}
+		j++
+	}
+	if hasSpace {
+		for ; slashes > 0; slashes-- {
+			qs[j] = '\\'
+			j++
+		}
+		qs[j] = '"'
+		j++
+	}
+	return string(qs[:j])
 }
 
 // utf16Len returns the number of UTF-16 code units s encodes to (a code point

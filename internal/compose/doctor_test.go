@@ -158,7 +158,7 @@ func TestDoctorRuntimeChecks(t *testing.T) {
 func TestDoctorStampMismatch(t *testing.T) {
 	in := fullyHealthyInput(t)
 	// Resolved env_file points at a different (valid) generation than the stamp.
-	other := TargetStamp(testKeys(t), []byte("other"))
+	other := TargetStamp(testKeys(t), "api", []byte("other"))
 	svc := in.Config.Services["api"]
 	svc.EnvFile[0].Path = filepath.Join(in.RuntimeDir, other, "api.env")
 	in.Config.Services["api"] = svc
@@ -184,7 +184,7 @@ func TestDoctorFormatRawMissing(t *testing.T) {
 
 func TestDoctorGenerationAbsentAndDrift(t *testing.T) {
 	in := fullyHealthyInput(t)
-	ghost := TargetStamp(testKeys(t), []byte("ghost"))
+	ghost := TargetStamp(testKeys(t), "api", []byte("ghost"))
 	in.ManagedStamps["api"] = ghost
 	f := Doctor(in)
 	if !hasCode(f, "generation_absent") {
@@ -284,7 +284,7 @@ func TestDoctorLabelChecks(t *testing.T) {
 	// Label resolves to the wrong stamp.
 	in = fullyHealthyInput(t)
 	svc := in.Config.Services["api"]
-	svc.Labels = map[string]string{"hikyo.stamp": TargetStamp(testKeys(t), []byte("nope"))}
+	svc.Labels = map[string]string{"hikyo.stamp": TargetStamp(testKeys(t), "api", []byte("nope"))}
 	in.Config.Services["api"] = svc
 	if !hasCode(Doctor(in), "label_stamp_mismatch") {
 		t.Error("expected label_stamp_mismatch")

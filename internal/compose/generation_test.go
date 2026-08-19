@@ -67,7 +67,7 @@ func TestWriteGenerationAndState(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), nil)
-	stamp := TargetStamp(keys, []byte("API=1\n"))
+	stamp := TargetStamp(keys, "api", []byte("API=1\n"))
 
 	if p, c := GenerationState(rt, stamp); p || c {
 		t.Fatal("state should be absent before write")
@@ -152,7 +152,7 @@ func TestCrashAfterDirCreatedLeavesUnreferenced(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failAfterCreate: true})
-	stamp := TargetStamp(keys, []byte("x"))
+	stamp := TargetStamp(keys, "api", []byte("x"))
 	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
 		t.Fatal("expected injected error")
 	}
@@ -171,7 +171,7 @@ func TestCrashBeforeCompleteLeavesUnreferenced(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failComplete: true})
-	stamp := TargetStamp(keys, []byte("x"))
+	stamp := TargetStamp(keys, "api", []byte("x"))
 	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err == nil {
 		t.Fatal("expected injected error")
 	}
@@ -200,8 +200,8 @@ func TestRecoverRefusesForeignEntry(t *testing.T) {
 func TestCrashBeforeRenameKeepsOldStamp(t *testing.T) {
 	projectDir := t.TempDir()
 	keys := testKeys(t)
-	oldStamp := TargetStamp(keys, []byte("v1"))
-	newStamp := TargetStamp(keys, []byte("v2"))
+	oldStamp := TargetStamp(keys, "api", []byte("v1"))
+	newStamp := TargetStamp(keys, "api", []byte("v2"))
 
 	rl := begin(t, projectDir, nil)
 	if err := rl.CommitStamps(map[string]string{"api": oldStamp}); err != nil {
@@ -223,8 +223,8 @@ func TestCrashBeforeRenameKeepsOldStamp(t *testing.T) {
 
 func TestCommitStampsPreservesForeignLines(t *testing.T) {
 	keys := testKeys(t)
-	s1 := TargetStamp(keys, []byte("1"))
-	s2 := TargetStamp(keys, []byte("2"))
+	s1 := TargetStamp(keys, "api", []byte("1"))
+	s2 := TargetStamp(keys, "api", []byte("2"))
 
 	for _, nl := range []struct{ name, eol string }{{"LF", "\n"}, {"CRLF", "\r\n"}} {
 		t.Run(nl.name, func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestCommitStampsPreservesMode(t *testing.T) {
 		t.Skip("POSIX modes are the unix leg")
 	}
 	keys := testKeys(t)
-	s := TargetStamp(keys, []byte("x"))
+	s := TargetStamp(keys, "api", []byte("x"))
 	for _, um := range []int{0o077, 0o022} {
 		old := setUmask(um)
 		projectDir := t.TempDir()
@@ -305,7 +305,7 @@ func TestCommitStampsNewFileIs0600(t *testing.T) {
 	defer setUmask(old)
 	projectDir := t.TempDir()
 	keys := testKeys(t)
-	s := TargetStamp(keys, []byte("x"))
+	s := TargetStamp(keys, "api", []byte("x"))
 	rl := begin(t, projectDir, nil)
 	if err := rl.CommitStamps(map[string]string{"api": s}); err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func TestCommitStampsNewFileIs0600(t *testing.T) {
 func TestCommitStampsNoPriorEnv(t *testing.T) {
 	projectDir := t.TempDir()
 	keys := testKeys(t)
-	s := TargetStamp(keys, []byte("x"))
+	s := TargetStamp(keys, "api", []byte("x"))
 	rl := begin(t, projectDir, nil)
 	if err := rl.CommitStamps(map[string]string{"api": s}); err != nil {
 		t.Fatal(err)
@@ -348,7 +348,7 @@ func TestCurrentStampsRejectsMalformed(t *testing.T) {
 // and duplicate variables are all hard errors before any rewrite (#13).
 func TestManagedBlockMalformations(t *testing.T) {
 	keys := testKeys(t)
-	s := TargetStamp(keys, []byte("x"))
+	s := TargetStamp(keys, "api", []byte("x"))
 	valid := "HIKYO_GEN_API=" + s
 	cases := map[string]string{
 		"duplicate-block":       managedBegin + "\n" + valid + "\n" + managedEnd + "\n" + managedBegin + "\n" + valid + "\n" + managedEnd + "\n",
@@ -478,7 +478,7 @@ func TestGCRemovesIncompleteRegardlessOfAge(t *testing.T) {
 	_, rt := dirs(t)
 	keys := testKeys(t)
 	rl := begin(t, t.TempDir(), errProbe{failComplete: true})
-	torn := TargetStamp(keys, []byte("torn"))
+	torn := TargetStamp(keys, "api", []byte("torn"))
 	_, _ = rl.WriteGeneration(rt, keys, "api", []byte("torn")) // fails at marker
 	old := time.Unix(1, 0)
 	_ = os.Chtimes(filepath.Join(rt, torn), old, old)
@@ -501,6 +501,128 @@ func TestGCRefusesForeignEntry(t *testing.T) {
 	}
 	if err := rl.GC(rt, DefaultGenerationsKept); err == nil {
 		t.Fatal("GC must refuse a foreign entry under the runtime dir")
+	}
+}
+
+// TestTwoTargetsSameContentDistinctGenerations: two DIFFERENT targets rendering
+// byte-identical content must get DIFFERENT stamps (target name is bound into
+// the stamp), so each writes and re-verifies its own <target>.env (NEW-1).
+func TestTwoTargetsSameContentDistinctGenerations(t *testing.T) {
+	_, rt := dirs(t)
+	keys := testKeys(t)
+	rl := begin(t, t.TempDir(), nil)
+	content := []byte("SHARED=1\n")
+
+	sApi, err := rl.WriteGeneration(rt, keys, "api", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sWorker, err := rl.WriteGeneration(rt, keys, "worker", content)
+	if err != nil {
+		t.Fatalf("second target with identical content must render: %v", err)
+	}
+	if sApi == sWorker {
+		t.Fatal("identical content across distinct targets produced the same stamp")
+	}
+	if b, err := os.ReadFile(filepath.Join(rt, sApi, "api.env")); err != nil || string(b) != string(content) {
+		t.Fatalf("api.env = %q err=%v", b, err)
+	}
+	if b, err := os.ReadFile(filepath.Join(rt, sWorker, "worker.env")); err != nil || string(b) != string(content) {
+		t.Fatalf("worker.env = %q err=%v", b, err)
+	}
+	// Idempotent re-render of each still verifies against its own directory.
+	if _, err := rl.WriteGeneration(rt, keys, "api", content); err != nil {
+		t.Fatalf("api re-render: %v", err)
+	}
+	if _, err := rl.WriteGeneration(rt, keys, "worker", content); err != nil {
+		t.Fatalf("worker re-render: %v", err)
+	}
+}
+
+// TestWriteGenerationRefusesSymlinkedRuntimeDir: the runtime dir itself being a
+// symlink is refused before any write (#6).
+func TestWriteGenerationRefusesSymlinkedRuntimeDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics are the unix leg")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "runtime")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	keys := testKeys(t)
+	rl := begin(t, t.TempDir(), nil)
+	if _, err := rl.WriteGeneration(link, keys, "api", []byte("x")); err == nil {
+		t.Fatal("WriteGeneration must refuse a symlinked runtime dir")
+	}
+}
+
+// TestRenderLockRefusedAfterClose: every verb is spent once the lock is
+// released, and a second Close is refused too (#11).
+func TestRenderLockRefusedAfterClose(t *testing.T) {
+	_, rt := dirs(t)
+	keys := testKeys(t)
+	projectDir := t.TempDir()
+	// A fresh state dir + lock we control the lifetime of (no t.Cleanup Close).
+	state := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := NewWriter(state, nil).BeginRender(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Close(); !errors.Is(err, errLockReleased) {
+		t.Errorf("second Close err = %v, want errLockReleased", err)
+	}
+	if _, err := lock.WriteGeneration(rt, keys, "api", []byte("x")); !errors.Is(err, errLockReleased) {
+		t.Errorf("WriteGeneration after Close err = %v, want errLockReleased", err)
+	}
+	if err := lock.CommitStamps(map[string]string{"api": TargetStamp(keys, "api", []byte("x"))}); !errors.Is(err, errLockReleased) {
+		t.Errorf("CommitStamps after Close err = %v, want errLockReleased", err)
+	}
+	if err := lock.Recover(rt); !errors.Is(err, errLockReleased) {
+		t.Errorf("Recover after Close err = %v, want errLockReleased", err)
+	}
+	if err := lock.GC(rt, DefaultGenerationsKept); !errors.Is(err, errLockReleased) {
+		t.Errorf("GC after Close err = %v, want errLockReleased", err)
+	}
+}
+
+// TestRecoverGCRefuseStampNamedNonDirectory: a top-level entry whose NAME is a
+// valid stamp but which is not a directory (a file, or a symlink — DirEntry.IsDir
+// does not follow) is a hard error for both Recover and GC (#11).
+func TestRecoverGCRefuseStampNamedNonDirectory(t *testing.T) {
+	keys := testKeys(t)
+	stampName := TargetStamp(keys, "api", []byte("x"))
+	for _, verb := range []string{"recover", "gc"} {
+		t.Run(verb, func(t *testing.T) {
+			_, rt := dirs(t)
+			if err := os.MkdirAll(rt, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// A regular file named exactly like a valid stamp.
+			if err := os.WriteFile(filepath.Join(rt, stampName), []byte("not a dir"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rl := begin(t, t.TempDir(), nil)
+			var err error
+			if verb == "recover" {
+				err = rl.Recover(rt)
+			} else {
+				err = rl.GC(rt, DefaultGenerationsKept)
+			}
+			if err == nil {
+				t.Fatalf("%s must refuse a stamp-named non-directory entry", verb)
+			}
+		})
 	}
 }
 

@@ -57,17 +57,31 @@ const (
 	// crypto.Stamp's own "hikyo-stamp-v1\x00" prefix.
 	targetContentDomain = "hikyo-target-content-v1\x00"
 
+	// targetSep separates the target name from the content in a stamp's canonical
+	// input. The target grammar (targetNameGrammar) admits no NUL byte, so the
+	// FIRST NUL after targetContentDomain splits (target, content) unambiguously —
+	// two distinct (target, content) pairs cannot collide into the same bytes.
+	targetSep = "\x00"
+
 	// DefaultGenerationsKept is the retention beyond the current stamp
 	// (ops-spec § 6: current + previous 3).
 	DefaultGenerationsKept = 3
 )
 
-// TargetStamp is the stamp over one target's rendered content: the canonical
-// per-target-content encoding fed to the keyed stamp. Keep the two domain
-// prefixes in their two layers — this one here, crypto.Stamp's inside.
-func TargetStamp(keys *crypto.LocalKeys, content []byte) string {
-	buf := make([]byte, 0, len(targetContentDomain)+len(content))
+// TargetStamp is the stamp over one target's rendered content, BOUND to the
+// target name: the canonical input is
+// "hikyo-target-content-v1\x00" + target + "\x00" + content, fed to the keyed
+// stamp. Binding the name is why two DIFFERENT targets that happen to render
+// byte-identical content still get DIFFERENT stamps (and thus different
+// generation directories) — without it, the second target would find the first
+// target's complete directory and fail to re-verify its own absent
+// <target>.env. Keep the two domain prefixes in their two layers — this one
+// here, crypto.Stamp's inside.
+func TargetStamp(keys *crypto.LocalKeys, target string, content []byte) string {
+	buf := make([]byte, 0, len(targetContentDomain)+len(target)+len(targetSep)+len(content))
 	buf = append(buf, targetContentDomain...)
+	buf = append(buf, target...)
+	buf = append(buf, targetSep...)
 	buf = append(buf, content...)
 	return keys.Stamp(buf)
 }
@@ -111,7 +125,13 @@ type RenderLock struct {
 	w          *Writer
 	projectDir string
 	fl         *flock.Flock
+	closed     bool
 }
+
+// errLockReleased is returned by every RenderLock verb — including a second
+// Close — once the lock has been released: the capability is spent and using it
+// would mutate the runtime dir without holding the serialization it stands for.
+var errLockReleased = errors.New("compose: render lock already released")
 
 // BeginRender takes the non-blocking per-project writer lock and returns a
 // handle scoped to projectDir (whose managed .env block is the stamp file). A
@@ -136,8 +156,15 @@ func (w *Writer) BeginRender(projectDir string) (*RenderLock, error) {
 	return &RenderLock{w: w, projectDir: projectDir, fl: fl}, nil
 }
 
-// Close releases the writer lock.
-func (rl *RenderLock) Close() error { return rl.fl.Unlock() }
+// Close releases the writer lock. A second Close is refused, not a silent
+// double-unlock.
+func (rl *RenderLock) Close() error {
+	if rl.closed {
+		return errLockReleased
+	}
+	rl.closed = true
+	return rl.fl.Unlock()
+}
 
 // WriteGeneration writes an immutable generation directory
 // <runtimeDir>/<stamp>/ holding one <target>.env (0600), fsynced, then a
@@ -151,14 +178,26 @@ func (rl *RenderLock) Close() error { return rl.fl.Unlock() }
 // error, not a silent trust or overwrite. An existing INCOMPLETE one is a torn
 // write: removed and rewritten.
 func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys, target string, content []byte) (string, error) {
+	if rl.closed {
+		return "", errLockReleased
+	}
 	if !targetNameGrammar.MatchString(target) {
 		return "", fmt.Errorf("compose: refusing to write generation: invalid target name %q", target)
 	}
-	stamp := TargetStamp(keys, content)
+	stamp := TargetStamp(keys, target, content)
 	envName := target + ".env"
 
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		return "", fmt.Errorf("compose: create runtime dir: %w", err)
+	}
+	// The runtime dir itself must not be a symlink: os.OpenRoot below confines
+	// lookups WITHIN the root but follows a symlinked root path, and the Chmod
+	// would follow it too. Lstat the final component and refuse a symlink before
+	// touching it; all further I/O then goes through the os.Root.
+	if li, err := os.Lstat(runtimeDir); err != nil {
+		return "", fmt.Errorf("compose: lstat runtime dir: %w", err)
+	} else if li.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("compose: runtime dir %s is a symlink; refusing", runtimeDir)
 	}
 	// Explicit 0700, not umask-dependent (ADR § Where plaintext lives).
 	if err := os.Chmod(runtimeDir, 0o700); err != nil {
@@ -176,7 +215,7 @@ func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys,
 		if err != nil {
 			return "", fmt.Errorf("compose: re-verify generation %s: %w", stamp, err)
 		}
-		if TargetStamp(keys, existing) != stamp {
+		if TargetStamp(keys, target, existing) != stamp {
 			return "", fmt.Errorf("compose: existing generation %s content does not match its stamp; refusing", stamp)
 		}
 		return stamp, nil
@@ -281,6 +320,9 @@ func GenerationState(runtimeDir, stamp string) (present, complete bool) {
 // byte-for-byte; the file's mode and ownership are preserved (never widened),
 // and a file that does not exist yet is created 0600.
 func (rl *RenderLock) CommitStamps(stamps map[string]string) error {
+	if rl.closed {
+		return errLockReleased
+	}
 	for t, s := range stamps {
 		if err := crypto.ParseStamp(s); err != nil {
 			return fmt.Errorf("compose: refusing to commit stamp for %q: %w", t, err)
@@ -478,6 +520,9 @@ func CurrentStamps(projectDir string) (map[string]string, error) {
 // directory; a foreign entry is a hard error naming it. It is a method on the
 // held lock, so it can only run under serialization.
 func (rl *RenderLock) Recover(runtimeDir string) error {
+	if rl.closed {
+		return errLockReleased
+	}
 	root, entries, err := openRuntimeEntries(runtimeDir)
 	if err != nil || root == nil {
 		return err
@@ -487,6 +532,9 @@ func (rl *RenderLock) Recover(runtimeDir string) error {
 		name := e.Name()
 		if err := crypto.ParseStamp(name); err != nil {
 			return fmt.Errorf("compose: refusing to recover: foreign entry %q under runtime dir %s", name, runtimeDir)
+		}
+		if !e.IsDir() {
+			return fmt.Errorf("compose: refusing to recover: stamp-named entry %q under runtime dir %s is not a directory", name, runtimeDir)
 		}
 		if _, complete := generationStateRoot(root, name); !complete {
 			if err := root.RemoveAll(name); err != nil {
@@ -503,6 +551,9 @@ func (rl *RenderLock) Recover(runtimeDir string) error {
 // generation, removes INCOMPLETE directories regardless of age, and errors on a
 // foreign entry. It is a method on the held lock.
 func (rl *RenderLock) GC(runtimeDir string, keep int) error {
+	if rl.closed {
+		return errLockReleased
+	}
 	currentStamps, err := CurrentStamps(rl.projectDir)
 	if err != nil {
 		return err
@@ -527,6 +578,9 @@ func (rl *RenderLock) GC(runtimeDir string, keep int) error {
 		name := e.Name()
 		if err := crypto.ParseStamp(name); err != nil {
 			return fmt.Errorf("compose: refusing to gc: foreign entry %q under runtime dir %s", name, runtimeDir)
+		}
+		if !e.IsDir() {
+			return fmt.Errorf("compose: refusing to gc: stamp-named entry %q under runtime dir %s is not a directory", name, runtimeDir)
 		}
 		if _, isCurrent := current[name]; isCurrent {
 			continue // never collect a current generation

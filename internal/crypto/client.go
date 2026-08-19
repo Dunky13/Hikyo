@@ -141,6 +141,16 @@ type SnapshotAAD struct {
 	// replaces the earlier Revision+Pinned pair: a pin is exactly a non-zero
 	// resolved revision, so one field is both necessary and sufficient.
 	PinnedRevision int64 `json:"pinned_revision"`
+	// ChangeToken is the server's keyed delivery-manifest token (`v1:`-prefixed),
+	// on the wire on BOTH the delivering and config-only dispositions. It is the
+	// resolved-content identity the client actually holds: an unpinned "current"
+	// revision is NOT on the wire, so PinnedRevision alone cannot distinguish two
+	// current snapshots with the same issuance but different content. Binding the
+	// token into the header makes the header — and therefore the HWM digest over
+	// it — differ whenever the delivered content differs (compose ADR § Expiry,
+	// clocks and rollback). It is NOT part of SnapshotContext: the offline box
+	// cannot reconstruct it without the server.
+	ChangeToken string `json:"change_token"`
 	// Projection is the authorized delivery capability list.
 	Projection []string `json:"projection"`
 	IssuedAt   string   `json:"issued_at"`

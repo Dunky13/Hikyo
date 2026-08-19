@@ -2,6 +2,7 @@ package compose
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -123,6 +124,61 @@ func TestEligibleCursorMissingEnvFile(t *testing.T) {
 	if _, ok := EligibleCursor(&cs, binding, current, runtime); ok {
 		t.Error("missing <target>.env should invalidate")
 	}
+}
+
+// TestEligibleCursorRejectsExtraCurrentStamp: an EXTRA target in the
+// managed-block stamps that the cursor was not issued for makes the sets unequal
+// → ineligible (#2, exact set equality both ways).
+func TestEligibleCursorRejectsExtraCurrentStamp(t *testing.T) {
+	_, runtime := cursorSetup(t)
+	cs, binding, current := buildEligible(t, runtime)
+	current["worker"] = "v1-" + hex32() // a target the cursor never covered
+	if _, ok := EligibleCursor(&cs, binding, current, runtime); ok {
+		t.Error("an extra managed-block stamp must invalidate the cursor")
+	}
+}
+
+// TestEligibleCursorRejectsNonRegularTargetFile: <target>.env being a directory
+// or a symlink (not a regular file) invalidates the cursor — the render is not
+// actually a plain env file (#2).
+func TestEligibleCursorRejectsNonRegularTargetFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink case is the unix leg")
+	}
+	t.Run("directory", func(t *testing.T) {
+		_, rt := cursorSetup(t)
+		cs, binding, current := buildEligible(t, rt)
+		stamp := cs.GenerationStamps["api"]
+		envPath := filepath.Join(rt, stamp, "api.env")
+		if err := removeFile(envPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := osMkdir(envPath, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := EligibleCursor(&cs, binding, current, rt); ok {
+			t.Error("a directory in place of <target>.env must invalidate")
+		}
+	})
+	t.Run("symlink", func(t *testing.T) {
+		_, rt := cursorSetup(t)
+		cs, binding, current := buildEligible(t, rt)
+		stamp := cs.GenerationStamps["api"]
+		envPath := filepath.Join(rt, stamp, "api.env")
+		target := filepath.Join(rt, stamp, "real.env")
+		if err := osWriteFile(target, []byte("api-content"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := removeFile(envPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := osSymlink("real.env", envPath); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := EligibleCursor(&cs, binding, current, rt); ok {
+			t.Error("a symlink in place of <target>.env must invalidate")
+		}
+	})
 }
 
 func TestSaveLoadCursorRoundTrip(t *testing.T) {

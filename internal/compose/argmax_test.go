@@ -55,6 +55,36 @@ func TestExecSizeWindowsUTF16SurrogatePairs(t *testing.T) {
 	}
 }
 
+func TestEscapeArg(t *testing.T) {
+	// Vectors matching syscall.EscapeArg: empty→"", spaces force quotes, a bare
+	// quote is backslash-escaped, backslashes are only doubled when they precede a
+	// quote or the closing quote of a quoted (space-bearing) argument.
+	for _, tc := range []struct{ in, want string }{
+		{"", `""`},
+		{"plain", "plain"},
+		{"a b", `"a b"`},
+		{`a"b`, `a\"b`},
+		{`a\`, `a\`},        // no space, trailing slash NOT doubled
+		{`a b\`, `"a b\\"`}, // space → quoted, trailing slash doubled before closing quote
+		{`\"`, `\\\"`},      // slash then quote: slash doubled, quote escaped
+		{"tab\there", "\"tab\there\""},
+	} {
+		if got := escapeArg(tc.in); got != tc.want {
+			t.Errorf("escapeArg(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestExecSizeWindowsCountsQuoting: an argument with a space gains surrounding
+// quotes on the real command line, so counting the RAW argv would undercount.
+func TestExecSizeWindowsCountsQuoting(t *testing.T) {
+	argv := []string{"a b"} // command line becomes `"a b"` = 5 units + NUL = 6
+	cmd, _, _ := ExecSizeWindows(nil, argv)
+	if cmd != 6 {
+		t.Errorf("command line units = %d, want 6 (quoted `\"a b\"` + NUL)", cmd)
+	}
+}
+
 func TestExecPreflight(t *testing.T) {
 	if ok, detail := ExecPreflight([]string{"A=1"}, []string{"echo"}, DefaultArgMax()); !ok {
 		t.Errorf("small command refused: %s", detail)
