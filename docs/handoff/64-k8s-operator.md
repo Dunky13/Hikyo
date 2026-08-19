@@ -310,6 +310,37 @@ added to `scripts/ci/classify-changed-paths.sh` AND `ci-required.needs`.
 | stamp length / version | 128 bit, `v1:` | k8s ADR |
 | `acknowledged_keys` max items | 64 | this ticket |
 
+### 0.10 Amendments from review round 1 (orchestrator decisions)
+
+- **Secrets are never informer-cached.** `Owns(Secret)` was dropped; every
+  Secret read (managed, bootstrap, stamp root, post-write verify, Orphan
+  finalization) goes through the uncached API reader. RBAC on `secrets` is
+  exactly get/create/update/patch — the ADR verb surface — and the operator's
+  cache never holds foreign Secret values. A deleted managed Secret is caught by
+  the cursor-eligibility check on the next reconcile / 5 min requeue.
+- **Verb-surface deviation (needs ratification):** the `Orphan` finalizer needs
+  a write on the CR's own metadata, which the ADR's `get/list/watch +
+  status update/patch` omits. The operator uses a JSON merge patch on
+  `metadata.finalizers` only, so the surface gains `hikyosecrets: patch` (plus
+  `hikyosecrets/finalizers: update` for clusters running the
+  OwnerReferencesPermissionEnforcement admission plugin, since controller
+  ownerRefs carry `blockOwnerDeletion`). Alternative rejected: authority by
+  label instead of controller ownerRef for Orphan Secrets — that would change
+  the ADR's authority rule, a larger deviation than one verb.
+- **TokenRequest grants are per-namespace Roles in both install modes**; the
+  ClusterRole never carries a token rule (a cross-namespace union of
+  `resourceNames` would let a name designated in one namespace mint in all).
+- **Stamp root name is locked** (`hikyo-operator-stamp-root`, no chart value);
+  the release-namespace Role grants get/update on that name plus create.
+- `current` answered to a cursor-less request is a protocol violation →
+  `FetchFailed` (retain). Any failure between the Secret write and the status
+  write clears `status.cursor`/`cursorBinding`.
+- Loader-control acknowledgement = set equality with the mapped loader-control
+  subset; `acknowledged_keys` is sent on every fetch, empty included.
+- Cursor gains `PinnedHistoricalRevision` (server): a pinned workload whose
+  pinned revision stops being current flips its secret authority from `reveal`
+  to `reveal-history`, so the transition must invalidate the cursor.
+
 ## Part 1 — What shipped
 
 _(filled in by the orchestrator as work packages land)_
