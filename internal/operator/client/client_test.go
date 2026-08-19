@@ -131,9 +131,11 @@ func TestFetchInvalid200IsFetchFailed(t *testing.T) {
 	}
 }
 
-func TestFetchAlwaysSendsAcknowledgedKeys(t *testing.T) {
-	// acknowledged_keys is present on every fetch, including an empty value, so
-	// the server records the list each time.
+func TestFetchOmitsEmptyAcknowledgedKeys(t *testing.T) {
+	// The contract's acknowledged_keys array parameter forbids an empty value
+	// ("empty value is not allowed"), so an empty list is encoded by OMITTING the
+	// parameter — sending `acknowledged_keys=` is a 400 at the server's request
+	// validator. A non-empty list is sent comma-joined.
 	var gotQuery string
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -145,11 +147,24 @@ func TestFetchAlwaysSendsAcknowledgedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+
+	// Empty list → parameter absent entirely.
 	if _, _, err := c.Fetch(context.Background(), FetchRequest{Org: "o", Project: "p", Environment: "e", Bearer: "t"}); err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	if !strings.Contains(gotQuery, "acknowledged_keys=") {
-		t.Fatalf("query %q missing an (empty) acknowledged_keys param", gotQuery)
+	if strings.Contains(gotQuery, "acknowledged_keys") {
+		t.Fatalf("empty acknowledged_keys must be omitted; query was %q", gotQuery)
+	}
+
+	// Non-empty list → sent comma-joined.
+	if _, _, err := c.Fetch(context.Background(), FetchRequest{
+		Org: "o", Project: "p", Environment: "e", Bearer: "t",
+		AcknowledgedKeys: []string{"PATH", "LD_PRELOAD"},
+	}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !strings.Contains(gotQuery, "acknowledged_keys=PATH%2CLD_PRELOAD") {
+		t.Fatalf("non-empty acknowledged_keys not sent comma-joined; query was %q", gotQuery)
 	}
 }
 

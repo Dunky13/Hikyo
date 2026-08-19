@@ -250,10 +250,15 @@ func (c *Client) Fetch(ctx context.Context, r FetchRequest) (*DeliveryResponse, 
 	if r.Projection != "" {
 		q.Set("projection", r.Projection)
 	}
-	// acknowledged_keys is ALWAYS sent — including an empty value
-	// (`acknowledged_keys=` present) — so the server records the acknowledged
-	// list on every fetch (§ 0.6/§ 0.10). form/explode:false → comma-joined.
-	q.Set("acknowledged_keys", strings.Join(r.AcknowledgedKeys, ","))
+	// acknowledged_keys is sent only when non-empty. The contract's array
+	// parameter forbids an empty value (`empty value is not allowed`), so an
+	// `acknowledged_keys=` with nothing after it is a 400 at the server's request
+	// validator — an omitted parameter is the wire encoding of "no acknowledged
+	// keys", which the server records as the empty list all the same (§ 0.6).
+	// form/explode:false → comma-joined when present.
+	if len(r.AcknowledgedKeys) > 0 {
+		q.Set("acknowledged_keys", strings.Join(r.AcknowledgedKeys, ","))
+	}
 	if enc := q.Encode(); enc != "" {
 		endpoint += "?" + enc
 	}

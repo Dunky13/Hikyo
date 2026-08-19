@@ -89,10 +89,27 @@ func Run(ctx context.Context, log *slog.Logger) error {
 	return nil
 }
 
+// ManagerOption tweaks NewManager. Production passes none; the seam exists so
+// the kind e2e harness can run a real manager without leader election (a single
+// in-process manager per test needs no lease, and acquiring one would only add
+// startup latency and a lingering Lease object).
+type ManagerOption func(*managerOptions)
+
+type managerOptions struct{ leaderElection bool }
+
+// WithLeaderElection overrides the default (on). Only the e2e harness sets it.
+func WithLeaderElection(on bool) ManagerOption {
+	return func(o *managerOptions) { o.leaderElection = on }
+}
+
 // NewManager builds the controller-runtime manager per § 0.7: leader election
 // on, health/readyz on :8081, metrics on :8080, informer resync 10h explicit,
 // and the cache restricted to the configured namespaces when set.
-func NewManager(restCfg *rest.Config, cfg Config) (manager.Manager, error) {
+func NewManager(restCfg *rest.Config, cfg Config, opts ...ManagerOption) (manager.Manager, error) {
+	mo := managerOptions{leaderElection: true}
+	for _, o := range opts {
+		o(&mo)
+	}
 	sch := runtime.NewScheme()
 	utilruntime.Must(scheme.AddToScheme(sch))
 	utilruntime.Must(hikyov1.AddToScheme(sch))
@@ -117,7 +134,7 @@ func NewManager(restCfg *rest.Config, cfg Config) (manager.Manager, error) {
 		Cache:                   cacheOpts,
 		Metrics:                 metricsserver.Options{BindAddress: cfg.MetricsAddr},
 		HealthProbeBindAddress:  cfg.HealthAddr,
-		LeaderElection:          true,
+		LeaderElection:          mo.leaderElection,
 		LeaderElectionID:        leaderElectionID,
 		LeaderElectionNamespace: cfg.OwnNamespace,
 	})
@@ -159,6 +176,9 @@ func (r *HikyoSecretReconciler) SetupWithManager(mgr manager.Manager) error {
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 			RateLimiter:             jitteredExponential(),
+			// Off in production (nil ⇒ strict). The e2e sets it so a second
+			// in-process manager can register the same controller name.
+			SkipNameValidation: skipNameValidation(r.SkipControllerNameValidation),
 		}).
 		Complete(r)
 }
@@ -171,6 +191,15 @@ func jitteredExponential() workqueue.TypedRateLimiter[reconcile.Request] {
 	return &jitterLimiter{
 		inner: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](backoffBase, backoffMax),
 	}
+}
+
+// skipNameValidation maps the reconciler flag to controller-runtime's *bool
+// option: nil (strict) unless the e2e explicitly opts out.
+func skipNameValidation(skip bool) *bool {
+	if !skip {
+		return nil
+	}
+	return &skip
 }
 
 // getenvOS is the production env source; tests call LoadConfig with their own.

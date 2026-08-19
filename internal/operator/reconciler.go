@@ -57,6 +57,14 @@ type HikyoSecretReconciler struct {
 	// TokenMinter mints federation tokens; nil is a hard error on the SA path.
 	TokenMinter tokenMinter
 
+	// SkipControllerNameValidation disables controller-runtime's process-global
+	// controller-name uniqueness guard. Production leaves it false (one operator,
+	// one controller, one process — the guard is free). It exists only so the kind
+	// e2e can run more than one manager in a single test process without the
+	// second SetupWithManager colliding on the shared "hikyosecret" controller
+	// name; it changes nothing about a production single-manager deployment.
+	SkipControllerNameValidation bool
+
 	// now is injected in tests for deterministic expiry conditions.
 	now func() time.Time
 }

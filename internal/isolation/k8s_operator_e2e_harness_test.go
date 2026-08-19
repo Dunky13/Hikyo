@@ -5,16 +5,26 @@
 // HIKYO_K8S_E2E_KUBECONFIG points at a kind cluster's kubeconfig.
 //
 // Shape (handoff § 0.8): the Hikyo server runs in-process on the host over TLS
-// via httptest.NewTLSServer; the operator's reconciler runs in-process against
-// the kind API server through a live (uncached) controller-runtime client;
-// CRDs are applied from chart/hikyo/crds. Reconciliation is driven SYNCHRONOUSLY
-// (r.Reconcile called directly) rather than through a running manager: the
-// controller Owns the managed Secret, so a running manager would requeue on
-// every Secret write and make the audit-count assertions (a "full" fetch after
-// rotate; exactly-once ordering) racy by construction. Driving Reconcile keeps
-// every per-reconcile assertion exact. This is the one deliberate divergence
-// from "manager in-process"; the reconciler, its client and the API server are
-// all real.
+// via httptest.NewTLSServer; CRDs are applied from chart/hikyo/crds; workloads
+// use registry.k8s.io/pause; one namespace per scenario.
+//
+// Two harness modes coexist by design:
+//   - The converge and federation scenarios run through the REAL manager
+//     (operator.NewManager + SetupWithManager + mgr.Start), so the production
+//     wiring — the uncached Reader, the TokenMinter, the workload Watches, the
+//     rate limiter — is exercised end to end (R1 found manager-level wiring bugs
+//     a direct-Reconcile harness cannot catch). Leader election is disabled via
+//     the WithLeaderElection seam: one in-process manager needs no lease.
+//   - The remaining scenarios (rotate, designation, conflict, lifecycle, write
+//     ordering) drive r.Reconcile directly. The controller has no Secret
+//     informer but the manager still requeues on workload/instance events and on
+//     the 5m resync, which would make the exact audit-count and single-write
+//     ordering assertions racy; synchronous driving keeps them exact.
+//
+// Scope ids are production-shaped prefixed UUIDv7s (the CRD's ScopeID grammar,
+// `^[a-z]{2,8}_[0-9a-fA-F-]{36}$`), NOT the isolation suite's `org_a` shorthand
+// — a HikyoSecret carrying `org_a` would be rejected at admission. The e2e seeds
+// its own org/project/environment under those ids.
 package isolation
 
 import (
@@ -22,6 +32,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,6 +40,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -62,41 +74,53 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
 
+const kubeconfigEnv = "HIKYO_K8S_E2E_KUBECONFIG"
+
+// pauseImage is the workload image (§ 0.8): a do-nothing container.
+const pauseImage = "registry.k8s.io/pause:3.10"
+
 // instanceName is the single HikyoInstance every scenario references.
 const instanceName = "hikyo-e2e-instance"
 
-// operatorReconciler aliases the reconciler under test so scenario code reads
-// cleanly. Its Client, Recorder, Config, Log and TokenMinter fields are exported;
-// the TokenMinter field's interface type is unexported but satisfied
-// structurally by e2eMinter's exported Mint method.
-type operatorReconciler = operator.HikyoSecretReconciler
+// Production-shaped scope ids (prefixed UUIDv7) satisfying the CRD ScopeID
+// grammar. The e2e seeds its own hierarchy under them.
+const (
+	e2eOrg = "org_0192f000-0000-7000-8000-00000000000a"
+	e2ePrj = "prj_0192f000-0000-7000-8000-00000000000b"
+	e2eEnv = "env_0192f000-0000-7000-8000-00000000000c"
+)
 
-func newReconciler(cl client.Client, sch *runtime.Scheme, rec record.EventRecorder, ownNS string) *operatorReconciler {
-	return &operatorReconciler{
-		Client: cl,
-		// Reader is the uncached read path in production (mgr.GetAPIReader()); the
-		// e2e's direct client serves uncached reads, so it doubles as both.
-		Reader:   cl,
-		Scheme:   sch,
-		Recorder: rec,
-		Config:   operator.Config{OwnNamespace: ownNS, TriggerRollouts: true},
-		Log:      discardLog(),
-	}
+// Two config + two secret keys (§ 0.8 converge). Names obey the KeyName grammar.
+const (
+	cfgKeyOne = "CONFIG_ONE"
+	cfgKeyTwo = "CONFIG_TWO"
+	secKeyOne = "SECRET_ONE"
+	secKeyTwo = "SECRET_TWO"
+
+	cfgValOne = "cfg-one-value"
+	cfgValTwo = "cfg-two-value"
+	secValOne = "sec-one-value"
+	secValTwo = "sec-two-value"
+)
+
+func e2eScopePrj() domain.Scope {
+	return domain.Scope{Org: domain.OrgID(e2eOrg), Project: domain.ProjectID(e2ePrj)}
 }
+
+func e2eScopeEnv() domain.Scope {
+	return domain.Scope{Org: domain.OrgID(e2eOrg), Project: domain.ProjectID(e2ePrj), Env: domain.EnvID(e2eEnv)}
+}
+
+// operatorReconciler aliases the reconciler under test. Its Client, Reader,
+// Recorder, Config, Log and TokenMinter fields are exported; the TokenMinter
+// field's interface type is unexported but satisfied structurally by e2eMinter's
+// exported Mint method.
+type operatorReconciler = operator.HikyoSecretReconciler
 
 func reconcileRequest(ns, name string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}
 }
 
-// kubeconfigEnv gates the whole suite: absent → skip (handoff § 0.8).
-const kubeconfigEnv = "HIKYO_K8S_E2E_KUBECONFIG"
-
-// pauseImage is the workload image (§ 0.8): a do-nothing container, so the
-// Deployment/pods schedule on kind without pulling anything heavy.
-const pauseImage = "registry.k8s.io/pause:3.10"
-
-// e2eScheme is the runtime scheme for the live client: core + apps + auth +
-// apiextensions (to apply CRDs) + the hikyo.dev types.
 func e2eScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	sch := runtime.NewScheme()
@@ -113,7 +137,6 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// restConfig builds the kind REST config from the gating kubeconfig, or skips.
 func restConfig(t *testing.T) *rest.Config {
 	t.Helper()
 	path := os.Getenv(kubeconfigEnv)
@@ -122,11 +145,15 @@ func restConfig(t *testing.T) *rest.Config {
 	}
 	cfg, err := clientcmd.BuildConfigFromFlags("", path)
 	must(t, err)
+	// Raise the default client-go throttle (5 QPS / 10 burst): the manager-driven
+	// scenarios and the polling clients issue enough reads that the default would
+	// throttle and flake the 60s condition waits.
+	cfg.QPS = 50
+	cfg.Burst = 100
 	return cfg
 }
 
-// repoRoot walks up from the test's working directory to the module root (the
-// directory holding go.mod), so chart/hikyo/crds resolves regardless of cwd.
+// repoRoot walks up to the module root so chart/hikyo/crds resolves.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -143,8 +170,7 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// applyCRDs applies both operator CRDs from chart/hikyo/crds and waits until
-// each reports Established, so the first CR create does not race admission.
+// applyCRDs applies both operator CRDs and waits until each reports Established.
 func applyCRDs(t *testing.T, ctx context.Context, cl client.Client) {
 	t.Helper()
 	crdDir := filepath.Join(repoRoot(t), "chart", "hikyo", "crds")
@@ -166,8 +192,8 @@ func applyCRDs(t *testing.T, ctx context.Context, cl client.Client) {
 			if crd.Name == "" {
 				continue
 			}
-			existing := &apiextensionsv1.CustomResourceDefinition{}
-			switch err := cl.Get(ctx, types.NamespacedName{Name: crd.Name}, existing); {
+			var existing apiextensionsv1.CustomResourceDefinition
+			switch err := cl.Get(ctx, types.NamespacedName{Name: crd.Name}, &existing); {
 			case apierrors.IsNotFound(err):
 				must(t, cl.Create(ctx, &crd))
 			case err != nil:
@@ -200,8 +226,7 @@ func waitCRDEstablished(t *testing.T, ctx context.Context, cl client.Client, nam
 	})
 }
 
-// poll runs cond until true or the 60s bound (handoff § 0.8: ≤ 60s per scenario
-// assertion). A cond error aborts immediately.
+// poll runs cond until true or the 60s bound (§ 0.8: ≤ 60s per assertion).
 func poll(t *testing.T, ctx context.Context, cond func(context.Context) (bool, error)) {
 	t.Helper()
 	pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -211,34 +236,33 @@ func poll(t *testing.T, ctx context.Context, cond func(context.Context) (bool, e
 	}
 }
 
-// opEnv is one scenario's world: a fresh sqlite DB, a fresh in-process TLS
-// Hikyo server, a dedicated kind namespace, and a live client. Fresh per
-// scenario because rotate-token-key (scenario 2) invalidates every cursor and
-// the audit COUNT(*) assertions must run against a private trail.
+// opEnv is one scenario's world: a fresh sqlite DB, a fresh in-process TLS Hikyo
+// server, a dedicated kind namespace and a live (uncached) client.
 type opEnv struct {
 	t        *testing.T
 	ctx      context.Context
+	restCfg  *rest.Config
 	db       *store.DB
 	server   *httptest.Server
 	caPEM    []byte
 	scheme   *runtime.Scheme
 	cl       client.Client
 	cs       *kubernetes.Clientset
-	ns       string // scenario namespace (also the operator's own namespace)
+	ns       string
 	fed      *service.Federation
 	recorder *record.FakeRecorder
 }
 
-// newOpEnv seeds the delivery catalogue (two config + two secret keys published
-// into env_a1), stands up the TLS server, creates a namespace, and pre-seeds the
-// stamp root so write-ordering assertions never see it created mid-flow.
+// newOpEnv seeds the delivery hierarchy (two config + two secret keys published
+// into the e2e environment), stands up the TLS server, creates a namespace, and
+// pre-seeds the stamp root.
 func newOpEnv(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme, withFederation bool) *opEnv {
 	t.Helper()
 	ctx := t.Context()
 
 	db := seededDB(t, openSQLite)
 	identityFixtures(t, db)
-	seedFourKeyCatalogue(t, db)
+	seedE2EScope(t, db)
 
 	kr := probeKeyring(t, db)
 	api := &server.API{
@@ -252,7 +276,7 @@ func newOpEnv(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme, withFeder
 		Delivery:     &service.Delivery{DB: db, Keyring: kr},
 		Version:      "k8se2e",
 	}
-	e := &opEnv{t: t, ctx: ctx, db: db, scheme: sch, recorder: record.NewFakeRecorder(500)}
+	e := &opEnv{t: t, ctx: ctx, restCfg: restCfg, db: db, scheme: sch, recorder: record.NewFakeRecorder(500)}
 	if withFederation {
 		e.fed = newE2EFederation(t, db)
 		api.Delivery = &service.Delivery{DB: db, Keyring: kr, Federation: e.fed, Now: time.Now}
@@ -275,9 +299,6 @@ func newOpEnv(t *testing.T, restCfg *rest.Config, sch *runtime.Scheme, withFeder
 	return e
 }
 
-// createNamespace makes a uniquely named namespace via GenerateName (the API
-// server assigns the suffix, so parallel subtests never collide) and registers
-// its deletion.
 func (e *opEnv) createNamespace() string {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "hikyo-e2e-"}}
 	must(e.t, e.cl.Create(e.ctx, ns))
@@ -288,13 +309,12 @@ func (e *opEnv) createNamespace() string {
 }
 
 // seedStampRoot pre-creates the operator's 32-byte stamp root in the scenario
-// namespace (which is also the reconciler's OwnNamespace), matching the operator
-// unit harness: its auto-creation is covered by the operator's own tests, and
-// pre-seeding keeps write-ordering assertions free of an extra Secret create.
+// namespace (also the operator's OwnNamespace); its auto-creation is covered by
+// the operator's own unit tests.
 func (e *opEnv) seedStampRoot() {
 	root := make([]byte, crypto.KeySize)
 	for i := range root {
-		root[i] = byte(i * 7)
+		root[i] = byte(i*7 + 1)
 	}
 	must(e.t, e.cl.Create(e.ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Namespace: e.ns, Name: hikyov1.StampRootSecretName},
@@ -303,47 +323,79 @@ func (e *opEnv) seedStampRoot() {
 	}))
 }
 
-// bearerToken mints a workload service-account bearer credential and returns the
-// plaintext token (delivered once). read/reveal grants are seeded by the caller.
-func (e *opEnv) newWorkloadCredential(name string) (service.ServiceAccountView, service.MintResult) {
-	ident := identitySvc(e.db)
-	sa, err := ident.CreateServiceAccount(e.ctx, service.LocalPrincipal(identAdmin), prjScope(), name, domain.ClassWorkload)
-	must(e.t, err)
-	minted, err := ident.MintCredential(e.ctx, service.LocalPrincipal(identAdmin), prjScope(), sa.ID, service.MintRequest{})
-	must(e.t, err)
-	return sa, minted
+// managerConfig is the operator config for the manager-driven scenarios: bound
+// to the scenario namespace, rollouts on, metrics/health servers disabled so
+// sequential scenarios never fight over :8080/:8081.
+func (e *opEnv) managerConfig() operator.Config {
+	return operator.Config{
+		Namespaces:      []string{e.ns},
+		TriggerRollouts: true,
+		OwnNamespace:    e.ns,
+		MetricsAddr:     "0",
+		HealthAddr:      "0",
+	}
 }
 
-// instanceURL is the TLS server origin the HikyoInstance points at.
-func (e *opEnv) instanceURL() string { return e.server.URL }
+// startManager builds a real manager (leader election off), wires the production
+// reconciler shape (cached Client, uncached Reader, TokenMinter, Watches), starts
+// it in a goroutine and blocks until its cache has synced.
+func (e *opEnv) startManager() {
+	e.t.Helper()
+	cfg := e.managerConfig()
+	mgr, err := operator.NewManager(e.restCfg, cfg, operator.WithLeaderElection(false))
+	must(e.t, err)
+	r := &operatorReconciler{
+		Client:                       mgr.GetClient(),
+		Reader:                       mgr.GetAPIReader(),
+		Scheme:                       mgr.GetScheme(),
+		Recorder:                     mgr.GetEventRecorderFor("hikyo-operator-e2e"),
+		Config:                       cfg,
+		Log:                          discardLog(),
+		TokenMinter:                  e2eMinter{cs: e.cs},
+		SkipControllerNameValidation: true, // more than one manager per test process
+	}
+	must(e.t, r.SetupWithManager(mgr))
 
-// caBundleB64 is the server certificate as base64 PEM for HikyoInstance.caBundle.
-func (e *opEnv) caBundleB64() string { return base64.StdEncoding.EncodeToString(e.caPEM) }
+	ctx, cancel := context.WithCancel(context.Background())
+	e.t.Cleanup(cancel)
+	go func() { _ = mgr.Start(ctx) }()
+	if !mgr.GetCache().WaitForCacheSync(mgrSyncCtx(e.t)) {
+		e.t.Fatal("manager cache did not sync")
+	}
+}
 
-// reconciler builds a reconciler bound to the live client, wired with a real
-// TokenMinter (kind TokenRequest) for the federation path. NewClientForURL is
-// left nil: the default factory dials inst.Spec.URL with decodeCABundle(caBundle)
-// — exactly the TLS server URL + cert — and its result type is unexported, so it
-// cannot be set from outside package operator anyway.
+func mgrSyncCtx(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// reconciler builds a direct-drive reconciler bound to the live client. Reader is
+// the same live (uncached) client. NewClientForURL is left nil: the default
+// factory dials inst.Spec.URL with decodeCABundle(caBundle) — the TLS server URL
+// + cert — and its result type is unexported, unsettable from outside operator.
 func (e *opEnv) reconciler() *operatorReconciler {
 	return e.reconcilerWith(e.cl)
 }
 
-func (e *opEnv) reconcilerWith(cl client.Client) *operatorReconciler {
-	r := newReconciler(cl, e.scheme, e.recorder, e.ns)
-	r.TokenMinter = e2eMinter{cs: e.cs}
-	return r
+func (e *opEnv) reconcilerWith(writer client.Client) *operatorReconciler {
+	return &operatorReconciler{
+		Client:      writer,
+		Reader:      e.cl,
+		Scheme:      e.scheme,
+		Recorder:    e.recorder,
+		Config:      operator.Config{OwnNamespace: e.ns, TriggerRollouts: true},
+		Log:         discardLog(),
+		TokenMinter: e2eMinter{cs: e.cs},
+	}
 }
 
-// reconcile drives one synchronous reconcile of the named CR in the scenario
-// namespace and returns its result/error.
 func (e *opEnv) reconcile(r *operatorReconciler, name string) error {
 	e.t.Helper()
 	_, err := r.Reconcile(e.ctx, reconcileRequest(e.ns, name))
 	return err
 }
 
-// drainEvents returns the FakeRecorder reasons emitted so far without blocking.
 func (e *opEnv) drainEvents() []string {
 	var out []string
 	for {
@@ -365,16 +417,12 @@ func eventsContain(events []string, reason string) bool {
 	return false
 }
 
-// --- object builders on the live cluster ---
+// --- object builders ---
 
 func (e *opEnv) createInstance(name, audience string) *hikyov1.HikyoInstance {
 	inst := &hikyov1.HikyoInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec: hikyov1.HikyoInstanceSpec{
-			URL:      e.instanceURL(),
-			CABundle: e.caBundleB64(),
-			Audience: audience,
-		},
+		Spec:       hikyov1.HikyoInstanceSpec{URL: e.server.URL, CABundle: e.caBundleB64(), Audience: audience},
 	}
 	must(e.t, e.cl.Create(e.ctx, inst))
 	e.t.Cleanup(func() {
@@ -383,9 +431,8 @@ func (e *opEnv) createInstance(name, audience string) *hikyov1.HikyoInstance {
 	return inst
 }
 
-// createBootstrapSecret writes a designated (or not) bootstrap Secret holding a
-// bearer token. When designate is true it carries both designation labels for
-// instanceLabel.
+func (e *opEnv) caBundleB64() string { return base64.StdEncoding.EncodeToString(e.caPEM) }
+
 func (e *opEnv) createBootstrapSecret(name, token, instanceLabel string, designate bool) *corev1.Secret {
 	labels := map[string]string{}
 	if designate {
@@ -401,8 +448,6 @@ func (e *opEnv) createBootstrapSecret(name, token, instanceLabel string, designa
 	return sec
 }
 
-// createServiceAccountObj creates a kind ServiceAccount (optionally designated),
-// returning it with its server-assigned UID populated.
 func (e *opEnv) createServiceAccountObj(name, instanceLabel string, designate bool) *corev1.ServiceAccount {
 	labels := map[string]string{}
 	if designate {
@@ -414,7 +459,17 @@ func (e *opEnv) createServiceAccountObj(name, instanceLabel string, designate bo
 	return sa
 }
 
-// crSpec is a compact description of a HikyoSecret to create.
+// newWorkloadCredential mints a workload SA bearer credential in the e2e project.
+func (e *opEnv) newWorkloadCredential(name string) (service.ServiceAccountView, service.MintResult) {
+	ident := identitySvc(e.db)
+	sa, err := ident.CreateServiceAccount(e.ctx, service.LocalPrincipal(identAdmin), e2eScopePrj(), name, domain.ClassWorkload)
+	must(e.t, err)
+	minted, err := ident.MintCredential(e.ctx, service.LocalPrincipal(identAdmin), e2eScopePrj(), sa.ID, service.MintRequest{})
+	must(e.t, err)
+	return sa, minted
+}
+
+// crSpec is a compact description of a HikyoSecret.
 type crSpec struct {
 	name           string
 	target         string
@@ -430,7 +485,7 @@ func (e *opEnv) createCR(s crSpec) *hikyov1.HikyoSecret {
 		ObjectMeta: metav1.ObjectMeta{Namespace: e.ns, Name: s.name},
 		Spec: hikyov1.HikyoSecretSpec{
 			InstanceRef: hikyov1.InstanceRef{Name: instanceName},
-			Scope:       hikyov1.Scope{Org: hikyov1.ScopeID(orgA), Project: hikyov1.ScopeID(prjA1), Environment: hikyov1.ScopeID(envA1)},
+			Scope:       hikyov1.Scope{Org: e2eOrg, Project: e2ePrj, Environment: e2eEnv},
 			Target:      hikyov1.Target{Name: s.target},
 		},
 	}
@@ -453,8 +508,6 @@ func (e *opEnv) createCR(s crSpec) *hikyov1.HikyoSecret {
 	return cr
 }
 
-// createPauseDeployment creates a replicas=1 pause Deployment, opted-in to the
-// named targets when any are given.
 func (e *opEnv) createPauseDeployment(name string, consumes ...string) *appsv1.Deployment {
 	ann := map[string]string{}
 	if len(consumes) > 0 {
@@ -504,7 +557,6 @@ func (e *opEnv) getDeployment(name string) *appsv1.Deployment {
 	return &d
 }
 
-// stampOf returns the pod-template stamp annotation for target on a Deployment.
 func stampOf(d *appsv1.Deployment, target string) string {
 	if d.Spec.Template.Annotations == nil {
 		return ""
@@ -512,9 +564,6 @@ func stampOf(d *appsv1.Deployment, target string) string {
 	return d.Spec.Template.Annotations[hikyov1.StampAnnotationPrefix+target]
 }
 
-// waitDeploymentSettled blocks until the Deployment's controller has observed
-// its latest generation (so a later resourceVersion/generation comparison is not
-// racing the built-in controller's status writes).
 func (e *opEnv) waitDeploymentSettled(name string) {
 	e.t.Helper()
 	poll(e.t, e.ctx, func(ctx context.Context) (bool, error) {
@@ -524,6 +573,61 @@ func (e *opEnv) waitDeploymentSettled(name string) {
 		}
 		return d.Status.ObservedGeneration >= d.Generation, nil
 	})
+}
+
+// waitCondition polls the CR until it carries the given condition type/status/
+// reason — the manager-driven scenarios' assertion primitive.
+func (e *opEnv) waitCondition(name, condType string, status metav1.ConditionStatus, reason string) *hikyov1.HikyoSecret {
+	e.t.Helper()
+	var last *hikyov1.HikyoSecret
+	pctx, cancel := context.WithTimeout(e.ctx, 60*time.Second)
+	defer cancel()
+	err := wait.PollUntilContextTimeout(pctx, 300*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		var cr hikyov1.HikyoSecret
+		if err := e.cl.Get(ctx, types.NamespacedName{Namespace: e.ns, Name: name}, &cr); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		last = &cr
+		for _, c := range cr.Status.Conditions {
+			if c.Type == condType {
+				return c.Status == status && c.Reason == reason, nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		e.t.Fatalf("CR %q never reached %s=%s/%s within 60s: %v\n  observedGeneration=%d lifecycle=%q conditions=%s",
+			name, condType, status, reason, err, obsGen(last), lifecycleOf(last), dumpConds(last))
+	}
+	return last
+}
+
+func obsGen(cr *hikyov1.HikyoSecret) int64 {
+	if cr == nil {
+		return -1
+	}
+	return cr.Status.ObservedGeneration
+}
+
+func lifecycleOf(cr *hikyov1.HikyoSecret) hikyov1.Lifecycle {
+	if cr == nil {
+		return ""
+	}
+	return cr.Status.Lifecycle
+}
+
+func dumpConds(cr *hikyov1.HikyoSecret) string {
+	if cr == nil {
+		return "<CR not found>"
+	}
+	var b strings.Builder
+	for _, c := range cr.Status.Conditions {
+		fmt.Fprintf(&b, "[%s=%s/%s: %s] ", c.Type, c.Status, c.Reason, c.Message)
+	}
+	if b.Len() == 0 {
+		return "<no conditions>"
+	}
+	return b.String()
 }
 
 // --- condition assertions (by type + reason, never message substring) ---
@@ -541,47 +645,141 @@ func requireCondition(t *testing.T, cr *hikyov1.HikyoSecret, condType string, st
 	t.Fatalf("condition %q absent; have %+v", condType, cr.Status.Conditions)
 }
 
-func conditionAbsent(t *testing.T, cr *hikyov1.HikyoSecret, condType string) {
-	t.Helper()
-	for _, c := range cr.Status.Conditions {
-		if c.Type == condType {
-			t.Fatalf("condition %q present but should be absent: (%s/%s)", condType, c.Status, c.Reason)
-		}
-	}
-}
-
 // --- audit helpers (payload is a JSON string column; match with LIKE) ---
 
-func (e *opEnv) auditCount(query string) int64 {
-	return queryInt(e.t, e.db, query)
-}
-
-// deliveryFetchedFull counts full-disposition fetch records that presented a
-// cursor.
 func (e *opEnv) countFullFetchWithCursor() int64 {
-	return e.auditCount(`SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' ` +
+	return queryInt(e.t, e.db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' `+
 		`AND payload LIKE '%"disposition":"full"%' AND payload LIKE '%"cursor_presented":true%'`)
 }
 
 func (e *opEnv) countCurrentFetch() int64 {
-	return e.auditCount(`SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' ` +
+	return queryInt(e.t, e.db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' `+
 		`AND payload LIKE '%"disposition":"current"%'`)
+}
+
+// --- e2e-scope seeding (production-shaped ids) ---
+
+// seedE2EScope seeds the e2e org/project/environment, the four keys, the fixture
+// admin's project grants, and publishes values for all four keys into the env.
+func seedE2EScope(t *testing.T, db *store.DB) {
+	t.Helper()
+	stmts := []string{
+		fmt.Sprintf(`INSERT INTO orgs (id, name, active, metadata, created_at) VALUES ('%s', 'e2e-org', TRUE, '{}', %s)`, e2eOrg, ts),
+		fmt.Sprintf(`INSERT INTO projects (id, org_id, name, created_at) VALUES ('%s', '%s', 'e2e', %s)`, e2ePrj, e2eOrg, ts),
+		fmt.Sprintf(`INSERT INTO project_schema_revisions (org_id, project_id, revision) VALUES ('%s', '%s', 0)`, e2eOrg, e2ePrj),
+		fmt.Sprintf(`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('%s', '%s', '%s', 'dev', '', %s, 0)`, e2eEnv, e2eOrg, e2ePrj, ts),
+	}
+	keys := []struct{ id, name, class string }{
+		{"key_e2e_cfg1", cfgKeyOne, "config"},
+		{"key_e2e_cfg2", cfgKeyTwo, "config"},
+		{"key_e2e_sec1", secKeyOne, "secret"},
+		{"key_e2e_sec2", secKeyTwo, "secret"},
+	}
+	for _, k := range keys {
+		stmts = append(stmts, fmt.Sprintf(
+			`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at)
+			 VALUES ('%s', '%s', '%s', '%s', '', '%s', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, %s)`,
+			k.id, e2eOrg, e2ePrj, k.name, k.class, ts))
+	}
+	// The fixture admin (usr_ident) gets the project authority the e2e drives:
+	// identity management (create SA + mint + revoke), member management + read
+	// (grant/revoke read), and edit/publish/definitions-edit (publish values).
+	for i, capability := range []string{"manage-identities", "manage-members", "read", "edit", "publish", "definitions-edit"} {
+		stmts = append(stmts, fmt.Sprintf(
+			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
+			 VALUES ('g_e2e_%d', '%s', '%s', '%s', '%s', NULL, %s)`,
+			i, identAdmin, capability, e2eOrg, e2ePrj, ts))
+	}
+	for _, s := range stmts {
+		execRaw(t, db, s)
+	}
+	seedOrigins(t, db)
+	publishE2EValues(t, db, map[string]string{
+		cfgKeyOne: cfgValOne, cfgKeyTwo: cfgValTwo, secKeyOne: secValOne, secKeyTwo: secValTwo,
+	})
+}
+
+// publishE2EValues stages then publishes a batch of values into the e2e env.
+func publishE2EValues(t *testing.T, db *store.DB, values map[string]string) {
+	t.Helper()
+	actor := service.LocalPrincipal(identAdmin)
+	scope := e2eScopeEnv()
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	versions := make([]string, 0, len(names))
+	for _, name := range names {
+		staged, err := valueSvc(t, db).Set(t.Context(), actor, scope, name, values[name])
+		if err != nil {
+			t.Fatalf("stage %s: %v", name, err)
+		}
+		versions = append(versions, staged.VersionID)
+	}
+	revisions := revisionSvc(t, db)
+	_, err := revisions.PublishPlanned(t.Context(), actor, scope, service.PublishRequest{VersionIDs: versions})
+	if errors.Is(err, service.ErrProtectedDestination) {
+		_, err = revisions.PublishPlanned(t.Context(), actor, scope, service.PublishRequest{
+			VersionIDs: versions, ConfirmedProtectedEnvironments: []string{string(scope.Env)},
+		})
+	}
+	if err != nil {
+		t.Fatalf("publish %v: %v", names, err)
+	}
+}
+
+// grantE2ERead grants a principal `read` on the e2e env through the real grant
+// API (the widening gate a production grant passes).
+func grantE2ERead(t *testing.T, db *store.DB, p domain.PrincipalID) {
+	t.Helper()
+	if _, err := grantSvcWithAuth(db).Create(t.Context(), service.LocalPrincipal(identAdmin),
+		service.GrantSpec{Target: p, Capability: domain.CapRead, Scope: e2eScopeEnv()}); err != nil {
+		t.Fatalf("grant read to %s: %v", p, err)
+	}
+}
+
+// revokeE2ERead removes a principal's `read` on the e2e env.
+func revokeE2ERead(t *testing.T, db *store.DB, p domain.PrincipalID) {
+	t.Helper()
+	if err := grantSvcWithAuth(db).Revoke(t.Context(), service.LocalPrincipal(identAdmin),
+		service.GrantSpec{Target: p, Capability: domain.CapRead, Scope: e2eScopeEnv()}); err != nil {
+		t.Fatalf("revoke read from %s: %v", p, err)
+	}
+}
+
+// seedE2EReveal writes a machine `reveal` grant on the e2e env directly (the
+// per-project machine-reveal opt-in API is out of scope; the isolation suite
+// seeds the row the same way).
+func seedE2EReveal(t *testing.T, db *store.DB, id string, p domain.PrincipalID, cap domain.Capability) {
+	t.Helper()
+	execRaw(t, db, fmt.Sprintf(
+		`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', %s)`,
+		id, p, cap, e2eOrg, e2ePrj, e2eEnv, ts))
+	seedOrigins(t, db)
+}
+
+// newE2EFederation builds a Federation service backed by a real admission
+// limiter and a real clock — the JWTs are minted by the kind API server, so
+// their timestamps are real and the validator's clock must be too.
+func newE2EFederation(t *testing.T, db *store.DB) *service.Federation {
+	t.Helper()
+	limiter, err := admission.New(admission.Config{ArgonMemoryKiB: crypto.PasswordFloor.MemoryKiB, Now: time.Now})
+	must(t, err)
+	cache := &oidcfed.Cache{Limiter: limiter, Nowf: time.Now, HTTP: http.DefaultClient}
+	return &service.Federation{DB: db, Auth: authWithWindow(db), Cache: cache, Now: time.Now}
 }
 
 // --- token minting via the kind TokenRequest subresource ---
 
-// e2eMinter mirrors the production clientsetMinter: it mints a short-lived,
-// audience-bound ServiceAccount token via the kind TokenRequest API. It
-// satisfies the reconciler's (unexported) tokenMinter interface structurally
-// through the exported Mint method.
+// e2eMinter mirrors the production clientsetMinter: a short-lived audience-bound
+// ServiceAccount token via the kind TokenRequest API. It satisfies the
+// reconciler's unexported tokenMinter interface structurally.
 type e2eMinter struct{ cs *kubernetes.Clientset }
 
 func (m e2eMinter) Mint(ctx context.Context, namespace, serviceAccount, audience string) (string, error) {
 	exp := int64(600)
-	tr := &authnv1.TokenRequest{Spec: authnv1.TokenRequestSpec{
-		Audiences:         []string{audience},
-		ExpirationSeconds: &exp,
-	}}
+	tr := &authnv1.TokenRequest{Spec: authnv1.TokenRequestSpec{Audiences: []string{audience}, ExpirationSeconds: &exp}}
 	out, err := m.cs.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, serviceAccount, tr, metav1.CreateOptions{})
 	if err != nil {
 		return "", fmt.Errorf("mint token for %s/%s: %w", namespace, serviceAccount, err)
@@ -589,12 +787,10 @@ func (m e2eMinter) Mint(ctx context.Context, namespace, serviceAccount, audience
 	return out.Status.Token, nil
 }
 
-// defaultAudience mints a token with no requested audience so the kind API
-// server stamps its default audience, then reads it back from the token's `aud`
-// claim — the value that must go in the issuer's RefusedAudiences.
+// defaultAudience mints a token with no requested audience so the kind API server
+// stamps its default, then reads it back — the value the issuer refuses.
 func (e *opEnv) defaultAudience(serviceAccount string) string {
-	tr := &authnv1.TokenRequest{Spec: authnv1.TokenRequestSpec{}}
-	out, err := e.cs.CoreV1().ServiceAccounts(e.ns).CreateToken(e.ctx, serviceAccount, tr, metav1.CreateOptions{})
+	out, err := e.cs.CoreV1().ServiceAccounts(e.ns).CreateToken(e.ctx, serviceAccount, &authnv1.TokenRequest{}, metav1.CreateOptions{})
 	must(e.t, err)
 	aud := jwtAudience(e.t, out.Status.Token)
 	if aud == "" {
@@ -603,7 +799,6 @@ func (e *opEnv) defaultAudience(serviceAccount string) string {
 	return aud
 }
 
-// jwtAudience decodes a compact JWT's payload and returns the first audience.
 func jwtAudience(t *testing.T, token string) string {
 	t.Helper()
 	parts := strings.Split(token, ".")
@@ -616,7 +811,6 @@ func jwtAudience(t *testing.T, token string) string {
 		Aud json.RawMessage `json:"aud"`
 	}
 	must(t, json.Unmarshal(payload, &claims))
-	// aud is either a string or an array of strings.
 	var single string
 	if err := json.Unmarshal(claims.Aud, &single); err == nil {
 		return single
@@ -629,60 +823,12 @@ func jwtAudience(t *testing.T, token string) string {
 	return many[0]
 }
 
-// discardLog is the operator log sink for tests.
-func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-
-// The scenario key set: two config keys and two secret keys (§ 0.8 converge).
-const (
-	cfgKeyOne = "CONFIG_ONE"
-	cfgKeyTwo = "CONFIG_TWO"
-	secKeyOne = "SECRET_ONE"
-	secKeyTwo = "SECRET_TWO"
-
-	cfgValOne = "cfg-one-value"
-	cfgValTwo = "cfg-two-value"
-	secValOne = "sec-one-value"
-	secValTwo = "sec-two-value"
-)
-
-// seedFourKeyCatalogue declares two config + two secret keys on prj_a1, grants
-// the fixture admin the edit/publish/definitions-edit it needs, and publishes
-// values for all four into env_a1 (delivery fails closed on an unmaterialized
-// environment, so the publish is what makes a fetch answer). Same shape as the
-// federation suite's seedDeliveryCatalogue, widened to four keys.
-func seedFourKeyCatalogue(t *testing.T, db *store.DB) {
-	t.Helper()
-	keys := []struct{ id, name, class string }{
-		{"key_e2e_cfg1", cfgKeyOne, "config"},
-		{"key_e2e_cfg2", cfgKeyTwo, "config"},
-		{"key_e2e_sec1", secKeyOne, "secret"},
-		{"key_e2e_sec2", secKeyTwo, "secret"},
+// discardLog silences the operator by default; set HIKYO_E2E_LOG to route it to
+// stderr for diagnosis (the manager scenarios reconcile asynchronously, so their
+// failures are otherwise invisible).
+func discardLog() *slog.Logger {
+	if os.Getenv("HIKYO_E2E_LOG") != "" {
+		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
-	for _, k := range keys {
-		execRaw(t, db, fmt.Sprintf(
-			`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at)
-			 VALUES ('%s', 'org_a', 'prj_a1', '%s', '', '%s', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, %s)`,
-			k.id, k.name, k.class, ts))
-	}
-	for i, capability := range []string{"edit", "publish", "definitions-edit"} {
-		execRaw(t, db, fmt.Sprintf(
-			`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at)
-			 VALUES ('g_e2e_%d', '%s', '%s', 'org_a', 'prj_a1', NULL, %s)`,
-			i, identAdmin, capability, ts))
-	}
-	publishDeliveryValues(t, db, envA1, map[string]string{
-		cfgKeyOne: cfgValOne, cfgKeyTwo: cfgValTwo,
-		secKeyOne: secValOne, secKeyTwo: secValTwo,
-	})
-}
-
-// newE2EFederation builds a Federation service backed by a real admission
-// limiter and a real clock — the federation JWTs are minted by the kind API
-// server, so their timestamps are real and the validator's clock must be too.
-func newE2EFederation(t *testing.T, db *store.DB) *service.Federation {
-	t.Helper()
-	limiter, err := admission.New(admission.Config{ArgonMemoryKiB: crypto.PasswordFloor.MemoryKiB, Now: time.Now})
-	must(t, err)
-	cache := &oidcfed.Cache{Limiter: limiter, Nowf: time.Now, HTTP: http.DefaultClient}
-	return &service.Federation{DB: db, Auth: authWithWindow(db), Cache: cache, Now: time.Now}
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
