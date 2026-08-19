@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
@@ -57,6 +58,15 @@ func Run(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 
+	// The federation path mints ServiceAccount tokens via the TokenRequest
+	// subresource, which the controller-runtime cache/client does not serve — so
+	// it needs a typed clientset. Without this the SA credential path would hit
+	// the reconciler's nil-minter hard error at runtime.
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("operator: build clientset for token minting: %w", err)
+	}
+
 	if err := (&HikyoSecretReconciler{
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
@@ -64,6 +74,7 @@ func Run(ctx context.Context, log *slog.Logger) error {
 		Config:          cfg,
 		Log:             log,
 		NewClientForURL: nil, // nil ⇒ default HTTPS client; tests inject a stub
+		TokenMinter:     clientsetMinter{cs: cs},
 	}).SetupWithManager(mgr); err != nil {
 		return err
 	}
