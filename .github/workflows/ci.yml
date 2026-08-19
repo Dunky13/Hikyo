@@ -592,12 +592,23 @@ jobs:
           restore-keys: |
             go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-
             go-k8s-e2e-${{ runner.os }}-
-      # install_only: the runner script creates and deletes the cluster itself,
-      # so kind-action provides only the pinned `kind` binary on PATH.
-      - name: Install kind
-        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
-        with:
-          install_only: true
+      # A pinned, checksummed binary download (the shellcheck pattern above):
+      # the repository's Actions allowlist is deliberately narrow, and kind is
+      # a single static binary — no third-party action needed.
+      - name: Install kind (pinned archive)
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+        run: |
+          binary="$RUNNER_TEMP/kind"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error \
+            --retry 4 --retry-delay 2 --retry-all-errors \
+            "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64" \
+            --output "$binary"
+          printf '%s  %s\n' "$KIND_SHA256" "$binary" | sha256sum --check --strict
+          chmod +x "$binary"
+          mv "$binary" /usr/local/bin/kind
+          kind version
       - name: Operator kind e2e
         run: ./scripts/ci/k8s-e2e.sh
       - name: Save k8s-e2e Go cache
