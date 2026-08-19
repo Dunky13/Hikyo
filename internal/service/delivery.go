@@ -195,6 +195,27 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 	if mode != delivery.ModeFull && mode != delivery.ModeConfigOnly {
 		return FetchResult{}, invalidDetail("unknown delivery projection %q", opts.Projection)
 	}
+	// acknowledged_keys is CALLER-CONTROLLED: the operator sends its
+	// loader-control acknowledgement, which the server records and otherwise
+	// ignores (k8s ADR § Loader-control). "Records and ignores" is not "accepts
+	// anything" — a list over the bound or carrying a name outside the key-name
+	// grammar is a malformed REQUEST, so it is refused as domain.ErrInvalid (400
+	// on the wire) HERE, before the sealer preflight opens any transaction. The
+	// alternative is worse than a bad answer: an over-long or malformed list
+	// would otherwise reach the closed audit schema mid-transaction, where the
+	// MaxLen/sanitize bound is a fail-LOUD (500) invariant, so a caller typo
+	// would masquerade as a server fault after work had already run. The bound
+	// and the grammar are the same the audit registry enforces; refusing them up
+	// front is what makes the wire answer a clean 400.
+	if len(opts.AcknowledgedKeys) > delivery.MaxAcknowledgedKeys {
+		return FetchResult{}, invalidDetail("acknowledged_keys carries %d entries, at most %d are allowed",
+			len(opts.AcknowledgedKeys), delivery.MaxAcknowledgedKeys)
+	}
+	for _, name := range opts.AcknowledgedKeys {
+		if err := schema.CheckKeyName(name); err != nil {
+			return FetchResult{}, invalidDetail("acknowledged_keys entry %q is not a valid key name", name)
+		}
+	}
 	// The project sealer is resolved BEFORE the transaction, under this
 	// operation's own formula, for the reason #50 recorded: minting a project
 	// DEK opens transactions of its own, and sqlite serves writes on a single
@@ -312,14 +333,25 @@ func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope,
 		if err != nil {
 			return err
 		}
+		// The pinned revision only when it is NON-CURRENT: a pinned-current
+		// delivery is content- and authority-identical to an unpinned latest,
+		// so binding 0 there keeps their cursors equal, and the moment a later
+		// publish makes this pin historical the term goes 0 -> pin.Revision and
+		// the cursor moves exactly once — which is the transition where the
+		// secret-value authority flips from `reveal` to `reveal-history`.
+		pinnedHistoricalRevision := int64(0)
+		if pinnedNonCurrent {
+			pinnedHistoricalRevision = out.PinnedRevision
+		}
 		computed, err := s.Keyring.DeliveryCursor(
 			string(scope.Org), string(scope.Project), string(scope.Env),
 			delivery.EncodeCursor(delivery.Cursor{
-				ChangeToken:           changeToken,
-				Projection:            projectionOf(grants, scope),
-				AuthorizationRevision: revisionOfAuthority,
-				PinGeneration:         pinGeneration,
-				Mode:                  mode,
+				ChangeToken:              changeToken,
+				Projection:               projectionOf(grants, scope),
+				AuthorizationRevision:    revisionOfAuthority,
+				PinGeneration:            pinGeneration,
+				Mode:                     mode,
+				PinnedHistoricalRevision: pinnedHistoricalRevision,
 			}))
 		if err != nil {
 			return err

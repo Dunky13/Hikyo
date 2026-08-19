@@ -320,9 +320,10 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			}
 			r := newFedRig(t, caseDB)
 			r.configureIssuer(t, tc.typ, []string{tc.shape.DefaultAudience})
-			r.bindShape(t, "wl-"+tc.name, tc.shape, hikyoAudience)
+			_, binding := r.bindShape(t, "wl-"+tc.name, tc.shape, hikyoAudience)
 
-			bound, err := r.idp.MintShape(tc.shape, hikyoAudience, r.clk.Now(), 10*time.Minute)
+			tokenLifetime := 10 * time.Minute
+			bound, err := r.idp.MintShape(tc.shape, hikyoAudience, r.clk.Now(), tokenLifetime)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -332,6 +333,21 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			}
 			if res.Current {
 				t.Fatal("a cursor-less federated fetch answered `current`")
+			}
+			// credential_expires_at is the BINDING's finite expiry, never the
+			// presented JWT's `exp`. §0.1 fixes the source as the federated
+			// binding, and the two differ here on purpose: the binding lives its
+			// default lifetime while this token lives ten minutes. Asserting
+			// equality with the binding AND inequality with the token exp is what
+			// makes the source unambiguous — a delivery surfaces the credential
+			// Hikyo issued, so the operator's ahead-of-time expiry condition fires
+			// on Hikyo's binding lifetime, not on a short-lived external token that
+			// is re-minted every fetch.
+			if !res.CredentialExpiresAt.Equal(binding.ExpiresAt) {
+				t.Errorf("credential_expires_at = %v, want the binding expiry %v", res.CredentialExpiresAt, binding.ExpiresAt)
+			}
+			if res.CredentialExpiresAt.Equal(r.clk.Now().Add(tokenLifetime)) {
+				t.Error("credential_expires_at equals the token exp: the source is the JWT, not the binding")
 			}
 			// The bound identity holds `read` and no disclosure capability, so
 			// the value rule applies per classification: the config value

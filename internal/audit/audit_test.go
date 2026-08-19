@@ -211,6 +211,48 @@ func TestCLIReauthHandoffAuditSchemaIsClosed(t *testing.T) {
 	}
 }
 
+// TestDeliveryFetchedRecordsAcknowledgedKeys pins the k8s ADR § Loader-control
+// obligation: the presented acknowledgement list is recorded on EVERY fetch, an
+// empty list included, so the closed schema requires the member and rejects a
+// payload that omits it. Present-and-empty is not omission — an empty list must
+// still validate, because a fetch that acknowledged nothing records exactly that.
+func TestDeliveryFetchedRecordsAcknowledgedKeys(t *testing.T) {
+	spec, ok := Spec(EventDeliveryFetched)
+	if !ok {
+		t.Fatal("identity.delivery_fetched is not registered")
+	}
+	ack, ok := spec.Schema["acknowledged_keys"]
+	if !ok || !ack.Required {
+		t.Fatalf("acknowledged_keys spec = %+v, want Required", ack)
+	}
+
+	// A complete payload carrying an EMPTY list validates: the acknowledgement
+	// was present, it was just empty.
+	full := Payload{
+		"disposition":          "full",
+		"credential_id":        "mcr_1",
+		"credential_kind":      "bearer",
+		"principal_class":      "workload",
+		"scope":                "org_a/prj_a1/env_a1",
+		"key_count":            2,
+		"projection":           "full",
+		"acknowledged_keys":    []string{},
+		"delivered_count":      1,
+		"change_token_version": "v1",
+		"cursor_presented":     false,
+	}
+	if err := spec.Schema.validate(EventDeliveryFetched, full); err != nil {
+		t.Fatalf("a complete payload with an empty acknowledged_keys was rejected: %v", err)
+	}
+
+	// Omitting the member is REJECTED (fail-closed): a fetch record without the
+	// acknowledgement is a silent absence the contract does not permit.
+	delete(full, "acknowledged_keys")
+	if err := spec.Schema.validate(EventDeliveryFetched, full); err == nil {
+		t.Fatal("a payload omitting acknowledged_keys validated; the member must be required")
+	}
+}
+
 // TestRegistryForbiddenPayloadContent is invariant 4's schema half: no
 // registered payload schema may declare a field whose name suggests it
 // carries the forbidden content classes (secret plaintext, bearer/credential

@@ -3,6 +3,7 @@ package isolation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
@@ -230,6 +231,20 @@ func runDeliveryCursorFalsification(t *testing.T, db *store.DB) {
 			component: "projection mode",
 			mutate: func(c delivery.Cursor) delivery.Cursor {
 				c.Mode = delivery.ModeConfigOnly
+				return c
+			},
+		},
+		{
+			// (6) PINNED HISTORICAL REVISION — the delivered snapshot became a
+			// pinned NON-CURRENT revision. The baseline fetch is unpinned, so the
+			// served cursor binds 0; a cursor claiming a pinned historical
+			// revision describes a delivery whose secret-value authority is
+			// `reveal-history` rather than `reveal`, and must not be accepted as
+			// current. This is the #64 P1 leg: the transition a content-only
+			// cursor gets wrong.
+			component: "pinned historical revision",
+			mutate: func(c delivery.Cursor) delivery.Cursor {
+				c.PinnedHistoricalRevision = 1
 				return c
 			},
 		},
@@ -745,7 +760,18 @@ func runDeliveryConfigOnlyProjection(t *testing.T, db *store.DB) {
 }
 
 func TestDeliveryAcknowledgedKeysAreRecordedSQLite(t *testing.T) {
-	db := seededDB(t, openSQLite)
+	runDeliveryAcknowledgedKeys(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryAcknowledgedKeysAreRecordedPostgres(t *testing.T) {
+	runDeliveryAcknowledgedKeys(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryAcknowledgedKeys pins the loader-control acknowledgement's two
+// server obligations: it lands on the fetch record AS PRESENTED and it is
+// otherwise ignored, and a malformed list is refused as a caller error BEFORE
+// any work rather than surfacing as the audit registry's fail-loud bound.
+func runDeliveryAcknowledgedKeys(t *testing.T, db *store.DB) {
 	identityFixtures(t, db)
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
@@ -769,10 +795,43 @@ func TestDeliveryAcknowledgedKeysAreRecordedSQLite(t *testing.T) {
 		AND payload LIKE '%"acknowledged_keys":[]%'`); n != 1 {
 		t.Errorf("empty acknowledged_keys recorded = %d, want 1", n)
 	}
+
+	// A caller-controlled list is BOUNDED and GRAMMAR-CHECKED at the service,
+	// before any transaction opens: over the item bound, or an item outside the
+	// key-name grammar, is a domain.ErrInvalid (400) refusal — never the audit
+	// schema's fail-loud MaxLen/sanitize bound after work has already run. The
+	// count of fetch records must not move across either refusal, which is what
+	// proves "refused before any work" rather than "refused after recording".
+	before := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'`)
+	tooMany := make([]string, delivery.MaxAcknowledgedKeys+1)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("KEY_%d", i)
+	}
+	if _, err := del.FetchAs(t.Context(), service.LocalPrincipal(identAdmin), env, "",
+		service.FetchOptions{AcknowledgedKeys: tooMany}); !errors.Is(err, domain.ErrInvalid) {
+		t.Errorf("acknowledged_keys over the bound = %v, want ErrInvalid", err)
+	}
+	if _, err := del.FetchAs(t.Context(), service.LocalPrincipal(identAdmin), env, "",
+		service.FetchOptions{AcknowledgedKeys: []string{"PATH", "not-a-valid-name"}}); !errors.Is(err, domain.ErrInvalid) {
+		t.Errorf("acknowledged_keys with a name outside the grammar = %v, want ErrInvalid", err)
+	}
+	if after := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'`); after != before {
+		t.Errorf("a refused acknowledgement wrote %d fetch records; a malformed list must be refused before any work", after-before)
+	}
 }
 
 func TestDeliveryCredentialExpiryIsFiniteOrAbsentSQLite(t *testing.T) {
-	db := seededDB(t, openSQLite)
+	runDeliveryCredentialExpiry(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryCredentialExpiryIsFiniteOrAbsentPostgres(t *testing.T) {
+	runDeliveryCredentialExpiry(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryCredentialExpiry pins the presenting credential's expiry surfacing:
+// a finite bearer credential carries its expiry, an indefinite one carries the
+// zero time.
+func runDeliveryCredentialExpiry(t *testing.T, db *store.DB) {
 	identityFixtures(t, db)
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
@@ -924,5 +983,121 @@ func runDeliveryPinnedNonCurrent(t *testing.T, db *store.DB) {
 	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'
 		AND payload LIKE '%"key":"DATABASE_PASSWORD"%' AND payload LIKE '%"revision":1%'`); n != 1 {
 		t.Errorf("disclosure naming pinned revision 1 = %d, want 1", n)
+	}
+}
+
+func TestDeliveryPinnedCurrentBecomingHistoricalInvalidatesCursorSQLite(t *testing.T) {
+	runDeliveryPinnedCurrentBecomingHistorical(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryPinnedCurrentBecomingHistoricalInvalidatesCursorPostgres(t *testing.T) {
+	runDeliveryPinnedCurrentBecomingHistorical(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryPinnedCurrentBecomingHistorical is the #64 P1: a pin that WAS
+// current, whose revision is then overtaken by a later publish, changes what the
+// delivery discloses without moving any of the content/authority cursor
+// components — so a content-only cursor answers "current" for a state that now
+// discloses strictly less.
+//
+// The fixture is built so EVERY other component is held across the transition:
+//   - the pinned snapshot (revision 1) is immutable, so the change token, which
+//     is computed over its plaintext, does not move — asserted, not assumed;
+//   - the workload's grants are seeded BEFORE the first fetch, so its authorized
+//     delivery projection and authorization revision are identical on both sides;
+//   - no pin is created, reassigned or released across the transition, so the pin
+//     generation is identical; the mode is `full` throughout.
+//
+// The one thing that moves is the effective secret-value authority: pinned-current
+// discloses under `reveal` (which the workload holds), pinned-non-current under
+// `reveal-history` (which it does not), so the secret goes from delivered to
+// presence-only. Only the pinned-historical-revision cursor component catches it;
+// before the fix the stale cursor still matched and the fetch answered "current".
+func runDeliveryPinnedCurrentBecomingHistorical(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db) // env_a1 at revision 1, both keys
+	del := deliverySvc(t, db)
+	ident := identitySvc(db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	// The pin authority (identAdmin) needs `pin` ∧ `publish` (OpPinSet) to pin,
+	// and — once the pin becomes non-current — `reveal-history` (OpPinSetHistory)
+	// for the delivery's authority recheck to pass; `publish` it already holds
+	// from the catalogue seed.
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_adm_pin','`+string(identAdmin)+`','pin','org_a','prj_a1','env_a1',`+ts+`)`)
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_adm_revh','`+string(identAdmin)+`','reveal-history','org_a','prj_a1','env_a1',`+ts+`)`)
+	seedOrigins(t, db)
+
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "transition-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The workload holds `read` and `reveal` — NOT `reveal-history` — and both
+	// are seeded now, before any fetch, so its projection never moves across the
+	// transition. A `reveal`-holder is exactly the caller that loses the secret
+	// when the pin turns historical.
+	grantMachineRead(t, db, sa.Principal, envA1)
+	seedMachineReveal(t, db, "g_wl_reveal", sa.Principal, domain.CapReveal, envA1)
+
+	// Pin the workload to revision 1 while it IS the environment's latest.
+	pins := &service.Pins{DB: db, Keyring: probeKeyring(t, db)}
+	if _, err := pins.Set(t.Context(), service.LocalPrincipal(identAdmin), env,
+		service.SetPinRequest{WorkloadPrincipalID: sa.Principal, Revision: 1}); err != nil {
+		t.Fatalf("pin the workload to the current revision 1: %v", err)
+	}
+
+	// Pinned-current: the secret crosses under `reveal`, and the cursor answers
+	// current on a repeat.
+	currentPin, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("pinned-current fetch: %v", err)
+	}
+	if v := deliveredByName(currentPin.Keys)["DATABASE_PASSWORD"].Value; v == nil || *v != "dev-secret" {
+		t.Fatalf("secret under reveal on a pinned-current delivery = %v, want the plaintext", v)
+	}
+	repeat, err := del.Fetch(t.Context(), minted.Value, env, currentPin.Cursor, service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("pinned-current conditional fetch: %v", err)
+	}
+	if !repeat.Current {
+		t.Fatal("the cursor a pinned-current fetch just returned was not current")
+	}
+
+	// A later publish makes revision 1 NON-CURRENT. The pinned snapshot is
+	// untouched, so nothing the workload is served under revision 1 changed —
+	// except the authority that governs its secret.
+	publishDeliveryValues(t, db, envA1, map[string]string{"DATABASE_URL": "postgres://dev-v2"})
+	if latest := latestRevision(t, db, "env_a1"); latest < 2 {
+		t.Fatalf("expected a second revision, latest = %d", latest)
+	}
+
+	afterOvertake, err := del.Fetch(t.Context(), minted.Value, env, currentPin.Cursor, service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("fetch after the pin turned historical: %v", err)
+	}
+	// The cursor the workload held is NO LONGER current: this is the P1.
+	if afterOvertake.Current {
+		t.Fatal("a pin becoming non-current left the cursor current: the historical transition is not bound in")
+	}
+	// It is a full delivery, and the secret is now presence-only — the effective
+	// disclosure authority genuinely flipped, so the cursor is catching a real
+	// change rather than a phantom.
+	if len(afterOvertake.Keys) == 0 {
+		t.Fatal("the post-transition fetch answered neither `current` nor a delivery")
+	}
+	if v := deliveredByName(afterOvertake.Keys)["DATABASE_PASSWORD"].Value; v != nil {
+		t.Errorf("the secret still crossed under `reveal` on a pinned NON-CURRENT delivery: %q — it requires reveal-history", *v)
+	}
+	// The change token did NOT move: the pinned snapshot's content is immutable,
+	// so this proves the cursor moved on the historical transition, not because
+	// the fixture changed the delivered content.
+	if afterOvertake.ChangeToken != currentPin.ChangeToken {
+		t.Fatal("the change token moved across the transition: the fixture changed content, so it is not proving the HISTORICAL transition invalidates")
 	}
 }
