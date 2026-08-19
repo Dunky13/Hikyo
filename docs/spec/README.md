@@ -1,6 +1,6 @@
-# Wenv — Specification handoff (the destination of wayfinder map [#1](https://github.com/Dunky13/wenv/issues/1))
+# Hikyo — Specification handoff (the destination of wayfinder map [#1](https://github.com/Hikyo-Org/Hikyo/issues/1))
 
-This is the build-ready specification set for Wenv 1.0: a fully open-source, self-hosted control plane for validated secrets and configuration across environments, Docker Compose and Kubernetes first-class. Synthesized 2026-08-06 at ticket [#27](https://github.com/Dunky13/wenv/issues/27) from 26 locked ADRs, 5 locked prototypes, and the map's ticket resolutions.
+This is the build-ready specification set for Hikyo 1.0: a fully open-source, self-hosted control plane for validated secrets and configuration across environments, Docker Compose and Kubernetes first-class. Synthesized 2026-08-06 at ticket [#27](https://github.com/Hikyo-Org/Hikyo/issues/27) from 26 locked ADRs, 5 locked prototypes, and the map's ticket resolutions.
 
 ## How this set works
 
@@ -35,14 +35,14 @@ This is the build-ready specification set for Wenv 1.0: a fully open-source, sel
 | MVP scope & acceptance criteria | [adr/mvp-boundary.md](../adr/mvp-boundary.md) §1–§2, §6 + [self-hoster-checklist.md](./self-hoster-checklist.md) (passed) |
 | Out-of-scope / roadmap appendix | [adr/mvp-boundary.md](../adr/mvp-boundary.md) §4, verbatim |
 | Implementation sequencing | [adr/mvp-boundary.md](../adr/mvp-boundary.md) §5 (CI-invariant subsystems first; promotions design-early/build-late) |
-| License & governance | [LICENSE](../../LICENSE) (MPL 2.0, [#9](https://github.com/Dunky13/wenv/issues/9)) + [adr/oss-mechanics.md](../adr/oss-mechanics.md) |
+| License & governance | [LICENSE](../../LICENSE) (MPL 2.0, [#9](https://github.com/Hikyo-Org/Hikyo/issues/9)) + [adr/oss-mechanics.md](../adr/oss-mechanics.md) |
 | Audit & event model | [adr/audit-model.md](../adr/audit-model.md) |
 | OSS project mechanics | [adr/oss-mechanics.md](../adr/oss-mechanics.md) |
 | Post-spec open items (fog sweep) | [open-items.md](./open-items.md) |
 
 ## Synthesis obligations, discharged
 
-Every "at synthesis (#27)" delegation in the corpus resolves as follows: exact SCIM/SAML/import/multi-instance spellings and serializations → [api-cli-spellings.md](./api-cli-spellings.md); canonical key grammar restatement → [domain-model.md](./domain-model.md); delegated tunable values (SAML, SCIM, multi-instance, import, GitHub adapter) → [ops-catalogue.md](./ops-catalogue.md) (the ops-spec row-15 numbering collision is reported there, deferred to an editorial amendment); the §3 self-hoster checklist (normative deliverable) → [self-hoster-checklist.md](./self-hoster-checklist.md), **passed, no blocking defect**; UI deltas (GitHub adapter knobs, scanning presentation, git-mode banner, declaration-is-public statement) → [ui-spec.md](./ui-spec.md); everything still unspecified → [open-items.md](./open-items.md), none foundational. One contradiction was found and fixed per procedure: oss-mechanics misquoted the license decision as Apache-2.0 (locked: MPL 2.0) — corrected via banner, [#33](https://github.com/Dunky13/wenv/issues/33) reopened and re-closed.
+Every "at synthesis (#27)" delegation in the corpus resolves as follows: exact SCIM/SAML/import/multi-instance spellings and serializations → [api-cli-spellings.md](./api-cli-spellings.md); canonical key grammar restatement → [domain-model.md](./domain-model.md); delegated tunable values (SAML, SCIM, multi-instance, import, GitHub adapter) → [ops-catalogue.md](./ops-catalogue.md) (the ops-spec row-15 numbering collision is reported there, deferred to an editorial amendment); the §3 self-hoster checklist (normative deliverable) → [self-hoster-checklist.md](./self-hoster-checklist.md), **passed, no blocking defect**; UI deltas (GitHub adapter knobs, scanning presentation, git-mode banner, declaration-is-public statement) → [ui-spec.md](./ui-spec.md); everything still unspecified → [open-items.md](./open-items.md), none foundational. One contradiction was found and fixed per procedure: oss-mechanics misquoted the license decision as Apache-2.0 (locked: MPL 2.0) — corrected via banner, [#33](https://github.com/Hikyo-Org/Hikyo/issues/33) reopened and re-closed.
 
 ## The 1.0 gate, in one sentence
 
