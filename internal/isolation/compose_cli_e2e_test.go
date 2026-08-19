@@ -13,6 +13,7 @@ import (
 
 	"github.com/Hikyo-Org/hikyo/internal/app"
 	"github.com/Hikyo-Org/hikyo/internal/cli"
+	"github.com/Hikyo-Org/hikyo/internal/compose"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/service"
@@ -29,18 +30,20 @@ import (
 // ids do not satisfy it).
 
 const (
-	cOrg    = "org_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0100"
-	cPrj    = "prj_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0101"
-	cEnv    = "env_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0102"
-	cKeyURL = "key_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0103"
-	cKeyPw  = "key_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0104"
-	cAdmin  = "usr_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0105"
+	cOrg     = "org_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0100"
+	cPrj     = "prj_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0101"
+	cEnv     = "env_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0102"
+	cKeyURL  = "key_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0103"
+	cKeyPw   = "key_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0104"
+	cAdmin   = "usr_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0105"
+	cKeyWork = "key_0193f0b4-1f2a-7c31-8c1e-2a4b6d8e0106"
 )
 
 type composeRig struct {
 	origin   string
 	db       *store.DB
 	stateDir string
+	credID   string
 }
 
 func bootComposeRig(t *testing.T, engine store.Engine) *composeRig {
@@ -96,6 +99,7 @@ func seedComposeCatalogue(t *testing.T, db *store.DB) {
 		`INSERT INTO environments (id, org_id, project_id, name, note, created_at, display_order) VALUES ('` + cEnv + `', '` + cOrg + `', '` + cPrj + `', 'prod', '', ` + ts + `, 0)`,
 		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at) VALUES ('` + cKeyURL + `', '` + cOrg + `', '` + cPrj + `', 'DATABASE_URL', '', 'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
 		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at) VALUES ('` + cKeyPw + `', '` + cOrg + `', '` + cPrj + `', 'DATABASE_PASSWORD', '', 'secret', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
+		`INSERT INTO keys (id, org_id, project_id, name, folder_path, classification, description, deprecated, deprecation_note, declaration, required_mode, forbidden_mode, group_id, created_at) VALUES ('` + cKeyWork + `', '` + cOrg + `', '` + cPrj + `', 'WORKER_URL', '', 'config', '', FALSE, '', '{"rule":{"type":"string"}}', 'none', 'none', NULL, ` + ts + `)`,
 		`INSERT INTO principals (id, kind, created_at) VALUES ('` + cAdmin + `', 'human', ` + ts + `)`,
 	}
 	for i, cap := range []string{"edit", "publish", "definitions-edit", "manage-identities", "read"} {
@@ -107,7 +111,7 @@ func seedComposeCatalogue(t *testing.T, db *store.DB) {
 		execRaw(t, db, s)
 	}
 	seedOrigins(t, db)
-	publishComposeValues(t, db, map[string]string{"DATABASE_URL": "postgres://dev", "DATABASE_PASSWORD": "dev-secret"})
+	publishComposeValues(t, db, map[string]string{"DATABASE_URL": "postgres://dev", "DATABASE_PASSWORD": "dev-secret", "WORKER_URL": "http://worker"})
 }
 
 func publishComposeValues(t *testing.T, db *store.DB, values map[string]string) {
@@ -153,6 +157,7 @@ func (r *composeRig) mintWorkload(t *testing.T) (domain.PrincipalID, string) {
 	if err != nil {
 		t.Fatalf("mint credential: %v", err)
 	}
+	r.credID = minted.Credential.ID
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte(minted.Value+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -323,6 +328,90 @@ func runComposeCLIRenderAndDoctor(t *testing.T, engine store.Engine) {
 	assertNoPlaintextInState(t, rig.stateDir, "postgres://dev")
 }
 
+func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
+	rig := bootComposeRig(t, store.EngineSQLite)
+	_, tokenFile := rig.mintWorkload(t)
+	work := t.TempDir()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	writeRenderConfigTwo(t, work, rig.origin, runtimeDir)
+
+	// First render materializes both targets.
+	code, _, stderr := rig.runCLI(t, work, nil, "compose", "render", "--token-file", tokenFile)
+	if code != cli.ExitOK {
+		t.Fatalf("first render exit=%d; stderr=%s", code, stderr)
+	}
+
+	// Publish a change to ONE target's key.
+	publishComposeValues(t, rig.db, map[string]string{"DATABASE_URL": "postgres://changed"})
+
+	// sync: doctor, render (only api moves), docker compose up -d.
+	docker, dockerLog := fakeDockerRecording(t)
+	code, _, stderr = rig.runCLIDocker(t, work, docker, "compose", "sync", "--token-file", tokenFile)
+	if code != cli.ExitOK {
+		t.Fatalf("sync exit=%d; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "rendered api generation v1-") {
+		t.Fatalf("sync did not re-render the changed target: %s", stderr)
+	}
+	if !strings.Contains(stderr, "unchanged worker generation v1-") {
+		t.Fatalf("sync moved a target it should not have (blast radius): %s", stderr)
+	}
+	if log := readFile(t, dockerLog); !strings.Contains(log, "compose up -d") {
+		t.Fatalf("sync did not run `docker compose up -d`: %q", log)
+	}
+
+	// A no-change sync recreates nothing.
+	docker2, dockerLog2 := fakeDockerRecording(t)
+	code, _, stderr = rig.runCLIDocker(t, work, docker2, "compose", "sync", "--token-file", tokenFile)
+	if code != cli.ExitOK {
+		t.Fatalf("no-change sync exit=%d; stderr=%s", code, stderr)
+	}
+	if strings.Contains(readFile(t, dockerLog2), "compose up -d") {
+		t.Fatalf("no-change sync ran docker up when nothing moved")
+	}
+}
+
+func TestComposeCLIReconcileSQLite(t *testing.T) {
+	rig := bootComposeRig(t, store.EngineSQLite)
+	_, tokenFile := rig.mintWorkload(t)
+	work := t.TempDir()
+	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	writeRenderConfig(t, work, rig.origin, runtimeDir)
+
+	// Buffer an offline-served disclosure record under the stack's state dir.
+	sd := filepath.Join(rig.stateDir, "compose", "acme")
+	if err := os.MkdirAll(sd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rid, err := composeNewRecordID(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := composeOfflineRecord(rid, cKeyURL, "DATABASE_URL", rig.credID)
+	if err := appendOffline(sd, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	// A live render flushes the buffered records before fetching.
+	code, _, stderr := rig.runCLI(t, work, nil, "compose", "render", "--token-file", tokenFile)
+	if code != cli.ExitOK {
+		t.Fatalf("render exit=%d; stderr=%s", code, stderr)
+	}
+	if n := countOfflineFiles(t, sd); n != 0 {
+		t.Fatalf("offline records not flushed: %d files remain", n)
+	}
+	// The reconcile emits one disclosure per accepted record with origin
+	// `offline-reconciled`, plus one envelope event for the batch.
+	if n := queryInt(t, rig.db,
+		`SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.offline_records_reconciled'`); n < 1 {
+		t.Fatalf("no identity.offline_records_reconciled event, got %d", n)
+	}
+	if n := queryInt(t, rig.db,
+		`SELECT COUNT(*) FROM audit_tenant_events WHERE origin = 'offline-reconciled'`); n < 1 {
+		t.Fatalf("no audit row with origin offline-reconciled, got %d", n)
+	}
+}
+
 // ---- helpers ----
 
 func withCmd(base []string, cmd string) []string {
@@ -358,6 +447,83 @@ func writeRenderConfig(t *testing.T, dir, origin, runtimeDir string) {
 	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(compose), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeRenderConfigTwo(t *testing.T, dir, origin, runtimeDir string) {
+	t.Helper()
+	content := "version: 1\ninstance: " + origin + "\norg: " + cOrg + "\nproject: " + cPrj + "\nenvironment: " + cEnv + "\n" +
+		"slug: acme\nruntime_dir: " + runtimeDir + "\n" +
+		"targets:\n  api:\n    keys: [" + cKeyURL + "]\n    services: [api]\n" +
+		"  worker:\n    keys: [" + cKeyWork + "]\n    services: [worker]\n"
+	if err := os.WriteFile(filepath.Join(dir, "hikyo-compose.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compose := "services:\n" +
+		"  api:\n    image: busybox\n    env_file:\n" +
+		"      - path: " + runtimeDir + "/${HIKYO_GEN_API:?run first}/api.env\n        format: raw\n" +
+		"    labels:\n      hikyo.stamp: \"${HIKYO_GEN_API:?run first}\"\n" +
+		"  worker:\n    image: busybox\n    env_file:\n" +
+		"      - path: " + runtimeDir + "/${HIKYO_GEN_WORKER:?run first}/worker.env\n        format: raw\n" +
+		"    labels:\n      hikyo.stamp: \"${HIKYO_GEN_WORKER:?run first}\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(compose), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeDockerRecording is fakeDocker that also appends every invocation's args to
+// a log file, so a test can assert whether `compose up -d` ran.
+func fakeDockerRecording(t *testing.T) (bin, logPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	logPath = filepath.Join(dir, "calls.log")
+	bin = filepath.Join(dir, "docker")
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" >> " + logPath + "\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo 2.30.0; exit 0; fi\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then echo '{\"services\":{}}'; exit 0; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, logPath
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func composeNewRecordID(t *testing.T) (string, error) {
+	t.Helper()
+	return compose.NewRecordID()
+}
+
+func composeOfflineRecord(rid, keyID, name, credID string) compose.OfflineRecord {
+	now := "2026-08-19T10:00:00Z"
+	return compose.OfflineRecord{
+		RecordID: rid, KeyID: keyID, KeyName: name, Classification: "config",
+		OccurredAt: now, CredentialID: credID, Generation: "v1-00000000000000000000000000000000", ServedFrom: now,
+	}
+}
+
+func appendOffline(stateDir string, rec compose.OfflineRecord) error {
+	return compose.Append(stateDir, []compose.OfflineRecord{rec})
+}
+
+func countOfflineFiles(t *testing.T, stateDir string) int {
+	t.Helper()
+	_, files, err := compose.Pending(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(files)
 }
 
 func fakeDocker(t *testing.T, version string) string {

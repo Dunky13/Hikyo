@@ -32,6 +32,11 @@ import (
 // pure logic and filesystem primitives. Every use of a compose primitive sits
 // behind a small helper here so the snapshot/generation format rework can be
 // reconciled in one place per primitive.
+//
+// Test seam: HIKYO_COMPOSE_DOCKER overrides the resolved `docker` executable for
+// `compose sync|doctor`. It is deliberately kept out of the help text — not part
+// of the CLI's stable surface, only a test/override hook — documented here and
+// in the api-cli-spellings "Compose delivery" section.
 
 const (
 	composeConfigName = "hikyo-compose.yaml"
@@ -572,8 +577,14 @@ func runComposeSync(ctx context.Context, ios IO, args []string) error {
 	}
 
 	// (1) Doctor checks run BEFORE the first render; any error finding refuses
-	// without rendering. Findings go to stderr — stdout stays empty.
-	findings, err := composeDoctorGather(ctx, ios, st, flags, projectDir)
+	// without rendering. Findings go to stderr — stdout stays empty. The
+	// server-agreement axis is DELIBERATELY EXCLUDED here: `never_rendered` and
+	// `server_manifest_drift` describe exactly the staleness this sync is about
+	// to repair, so gating on them would make every publish (and every fresh box)
+	// brick sync forever. Sync's gate is the LOCAL integrity checks (version
+	// floor, format raw, stamp grammar, token/state modes); the drift stays an
+	// error for the doctor VERB, which reports rather than repairs.
+	findings, err := composeDoctorGather(ctx, ios, st, flags, projectDir, false)
 	if err != nil {
 		return err
 	}
@@ -642,7 +653,7 @@ func runComposeDoctor(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	findings, err := composeDoctorGather(ctx, ios, st, flags, projectDir)
+	findings, err := composeDoctorGather(ctx, ios, st, flags, projectDir, true)
 	if err != nil {
 		return err
 	}
@@ -657,7 +668,7 @@ func runComposeDoctor(ctx context.Context, ios IO, args []string) error {
 // version/config, the raw compose file, managed stamps, generation state, file
 // modes, and server agreement via a conditional fetch — and returns the merged
 // finding list.
-func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFlags, projectDir string) ([]compose.Finding, error) {
+func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFlags, projectDir string, includeServerAgreement bool) ([]compose.Finding, error) {
 	cfg, cfgDir, err := findComposeConfig(startDir(ios, projectDir))
 	if err != nil {
 		return nil, err
@@ -709,7 +720,9 @@ func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFla
 		findings = dropCode(findings, "compose_version_below_floor")
 	}
 
-	findings = append(findings, doctorServerAgreement(ctx, client, stateDir, managed, runtimeDir, org, project, env, allTargetKeyIDs(cfg))...)
+	if includeServerAgreement {
+		findings = append(findings, doctorServerAgreement(ctx, client, stateDir, managed, runtimeDir, org, project, env, allTargetKeyIDs(cfg))...)
+	}
 
 	sortFindings(findings)
 	return findings, nil
