@@ -291,8 +291,6 @@ func runAuthorizationMovementInvalidatesCursor(t *testing.T, db *store.DB) {
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
 	ident := identitySvc(db)
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	ident.Now = func() time.Time { return now }
 	env := scopeEnv(orgA, prjA1, envA1)
 
 	// A workload service account with `read(env_a1)` and a bearer credential, so
@@ -839,6 +837,10 @@ func runDeliveryCredentialExpiry(t *testing.T, db *store.DB) {
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
 	ident := identitySvc(db)
+	// The store keeps microseconds; pin the mint clock to a microsecond instant so
+	// the in-memory ExpiresAt and the stored one compare EXACTLY on every OS.
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	ident.Now = func() time.Time { return now }
 	env := scopeEnv(orgA, prjA1, envA1)
 
 	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
