@@ -5023,8 +5023,10 @@ paths:
       - $ref: "#/components/parameters/OrgID"
       - $ref: "#/components/parameters/ProjectID"
       - $ref: "#/components/parameters/EnvironmentID"
-      - $ref: "#/components/parameters/DeliveryCursor"
     get:
+      parameters:
+        - $ref: "#/components/parameters/DeliveryCursor"
+        - $ref: "#/components/parameters/DeliveryConfigOnly"
       operationId: fetchDelivery
       tags: [delivery]
       summary: Fetch the authorized projection, conditionally.
@@ -5038,11 +5040,10 @@ paths:
         delivering path, so a caller who has lost `read` receives the uniform
         nonexistent response rather than "current".
 
-        Today there are no value tables, so what is delivered is the key
-        catalogue and each key's declared presence for this environment: config
-        keys and secret PRESENCE only, no plaintext anywhere. That is the surface
-        the Compose and Kubernetes integrations consume, and it is the seam the
-        value tables land behind.
+        Config values are delivered under `read`; secret values require
+        `reveal` for the latest snapshot or `reveal-history` for pinned
+        non-current material. Without that capability, secret presence remains
+        visible and plaintext is omitted.
 
         Both a `hik_` bearer credential and an externally issued OIDC ID token
         authenticate here, with identical authority: a machine principal's
@@ -5062,6 +5063,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeliveryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records:
+    parameters:
+      - $ref: "#/components/parameters/OrgID"
+      - $ref: "#/components/parameters/ProjectID"
+      - $ref: "#/components/parameters/EnvironmentID"
+    post:
+      operationId: reconcileOfflineRecords
+      tags: [delivery]
+      summary: Reconcile client-durable offline disclosure records.
+      description: |
+        Accepts records fsynced by a client before offline plaintext release.
+        Idempotency is scoped to the presenting principal and record id. A live
+        credential may reconcile records served by a credential since revoked.
+      x-hikyo-class: tenant
+      x-hikyo-operation: delivery.reconcile-offline
+      x-hikyo-formula: [read@environment]
+      x-hikyo-artifacts: [machine-credential]
+      x-hikyo-min-revision: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcileOfflineRecordsRequest"
+      responses:
+        "200":
+          description: The idempotent batch outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileOfflineRecordsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "404":
@@ -8504,6 +8549,17 @@ components:
       schema:
         type: string
         maxLength: 128
+    DeliveryConfigOnly:
+      name: config_only
+      in: query
+      required: false
+      description: |
+        Requests the distinct config-only authorized projection. The mode is
+        bound into the cursor while the change token remains over the full
+        environment manifest.
+      schema:
+        type: boolean
+        default: false
     ScimBindingID:
       name: binding
       in: path
@@ -11028,10 +11084,9 @@ components:
       additionalProperties: false
       required: [name, classification, presence]
       description: |
-        One key as the machine surface delivers it. There is deliberately NO
-        value property, and its absence is not a placeholder: no plaintext
-        crosses this surface, so the ticket that adds values has to add the
-        member deliberately.
+        One key as the machine surface delivers it. Config rows carry value;
+        secret rows carry value only when the caller's projection admits the
+        served revision, otherwise presence remains visible without plaintext.
       properties:
         name:
           type: string
@@ -11047,11 +11102,15 @@ components:
             delivers (#51 -- values landed, and the change token moves with
             them); the other three are the declared presence rules for keys
             the snapshot does not carry.
+        value:
+          type: string
+          maxLength: 65536
+          description: Present for set config rows and authorized secret rows.
 
     DeliveryResponse:
       type: object
       additionalProperties: false
-      required: [current, cursor, change_token, schema_revision, keys, pin_expired]
+      required: [current, cursor, change_token, schema_revision, keys, pin_expired, issued_at, snapshot_expires_at]
       description: |
         Either the authorized projection, or the statement that the presented
         cursor is current — in which case `keys` is empty and NOTHING was
@@ -11070,9 +11129,9 @@ components:
             BOTH dispositions so a caller told "current" can keep polling without
             re-fetching to learn its own cursor.
 
-            It is bound to four things — the change token, the caller's
+            It is bound to five things — the change token, the caller's
             authorized delivery projection, the principal's authorization
-            revision, and the pin generation — never to content alone. Any
+            revision, the pin generation, and config-only mode — never to content alone. Any
             authorization movement therefore invalidates it and produces a full
             authorized delivery rather than a "current" answer.
         change_token:
@@ -11100,6 +11159,66 @@ components:
           items:
             $ref: "#/components/schemas/DeliveredKey"
           description: Empty when `current` is true.
+        issued_at:
+          $ref: "#/components/schemas/Timestamp"
+        snapshot_expires_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    OfflineDeliveryRecord:
+      type: object
+      additionalProperties: false
+      required: [record_id, key_id, key_name, classification, occurred_at, credential_id, generation, served_from]
+      properties:
+        record_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        key_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        key_name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        classification:
+          $ref: "#/components/schemas/KeyClassification"
+        occurred_at:
+          $ref: "#/components/schemas/Timestamp"
+        credential_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        generation:
+          type: string
+          minLength: 1
+          maxLength: 64
+        served_from:
+          $ref: "#/components/schemas/Timestamp"
+
+    ReconcileOfflineRecordsRequest:
+      type: object
+      additionalProperties: false
+      required: [records]
+      properties:
+        records:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: "#/components/schemas/OfflineDeliveryRecord"
+
+    ReconcileOfflineRecordsResponse:
+      type: object
+      additionalProperties: false
+      required: [accepted, duplicates]
+      properties:
+        accepted:
+          type: integer
+          minimum: 0
+        duplicates:
+          type: integer
+          minimum: 0
 
     CredentialPolicy:
       type: object

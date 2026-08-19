@@ -460,6 +460,12 @@ type MasterKey struct {
 	CreatedAt    string
 }
 
+type OfflineRecord struct {
+	PrincipalID string
+	RecordID    string
+	CreatedAt   string
+}
+
 type OidcProvider struct {
 	ID              string
 	Slug            string

@@ -26,6 +26,11 @@ INSERT INTO audit_instance_events (
     source_ip, user_agent, origin, payload
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
+-- hikyo:authn-resolution
+-- name: ClaimOfflineRecord :execrows
+INSERT OR IGNORE INTO offline_records (principal_id, record_id, created_at)
+VALUES (?, ?, ?);
+
 -- name: PageTenantAuditOrg :many
 SELECT seq, id, type, schema_version, occurred_at, occurred_asserted, recorded_at,
     actor_id, actor_class, actor_credential_id, authority_id,

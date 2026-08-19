@@ -1,5 +1,5 @@
 // Package delivery owns the canonical encodings the machine fetch path keys:
-// the delivery manifest the change token covers, and the four-tuple the
+// the delivery manifest the change token covers, and the five-tuple the
 // conditional cursor is bound to.
 //
 // It holds encoding and nothing else. The keying lives in internal/crypto
@@ -14,7 +14,13 @@ import (
 	"encoding/binary"
 	"slices"
 	"strings"
+	"time"
 )
+
+// SnapshotMaxAge is the server-asserted maximum age of an offline delivery
+// snapshot (ops-spec § 6). Clients bind both timestamps into snapshot AAD and
+// refuse the ciphertext after this interval.
+const SnapshotMaxAge = 7 * 24 * time.Hour
 
 // ManifestVersion is the canonical encoding's version, carried INSIDE the
 // signed bytes as well as on the token string. Inside matters: without it, two
@@ -88,7 +94,7 @@ func Manifest(rows []Row) []byte {
 	return out
 }
 
-// Cursor is the four-tuple a conditional fetch's cursor is bound to. The ADR is
+// Cursor is the five-tuple a conditional fetch's cursor is bound to. The ADR is
 // explicit that it is "never the environment's change token alone", and each
 // component closes a distinct failure:
 //
@@ -104,6 +110,8 @@ func Manifest(rows []Row) []byte {
 //	AuthorizationRevision the principal's authority moved at all — a grant
 //	                      added, removed or narrowed.
 //	PinGeneration         a pin was created, reassigned or released.
+//	ConfigOnly            the authorized delivery mode changed. Without it, a
+//	                      config-only cursor could suppress a later full fetch.
 type Cursor struct {
 	ChangeToken string
 	// Projection is the caller's authorized delivery projection: the sorted
@@ -114,13 +122,16 @@ type Cursor struct {
 	AuthorizationRevision int64
 	// PinGeneration is the (principal, environment) pin counter.
 	PinGeneration int64
+	// ConfigOnly distinguishes the config projection from full delivery. The
+	// change token remains over the full manifest; mode belongs only here.
+	ConfigOnly bool
 }
 
 // CursorVersion is the tuple encoding's version, inside the signed bytes for
 // the same reason ManifestVersion is.
 const CursorVersion = "v1"
 
-// EncodeCursor renders the four-tuple canonically. Every component is
+// EncodeCursor renders the five-tuple canonically. Every component is
 // length-prefixed and the projection is sorted, so the encoding is injective:
 // two different tuples cannot produce one cursor, which is what makes
 // "recompute and compare" a sound test rather than a heuristic.
@@ -140,6 +151,11 @@ func EncodeCursor(c Cursor) []byte {
 	// large number instead of an obviously wrong one.
 	out = binary.AppendVarint(out, c.AuthorizationRevision)
 	out = binary.AppendVarint(out, c.PinGeneration)
+	mode := "full"
+	if c.ConfigOnly {
+		mode = "config-only"
+	}
+	out = appendField(out, mode)
 	return out
 }
 

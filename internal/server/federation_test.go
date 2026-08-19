@@ -34,7 +34,7 @@ type stubDelivery struct {
 	err    error
 }
 
-func (s stubDelivery) Fetch(_ context.Context, presented string, scope domain.Scope, cursor string) (service.FetchResult, error) {
+func (s stubDelivery) FetchMode(_ context.Context, presented string, scope domain.Scope, cursor string, _ bool) (service.FetchResult, error) {
 	if s.err != nil {
 		return service.FetchResult{}, s.err
 	}
@@ -45,16 +45,30 @@ func (s stubDelivery) Fetch(_ context.Context, presented string, scope domain.Sc
 		return service.FetchResult{}, domain.ErrUnauthenticated
 	}
 	if cursor == s.cursor && cursor != "" {
-		return service.FetchResult{Current: true, Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7}, nil
+		return service.FetchResult{Current: true, Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
+			IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC()}, nil
 	}
 	return service.FetchResult{
 		Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
 		Keys: []service.DeliveredKey{
-			{Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceRequired},
+			{Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceRequired, Value: stringPtr("postgres://db")},
 			{Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceOptional},
 		},
+		IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC(),
 	}, nil
 }
+
+func (s stubDelivery) ReconcileOfflineRecords(_ context.Context, presented string, _ domain.Scope, records []service.OfflineRecord) (service.ReconcileResult, error) {
+	if s.err != nil {
+		return service.ReconcileResult{}, s.err
+	}
+	if presented == "" {
+		return service.ReconcileResult{}, domain.ErrUnauthenticated
+	}
+	return service.ReconcileResult{Accepted: len(records)}, nil
+}
+
+func stringPtr(value string) *string { return &value }
 
 type stubFederation struct{ err error }
 
@@ -127,6 +141,12 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	if full.SchemaRevision != 7 {
 		t.Errorf("schema_revision = %d, want 7", full.SchemaRevision)
 	}
+	if full.Keys[0].Value == nil || *full.Keys[0].Value != "postgres://db" || full.Keys[1].Value != nil {
+		t.Fatalf("value projection rendered %+v", full.Keys)
+	}
+	if full.SnapshotExpiresAt.Sub(full.IssuedAt) != delivery.SnapshotMaxAge {
+		t.Fatalf("snapshot lifetime = %s, want %s", full.SnapshotExpiresAt.Sub(full.IssuedAt), delivery.SnapshotMaxAge)
+	}
 
 	resp, payload = call(t, srv, http.MethodGet, deliveryPath+"?cursor=v1:cursor", "hik_1_wl_abc", nil)
 	if resp.StatusCode != http.StatusOK {
@@ -144,6 +164,28 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 	}
 	if len(current.Keys) != 0 {
 		t.Fatalf("`current` carried %d keys, want none", len(current.Keys))
+	}
+}
+
+func TestOfflineRecordReconciliationRoute(t *testing.T) {
+	srv := federationServer(t, stubFederation{}, stubDelivery{})
+	now := time.Unix(1_800_000_000, 0).UTC()
+	body := apigen.ReconcileOfflineRecordsRequest{Records: []apigen.OfflineDeliveryRecord{{
+		RecordId: "offline-001", KeyId: "key_001", KeyName: "DATABASE_PASSWORD",
+		Classification: apigen.KeyClassificationSecret, OccurredAt: now,
+		CredentialId: "cred_revoked", Generation: "v1-0123456789abcdef0123456789abcdef",
+		ServedFrom: now.Add(-time.Hour),
+	}}}
+	resp, payload := call(t, srv, http.MethodPost, deliveryPath+"/offline-records", "hik_1_wl_abc", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("offline reconciliation -> %d: %s", resp.StatusCode, payload)
+	}
+	var result apigen.ReconcileOfflineRecordsResponse
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Accepted != 1 || result.Duplicates != 0 {
+		t.Fatalf("offline reconciliation rendered %+v", result)
 	}
 }
 

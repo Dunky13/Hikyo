@@ -18,6 +18,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/domain"
 	"github.com/Hikyo-Org/hikyo/internal/oidcfed"
 	"github.com/Hikyo-Org/hikyo/internal/oidctest"
+	"github.com/Hikyo-Org/hikyo/internal/schema"
 	"github.com/Hikyo-Org/hikyo/internal/service"
 	"github.com/Hikyo-Org/hikyo/internal/store"
 )
@@ -1546,6 +1547,15 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 	}
 	if _, err := r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), res.Cursor); err != nil {
 		t.Fatalf("identity.delivery_fetched (current): %v", err)
+	}
+	if _, err := r.del.ReconcileOfflineRecordsAs(t.Context(), human,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{{
+			RecordID: "audit-offline-001", KeyID: "key_fed_pw", KeyName: "DATABASE_PASSWORD",
+			Classification: string(schema.Secret), OccurredAt: time.Now().UTC(),
+			CredentialID: binding.CredentialID, Generation: "v1-0123456789abcdef0123456789abcdef",
+			ServedFrom: time.Now().UTC().Add(-time.Minute),
+		}}); err != nil {
+		t.Fatalf("identity.offline_records_reconciled: %v", err)
 	}
 
 	// A federated refusal and a JWKS event, so both wire-declared types have an

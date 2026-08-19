@@ -289,7 +289,8 @@ var wireRegistry = map[string]Class{
 	// caller who cannot read the environment gets exactly what a caller
 	// addressing an environment that does not exist gets, which is what makes
 	// the conditional answer safe to give.
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery": ClassTenant,
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":                  ClassTenant,
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": ClassTenant,
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      ClassTenant,
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     ClassTenant,
@@ -741,6 +742,10 @@ var wireEvents = map[string][]audit.EventType{
 		audit.EventFederationRefused,
 		audit.EventJWKSRefreshFailed,
 	},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": {
+		audit.EventFederationRefused,
+		audit.EventJWKSRefreshFailed,
+	},
 }
 
 // wireRoutes maps an HTTP entry point to the registered operation(s) it reaches.
@@ -817,12 +822,13 @@ var wireRoutes = map[string][]Operation{
 	"http:PUT /api/v1/instance/credential-policy":           {OpCredentialPolicyUpdate},
 
 	// OIDC federation (#62). One route, one operation.
-	"http:GET /api/v1/instance/federation-issuers":                                               {OpFederationIssuerList},
-	"http:POST /api/v1/instance/federation-issuers":                                              {OpFederationIssuerCreate},
-	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":                                    {OpFederationIssuerUpdate},
-	"http:DELETE /api/v1/instance/federation-issuers/{issuer}":                                   {OpFederationIssuerDelete},
-	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings": {OpBindingCreate},
-	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":         {OpDeliveryFetch},
+	"http:GET /api/v1/instance/federation-issuers":                                                        {OpFederationIssuerList},
+	"http:POST /api/v1/instance/federation-issuers":                                                       {OpFederationIssuerCreate},
+	"http:PATCH /api/v1/instance/federation-issuers/{issuer}":                                             {OpFederationIssuerUpdate},
+	"http:DELETE /api/v1/instance/federation-issuers/{issuer}":                                            {OpFederationIssuerDelete},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/service-accounts/{serviceAccount}/bindings":          {OpBindingCreate},
+	"http:GET /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery":                  {OpDeliveryFetch},
+	"http:POST /api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery/offline-records": {OpDeliveryReconcileOffline},
 
 	"http:GET /api/v1/orgs/{org}/projects/{project}/grants":                                      {OpGrantListProject},
 	"http:POST /api/v1/orgs/{org}/projects/{project}/grants":                                     {OpGrantCreateProject},

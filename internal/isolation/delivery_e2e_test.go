@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/authz"
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
@@ -39,6 +40,8 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	identityFixtures(t, db)
 	seedDeliveryCatalogue(t, db)
 	del := deliverySvc(t, db)
+	issuedAt := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	del.Now = func() time.Time { return issuedAt }
 	caller := service.LocalPrincipal(identAdmin)
 	env := scopeEnv(orgA, prjA1, envA1)
 
@@ -62,8 +65,20 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 		t.Fatalf("delivered %d keys, want the snapshot's %d", len(first.Keys), want)
 	}
 	presence := map[string]delivery.Presence{}
+	values := map[string]*string{}
 	for _, k := range first.Keys {
 		presence[k.Name] = k.Presence
+		values[k.Name] = k.Value
+	}
+	if values["DATABASE_URL"] == nil || *values["DATABASE_URL"] == "" {
+		t.Fatal("read-only delivery omitted the config plaintext")
+	}
+	if values["DATABASE_PASSWORD"] != nil {
+		t.Fatal("read-only delivery exposed secret plaintext")
+	}
+	if !first.IssuedAt.Equal(issuedAt) || !first.SnapshotExpiresAt.Equal(issuedAt.Add(delivery.SnapshotMaxAge)) {
+		t.Fatalf("snapshot timestamps = (%s, %s), want issued_at %s and +7d expiry",
+			first.IssuedAt, first.SnapshotExpiresAt, issuedAt)
 	}
 	// Every delivered key is `set`: it is in the snapshot because it resolved.
 	// The declared presence RULE is no longer what the fetch reports, and it is
@@ -118,6 +133,156 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	if n := queryInt(t, db,
 		"SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' AND payload LIKE '%\"cursor_presented\":false%'"); n != 1 {
 		t.Errorf("cursor-less access records = %d, want exactly 1", n)
+	}
+
+	configOnly, err := del.FetchAsMode(t.Context(), caller, env, "", true)
+	if err != nil {
+		t.Fatalf("config-only fetch: %v", err)
+	}
+	if configOnly.Cursor == first.Cursor {
+		t.Fatal("config-only and full delivery returned the same cursor")
+	}
+	if configOnly.ChangeToken != first.ChangeToken {
+		t.Fatal("config-only changed the full-manifest change token")
+	}
+	for _, key := range configOnly.Keys {
+		if key.Classification != string(schema.Config) {
+			t.Fatalf("config-only delivered %s key %s", key.Classification, key.Name)
+		}
+	}
+	configCurrent, err := del.FetchAsMode(t.Context(), caller, env, configOnly.Cursor, true)
+	if err != nil || !configCurrent.Current {
+		t.Fatalf("config-only cursor round trip = (%+v, %v), want current", configCurrent, err)
+	}
+	fullWithConfigCursor, err := del.FetchAsMode(t.Context(), caller, env, configOnly.Cursor, false)
+	if err != nil || fullWithConfigCursor.Current {
+		t.Fatalf("config-only cursor answered current in full mode = (%+v, %v)", fullWithConfigCursor, err)
+	}
+}
+
+func TestDeliveryValueProjectionAndDisclosureSQLite(t *testing.T) {
+	runDeliveryValueProjectionAndDisclosure(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryValueProjectionAndDisclosurePostgres(t *testing.T) {
+	runDeliveryValueProjectionAndDisclosure(t, seededDB(t, openPostgres))
+}
+
+func runDeliveryValueProjectionAndDisclosure(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	ident := identitySvc(db)
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "value-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+	del := deliverySvc(t, db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	readOnly, err := del.Fetch(t.Context(), minted.Value, env, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range readOnly.Keys {
+		switch key.Classification {
+		case string(schema.Config):
+			if key.Value == nil {
+				t.Errorf("read-only service account received no config value for %s", key.Name)
+			}
+		case string(schema.Secret):
+			if key.Value != nil {
+				t.Errorf("read-only service account received secret value for %s", key.Name)
+			}
+		}
+	}
+	seedMachineReveal(t, db, "g_delivery_reveal", sa.Principal, domain.CapReveal, envA1)
+	revealed, err := del.Fetch(t.Context(), minted.Value, env, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretCount := 0
+	for _, key := range revealed.Keys {
+		if key.Classification == string(schema.Secret) {
+			secretCount++
+			if key.Value == nil {
+				t.Errorf("reveal projection omitted secret value for %s", key.Name)
+			}
+		}
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events
+		WHERE type = 'disclosure.value_revealed' AND payload LIKE '%"surface":"delivery"%'`); got != int64(secretCount) {
+		t.Fatalf("delivery disclosure events = %d, want delivered secret count %d", got, secretCount)
+	}
+	current, err := del.Fetch(t.Context(), minted.Value, env, revealed.Cursor)
+	if err != nil || !current.Current {
+		t.Fatalf("revealed cursor round trip = (%+v, %v), want current", current, err)
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events
+		WHERE type = 'disclosure.value_revealed' AND payload LIKE '%"surface":"delivery"%'`); got != int64(secretCount) {
+		t.Fatalf("current disposition emitted disclosure events: got %d, want %d", got, secretCount)
+	}
+}
+
+func TestOfflineRecordReconciliationSQLite(t *testing.T) {
+	runOfflineRecordReconciliation(t, seededDB(t, openSQLite))
+}
+
+func TestOfflineRecordReconciliationPostgres(t *testing.T) {
+	runOfflineRecordReconciliation(t, seededDB(t, openPostgres))
+}
+
+func runOfflineRecordReconciliation(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	ident := identitySvc(db)
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "offline-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presenter, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+	if err := ident.RevokeCredential(t.Context(), service.LocalPrincipal(identAdmin), prjScope(), sa.ID, served.Credential.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	record := service.OfflineRecord{
+		RecordID: "offline-001", KeyID: "key_fed_pw", KeyName: "DATABASE_PASSWORD",
+		Classification: string(schema.Secret), OccurredAt: now.Add(-time.Minute),
+		CredentialID: served.Credential.ID, Generation: "v1-0123456789abcdef0123456789abcdef",
+		ServedFrom: now.Add(-time.Hour),
+	}
+	del := deliverySvc(t, db)
+	first, err := del.ReconcileOfflineRecords(t.Context(), presenter.Value,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{record})
+	if err != nil || first.Accepted != 1 || first.Duplicates != 0 {
+		t.Fatalf("first reconciliation = (%+v, %v)", first, err)
+	}
+	second, err := del.ReconcileOfflineRecords(t.Context(), presenter.Value,
+		scopeEnv(orgA, prjA1, envA1), []service.OfflineRecord{record})
+	if err != nil || second.Accepted != 0 || second.Duplicates != 1 {
+		t.Fatalf("duplicate reconciliation = (%+v, %v)", second, err)
+	}
+	asserted := "occurred_asserted = 1"
+	if db.Engine() == store.EnginePostgres {
+		asserted = "occurred_asserted"
+	}
+	if got := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events
+		WHERE type = 'disclosure.value_revealed' AND origin = 'offline-reconciled' AND `+asserted); got != 1 {
+		t.Fatalf("offline disclosure events = %d, want 1", got)
 	}
 }
 
