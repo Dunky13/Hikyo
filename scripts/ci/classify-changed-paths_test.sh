@@ -11,6 +11,7 @@ actual=$(printf '%s\n' \
 
 expected='{
 	"client": false,
+	"compose_demo": false,
 	"docs": true,
 	"fuzz": false,
 	"generated": false,
@@ -36,7 +37,7 @@ web_actual=$(printf '%s\n' 'web/src/routes/Values.tsx' | "$classifier" --files)
 if ! printf '%s\n' "$web_actual" | jq -e '
 	.web == true and
 	.release_snapshot == true and
-	([.client, .docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.client, .compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: web-only plan was wrong\n' >&2
@@ -53,7 +54,7 @@ if ! printf '%s\n' "$core_actual" | jq -e '
 	.race == true and
 	.test == true and
 	.web == true and
-	([.client, .docs, .lint, .supply_chain_checks] | all(. == false))
+	([.client, .compose_demo, .docs, .lint, .supply_chain_checks] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: core plan was wrong\n' >&2
 	printf 'actual: %s\n' "$core_actual" >&2
@@ -63,6 +64,7 @@ fi
 api_actual=$(printf '%s\n' 'api/openapi.yaml' | "$classifier" --files)
 if ! printf '%s\n' "$api_actual" | jq -e '
 	.client == true and
+	.compose_demo == true and
 	.fuzz == true and
 	.generated == true and
 	.headline_guarantee == true and
@@ -82,7 +84,7 @@ if ! printf '%s\n' "$client_actual" | jq -e '
 	.client == true and
 	.release_snapshot == true and
 	.web == true and
-	([.docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: client plan was wrong\n' >&2
@@ -95,7 +97,7 @@ if ! printf '%s\n' "$release_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .docs, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .compose_demo, .docs, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: release plan was wrong\n' >&2
 	printf 'actual: %s\n' "$release_actual" >&2
@@ -106,7 +108,7 @@ license_actual=$(printf '%s\n' 'LICENSE' | "$classifier" --files)
 if ! printf '%s\n' "$license_actual" | jq -e '
 	.docs == true and
 	.release_snapshot == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test, .web] |
+	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test, .web] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: LICENSE plan was wrong\n' >&2
@@ -121,7 +123,7 @@ if ! printf '%s\n' "$main_gate_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: main CI gate plan was wrong\n' >&2
 	printf 'actual: %s\n' "$main_gate_actual" >&2
@@ -135,7 +137,7 @@ for docs_script in \
 	if ! printf '%s\n' "$docs_script_actual" | jq -e '
 		.docs == true and
 		.lint == true and
-		([.client, .fuzz, .generated, .headline_guarantee, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
+		([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .race, .release_snapshot, .supply_chain_checks, .test, .web] |
 			all(. == false))
 	' >/dev/null; then
 		printf 'changed-path classifier fixture failed: %s plan was wrong\n' \
@@ -173,7 +175,7 @@ if ! printf '%s\n' "$fallback_actual" | jq -e '
 	.lint == true and
 	.release_snapshot == true and
 	.supply_chain_checks == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
+	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .race, .test, .web] | all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: fallback-channel plan was wrong\n' >&2
 	printf 'actual: %s\n' "$fallback_actual" >&2
@@ -188,7 +190,7 @@ if ! printf '%s\n' "$mixed_actual" | jq -e '
 	.docs == true and
 	.release_snapshot == true and
 	.web == true and
-	([.client, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
+	([.client, .compose_demo, .fuzz, .generated, .headline_guarantee, .lint, .race, .supply_chain_checks, .test] |
 		all(. == false))
 ' >/dev/null; then
 	printf 'changed-path classifier fixture failed: mixed plan was not a union\n' >&2
@@ -209,6 +211,19 @@ for fail_closed_input in \
 	if ! printf '%s\n' "$fail_closed_actual" | jq -e 'all(.[]; . == true)' >/dev/null; then
 		printf 'changed-path classifier fixture failed: %s did not fail closed\n' \
 			"${fail_closed_input:-empty input}" >&2
+		exit 1
+	fi
+done
+
+for compose_path in \
+	'install/compose/demo/compose.yaml' \
+	'scripts/compose-demo.sh' \
+	'internal/cli/compose.go' \
+	'internal/compose/config.go' \
+	'internal/service/delivery.go'; do
+	compose_actual=$(printf '%s\n' "$compose_path" | "$classifier" --files)
+	if ! printf '%s\n' "$compose_actual" | jq -e '.compose_demo == true' >/dev/null; then
+		printf 'changed-path classifier fixture failed: %s did not select compose-demo\n' "$compose_path" >&2
 		exit 1
 	fi
 done

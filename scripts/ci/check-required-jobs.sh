@@ -13,8 +13,8 @@ fi
 event=$1
 results=$2
 plan=$3
-expected_results='["changes","client","dco","docs","fuzz","generated","headline-guarantee","lint","race","release-snapshot","supply-chain-checks","test","web"]'
-expected_plan='["client","docs","fuzz","generated","headline_guarantee","lint","race","release_snapshot","supply_chain_checks","test","web"]'
+expected_results='["changes","client","compose-demo","dco","docs","fuzz","generated","headline-guarantee","lint","race","release-snapshot","supply-chain-checks","test","web"]'
+expected_plan='["client","compose_demo","docs","fuzz","generated","headline_guarantee","lint","race","release_snapshot","supply_chain_checks","test","web"]'
 
 case "$event" in
 	pull_request | pull_request_target | push) ;;

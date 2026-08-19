@@ -271,3 +271,40 @@ Not run (per brief): isolation/conformance suites; `-race`.
 
 Ready for the orchestrator's blocking cross-model (Codex) review of this
 Claude-authored work.
+
+## Stream D
+
+The real-Compose demo now lives in `install/compose/demo` and is driven by
+`scripts/compose-demo.sh`. It boots a clean loopback dev instance, establishes
+and MFA-enrols the bootstrap account, creates the hierarchy and complete
+representable raw-dotenv corpus, publishes it, mints an environment-scoped
+read-only workload credential, renders, and starts Alpine through Docker
+Compose. It proves byte-exact container values, refusal-by-name for an embedded
+newline with no generation/stamp change, doctor findings, and a publish → sync
+→ stamp move → container restart round-trip.
+
+Run it from the repository root with `./scripts/compose-demo.sh`. CI runs the
+same command in the selective `compose-demo` job after enforcing the Docker
+Compose 2.30.0 floor. The required-job checker and changed-path classifier
+include the job and its source paths.
+
+The new `/docs/compose/` page documents both delivery mechanisms, setup,
+project config, raw dotenv, offline behavior, doctor/sync, token custody,
+systemd references, and current limits. The CLI reference now lists `run` and
+`compose`; `install/systemd/hikyo-compose-sync.service` and `.timer` provide the
+documented five-minute one-shot example.
+
+Local execution is blocked before key creation by the hierarchy CLI. After a
+fresh dev server, bootstrap establishment, TOTP enrollment, CLI login and
+step-up, successful `org create`, explicit `edit`, `publish`,
+`definitions-edit`, `manage-identities`, `manage-members`, and `read` grants at
+that org, then another fresh login and TOTP step-up, this command:
+
+```text
+hikyo project create --context demo --org <org_id> --name stack
+```
+
+exits `5` with the exact stderr `hikyo: not found`. The demo script fails loud
+with that evidence. No Go code or datastore shortcut was added; the Compose
+render/container/refusal/doctor/sync legs remain unexecuted until the CLI can
+create the project through its public surface.

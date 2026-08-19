@@ -1,0 +1,14 @@
+[Unit]
+Description=Synchronize Hikyo values into a Docker Compose stack
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hikyo
+Group=hikyo
+WorkingDirectory=/srv/my-stack
+RuntimeDirectory=hikyo
+RuntimeDirectoryMode=0700
+LoadCredentialEncrypted=hikyo-token:/etc/credstore.encrypted/hikyo-token
+ExecStart=/usr/local/bin/hikyo compose sync --project-directory /srv/my-stack --token-file ${CREDENTIALS_DIRECTORY}/hikyo-token
