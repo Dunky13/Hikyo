@@ -1470,6 +1470,24 @@ func (e WebauthnReauthStartRequestAdapterOperation) Valid() bool {
 	}
 }
 
+// Defines values for DeliveryProjection.
+const (
+	ConfigOnly DeliveryProjection = "config-only"
+	Full       DeliveryProjection = "full"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryProjection enum.
+func (e DeliveryProjection) Valid() bool {
+	switch e {
+	case ConfigOnly:
+		return true
+	case Full:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ShowAdapterTargetParamsFormat.
 const (
 	Detail   ShowAdapterTargetParamsFormat = "detail"
@@ -2382,12 +2400,14 @@ type DeclareValuesRequest struct {
 	Value string  `json:"value"`
 }
 
-// DeliveredKey One key as the machine surface delivers it. Config rows carry value;
-// secret rows carry value only when the caller's projection admits the
-// served revision, otherwise presence remains visible without plaintext.
-// Under the config-only projection a secret is delivered PRESENCE-ONLY
-// (`presence: set`, no value) — not omitted — so a projected-out secret
-// stays distinguishable from a deleted key.
+// DeliveredKey One key as the machine surface delivers it. `value` is present IFF the
+// plaintext was actually delivered to this caller; its absence means
+// presence-only — the key exists and the snapshot delivers it, but this
+// caller was not authorized to receive the plaintext (a `secret` key
+// without `reveal`), so no plaintext crossed. Whether a value crosses is
+// decided server-side per key: `config` under `read`, `secret` under
+// `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
+// revision).
 type DeliveredKey struct {
 	// Classification Classification IS the sensitivity boundary. A matrix row is uniformly
 	// secret or config; it changes only through the reclassification
@@ -2406,7 +2426,9 @@ type DeliveredKey struct {
 	// the snapshot does not carry.
 	Presence DeliveredKeyPresence `json:"presence"`
 
-	// Value Present for set config rows and authorized secret rows.
+	// Value The delivered plaintext. Present ONLY when the caller was
+	// authorized to receive it (see the schema description); absent for a
+	// presence-only key. The maxLength matches the value-write bound.
 	Value *string `json:"value,omitempty"`
 }
 
@@ -2421,11 +2443,21 @@ type DeliveredKeyPresence string
 // cursor is current — in which case `keys` is empty and NOTHING was
 // disclosed. Only a fetch that actually delivers values is a disclosure.
 type DeliveryResponse struct {
-	// ChangeToken The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
-	// a content digest, so it is unforgeable and un-invertible without the
-	// server key and may flow into pod annotations, logs and
+	// ChangeToken The keyed delivery-manifest token, `v1:`-prefixed. It is
+	// change-detection material ONLY — the conditional-fetch cursor's
+	// input — and is never itself a workload-visible value (k8s ADR §
+	// Declared amendment): what reaches a pod annotation is the
+	// consumer's client-side per-target keyed stamp, not this token.
+	// Keyed rather than a content digest, so it is unforgeable and
+	// un-invertible without the server key and may flow into logs and
 	// change-detection caches as ordinary non-secret metadata.
 	ChangeToken string `json:"change_token"`
+
+	// CredentialExpiresAt The presenting credential's expiry when it is finite — a bearer
+	// credential's `expires_at`, a federated binding's expiry. ABSENT for
+	// an indefinite credential. The operator surfaces it as the ADR's
+	// ahead-of-time expiry condition and event.
+	CredentialExpiresAt *Timestamp `json:"credential_expires_at,omitempty"`
 
 	// CredentialId The authenticated caller's credential identifier, returned on both
 	// dispositions so clients can bind snapshots and offline records to
@@ -2440,11 +2472,11 @@ type DeliveryResponse struct {
 	// BOTH dispositions so a caller told "current" can keep polling without
 	// re-fetching to learn its own cursor.
 	//
-	// It is bound to five things — the change token, the caller's
-	// authorized delivery projection, the principal's authorization
-	// revision, the pin generation, and config-only mode — never to content alone. Any
-	// authorization movement therefore invalidates it and produces a full
-	// authorized delivery rather than a "current" answer.
+	// It is bound to the change token, the caller's authorized delivery
+	// projection, the principal's authorization revision, the pin
+	// generation, and the projection mode — never to content alone. Any
+	// authorization or projection movement therefore invalidates it and
+	// produces a full authorized delivery rather than a "current" answer.
 	Cursor string `json:"cursor"`
 
 	// IssuedAt RFC 3339 UTC, microsecond precision.
@@ -5319,11 +5351,14 @@ type ConnectionID = ID
 // CredentialID A prefixed UUIDv7, e.g. `org_0198…`.
 type CredentialID = ID
 
-// DeliveryConfigOnly defines model for DeliveryConfigOnly.
-type DeliveryConfigOnly = bool
+// DeliveryAcknowledgedKeys defines model for DeliveryAcknowledgedKeys.
+type DeliveryAcknowledgedKeys = []KeyName
 
 // DeliveryCursor defines model for DeliveryCursor.
 type DeliveryCursor = string
+
+// DeliveryProjection defines model for DeliveryProjection.
+type DeliveryProjection string
 
 // EnvironmentID A prefixed UUIDv7, e.g. `org_0198…`.
 type EnvironmentID = ID
@@ -5494,14 +5529,22 @@ type FetchDeliveryParams struct {
 	// serve and compares.
 	Cursor *DeliveryCursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 
-	// ConfigOnly Requests the distinct config-only authorized projection: `config` keys
-	// are delivered with their value; `secret` keys are delivered
-	// PRESENCE-ONLY (`presence: set`, no value) rather than omitted, because
-	// `read` already confers that they exist and delivering their presence
-	// keeps a projected-out secret distinguishable from a deleted key. The
-	// mode is bound into the cursor while the change token remains over the
-	// full environment manifest.
-	ConfigOnly *DeliveryConfigOnly `form:"config_only,omitempty" json:"config_only,omitempty"`
+	// Projection A SERVER-SIDE AUTHORIZED TERM, never a client-side filter (k8s ADR §
+	// Refresh). `config-only` omits `secret` keys from the delivery entirely
+	// — not presence-only, gone — and from the manifest the change token is
+	// computed over, and the mode is bound into the conditional-fetch cursor
+	// so a projection change invalidates it. `full` (the default) delivers
+	// every key the caller is authorized to see.
+	Projection *DeliveryProjection `form:"projection,omitempty" json:"projection,omitempty"`
+
+	// AcknowledgedKeys The loader-control keys the consumer explicitly acknowledges, so the
+	// server's fetch audit record carries which acknowledgement was in force
+	// for this delivery (k8s ADR § Loader-control). The server RECORDS it and
+	// otherwise ignores it — it filters nothing and refuses nothing; the
+	// loader-control refusal is enforced by the operator against its mapping,
+	// which the server cannot see. Comma-separated, each item under the key
+	// grammar, at most 64.
+	AcknowledgedKeys *DeliveryAcknowledgedKeys `form:"acknowledged_keys,omitempty" json:"acknowledged_keys,omitempty"`
 }
 
 // RevokeEnvGrantParams defines parameters for RevokeEnvGrant.
@@ -11118,15 +11161,28 @@ func (siw *ServerInterfaceWrapper) FetchDelivery(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// ------------- Optional query parameter "config_only" -------------
+	// ------------- Optional query parameter "projection" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "config_only", r.URL.Query(), &params.ConfigOnly, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "projection", r.URL.Query(), &params.Projection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "config_only"})
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "projection"})
 		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "config_only", Err: err})
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projection", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "acknowledged_keys" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "acknowledged_keys", r.URL.Query(), &params.AcknowledgedKeys, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "acknowledged_keys"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acknowledged_keys", Err: err})
 		}
 		return
 	}

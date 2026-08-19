@@ -1389,15 +1389,20 @@ export const zValueDiff = z.object({
 });
 
 /**
- * One key as the machine surface delivers it. There is deliberately NO
- * value property, and its absence is not a placeholder: no plaintext
- * crosses this surface, so the ticket that adds values has to add the
- * member deliberately.
+ * One key as the machine surface delivers it. `value` is present IFF the
+ * plaintext was actually delivered to this caller; its absence means
+ * presence-only — the key exists and the snapshot delivers it, but this
+ * caller was not authorized to receive the plaintext (a `secret` key
+ * without `reveal`), so no plaintext crossed. Whether a value crosses is
+ * decided server-side per key: `config` under `read`, `secret` under
+ * `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
+ * revision).
  *
  */
 export const zDeliveredKey = z.object({
     name: z.string().max(256),
     classification: zKeyClassification,
+    value: z.string().max(65536).optional(),
     presence: z.enum([
         'required',
         'forbidden',
@@ -1416,6 +1421,7 @@ export const zDeliveryResponse = z.object({
     current: z.boolean(),
     cursor: z.string().max(128),
     change_token: z.string().max(128),
+    credential_expires_at: zTimestamp.optional(),
     schema_revision: z.int().gte(0),
     pinned_revision: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
     pin_expired: z.boolean(),
@@ -2392,6 +2398,29 @@ export const zFederationIssuerId = zId;
  *
  */
 export const zDeliveryCursor = z.string().max(128);
+
+/**
+ * A SERVER-SIDE AUTHORIZED TERM, never a client-side filter (k8s ADR §
+ * Refresh). `config-only` omits `secret` keys from the delivery entirely
+ * — not presence-only, gone — and from the manifest the change token is
+ * computed over, and the mode is bound into the conditional-fetch cursor
+ * so a projection change invalidates it. `full` (the default) delivers
+ * every key the caller is authorized to see.
+ *
+ */
+export const zDeliveryProjection = z.enum(['full', 'config-only']).default('full');
+
+/**
+ * The loader-control keys the consumer explicitly acknowledges, so the
+ * server's fetch audit record carries which acknowledgement was in force
+ * for this delivery (k8s ADR § Loader-control). The server RECORDS it and
+ * otherwise ignores it — it filters nothing and refuses nothing; the
+ * loader-control refusal is enforced by the operator against its mapping,
+ * which the server cannot see. Comma-separated, each item under the key
+ * grammar, at most 64.
+ *
+ */
+export const zDeliveryAcknowledgedKeys = z.array(zKeyName).max(64);
 
 /**
  * SCIM binding identifier.
@@ -3799,7 +3828,9 @@ export const zFetchDeliveryPath = z.object({
 });
 
 export const zFetchDeliveryQuery = z.object({
-    cursor: z.string().max(128).optional()
+    cursor: z.string().max(128).optional(),
+    projection: z.enum(['full', 'config-only']).optional().default('full'),
+    acknowledged_keys: z.array(zKeyName).max(64).optional()
 });
 
 /**

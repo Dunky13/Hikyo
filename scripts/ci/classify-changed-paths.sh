@@ -14,6 +14,7 @@ docs=false
 fuzz=false
 generated=false
 headline_guarantee=false
+k8s_e2e=false
 lint=false
 race=false
 release_snapshot=false
@@ -29,6 +30,7 @@ all_jobs() {
 	fuzz=true
 	generated=true
 	headline_guarantee=true
+	k8s_e2e=true
 	lint=true
 	race=true
 	release_snapshot=true
@@ -103,6 +105,32 @@ else
 			release_snapshot=true
 			web=true
 			;;
+		# The operator (Go under test by the kind e2e) and the kind e2e test
+		# itself carry the *.go integration set PLUS the k8s_e2e job.
+		internal/operator/* | internal/isolation/k8s_*)
+			fuzz=true
+			generated=true
+			headline_guarantee=true
+			k8s_e2e=true
+			race=true
+			release_snapshot=true
+			test=true
+			web=true
+			;;
+		# Generated CRDs feed the generated-freshness diff and chart validation,
+		# and are applied by the kind e2e.
+		chart/hikyo/crds/*)
+			generated=true
+			k8s_e2e=true
+			lint=true
+			release_snapshot=true
+			supply_chain_checks=true
+			;;
+		# The kind e2e runner (shellcheck'd by lint like every scripts/ci/*.sh).
+		scripts/ci/k8s-e2e.sh)
+			k8s_e2e=true
+			lint=true
+			;;
 		release/* | chart/* | scripts/release/* | scripts/lib/* | install/* | Dockerfile.release | .dockerignore)
 			lint=true
 			release_snapshot=true
@@ -135,6 +163,7 @@ jq -cn \
 	--argjson fuzz "$fuzz" \
 	--argjson generated "$generated" \
 	--argjson headline_guarantee "$headline_guarantee" \
+	--argjson k8s_e2e "$k8s_e2e" \
 	--argjson lint "$lint" \
 	--argjson race "$race" \
 	--argjson release_snapshot "$release_snapshot" \
@@ -148,6 +177,7 @@ jq -cn \
 		fuzz: $fuzz,
 		generated: $generated,
 		headline_guarantee: $headline_guarantee,
+		k8s_e2e: $k8s_e2e,
 		lint: $lint,
 		race: $race,
 		release_snapshot: $release_snapshot,

@@ -21,6 +21,7 @@
     "account-security",
     "deployment-adapters",
     "compose",
+    "kubernetes-operator",
     "---Identity providers---",
     "saml",
     "scim",

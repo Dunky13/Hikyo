@@ -238,7 +238,8 @@ func runComposeCLIDelivery(t *testing.T, engine store.Engine) {
 	}
 
 	// --config-only: a distinct projection with no secret; delivers the config
-	// value byte-exact and records config_only in the fetch audit.
+	// value byte-exact and records projection=config-only in the fetch audit
+	// (#64's audit field; the wire param is projection, not config_only).
 	var cfgEnv []string
 	code, _, stderr = rig.runCLI(t, work, &cfgEnv, withCmd(append(append([]string{}, target...), "--config-only"), "true")...)
 	if code != cli.ExitOK {
@@ -251,7 +252,7 @@ func runComposeCLIDelivery(t *testing.T, engine store.Engine) {
 		t.Fatalf("config-only leaked a secret: %v", filterKV(cfgEnv, "DATABASE_PASSWORD="))
 	}
 	if n := queryInt(t, rig.db,
-		`SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' AND payload LIKE '%"config_only":true%'`); n < 1 {
+		`SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' AND payload LIKE '%"projection":"config-only"%'`); n < 1 {
 		t.Fatalf("config-only fetch audit event = %d, want ≥1", n)
 	}
 

@@ -11,12 +11,12 @@ func TestCursorEncodingBindsConfigOnlyMode(t *testing.T) {
 		AuthorizationRevision: 7, PinGeneration: 3,
 	}
 	full := EncodeCursor(base)
-	base.ConfigOnly = true
+	base.Mode = ModeConfigOnly
 	configOnly := EncodeCursor(base)
 	if bytes.Equal(full, configOnly) {
 		t.Fatal("full and config-only modes encoded to the same cursor tuple")
 	}
-	base.ConfigOnly = false
+	base.Mode = ModeFull
 	if roundTrip := EncodeCursor(base); !bytes.Equal(full, roundTrip) {
 		t.Fatal("returning to full mode did not reproduce its canonical encoding")
 	}

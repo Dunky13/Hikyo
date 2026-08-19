@@ -1,0 +1,220 @@
+{{- include "hikyo.operator.validate" . -}}
+{{- if .Values.operator.enabled }}
+{{- $operatorName := include "hikyo.operator.fullname" . -}}
+{{- $releaseNS := .Release.Namespace -}}
+{{- if empty .Values.operator.namespaces }}
+# Cluster-wide authority: one ClusterRole carrying the cluster-scoped reads plus
+# the per-namespace access rules. It NEVER carries a serviceaccounts/token rule —
+# TokenRequest grants are always namespace-scoped Roles (below).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyoinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"]
+    verbs: ["get"]
+  {{- include "hikyo.operator.namespaceRules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- else }}
+# Namespaced authority: a minimal ClusterRole (cluster-scoped reads only) plus a
+# Role/RoleBinding per watched namespace carrying the same access rules.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyoinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- range $namespace := .Values.operator.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  {{- include "hikyo.operator.namespaceRules" $ | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- end }}
+{{- end }}
+{{- range $namespace, $serviceAccounts := .Values.operator.designatedServiceAccounts }}
+{{- if $serviceAccounts }}
+---
+# TokenRequest authority is per-namespace in BOTH modes (ADR § Identity):
+# serviceaccounts/token `create`, restricted by resourceNames to this
+# namespace's designated ServiceAccounts. A ClusterRole can only express the
+# cross-namespace union, so the grant lives here even under cluster-wide watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-token
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range (sortAlpha (uniq $serviceAccounts)) }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-token
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-token
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- end }}
+{{- end }}
+{{- if not (empty .Values.operator.namespaces) }}
+---
+# Stamp-root Secret RBAC in the release namespace. Only needed in namespaced
+# mode: the cluster-wide ClusterRole already covers Secrets everywhere. The
+# operator reads/updates a name-restricted `hikyo-operator-stamp-root`, and needs
+# unrestricted `create` because a Secret that does not yet exist cannot be
+# named in a resourceNames rule.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-stamp-root
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["hikyo-operator-stamp-root"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-stamp-root
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-stamp-root
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- end }}
+---
+# Leader election is namespace-local even when watched authority is cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-leader-election
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-leader-election
+  namespace: {{ $releaseNS | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $releaseNS | quote }}
+{{- end }}

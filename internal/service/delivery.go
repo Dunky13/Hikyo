@@ -5,8 +5,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/audit"
@@ -24,12 +22,19 @@ import (
 // ADR § Authentication, authorization and the fetch path; revision-model ADR §
 // Revision identity as amended by the schema-model ADR).
 //
-// WHAT IS DELIVERED TODAY, stated first because it bounds everything below. A
-// fetch projects one committed snapshot: config plaintext under read, secret
-// plaintext under reveal (or reveal-history for pinned non-current material),
-// and secret presence otherwise. The full manifest still keys the change token.
+// WHAT IS DELIVERED, stated first because it bounds everything below. A fetch
+// delivers the authorized projection of the addressed environment's committed
+// snapshot: each key's name, classification, presence, and — where the caller
+// is authorized to receive it — its PLAINTEXT value. The per-key value rule is
+// evaluated server-side, in-transaction, from the grant rows already loaded: a
+// `config` value crosses under `read`, a `secret` value under `read ∧ reveal`
+// (or `read ∧ reveal-history` for a pinned non-current revision), and a secret
+// the caller may not reveal arrives presence-only with no value. That is the
+// surface #63 (Compose) and #64 (the Kubernetes operator) consume to converge
+// their delivery targets: a value moving changes the change token and therefore
+// fires the consumer's rollout.
 //
-// THE CURSOR IS BOUND TO FIVE THINGS, never to content alone, and the ADR's
+// THE CURSOR IS BOUND TO MORE THAN CONTENT ALONE, and the ADR's
 // reasoning for each is in internal/delivery. The mechanism here is deliberately
 // the dullest one that works: the server recomputes the cursor for the state it
 // is about to serve and compares it to the one presented. A match means
@@ -41,10 +46,6 @@ import (
 
 // FetchResult is one machine fetch.
 type FetchResult struct {
-	// CredentialID is the authenticated caller's immutable credential id. It is
-	// returned on BOTH dispositions because clients bind it into snapshot AAD
-	// and offline disclosure records rather than guessing their wire identity.
-	CredentialID string
 	// Current reports that the presented cursor named the state the server was
 	// about to serve. NO CONTENT accompanies it — that is the whole point: only
 	// a fetch that actually delivers is a disclosure.
@@ -54,10 +55,18 @@ type FetchResult struct {
 	// keep polling without having to re-fetch to learn its own cursor.
 	Cursor string
 	// ChangeToken is the keyed delivery-manifest token, `v1:`-prefixed. It is
-	// non-secret metadata by construction (keyed, not a digest of content), so
-	// it may flow into pod annotations and logs — which is what the Kubernetes
-	// operator's hash-annotation restart mechanism consumes.
+	// change-detection material ONLY — the conditional-fetch cursor's input —
+	// and is never itself a workload-visible value (k8s ADR § Declared
+	// amendment): what reaches a pod annotation is the consumer's client-side
+	// per-target keyed stamp, not this token. It is non-secret metadata by
+	// construction (keyed, not a digest of content), so it may flow into logs
+	// and change-detection caches.
 	ChangeToken string
+	// CredentialExpiresAt is the presenting credential's expiry when finite
+	// (bearer credential `expires_at`; federated binding expiry), and the zero
+	// time for an indefinite credential. The operator surfaces it as the ADR's
+	// ahead-of-time expiry condition.
+	CredentialExpiresAt time.Time
 	// SchemaRevision is the project's monotonic key-catalogue revision, the
 	// human-facing ordering the ADR pairs with the opaque token.
 	SchemaRevision int64
@@ -68,20 +77,67 @@ type FetchResult struct {
 	// PinExpired is a loud status condition only. Expiry ends retention
 	// protection; it never changes delivery while the payload survives.
 	PinExpired bool
+	// CredentialID is the authenticated caller's immutable credential id. It is
+	// returned on BOTH dispositions because clients bind it into snapshot AAD
+	// and offline disclosure records rather than guessing their wire identity.
+	CredentialID string
 	// IssuedAt and SnapshotExpiresAt are server assertions bound into the
-	// client's offline-snapshot AAD. They are present on both dispositions.
+	// client's offline-snapshot AAD. They are present on both dispositions;
+	// SnapshotExpiresAt is IssuedAt + delivery.SnapshotMaxAge.
 	IssuedAt          time.Time
 	SnapshotExpiresAt time.Time
 }
 
-// DeliveredKey is one key as the machine surface delivers it. Value is absent
-// for an unrevealed secret and present for config or authorized secret material.
+// DeliveredKey is one key as the machine surface delivers it: its name, its
+// classification, its presence, and — iff the caller was authorized to receive
+// it — its plaintext Value.
 type DeliveredKey struct {
+	// KeyID is the immutable key id (entry.KeyID), delivered so a client can
+	// bind per-key offline disclosure records to a stable identity.
 	KeyID          string
 	Name           string
 	Classification string
 	Presence       delivery.Presence
-	Value          *string
+	// Value is the delivered plaintext, non-nil IFF it actually crossed to this
+	// caller. A nil Value on a `set` key is presence-only: the snapshot delivers
+	// the key, but this caller may not receive its plaintext. A pointer, not a
+	// string, because the empty string is a legitimate delivered value and
+	// "delivered empty" must be distinguishable from "not delivered".
+	Value *string
+}
+
+// FetchOptions carries the per-request delivery controls that are not the
+// cursor: the projection mode and the acknowledged loader-control keys. It is a
+// struct rather than positional arguments so the two can grow without churning
+// every caller again, and its zero value is the default fetch — `full`
+// projection, no acknowledgement — which is what the below-the-network callers
+// that do not care about either want.
+type FetchOptions struct {
+	// Projection is the delivery projection. The empty value means `full`.
+	Projection delivery.Mode
+	// AcknowledgedKeys is the loader-control acknowledgement, recorded on the
+	// fetch audit record AS PRESENTED and otherwise ignored — the server filters
+	// nothing and refuses nothing on it (k8s ADR § Loader-control).
+	AcknowledgedKeys []string
+}
+
+// OfflineRecord is one client-durable disclosure record produced before an
+// offline snapshot released plaintext.
+type OfflineRecord struct {
+	RecordID       string
+	KeyID          string
+	KeyName        string
+	Classification string
+	OccurredAt     time.Time
+	CredentialID   string
+	Generation     string
+	ServedFrom     time.Time
+}
+
+// ReconcileResult reports the idempotent outcome of one bounded batch.
+type ReconcileResult struct {
+	Accepted   int
+	Duplicates int
 }
 
 var (
@@ -116,25 +172,6 @@ type DeliveryConformanceProbe interface {
 	AfterAttemptReset(out *FetchResult) error
 }
 
-// OfflineRecord is one client-durable disclosure record produced before an
-// offline snapshot released plaintext.
-type OfflineRecord struct {
-	RecordID       string
-	KeyID          string
-	KeyName        string
-	Classification string
-	OccurredAt     time.Time
-	CredentialID   string
-	Generation     string
-	ServedFrom     time.Time
-}
-
-// ReconcileResult reports the idempotent outcome of one bounded batch.
-type ReconcileResult struct {
-	Accepted   int
-	Duplicates int
-}
-
 func (s *Delivery) now() time.Time {
 	if s.Now == nil {
 		return time.Now().UTC()
@@ -156,12 +193,7 @@ func (s *Delivery) now() time.Time {
 // remains available to below-the-network local authority so operators and
 // conformance fixtures can exercise the delivery mechanism without forging a
 // machine artifact.
-func (s *Delivery) Fetch(ctx context.Context, presented string, scope domain.Scope, cursor string) (FetchResult, error) {
-	return s.FetchMode(ctx, presented, scope, cursor, false)
-}
-
-// FetchMode is Fetch with the authorized delivery mode made explicit.
-func (s *Delivery) FetchMode(ctx context.Context, presented string, scope domain.Scope, cursor string, configOnly bool) (FetchResult, error) {
+func (s *Delivery) Fetch(ctx context.Context, presented string, scope domain.Scope, cursor string, opts FetchOptions) (FetchResult, error) {
 	if s.Keyring == nil {
 		return FetchResult{}, ErrDeliveryKeyring
 	}
@@ -169,7 +201,7 @@ func (s *Delivery) FetchMode(ctx context.Context, presented string, scope domain
 	if err != nil {
 		return FetchResult{}, err
 	}
-	return s.FetchAsMode(ctx, actor, scope, cursor, configOnly)
+	return s.FetchAs(ctx, actor, scope, cursor, opts)
 }
 
 // FetchAs is Fetch with the caller already decided.
@@ -180,14 +212,40 @@ func (s *Delivery) FetchMode(ctx context.Context, presented string, scope domain
 // It is exported because the below-the-network callers — the isolation harness
 // and, later, any local-authority verb — resolve their principal by other means
 // and must not have to forge an artifact to reach the same code.
-func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope, cursor string) (FetchResult, error) {
-	return s.FetchAsMode(ctx, actor, scope, cursor, false)
-}
-
-// FetchAsMode is FetchMode with the caller already decided.
-func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Scope, cursor string, configOnly bool) (FetchResult, error) {
+func (s *Delivery) FetchAs(ctx context.Context, actor Actor, scope domain.Scope, cursor string, opts FetchOptions) (FetchResult, error) {
 	if s.Keyring == nil {
 		return FetchResult{}, ErrDeliveryKeyring
+	}
+	// Normalized once, here, so both the value/manifest projection and the
+	// cursor bind-tuple use the same canonical mode and can never disagree. An
+	// unrecognized mode is refused loudly BEFORE any work — the exported
+	// below-the-network path has no OpenAPI enum in front of it, so validating
+	// here is what keeps a bogus projection from reaching the cursor and the
+	// audit schema as a value neither can name.
+	mode := delivery.NormalizeMode(opts.Projection)
+	if mode != delivery.ModeFull && mode != delivery.ModeConfigOnly {
+		return FetchResult{}, invalidDetail("unknown delivery projection %q", opts.Projection)
+	}
+	// acknowledged_keys is CALLER-CONTROLLED: the operator sends its
+	// loader-control acknowledgement, which the server records and otherwise
+	// ignores (k8s ADR § Loader-control). "Records and ignores" is not "accepts
+	// anything" — a list over the bound or carrying a name outside the key-name
+	// grammar is a malformed REQUEST, so it is refused as domain.ErrInvalid (400
+	// on the wire) HERE, before the sealer preflight opens any transaction. The
+	// alternative is worse than a bad answer: an over-long or malformed list
+	// would otherwise reach the closed audit schema mid-transaction, where the
+	// MaxLen/sanitize bound is a fail-LOUD (500) invariant, so a caller typo
+	// would masquerade as a server fault after work had already run. The bound
+	// and the grammar are the same the audit registry enforces; refusing them up
+	// front is what makes the wire answer a clean 400.
+	if len(opts.AcknowledgedKeys) > delivery.MaxAcknowledgedKeys {
+		return FetchResult{}, invalidDetail("acknowledged_keys carries %d entries, at most %d are allowed",
+			len(opts.AcknowledgedKeys), delivery.MaxAcknowledgedKeys)
+	}
+	for _, name := range opts.AcknowledgedKeys {
+		if err := schema.CheckKeyName(name); err != nil {
+			return FetchResult{}, invalidDetail("acknowledged_keys entry %q is not a valid key name", name)
+		}
 	}
 	// The project sealer is resolved BEFORE the transaction, under this
 	// operation's own formula, for the reason #50 recorded: minting a project
@@ -217,6 +275,9 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 		// can take real time, and a credential whose idle, absolute or expiry
 		// deadline passes during it must be refused by the authentication this
 		// delivery actually rides, not admitted on a stale instant.
+		// issuedAt is captured ONCE here so the credential-liveness clock, the
+		// pin-expiry check, and the server-asserted snapshot issuance/expiry all
+		// name the same instant.
 		issuedAt := s.now()
 		caller, err := actor.resolve(ctx, az, issuedAt)
 		if err != nil {
@@ -233,7 +294,10 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 		}
 
 		var selected *store.Snapshot
-		historical := false
+		// pinnedNonCurrent gates the secret-value rule below: a pinned delivery
+		// of a revision that is NOT the environment's latest discloses history,
+		// so a `secret` value crosses only under `reveal-history`, not `reveal`.
+		pinnedNonCurrent := false
 		pin, pinErr := r.Pins().GetForWorkload(ctx, p, string(caller.Principal))
 		switch {
 		case errors.Is(pinErr, store.ErrNotFound):
@@ -257,7 +321,7 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 				return err
 			}
 			if snapshot.Revision != latest.Revision {
-				historical = true
+				pinnedNonCurrent = true
 				holds, err := az.RecordedPrincipalHolds(ctx, caller, authority, authz.OpPinSetHistory, scope)
 				if err != nil {
 					return err
@@ -274,17 +338,19 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 			out.PinExpired = !pin.ExpiresAt.After(issuedAt)
 		}
 
-		// The non-content cursor components and the authorized value projection.
+		// The caller's grant rows, loaded BEFORE the projection because the
+		// per-key value rule reads them too: whether a `secret` value crosses is
+		// `holds(reveal)` (or `holds(reveal-history)` for a pinned non-current
+		// revision) over exactly these rows. There is no second authorization
+		// path — the operation formula stays `read@environment`, and value
+		// disclosure is a projection of the grants that formula already required.
 		grants, err := az.GrantRowsForPrincipal(ctx, caller.Principal)
 		if err != nil {
 			return err
 		}
-		canReveal := holds(grants, domain.CapReveal, scope)
-		if historical {
-			canReveal = holds(grants, domain.CapRevealHistory, scope)
-		}
-		rows, manifest, schemaRevision, snapshotRevision, err := deliveryRows(
-			ctx, r, p, sealer, selected, canReveal, configOnly)
+
+		rows, manifest, revision, snapshotRevision, err := deliveryRows(
+			ctx, r, p, sealer, scope, selected, grants, mode, pinnedNonCurrent)
 		if err != nil {
 			return err
 		}
@@ -293,6 +359,7 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 			return err
 		}
 
+		// The other two non-content components.
 		revisionOfAuthority, err := az.PrincipalGeneration(ctx, caller.Principal)
 		if err != nil {
 			return err
@@ -301,14 +368,25 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 		if err != nil {
 			return err
 		}
+		// The pinned revision only when it is NON-CURRENT: a pinned-current
+		// delivery is content- and authority-identical to an unpinned latest,
+		// so binding 0 there keeps their cursors equal, and the moment a later
+		// publish makes this pin historical the term goes 0 -> pin.Revision and
+		// the cursor moves exactly once — which is the transition where the
+		// secret-value authority flips from `reveal` to `reveal-history`.
+		pinnedHistoricalRevision := int64(0)
+		if pinnedNonCurrent {
+			pinnedHistoricalRevision = out.PinnedRevision
+		}
 		computed, err := s.Keyring.DeliveryCursor(
 			string(scope.Org), string(scope.Project), string(scope.Env),
 			delivery.EncodeCursor(delivery.Cursor{
-				ChangeToken:           changeToken,
-				Projection:            projectionOf(grants, scope),
-				AuthorizationRevision: revisionOfAuthority,
-				PinGeneration:         pinGeneration,
-				ConfigOnly:            configOnly,
+				ChangeToken:              changeToken,
+				Projection:               projectionOf(grants, scope),
+				AuthorizationRevision:    revisionOfAuthority,
+				PinGeneration:            pinGeneration,
+				Mode:                     mode,
+				PinnedHistoricalRevision: pinnedHistoricalRevision,
 			}))
 		if err != nil {
 			return err
@@ -322,37 +400,40 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 			subtle.ConstantTimeCompare([]byte(cursor), []byte(computed)) == 1
 
 		out = FetchResult{
-			CredentialID: caller.CredentialID,
-			Current:      current, Cursor: computed, ChangeToken: changeToken,
-			SchemaRevision: schemaRevision, PinnedRevision: out.PinnedRevision,
-			PinExpired: out.PinExpired, IssuedAt: issuedAt,
+			Current: current, Cursor: computed, ChangeToken: changeToken,
+			CredentialExpiresAt: caller.CredentialExpiresAt,
+			SchemaRevision:      revision, PinnedRevision: out.PinnedRevision,
+			PinExpired:        out.PinExpired,
+			CredentialID:      caller.CredentialID,
+			IssuedAt:          issuedAt,
 			SnapshotExpiresAt: issuedAt.Add(delivery.SnapshotMaxAge),
 		}
 		if !current {
 			out.Keys = rows
-			for _, key := range rows {
-				if key.Classification != string(schema.Secret) || key.Value == nil {
-					continue
-				}
-				ev, err := domainEvent(ctx, audit.EventValueRevealed, caller.Principal,
-					audit.Object{Type: "key", ID: key.KeyID}, audit.Payload{
-						"key_id": key.KeyID, "name": audit.SanitizeFreeText(key.Name),
-						"surface": "delivery", "revision": snapshotRevision,
-					})
-				if err != nil {
-					return err
-				}
-				if err := r.Audit().InsertTenant(ctx, p, ev); err != nil {
-					return err
-				}
-			}
 		}
 
 		disposition := "full"
 		if current {
 			disposition = "current"
 		}
-		e, err := domainEvent(ctx, audit.EventDeliveryFetched, caller.Principal,
+		// The values actually delivered — config plus any authorized secrets —
+		// which is the count of disclosure events this fetch emits, and is
+		// distinct from key_count because presence-only keys carry no value.
+		// A "current" answer delivers nothing, so both counts are zero.
+		delivered := 0
+		for i := range out.Keys {
+			if out.Keys[i].Value != nil {
+				delivered++
+			}
+		}
+		// acknowledged_keys is recorded AS PRESENTED — the k8s ADR's audit
+		// obligation is "which acknowledgement was in force", so it is neither
+		// sorted nor deduped here. A nil slice records as an empty list.
+		acknowledged := opts.AcknowledgedKeys
+		if acknowledged == nil {
+			acknowledged = []string{}
+		}
+		fetchEvent, err := domainEvent(ctx, audit.EventDeliveryFetched, caller.Principal,
 			audit.Object{Type: "environment", ID: string(scope.Env)}, audit.Payload{
 				"disposition":          disposition,
 				"credential_id":        caller.CredentialID,
@@ -360,14 +441,47 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 				"principal_class":      string(caller.Class),
 				"scope":                renderScope(scope),
 				"key_count":            len(out.Keys),
+				"projection":           string(mode),
+				"acknowledged_keys":    acknowledged,
+				"delivered_count":      delivered,
 				"change_token_version": crypto.TokenVersion,
 				"cursor_presented":     cursor != "",
-				"config_only":          configOnly,
 			})
 		if err != nil {
 			return err
 		}
-		return r.Audit().InsertTenant(ctx, p, e)
+		if err := r.Audit().InsertTenant(ctx, p, fetchEvent); err != nil {
+			return err
+		}
+		// One immutable disclosure record per delivered VALUE, referencing the
+		// fetch record by correlation id: the fetch is the envelope, these are
+		// its contents. Presence-only keys emit nothing (no value crossed), and
+		// a "current" answer carries no keys at all.
+		for i := range out.Keys {
+			k := out.Keys[i]
+			if k.Value == nil {
+				continue
+			}
+			disclosure, err := newAuditEvent(ctx, audit.EventDisclosure, caller.Principal,
+				audit.Object{Type: "environment", ID: string(scope.Env)}, audit.OutcomeSuccess,
+				fetchEvent.ID, audit.Payload{
+					"key":             k.Name,
+					"classification":  k.Classification,
+					"revision":        snapshotRevision,
+					"credential_id":   caller.CredentialID,
+					"credential_kind": caller.Artifact,
+					"principal_class": string(caller.Class),
+					"scope":           renderScope(scope),
+					"projection":      string(mode),
+				})
+			if err != nil {
+				return err
+			}
+			if err := r.Audit().InsertTenant(ctx, p, disclosure); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		// The chokepoint's own federated refusals — an unbound identity, a revoked
@@ -386,6 +500,13 @@ func (s *Delivery) FetchAsMode(ctx context.Context, actor Actor, scope domain.Sc
 // ReconcileOfflineRecords authenticates a live presenter and persists the
 // client-side disclosure facts that were fsynced before offline plaintext was
 // released. Dedupe is scoped to the presenting principal, so retries are safe.
+//
+// The per-key event stays audit.EventValueRevealed (disclosure.value_revealed,
+// surface: offline-serve) rather than #64's audit.EventDisclosure: that event
+// requires a snapshot `revision` an offline record does not carry, references a
+// fetch envelope this path has no equivalent for, and lacks the served_credential
+// _id/generation/served_from fields the offline disclosure records. Extending
+// EventValueRevealed's schema with those (optional) fields is the clean home.
 func (s *Delivery) ReconcileOfflineRecords(ctx context.Context, presented string, scope domain.Scope, records []OfflineRecord) (ReconcileResult, error) {
 	actor, err := s.callerActor(ctx, presented)
 	if err != nil {
@@ -544,23 +665,37 @@ func (s *Delivery) recordUnbound(ctx context.Context, actor Actor, cause error) 
 	return cause
 }
 
-// deliveryRows reads what the environment's LATEST COMMITTED SNAPSHOT
-// delivers, and builds the manifest the change token is computed over.
+// deliveryRows reads what the environment's committed snapshot delivers, builds
+// the manifest the change token is computed over, and decides per key whether
+// the caller receives the plaintext.
 //
 // It reads the snapshot rather than live values, which is the flat-model ADR's
 // "delivery reads only committed, valid snapshots" made structural: an
 // environment with no published revision fails closed here rather than serving
 // a state no publish ever validated.
 //
-// The manifest always carries the FULL plaintext state while the response is an
-// authorized projection. The token must move when any value moves even when the
-// caller cannot reveal it; its keyed construction discloses nothing about the
-// values it covers.
+// Two projections come out of one pass and the split is the whole design.
+//
+//   - The MANIFEST carries plaintext for every delivered key (under `full`) so
+//     the KEYED change token moves whenever any value moves — the token is
+//     unforgeable and un-invertible, so it discloses nothing about the values it
+//     covers. Under `config-only` the manifest carries CONFIG keys only, so the
+//     token a config-only consumer holds is stable across secret rotations it
+//     was never meant to see.
+//   - The KEYS the caller receives carry plaintext only where the caller is
+//     authorized: config under `read` (already held), secret under
+//     `holds(reveal)` — or `holds(reveal-history)` for a pinned non-current
+//     revision — and otherwise presence-only. Under `config-only`, secret keys
+//     are omitted entirely rather than delivered presence-only.
+//
+// snapshotRevision (the delivered revision, pinned or latest) rides out for the
+// per-value disclosure records; schemaRevision is the human-facing catalogue
+// ordering.
 func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
-	selected *store.Snapshot, canReveal, configOnly bool) ([]DeliveredKey, []delivery.Row, int64, int64, error) {
+	scope domain.Scope, selected *store.Snapshot, grants []authz.GrantRow, mode delivery.Mode,
+	pinnedNonCurrent bool) (keys []DeliveredKey, manifest []delivery.Row, schemaRevision, snapshotRevision int64, err error) {
 	var snapshot store.Snapshot
 	if selected == nil {
-		var err error
 		snapshot, err = r.Snapshots().Latest(ctx, p)
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, nil, 0, 0, ErrNotMaterialized
@@ -575,41 +710,49 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-	keys := make([]DeliveredKey, 0, len(entries))
-	rows := make([]delivery.Row, 0, len(entries))
+	// The capability that authorizes a secret VALUE for this fetch: history for
+	// a pinned non-current revision (it discloses the past), reveal otherwise.
+	secretCap := domain.CapReveal
+	if pinnedNonCurrent {
+		secretCap = domain.CapRevealHistory
+	}
+	at := domain.Scope{Org: scope.Org, Project: scope.Project, Env: scope.Env}
+	revealsSecret := holds(grants, secretCap, at)
+
+	keys = make([]DeliveredKey, 0, len(entries))
+	manifest = make([]delivery.Row, 0, len(entries))
 	for _, entry := range entries {
+		secret := entry.Classification == string(schema.Secret)
+		// config-only is a server-side authorized term: a secret key is not in
+		// the delivery and not in the manifest the token covers, so a secret's
+		// existence or value never leaks into a config-only consumer's token.
+		if secret && mode == delivery.ModeConfigOnly {
+			continue
+		}
 		plain, err := sealer.OpenField(snapshotAAD(
 			entry.OrgID, entry.ProjectID, entry.EnvironmentID, entry.KeyID, entry.SnapshotID, entry.ID), entry.Ciphertext)
 		if err != nil {
 			return nil, nil, 0, 0, fmt.Errorf("service: snapshot entry %s: %w", entry.ID, err)
 		}
-		rows = append(rows, delivery.Row{
-			Key: entry.KeyName, Classification: entry.Classification, Value: string(plain),
-		})
-		// Config-only is a distinct authorized projection. A secret is delivered
-		// PRESENCE-ONLY (presence: set, no value): `read` already confers that the
-		// key exists (ADR: "read already confers knowledge that those keys exist"),
-		// so this discloses nothing new, and — unlike omitting it — it keeps a
-		// projected-out secret distinguishable from a deleted config key (R1-7).
-		secretUnderConfigOnly := configOnly && entry.Classification == string(schema.Secret)
 		key := DeliveredKey{
 			KeyID: entry.KeyID, Name: entry.KeyName, Classification: entry.Classification,
 			Presence: delivery.PresenceSet,
 		}
-		// A secret under config_only carries no value even when the caller could
-		// reveal outside that projection; config values, and revealable secret
-		// values under the full projection, carry theirs.
-		if !secretUnderConfigOnly && (entry.Classification == string(schema.Config) || canReveal) {
+		// Config crosses under the read the operation already required; a secret
+		// crosses only under reveal / reveal-history, else presence-only.
+		if !secret || revealsSecret {
 			value := string(plain)
 			key.Value = &value
 		}
 		keys = append(keys, key)
+		manifest = append(manifest, delivery.Row{
+			Key: entry.KeyName, Classification: entry.Classification, Value: string(plain),
+		})
 	}
 	// The PINNED schema revision, not the live one: what this snapshot was
 	// validated against is a property of the snapshot, and a schema that has
 	// moved since must not make history claim it was validated at the new one.
-	slices.SortFunc(keys, func(a, b DeliveredKey) int { return strings.Compare(a.Name, b.Name) })
-	return keys, rows, snapshot.SchemaRevision, snapshot.Revision, nil
+	return keys, manifest, snapshot.SchemaRevision, snapshot.Revision, nil
 }
 
 // projectionOf is the caller's AUTHORIZED DELIVERY PROJECTION: which of the
@@ -623,8 +766,10 @@ func deliveryRows(ctx context.Context, r store.Repos, p authz.Proof, sealer *cry
 // from secret-bearing content becomes a comparison oracle for whether hidden
 // values changed.
 //
-// `reveal` and `reveal-history` change which secret values are delivered, so a
-// movement in either capability must invalidate the prior cursor.
+// It is computed from the caller's real grant rows, so it moves the moment a
+// disclosure capability is granted or revoked — which is exactly when what the
+// caller may receive changes, now that `reveal` and `reveal-history` gate
+// whether a secret's plaintext crosses (deliveryRows).
 func projectionOf(grants []authz.GrantRow, scope domain.Scope) []string {
 	at := domain.Scope{Org: scope.Org, Project: scope.Project, Env: scope.Env}
 	var out []string

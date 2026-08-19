@@ -11,3 +11,15 @@ Then name the database Secret and the reverse proxy's exact trusted CIDRs:
   helm install {{ .Release.Name }} . \
     --set database.existingSecret=YOUR_SECRET \
     --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
+
+{{- if .Values.operator.enabled }}
+Operator: enabled
+  mode: {{ if empty .Values.operator.namespaces }}cluster-wide{{ else }}namespaced{{ end }}
+  namespaces: {{ if empty .Values.operator.namespaces }}all{{ else }}{{ join "," .Values.operator.namespaces }}{{ end }}
+  trigger rollouts: {{ .Values.operator.triggerRollouts }}
+  stamp root Secret: hikyo-operator-stamp-root (created by the operator in {{ .Release.Namespace }})
+{{- else }}
+Operator: disabled
+{{- end }}
+
+values land in native Secrets, plaintext at rest by default on K3s — enable --secrets-encryption; see the docs runbook

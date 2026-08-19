@@ -2420,7 +2420,7 @@ var operations = map[Operation]opSpec{
 			StoreCatalogueRevisionGet:  true,
 			StoreAuditTenantInsert:     true,
 		},
-		events: []audit.EventType{audit.EventDeliveryFetched, audit.EventValueRevealed},
+		events: []audit.EventType{audit.EventDeliveryFetched, audit.EventDisclosure},
 	},
 	OpDeliveryReconcileOffline: {
 		class:   ClassTenant,

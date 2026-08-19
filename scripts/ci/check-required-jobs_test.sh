@@ -38,6 +38,7 @@ all_plan='{
 	"fuzz":true,
 	"generated":true,
 	"headline_guarantee":true,
+	"k8s_e2e":true,
 	"lint":true,
 	"race":true,
 	"release_snapshot":true,
@@ -55,6 +56,7 @@ all_success='{
 	"fuzz":{"result":"success"},
 	"generated":{"result":"success"},
 	"headline-guarantee":{"result":"success"},
+	"k8s-e2e":{"result":"success"},
 	"lint":{"result":"success"},
 	"race":{"result":"success"},
 	"release-snapshot":{"result":"success"},
@@ -70,6 +72,7 @@ docs_success=$(printf '%s' "$all_success" | jq '
 	.fuzz.result = "skipped" |
 	.generated.result = "skipped" |
 	.["headline-guarantee"].result = "skipped" |
+	.["k8s-e2e"].result = "skipped" |
 	.lint.result = "skipped" |
 	.race.result = "skipped" |
 	.["release-snapshot"].result = "skipped" |

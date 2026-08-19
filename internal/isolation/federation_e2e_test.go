@@ -323,11 +323,12 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			r.configureIssuer(t, tc.typ, []string{tc.shape.DefaultAudience})
 			_, binding := r.bindShape(t, "wl-"+tc.name, tc.shape, hikyoAudience)
 
-			bound, err := r.idp.MintShape(tc.shape, hikyoAudience, r.clk.Now(), 10*time.Minute)
+			tokenLifetime := 10 * time.Minute
+			bound, err := r.idp.MintShape(tc.shape, hikyoAudience, r.clk.Now(), tokenLifetime)
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, err := r.del.Fetch(t.Context(), bound, scopeEnv(orgA, prjA1, envA1), "")
+			res, err := r.del.Fetch(t.Context(), bound, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{})
 			if err != nil {
 				t.Fatalf("federated fetch: %v", err)
 			}
@@ -337,16 +338,34 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if res.CredentialID != binding.CredentialID {
 				t.Fatalf("credential id = %q, want binding %q", res.CredentialID, binding.CredentialID)
 			}
-			// The delivered projection is the whole catalogue, and NO PLAINTEXT
-			// crosses it whatever the classification: the delivered members are a
-			// name, a classification and a presence, and there is no value member
-			// on the type at all.
+			// credential_expires_at is the BINDING's finite expiry, never the
+			// presented JWT's `exp`. §0.1 fixes the source as the federated
+			// binding, and the two differ here on purpose: the binding lives its
+			// default lifetime while this token lives ten minutes. Asserting
+			// equality with the binding AND inequality with the token exp is what
+			// makes the source unambiguous — a delivery surfaces the credential
+			// Hikyo issued, so the operator's ahead-of-time expiry condition fires
+			// on Hikyo's binding lifetime, not on a short-lived external token that
+			// is re-minted every fetch.
+			if !res.CredentialExpiresAt.Equal(binding.ExpiresAt) {
+				t.Errorf("credential_expires_at = %v, want the binding expiry %v", res.CredentialExpiresAt, binding.ExpiresAt)
+			}
+			if res.CredentialExpiresAt.Equal(r.clk.Now().Add(tokenLifetime)) {
+				t.Error("credential_expires_at equals the token exp: the source is the JWT, not the binding")
+			}
+			// The bound identity holds `read` and no disclosure capability, so
+			// the value rule applies per classification: the config value
+			// crosses, the secret is presence-only. A federated principal has
+			// identical authority to a bearer sibling, so this is the same rule
+			// the bearer tests exercise, reached over a real token.
 			presence := map[string]delivery.Presence{}
+			values := map[string]*string{}
 			for _, k := range res.Keys {
 				if k.KeyID == "" {
 					t.Fatalf("delivered key %q has no immutable key id", k.Name)
 				}
 				presence[k.Name] = k.Presence
+				values[k.Name] = k.Value
 			}
 			// Every delivered key is `set`: it is in the payload because the
 			// snapshot RESOLVED it. The declared presence rule is no longer
@@ -357,6 +376,12 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 					t.Errorf("presence for %s = %q, want set (the snapshot delivers it)", name, presence[name])
 				}
 			}
+			if v := values["DATABASE_URL"]; v == nil {
+				t.Error("the config value did not cross under read")
+			}
+			if values["DATABASE_PASSWORD"] != nil {
+				t.Error("the secret value crossed without reveal — it must be presence-only")
+			}
 
 			// THE DEFAULT AUDIENCE IS REFUSED. Same identity, same signature,
 			// same pinned claims — only the audience differs, and it is the one
@@ -365,7 +390,7 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.del.Fetch(t.Context(), defaulted, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+			if _, err := r.del.Fetch(t.Context(), defaulted, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 				t.Fatalf("default-audience token = %v, want the uniform refusal", err)
 			}
 
@@ -377,7 +402,7 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.del.Fetch(t.Context(), both, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+			if _, err := r.del.Fetch(t.Context(), both, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 				t.Fatalf("multi-audience token = %v, want the uniform refusal", err)
 			}
 
@@ -392,7 +417,7 @@ func runFederationPerIssuerType(t *testing.T, db *store.DB) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.del.Fetch(t.Context(), stranger, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+			if _, err := r.del.Fetch(t.Context(), stranger, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 				t.Fatalf("unbound subject = %v, want the uniform refusal", err)
 			}
 		})
@@ -469,7 +494,7 @@ func runPullRequestRefusal(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("pull_request_target against a push binding = %v, want the uniform refusal", err)
 	}
 
@@ -480,7 +505,7 @@ func runPullRequestRefusal(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), prToken, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), prToken, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("pull_request against a push binding = %v, want the uniform refusal", err)
 	}
 
@@ -510,7 +535,7 @@ func runPullRequestRefusal(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), prtToken, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), prtToken, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("deliberately bound pull_request_target = %v, want acceptance", err)
 	}
 }
@@ -547,7 +572,7 @@ func runJWKSStalenessBound(t *testing.T, db *store.DB) {
 	}
 
 	// Phase 1: warm the cache while the issuer is up.
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("warm fetch: %v", err)
 	}
 	warmFetches := r.idp.Fetches()
@@ -559,7 +584,7 @@ func runJWKSStalenessBound(t *testing.T, db *store.DB) {
 	// validation CONTINUES from cache. Stale-but-valid beats not-starting.
 	r.idp.SetOffline(true)
 	r.clk.advance(oidcfed.RefreshInterval + time.Minute)
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("fetch inside the staleness bound during an outage = %v, want serve-from-cache", err)
 	}
 	// The tolerated failure is RECORDED, not swallowed: the ADR requires an
@@ -573,7 +598,7 @@ func runJWKSStalenessBound(t *testing.T, db *store.DB) {
 	// Phase 3: past the bound, FAIL CLOSED. The refusal is the uniform one on
 	// the wire; the trail is where the cause lives.
 	r.clk.advance(oidcfed.StalenessBound)
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("fetch past the staleness bound = %v, want the uniform refusal", err)
 	}
 	breaches := queryInt(t, db,
@@ -596,7 +621,7 @@ func runJWKSStalenessBound(t *testing.T, db *store.DB) {
 	// retry per issuer per window, never one per request.
 	r.idp.SetOffline(false)
 	r.clk.advance(oidcfed.RefreshBackoff + time.Second)
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("fetch after the issuer recovered = %v, want acceptance", err)
 	}
 }
@@ -624,7 +649,7 @@ func runUnknownKIDRateLimit(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), first, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), first, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("warm fetch: %v", err)
 	}
 
@@ -638,7 +663,7 @@ func runUnknownKIDRateLimit(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), rotated, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), rotated, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("fetch after issuer key rotation = %v, want the unknown-kid refresh to recover it", err)
 	}
 
@@ -658,7 +683,7 @@ func runUnknownKIDRateLimit(t *testing.T, db *store.DB) {
 		// The outcome is deliberately not asserted: some of these succeed (the
 		// refresh went out) and some fail (it was throttled), and which is which
 		// depends on where in the window the loop is. Both are correct.
-		_, _ = r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "")
+		_, _ = r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{})
 	}
 	if spent := r.idp.Fetches() - before; spent > admission.IssuerRefreshPerMinute {
 		t.Errorf("%d outbound JWKS fetches for %d unknown kids: the per-issuer allowance of %d did not bind",
@@ -697,7 +722,7 @@ func TestFederationStaticJWKSSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("static-JWKS fetch with the issuer unreachable = %v, want acceptance", err)
 	}
 	if r.idp.Fetches() != 0 {
@@ -713,7 +738,7 @@ func TestFederationStaticJWKSSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), rotated, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), rotated, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("static JWKS after an unrecorded rotation = %v, want the uniform refusal", err)
 	}
 }
@@ -755,7 +780,7 @@ func runRestorePredicate(t *testing.T, db *store.DB) {
 	}
 	// It authenticates BEFORE the restore. If it did not, the fixture would be
 	// proving nothing about the predicate.
-	if _, err := r.del.Fetch(t.Context(), captured, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), captured, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("pre-restore fetch with a skewed iat = %v, want acceptance", err)
 	}
 
@@ -778,7 +803,7 @@ func runRestorePredicate(t *testing.T, db *store.DB) {
 	if !capturedIAT.After(at) {
 		t.Fatalf("fixture broken: the captured iat %s must be after the re-activation instant %s", capturedIAT, at)
 	}
-	if _, err := r.del.Fetch(t.Context(), captured, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), captured, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("captured pre-restore token after re-activation = %v, want the uniform refusal", err)
 	}
 	// The refusal IS recorded, and under the in-transaction leg's single cause
@@ -805,7 +830,7 @@ func runRestorePredicate(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), fresh, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), fresh, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("post-reactivation token = %v, want acceptance", err)
 	}
 
@@ -841,10 +866,10 @@ func runRestorePredicate(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), aboveFloor, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), aboveFloor, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("control token one second ABOVE the floor = %v, want acceptance — without this the refusal below proves nothing", err)
 	}
-	if _, err := r.del.Fetch(t.Context(), belowFloor, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), belowFloor, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token one second BELOW the floor = %v, want a PERMANENT refusal", err)
 	}
 }
@@ -915,7 +940,7 @@ func TestFederationRequiresImmutableIdentifiersSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("id-pinned binding = %v, want acceptance", err)
 	}
 }
@@ -954,7 +979,7 @@ func TestFederationPinsNestedKubernetesUIDSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("uid-pinned kubernetes binding = %v, want acceptance", err)
 	}
 
@@ -969,7 +994,7 @@ func TestFederationPinsNestedKubernetesUIDSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), reborn, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), reborn, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("recreated ServiceAccount with a new uid = %v, want the uniform refusal", err)
 	}
 
@@ -1030,7 +1055,7 @@ func TestFederationRefusesPlaintextJWKSSQLite(t *testing.T) {
 	// are the RIGHT keys, so nothing but the scheme check can refuse this — which
 	// is the point: a fixture serving wrong keys would pass for the wrong reason.
 	r.idp.JWKSURIOverride = plaintext.URL
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("plaintext jwks_uri serving the correct keys = %v, want the uniform refusal", err)
 	}
 
@@ -1039,7 +1064,7 @@ func TestFederationRefusesPlaintextJWKSSQLite(t *testing.T) {
 	r.clk.advance(oidcfed.RefreshBackoff + time.Second)
 	r.idp.JWKSURIOverride = r.idp.Server.URL + "/jwks-redirect"
 	r.idp.RedirectJWKSTo = plaintext.URL
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("https jwks_uri redirecting to plaintext = %v, want the uniform refusal", err)
 	}
 
@@ -1047,7 +1072,7 @@ func TestFederationRefusesPlaintextJWKSSQLite(t *testing.T) {
 	// accepted, so (a) and (b) refused the TRANSPORT and not the key set.
 	r.clk.advance(oidcfed.RefreshBackoff + time.Second)
 	r.idp.JWKSURIOverride, r.idp.RedirectJWKSTo = "", ""
-	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), mint(), scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("the same keys over https = %v, want acceptance", err)
 	}
 }
@@ -1109,7 +1134,7 @@ func TestFederationOutageDoesNotSerializeIssuersSQLite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+		if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 			t.Fatalf("warm fetch for %s: %v", tok.idp.Issuer(), err)
 		}
 	}
@@ -1134,7 +1159,7 @@ func TestFederationOutageDoesNotSerializeIssuersSQLite(t *testing.T) {
 				errs[i] = err
 				return
 			}
-			_, errs[i] = r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "")
+			_, errs[i] = r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{})
 		}()
 	}
 	wg.Wait()
@@ -1163,7 +1188,7 @@ func TestFederationOutageDoesNotSerializeIssuersSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), healthyToken, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), healthyToken, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("healthy issuer during the other one's outage = %v, want acceptance", err)
 	}
 
@@ -1176,7 +1201,7 @@ func TestFederationOutageDoesNotSerializeIssuersSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("fetch inside the backoff window = %v, want serve-from-cache", err)
 	}
 	if attempts := r.idp.Attempts() - recovered; attempts != 0 {
@@ -1218,7 +1243,7 @@ func TestFederationIssuerPolicyCannotGoStaleSQLite(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Baseline: it authenticates.
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("baseline fetch: %v", err)
 	}
 
@@ -1233,14 +1258,14 @@ func TestFederationIssuerPolicyCannotGoStaleSQLite(t *testing.T) {
 		}
 		r.fed.OnValidated = nil
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("fetch whose issuer policy moved mid-flight = %v, want the uniform refusal", err)
 	}
 
 	// And the new policy is what applies from now on: the same token, presented
 	// fresh, is refused because its audience is now a refused one. The mid-flight
 	// refusal was not a one-off retry hint.
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("fetch under the narrowed policy = %v, want the uniform refusal", err)
 	}
 }
@@ -1303,14 +1328,14 @@ func runBindingImmutability(t *testing.T, db *store.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), loose, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), loose, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token matching only the replaced binding = %v, want the uniform refusal", err)
 	}
 	tight, err := r.idp.MintShape(stricter, hikyoAudience, r.clk.Now(), 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), tight, scopeEnv(orgA, prjA1, envA1), ""); err != nil {
+	if _, err := r.del.Fetch(t.Context(), tight, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err != nil {
 		t.Fatalf("token matching the replacement = %v, want acceptance", err)
 	}
 
@@ -1361,7 +1386,7 @@ func TestFederationClaimTypeIsNotFoldedSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf(`numeric repository_id against a string pin = %v, want the uniform refusal`, err)
 	}
 }
@@ -1379,7 +1404,7 @@ func TestFederationTokenCapsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), overSpan, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), overSpan, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token declaring a span beyond the cap = %v, want the uniform refusal", err)
 	}
 
@@ -1388,7 +1413,7 @@ func TestFederationTokenCapsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), tooOld, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), tooOld, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token older than the age cap = %v, want the uniform refusal", err)
 	}
 	if n := queryInt(t, db,
@@ -1407,7 +1432,7 @@ func TestFederationTokenCapsSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.del.Fetch(t.Context(), foreign, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), foreign, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("unconfigured issuer = %v, want the uniform refusal", err)
 	}
 	if n := queryInt(t, db,
@@ -1444,7 +1469,7 @@ func runFederationTokenAgeCannotExpireMidFlight(t *testing.T, db *store.DB) {
 		r.clk.advance(oidcfed.MaxTokenAge + time.Second)
 		r.fed.OnValidated = nil
 	}
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); !errors.Is(err, domain.ErrUnauthenticated) {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); !errors.Is(err, domain.ErrUnauthenticated) {
 		t.Fatalf("token crossing the age cap during validation = %v, want the uniform refusal", err)
 	}
 	if !validated {
@@ -1542,16 +1567,16 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 	// because the point here is the EVENT, not the artifact class — and a
 	// federated token would additionally have to clear the restore predicate the
 	// line above just armed.
-	res, err := r.del.Fetch(t.Context(), "", scopeEnv(orgA, prjA1, envA1), "")
+	res, err := r.del.Fetch(t.Context(), "", scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{})
 	if err == nil {
 		t.Fatal("an empty artifact fetched successfully; the surface is not authenticating")
 	}
 	human := service.LocalPrincipal(identAdmin)
-	res, err = r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), "")
+	res, err = r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("identity.delivery_fetched (full): %v", err)
 	}
-	if _, err := r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), res.Cursor); err != nil {
+	if _, err := r.del.FetchAs(t.Context(), human, scopeEnv(orgA, prjA1, envA1), res.Cursor, service.FetchOptions{}); err != nil {
 		t.Fatalf("identity.delivery_fetched (current): %v", err)
 	}
 	if _, err := r.del.ReconcileOfflineRecordsAs(t.Context(), human,
@@ -1566,7 +1591,7 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 
 	// A federated refusal and a JWKS event, so both wire-declared types have an
 	// emitter too.
-	if _, err := r.del.Fetch(t.Context(), "not.a.token", scopeEnv(orgA, prjA1, envA1), ""); err == nil {
+	if _, err := r.del.Fetch(t.Context(), "not.a.token", scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err == nil {
 		t.Fatal("a malformed token fetched successfully")
 	}
 	r.idp.SetOffline(true)
@@ -1577,7 +1602,7 @@ func runFederationLifecycle(t *testing.T, db *store.DB) {
 	}
 	// Refused by the restore predicate, and on the way there it records the
 	// tolerated refresh failure.
-	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), ""); err == nil {
+	if _, err := r.del.Fetch(t.Context(), token, scopeEnv(orgA, prjA1, envA1), "", service.FetchOptions{}); err == nil {
 		t.Fatal("a token predating re-activation fetched successfully")
 	}
 	r.idp.SetOffline(false)

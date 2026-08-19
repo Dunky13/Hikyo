@@ -55,6 +55,7 @@ jobs:
               fuzz: true,
               generated: true,
               headline_guarantee: true,
+              k8s_e2e: true,
               lint: true,
               race: true,
               release_snapshot: true,
@@ -160,12 +161,8 @@ jobs:
           fi
           grep -Fx "  repository: ghcr.io/${module_owner}/hikyo" chart/hikyo/values.yaml
           grep -Fx "  digest: sha256:RELEASE_IMAGE_DIGEST" chart/hikyo/values.yaml
-          helm lint chart/hikyo --set database.existingSecret=fixture \
-            --set 'network.trustedProxyCIDRs={10.42.0.0/16}'
-          helm template fixture chart/hikyo --set database.existingSecret=fixture \
-            --set 'network.trustedProxyCIDRs={10.42.0.0/16}' >/dev/null
-          ! helm template fixture chart/hikyo \
-            --set database.existingSecret=fixture >/dev/null 2>&1
+      - name: Chart renders across modes with hardening and refusal assertions
+        run: ./scripts/ci/check-chart.sh
       - name: Release trust and refusal fixtures
         run: ./scripts/release/test-fixtures.sh
       - name: Manifest binding fixture
@@ -178,6 +175,8 @@ jobs:
         run: ./scripts/ci/check-required-jobs_test.sh
       - name: Changed-path classifier fixture
         run: ./scripts/ci/classify-changed-paths_test.sh
+      - name: Chart check fixture
+        run: ./scripts/ci/check-chart_test.sh
       - name: Trusted CI scripts fixture
         run: ./scripts/ci/check-trusted-ci-scripts_test.sh
       - name: Immutable-tag probe fixture
@@ -282,6 +281,12 @@ jobs:
           git diff --exit-code -- internal/store/sqlitegen internal/store/pggen api/apigen
           # git diff misses newly generated untracked files
           test -z "$(git status --porcelain --untracked-files=all -- internal/store/sqlitegen internal/store/pggen api/apigen)"
+      - name: Operator CRDs and deepcopy are fresh
+        run: |
+          ./scripts/gen-crds.sh
+          git diff --exit-code -- chart/hikyo/crds internal/operator/api
+          # git diff misses newly generated untracked files
+          test -z "$(git status --porcelain --untracked-files=all -- chart/hikyo/crds internal/operator/api)"
       - name: Save generated-code Go cache
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -582,6 +587,65 @@ jobs:
           path: ~/go/pkg/mod
           key: ${{ steps.go-module-cache.outputs.cache-primary-key }}
 
+  # The operator's kind end-to-end suite (#64, mvp-boundary M3): the Hikyo
+  # server runs in-process over TLS, the operator reconciler in-process against a
+  # real kind API server, and the CRDs are applied from chart/hikyo/crds. The
+  # runner script (scripts/ci/k8s-e2e.sh) owns the cluster lifecycle — it creates
+  # a fresh `hikyo-e2e` cluster and deletes it in a trap.
+  k8s-e2e:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).k8s_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore k8s-e2e Go cache
+        id: k8s-e2e-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-k8s-e2e-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-k8s-e2e-${{ runner.os }}-
+      # A pinned, checksummed binary download (the shellcheck pattern above):
+      # the repository's Actions allowlist is deliberately narrow, and kind is
+      # a single static binary — no third-party action needed.
+      - name: Install kind (pinned archive)
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+        run: |
+          binary="$RUNNER_TEMP/kind"
+          curl --fail --location --proto '=https' --tlsv1.2 --silent --show-error \
+            --retry 4 --retry-delay 2 --retry-all-errors \
+            "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64" \
+            --output "$binary"
+          printf '%s  %s\n' "$KIND_SHA256" "$binary" | sha256sum --check --strict
+          chmod +x "$binary"
+          mv "$binary" /usr/local/bin/kind
+          kind version
+      - name: Operator kind e2e
+        run: ./scripts/ci/k8s-e2e.sh
+      - name: Save k8s-e2e Go cache
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.k8s-e2e-go-cache.outputs.cache-primary-key }}
+
   # Race detector as its own context: a concurrent server with transaction
   # retry and a single-writer SQLite pool gets its data races found here, not
   # in production. The probe-based isolation E2E suite exceeds the per-package
@@ -784,6 +848,7 @@ jobs:
       - fuzz
       - generated
       - headline-guarantee
+      - k8s-e2e
       - lint
       - race
       - release-snapshot

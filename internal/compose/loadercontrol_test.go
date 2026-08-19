@@ -2,36 +2,12 @@ package compose
 
 import (
 	"reflect"
-	"sort"
 	"testing"
 )
 
-// loaderControlPinned is the ADR's baseline verbatim. Shrinking the production
-// list (loaderControlExact + prefixes) fails this test — #25 may extend, not
-// silently shrink.
-var loaderControlPinnedExact = []string{
-	"PATH", "IFS", "ENV", "BASH_ENV", "SHELLOPTS", "NODE_OPTIONS",
-	"PYTHONSTARTUP", "PYTHONPATH", "PERL5OPT", "PERL5LIB", "RUBYOPT", "RUBYLIB",
-	"JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH",
-	"SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE",
-	"NODE_EXTRA_CA_CERTS",
-}
-
-func TestLoaderControlBaselinePinned(t *testing.T) {
-	got := make([]string, 0, len(loaderControlExact))
-	for k := range loaderControlExact {
-		got = append(got, k)
-	}
-	sort.Strings(got)
-	want := append([]string(nil), loaderControlPinnedExact...)
-	sort.Strings(want)
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("exact baseline drifted.\n got: %v\nwant: %v", got, want)
-	}
-	if !reflect.DeepEqual(loaderControlPrefixes, []string{"LD_", "GIT_"}) {
-		t.Errorf("prefix baseline drifted: %v", loaderControlPrefixes)
-	}
-}
+// The baseline is pinned verbatim in its single home, internal/delivery
+// (TestLoaderControlBaselinePinned there). These tests cover the compose-facing
+// re-export and the refusal helper that live in this package.
 
 func TestIsLoaderControl(t *testing.T) {
 	cases := map[string]bool{

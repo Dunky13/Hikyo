@@ -30,11 +30,20 @@ import (
 // stubDelivery answers a fixed projection, so the assertions are about the wire
 // rather than about the datastore.
 type stubDelivery struct {
-	cursor string
-	err    error
+	cursor              string
+	credentialExpiresAt time.Time
+	err                 error
+	// got records the options the transport passed through, so a wire test can
+	// assert the projection and acknowledgement query params reached the service
+	// unmangled. It is a pointer because the stub is handed to the server by
+	// value; the pointee is shared with the test.
+	got *service.FetchOptions
 }
 
-func (s stubDelivery) FetchMode(_ context.Context, presented string, scope domain.Scope, cursor string, _ bool) (service.FetchResult, error) {
+func (s stubDelivery) Fetch(_ context.Context, presented string, scope domain.Scope, cursor string, opts service.FetchOptions) (service.FetchResult, error) {
+	if s.got != nil {
+		*s.got = opts
+	}
 	if s.err != nil {
 		return service.FetchResult{}, s.err
 	}
@@ -49,12 +58,16 @@ func (s stubDelivery) FetchMode(_ context.Context, presented string, scope domai
 			CredentialID: "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
 			IssuedAt:     time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC()}, nil
 	}
+	// A delivered value carries plaintext; a presence-only secret carries none,
+	// so the render half is exercised on both a non-nil and a nil `value`.
+	delivered := "postgres://render-test"
 	return service.FetchResult{
 		Cursor: s.cursor, ChangeToken: "v1:token", SchemaRevision: 7,
-		CredentialID: "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
+		CredentialID:        "mcr_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f16",
+		CredentialExpiresAt: s.credentialExpiresAt,
 		Keys: []service.DeliveredKey{
-			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17", Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceRequired, Value: stringPtr("postgres://db")},
-			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18", Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceOptional},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f17", Name: "DATABASE_URL", Classification: "config", Presence: delivery.PresenceSet, Value: &delivered},
+			{KeyID: "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18", Name: "DATABASE_PASSWORD", Classification: "secret", Presence: delivery.PresenceSet},
 		},
 		IssuedAt: time.Unix(1_800_000_000, 0).UTC(), SnapshotExpiresAt: time.Unix(1_800_604_800, 0).UTC(),
 	}, nil
@@ -69,8 +82,6 @@ func (s stubDelivery) ReconcileOfflineRecords(_ context.Context, presented strin
 	}
 	return service.ReconcileResult{Accepted: len(records)}, nil
 }
-
-func stringPtr(value string) *string { return &value }
 
 type stubFederation struct{ err error }
 
@@ -150,7 +161,7 @@ func TestDeliveryRouteRendersBothDispositions(t *testing.T) {
 		full.Keys[1].KeyId != "key_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f18" {
 		t.Fatalf("key ids rendered %+v", full.Keys)
 	}
-	if full.Keys[0].Value == nil || *full.Keys[0].Value != "postgres://db" || full.Keys[1].Value != nil {
+	if full.Keys[0].Value == nil || *full.Keys[0].Value != "postgres://render-test" || full.Keys[1].Value != nil {
 		t.Fatalf("value projection rendered %+v", full.Keys)
 	}
 	if full.SnapshotExpiresAt.Sub(full.IssuedAt) != delivery.SnapshotMaxAge {
@@ -199,6 +210,128 @@ func TestOfflineRecordReconciliationRoute(t *testing.T) {
 	if result.Accepted != 1 || result.Duplicates != 0 {
 		t.Fatalf("offline reconciliation rendered %+v", result)
 	}
+}
+
+// TestDeliveryRouteCarriesTheProjectionAndValue pins the new fetch surface at
+// the wire: the `projection` and `acknowledged_keys` query params reach the
+// service unmangled, a delivered value renders as the optional `value` member
+// while a presence-only key omits it, and a finite `credential_expires_at`
+// renders while a zero one stays absent.
+func TestDeliveryRouteCarriesTheProjectionAndValue(t *testing.T) {
+	var got service.FetchOptions
+	expires := time.Unix(1_820_000_000, 0).UTC()
+	srv := federationServer(t, stubFederation{}, stubDelivery{
+		cursor: "v1:cursor", credentialExpiresAt: expires, got: &got,
+	})
+
+	resp, payload := call(t, srv, http.MethodGet,
+		deliveryPath+"?projection=config-only&acknowledged_keys=PATH,LD_PRELOAD", "hik_1_wl_abc", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fetch -> %d: %s", resp.StatusCode, payload)
+	}
+	// The authorized term and the acknowledgement reached the service verbatim.
+	if got.Projection != delivery.ModeConfigOnly {
+		t.Errorf("service saw projection %q, want config-only", got.Projection)
+	}
+	if len(got.AcknowledgedKeys) != 2 || got.AcknowledgedKeys[0] != "PATH" || got.AcknowledgedKeys[1] != "LD_PRELOAD" {
+		t.Errorf("service saw acknowledged_keys %v, want [PATH LD_PRELOAD] in order", got.AcknowledgedKeys)
+	}
+
+	var full apigen.DeliveryResponse
+	if err := json.Unmarshal(payload, &full); err != nil {
+		t.Fatal(err)
+	}
+	// The delivered value renders; the presence-only secret omits `value`.
+	byName := map[string]apigen.DeliveredKey{}
+	for _, k := range full.Keys {
+		byName[k.Name] = k
+	}
+	if v := byName["DATABASE_URL"].Value; v == nil || *v != "postgres://render-test" {
+		t.Errorf("DATABASE_URL value = %v, want the delivered plaintext", v)
+	}
+	if byName["DATABASE_PASSWORD"].Value != nil {
+		t.Error("a presence-only secret rendered a value; it must omit the member")
+	}
+	if full.CredentialExpiresAt == nil || !full.CredentialExpiresAt.Equal(expires) {
+		t.Errorf("credential_expires_at = %v, want %v", full.CredentialExpiresAt, expires)
+	}
+	// The generated pointer types cannot tell an ABSENT member from a JSON
+	// `null` — both unmarshal to a nil pointer — but the contract distinguishes
+	// them: §0.1 requires presence-only to mean the `value` member is ABSENT,
+	// never null, and an indefinite credential to OMIT `credential_expires_at`.
+	// So inspect the raw bytes: reject the member being present at all on the
+	// presence-only secret, and require it on the delivered value and the finite
+	// credential.
+	top, rawKeys := rawDeliveryMembers(t, payload)
+	if _, present := rawKeys["DATABASE_URL"]["value"]; !present {
+		t.Error("the delivered config key omitted its `value` member on the wire")
+	}
+	if _, present := rawKeys["DATABASE_PASSWORD"]["value"]; present {
+		t.Error("the presence-only secret carried a `value` member on the wire; absence means absent, never null")
+	}
+	if _, present := top["credential_expires_at"]; !present {
+		t.Error("a finite credential omitted credential_expires_at on the wire")
+	}
+
+	// A default (cursor-only) request carries no projection or acknowledgement,
+	// and an indefinite credential (zero expiry) renders no member. A fresh
+	// server whose stub returns the zero expiry drives the absence.
+	var gotDefault service.FetchOptions
+	indef := federationServer(t, stubFederation{}, stubDelivery{cursor: "v1:cursor", got: &gotDefault})
+	resp, payload = call(t, indef, http.MethodGet, deliveryPath, "hik_1_wl_abc", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("default fetch -> %d: %s", resp.StatusCode, payload)
+	}
+	// oapi fills the spec default, so a request omitting `projection` reaches
+	// the service as `full` (the empty mode normalizes to the same thing), and
+	// an omitted acknowledgement carries no keys.
+	if m := delivery.NormalizeMode(gotDefault.Projection); m != delivery.ModeFull {
+		t.Errorf("default projection reached the service as %q, want full", gotDefault.Projection)
+	}
+	if len(gotDefault.AcknowledgedKeys) != 0 {
+		t.Errorf("default request carried acknowledged_keys %v, want none", gotDefault.AcknowledgedKeys)
+	}
+	var dflt apigen.DeliveryResponse
+	if err := json.Unmarshal(payload, &dflt); err != nil {
+		t.Fatal(err)
+	}
+	if dflt.CredentialExpiresAt != nil {
+		t.Errorf("indefinite credential rendered credential_expires_at = %v, want absent", dflt.CredentialExpiresAt)
+	}
+	// Absent, not null — inspected on the raw bytes, because the pointer type
+	// cannot tell the two apart and the contract requires absence.
+	topDflt, _ := rawDeliveryMembers(t, payload)
+	if _, present := topDflt["credential_expires_at"]; present {
+		t.Error("an indefinite credential carried a credential_expires_at member on the wire; it must be absent")
+	}
+}
+
+// rawDeliveryMembers re-parses a delivery response preserving JSON member
+// PRESENCE, which the generated pointer types erase: an absent `value` and a
+// `value: null` both unmarshal to a nil *string, yet the contract keeps them
+// distinct — presence-only and indefinite mean the member is ABSENT. The wire
+// test has to see the bytes to assert that. It returns the top-level members and
+// the `keys` array indexed by name, each as a raw member set.
+func rawDeliveryMembers(t *testing.T, payload []byte) (top map[string]json.RawMessage, keysByName map[string]map[string]json.RawMessage) {
+	t.Helper()
+	if err := json.Unmarshal(payload, &top); err != nil {
+		t.Fatal(err)
+	}
+	keysByName = map[string]map[string]json.RawMessage{}
+	if rawKeys, ok := top["keys"]; ok {
+		var keys []map[string]json.RawMessage
+		if err := json.Unmarshal(rawKeys, &keys); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range keys {
+			var name string
+			if err := json.Unmarshal(k["name"], &name); err != nil {
+				t.Fatal(err)
+			}
+			keysByName[name] = k
+		}
+	}
+	return top, keysByName
 }
 
 // TestDeliveryRouteRefusesWithoutAnArtifact pins that the route reaches the

@@ -145,7 +145,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 		ack = cfg.Run.AcknowledgeLoaderControl
 	}
 
-	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, "")
+	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, ack, "")
 
 	var (
 		fetched map[string]string
@@ -389,7 +389,10 @@ func composeRenderCore(ctx context.Context, ios IO, st *State, flags commonFlags
 	}
 	present := eligibleCursor(stateDir, cfg, currentStamps, runtimeDir, token, env, configOnly)
 
-	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, present)
+	// The acknowledgement in force for this render is the UNION of every target's
+	// acknowledge_loader_control (#64 audit field). The server records it and
+	// filters nothing; per-target refusal below stays client-side authoritative.
+	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, renderAcknowledged(cfg), present)
 	if ferr != nil {
 		moved, err := composeRenderOffline(ctx, ios, lock, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, token, configOnly, ferr)
 		return moved, rp, err
@@ -425,25 +428,22 @@ func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, s
 		for _, id := range tgt.Keys {
 			k, ok := byID[id]
 			if !ok {
-				// The server delivers EVERY projected key id: config keys with a
-				// value, and — under --config-only — secrets as presence-only rows
-				// (R1-7). A configured id that is not delivered at all therefore
-				// means the target cannot render as declared → refuse in both modes
-				// (an omitted secret is no longer indistinguishable from a deleted
-				// key).
+				// Under --config-only the server OMITS secrets ENTIRELY — from the
+				// delivery and from the manifest (#64's locked rule) — so a
+				// projected-out secret is indistinguishable from a deleted config
+				// id. A configured id that is not delivered is therefore a SKIP in
+				// config-only, not a refusal; `compose doctor`'s drift checks are the
+				// compensating control that surface a genuinely deleted key. Under the
+				// FULL projection every configured id must be delivered, so an absent
+				// one refuses the target.
+				if configOnly {
+					continue
+				}
 				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server", name, id))
 				continue
 			}
 			if !configOnly && isUnrevealedSecret(k) {
 				refusals = append(refusals, fmt.Sprintf("%s: %s: secret has no value — %s", name, k.Name, machineRevealOptIn))
-				continue
-			}
-			// Under --config-only a secret is delivered PRESENCE-ONLY (no value):
-			// record its presence in the snapshot so the offline path can tell a
-			// projected-out secret from a deleted key (R1-7), but never render it
-			// into the env — no NAME=, no loader-control check, no rendered row.
-			if configOnly && k.Classification == apigen.KeyClassificationSecret {
-				srows = append(srows, compose.SnapshotRow{Name: k.Name, KeyID: k.KeyId, Classification: string(k.Classification), Value: ""})
 				continue
 			}
 			// A delivered row with no value is genuinely unset / projected-out:
@@ -562,18 +562,18 @@ func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock,
 		for _, id := range tgt.Keys {
 			r, ok := byID[id]
 			if !ok {
-				// Every configured target key id must be present in the sealed
-				// payload rows — the render-target set check at key granularity
-				// (R1-3). A config_only snapshot records secrets as presence-only
-				// rows (below), so an absent id means a genuinely deleted key →
-				// refuse by id in both modes (R1-7: no silent config_only skip).
+				// Under the FULL projection every configured target key id must be
+				// present in the sealed payload rows — the render-target set check at
+				// key granularity (R1-3), an absent id is a genuinely deleted key and
+				// refuses. Under --config-only the snapshot never held secrets (the
+				// server omits them entirely, #64's locked rule), so an absent id is
+				// indistinguishable from a projected-out secret and is a SKIP, not a
+				// refusal — `compose doctor`'s drift checks are the compensating
+				// control. This mirrors the live-fetch config-only skip.
+				if configOnly {
+					continue
+				}
 				refusals = append(refusals, fmt.Sprintf("%s: %s: not present in the last snapshot", name, id))
-				continue
-			}
-			// A presence-only secret row (config_only, no value) confers presence
-			// for the membership check above but never renders into the env
-			// (mirror of the live nil-value skip, R1-7).
-			if configOnly && r.Classification == string(apigen.KeyClassificationSecret) {
 				continue
 			}
 			rows = append(rows, compose.Row{Name: r.Name, Value: r.Value})
@@ -966,7 +966,7 @@ func doctorServerStamps(ctx context.Context, client *Client, cfg *compose.Config
 		return nil, []compose.Finding{{Severity: compose.SeverityError, Code: "never_rendered",
 			Message: "no eligible cursor: this box has not rendered, or its render is gone; run `hikyo compose render`"}}, false
 	}
-	resp, err := fetchDelivery(ctx, client, org, project, env, false, present)
+	resp, err := fetchDelivery(ctx, client, org, project, env, false, renderAcknowledged(cfg), present)
 	if err != nil {
 		sev := compose.SeverityError
 		msg := fmt.Sprintf("the server refused the agreement check: %v", err)
@@ -1137,10 +1137,41 @@ func deliveryPath(org, project, env string) string {
 		"/environments/" + url.PathEscape(env) + "/delivery"
 }
 
-func fetchDelivery(ctx context.Context, client *Client, org, project, env string, configOnly bool, cursor string) (apigen.DeliveryResponse, error) {
+// renderAcknowledged is the sorted, deduped union of every target's
+// acknowledge_loader_control — the loader-control acknowledgement in force for a
+// render, sent on the fetch so the server's audit record carries it (#64).
+func renderAcknowledged(cfg *compose.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	for _, name := range cfg.TargetNames() {
+		for _, k := range cfg.Targets[name].AcknowledgeLoaderControl {
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func fetchDelivery(ctx context.Context, client *Client, org, project, env string, configOnly bool, acknowledged []string, cursor string) (apigen.DeliveryResponse, error) {
 	q := url.Values{}
 	if configOnly {
-		q.Set("config_only", "true")
+		// The wire term is `projection=config-only` (#64's server param); the CLI
+		// flag stays `--config-only`. `full` is the default and is left implicit.
+		q.Set("projection", "config-only")
+	}
+	// acknowledged_keys is sent AS PRESENTED so the server records which
+	// loader-control acknowledgement was in force for this delivery (#64 audit
+	// field). The server records and otherwise ignores it — client-side refusal
+	// stays authoritative. style: form, explode: false ⇒ a single CSV member.
+	if len(acknowledged) > 0 {
+		q.Set("acknowledged_keys", strings.Join(acknowledged, ","))
 	}
 	if cursor != "" {
 		q.Set("cursor", cursor)

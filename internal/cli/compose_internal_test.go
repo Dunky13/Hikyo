@@ -580,9 +580,10 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// config_only projection: the config key carries a value, the secret is
-		// delivered PRESENCE-ONLY (presence set, no value — R1-7), and an unset
-		// config key carries no value.
+		// config-only projection: the config key carries a value, and an unset
+		// config key carries no value. The configured secret key_sec is OMITTED
+		// ENTIRELY by the server under config-only (#64's locked rule), so it is
+		// simply absent from the delivery — the target must SKIP it, not refuse.
 		_, _ = w.Write([]byte(deliveryJSON(t, apigen.DeliveryResponse{
 			ChangeToken: "v1:t1", CredentialId: "cred_1", Current: false, Cursor: "v1:c1",
 			IssuedAt: time.Now().UTC(), SnapshotExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour),
@@ -592,9 +593,6 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 				// A delivered config key with NO value (genuinely unset): must never
 				// be emitted as OPTIONAL= (finding 7).
 				{KeyId: "key_opt", Name: "OPTIONAL", Classification: apigen.KeyClassificationConfig, Presence: apigen.DeliveredKeyPresenceOptional, Value: nil},
-				// Secret delivered presence-only under config-only: confers presence
-				// for the membership check but never renders a value (R1-7).
-				{KeyId: "key_sec", Name: "DB_PASSWORD", Classification: apigen.KeyClassificationSecret, Presence: apigen.DeliveredKeyPresenceSet, Value: nil},
 			},
 		})))
 	}))
@@ -636,11 +634,14 @@ func TestComposeRenderConfigOnlyMixedTarget(t *testing.T) {
 	}
 }
 
-// TestComposeRenderConfigOnlyRefusesDeletedKey: under --config-only a configured
-// key id the server does not deliver AT ALL (not even presence-only) is a
-// genuinely deleted key and must be REFUSED by id — no longer indistinguishable
-// from a projected-out secret (R1-7).
-func TestComposeRenderConfigOnlyRefusesDeletedKey(t *testing.T) {
+// TestComposeRenderConfigOnlySkipsUndeliveredKey: under --config-only a
+// configured key id the server does not deliver AT ALL is a SKIP, not a refusal.
+// #64's config-only projection omits secrets ENTIRELY — from the delivery and
+// from the manifest — so a projected-out secret is indistinguishable from a
+// deleted config id; the render proceeds and `compose doctor`'s drift checks are
+// the compensating control. (The full-projection undelivered-id refusal is
+// covered separately.)
+func TestComposeRenderConfigOnlySkipsUndeliveredKey(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -648,7 +649,8 @@ func TestComposeRenderConfigOnlyRefusesDeletedKey(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// key_gone is configured but not delivered at all.
+		// key_gone is configured but not delivered at all (omitted secret or
+		// deleted config — the client cannot tell, and under config-only skips).
 		_, _ = w.Write([]byte(deliveryJSON(t, apigen.DeliveryResponse{
 			ChangeToken: "v1:t1", CredentialId: "cred_1", Current: false, Cursor: "v1:c1",
 			IssuedAt: time.Now().UTC(), SnapshotExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour),
@@ -670,11 +672,26 @@ func TestComposeRenderConfigOnlyRefusesDeletedKey(t *testing.T) {
 	_, stateDir := machineState(t, server.URL)
 	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
 	code := Run(t.Context(), ios, []string{"compose", "render", "--config-only"})
-	if code != ExitRefused {
-		t.Fatalf("deleted key id under config-only exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	if code != ExitOK {
+		t.Fatalf("undelivered key id under config-only exit=%d, want ExitOK (skip); stderr=%s", code, stderr)
 	}
-	if !strings.Contains(stderr.String(), "key_gone") || !strings.Contains(stderr.String(), "not delivered") {
-		t.Fatalf("refusal did not name the deleted key id: %s", stderr)
+	if !strings.Contains(stderr.String(), "rendered api generation v1-") {
+		t.Fatalf("config-only render did not render the surviving config key: %s", stderr)
+	}
+	// The rendered env holds the config value and nothing for the skipped id.
+	var envBody string
+	_ = filepath.WalkDir(runtimeDir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, "api.env") {
+			b, _ := os.ReadFile(p)
+			envBody = string(b)
+		}
+		return nil
+	})
+	if !strings.Contains(envBody, "DATABASE_URL=") {
+		t.Fatalf("config value not rendered: %q", envBody)
+	}
+	if strings.Contains(envBody, "key_gone") {
+		t.Fatalf("an undelivered key produced an env entry: %q", envBody)
 	}
 }
 
