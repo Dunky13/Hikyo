@@ -562,7 +562,7 @@ jobs:
   race:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).race }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
@@ -616,7 +616,7 @@ jobs:
   fuzz:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).fuzz }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
