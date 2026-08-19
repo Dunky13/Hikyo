@@ -18,7 +18,7 @@ env:
 
 jobs:
   build-unsigned-draft:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -136,8 +136,10 @@ jobs:
               -o "image-root/$arch/hikyo" ./cmd/hikyo
           done
 
-      - name: Setup Blacksmith Builder
-        uses: useblacksmith/setup-docker-builder@9309da73a81f66976a6d750572e221508b1e2682 # v1.12.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          version: v0.36.1
+          driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679fd # v4.6.0
         with:
           registry: ghcr.io
@@ -150,7 +152,7 @@ jobs:
         run: ./scripts/release/check-oci-unused.sh "$IMAGE:$VERSION"
       - name: Publish unsigned multi-arch image
         id: image
-        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2.3.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.release

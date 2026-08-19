@@ -22,7 +22,7 @@ jobs:
   # Keep the required workflow present on every PR, then select jobs inside it.
   # Unknown paths and changes to this classifier fail closed to the full plan.
   changes:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     outputs:
       plan: ${{ steps.classify.outputs.plan }}
     steps:
@@ -65,7 +65,7 @@ jobs:
   lint:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).lint }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +114,7 @@ jobs:
 
   dco:
     if: github.event_name != 'push'
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -134,7 +134,7 @@ jobs:
   supply-chain-checks:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).supply_chain_checks }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -191,7 +191,7 @@ jobs:
   release-snapshot:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).release_snapshot }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -246,7 +246,7 @@ jobs:
   generated:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).generated }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -292,7 +292,7 @@ jobs:
   client:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).client }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -323,7 +323,7 @@ jobs:
   docs:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).docs }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -358,7 +358,7 @@ jobs:
   web:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).web }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     strategy:
       # A flow that only passes at 1280px has not passed, so the viewport that
       # broke must be named — cancelling its sibling would hide half the answer.
@@ -462,7 +462,7 @@ jobs:
   test:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).test }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
@@ -548,7 +548,7 @@ jobs:
   headline-guarantee:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).headline_guarantee }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
@@ -612,7 +612,7 @@ jobs:
       - supply-chain-checks
       - test
       - web
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
