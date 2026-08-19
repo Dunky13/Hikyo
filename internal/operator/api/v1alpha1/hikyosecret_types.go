@@ -74,18 +74,33 @@ type AuthRef struct {
 	ServiceAccountRef *LocalObjectRef `json:"serviceAccountRef,omitempty"`
 }
 
+// ScopeID mirrors the server's OpenAPI `ID` grammar — a prefixed UUIDv7, the
+// exact shape the delivery path takes for org/project/environment. Enforcing it
+// at admission stops an invalid CR from entering endless failed reconciles
+// (finding: scope ids must mirror the server grammar).
+//
+// +kubebuilder:validation:MinLength=3
+// +kubebuilder:validation:MaxLength=64
+// +kubebuilder:validation:Pattern=`^[a-z]{2,8}_[0-9a-fA-F-]{36}$`
+type ScopeID string
+
+// KeyName mirrors the server's OpenAPI `KeyName` grammar (uppercase ASCII,
+// digits, underscore, no leading digit) — the canonical key-name grammar every
+// delivery surface assumes. Used for mapped source keys and acknowledged loader
+// keys so a comma-bearing or otherwise malformed name cannot change meaning when
+// serialized into `acknowledged_keys`.
+//
+// +kubebuilder:validation:MinLength=1
+// +kubebuilder:validation:MaxLength=128
+// +kubebuilder:validation:Pattern=`^[A-Z_][A-Z0-9_]*$`
+type KeyName string
+
 // Scope is the Hikyo (org, project, environment) selector, as the API takes
 // them in the request path.
 type Scope struct {
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=256
-	Org string `json:"org"`
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=256
-	Project string `json:"project"`
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=256
-	Environment string `json:"environment"`
+	Org         ScopeID `json:"org"`
+	Project     ScopeID `json:"project"`
+	Environment ScopeID `json:"environment"`
 }
 
 // Mapping is one delivered key routed to one managed-Secret data key. The source
@@ -94,9 +109,8 @@ type Scope struct {
 // the source set, which is why the mapping digest binds both (cursor eligibility
 // § 0.5).
 type Mapping struct {
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=256
-	Key string `json:"key"`
+	// Key is the Hikyo source key name, under the canonical KeyName grammar.
+	Key KeyName `json:"key"`
 
 	// SecretKey is the managed Secret's data key. Defaults to Key; the operator
 	// applies the default, not the API server, because it also validates it
@@ -114,7 +128,7 @@ func (m Mapping) EffectiveSecretKey() string {
 	if m.SecretKey != "" {
 		return m.SecretKey
 	}
-	return m.Key
+	return string(m.Key)
 }
 
 // Target is the managed Secret this CR owns. The name is immutable and ≤ 63
@@ -165,7 +179,7 @@ type HikyoSecretSpec struct {
 	//
 	// +optional
 	// +kubebuilder:validation:MaxItems=64
-	AcknowledgedLoaderKeys []string `json:"acknowledgedLoaderKeys,omitempty"`
+	AcknowledgedLoaderKeys []KeyName `json:"acknowledgedLoaderKeys,omitempty"`
 
 	// ResyncInterval is the success-path requeue cadence (ops-spec default 5m).
 	// A Go duration string; the operator parses it.

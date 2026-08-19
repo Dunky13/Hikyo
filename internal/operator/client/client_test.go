@@ -94,6 +94,65 @@ func TestFetchDecodesAndSendsParams(t *testing.T) {
 	}
 }
 
+func TestFetchInvalid200IsFetchFailed(t *testing.T) {
+	// A 200 that is not a valid delivery must be retained (FetchFailed), never
+	// treated as an authoritative empty delivery that drops managed data.
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"empty object missing required members", `{}`},
+		{"missing keys member", `{"current":false,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false}`},
+		{"current true but keys present", `{"current":true,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false,"keys":[{"name":"A","classification":"config","presence":"set","value":"v"}]}`},
+		{"key missing classification", `{"current":false,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false,"keys":[{"name":"A","presence":"set"}]}`},
+		{"invalid classification enum", `{"current":false,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false,"keys":[{"name":"A","classification":"public","presence":"set"}]}`},
+		{"invalid presence enum", `{"current":false,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false,"keys":[{"name":"A","classification":"config","presence":"maybe"}]}`},
+		{"malformed json", `{not-json`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, err := NewClient(srv.URL, caPEM(t, srv), "ua")
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			resp, outcome, err := c.Fetch(context.Background(), FetchRequest{Org: "o", Project: "p", Environment: "e", Bearer: "t"})
+			if outcome != OutcomeFetchFailed {
+				t.Fatalf("invalid 200 outcome = %v, want OutcomeFetchFailed", outcome)
+			}
+			if resp != nil || err == nil {
+				t.Fatalf("invalid 200 should return nil resp and an error; resp=%v err=%v", resp, err)
+			}
+		})
+	}
+}
+
+func TestFetchAlwaysSendsAcknowledgedKeys(t *testing.T) {
+	// acknowledged_keys is present on every fetch, including an empty value, so
+	// the server records the list each time.
+	var gotQuery string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"current":true,"cursor":"c","change_token":"t","schema_revision":1,"pin_expired":false,"keys":[]}`))
+	}))
+	defer srv.Close()
+	c, err := NewClient(srv.URL, caPEM(t, srv), "ua")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, _, err := c.Fetch(context.Background(), FetchRequest{Org: "o", Project: "p", Environment: "e", Bearer: "t"}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !strings.Contains(gotQuery, "acknowledged_keys=") {
+		t.Fatalf("query %q missing an (empty) acknowledged_keys param", gotQuery)
+	}
+}
+
 func TestFetchStatusMapping(t *testing.T) {
 	cases := []struct {
 		status int

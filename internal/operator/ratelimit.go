@@ -27,7 +27,16 @@ func (j *jitterLimiter) When(item reconcile.Request) time.Duration {
 	// ±20% jitter. rand/v2's default source is fine — this is retry spreading,
 	// not anything security-sensitive.
 	factor := 0.8 + 0.4*rand.Float64()
-	return time.Duration(float64(base) * factor)
+	d := time.Duration(float64(base) * factor)
+	// Clamp to the declared [1s, 5m] bounds AFTER jitter (§ 0.4/§ 0.9): jitter
+	// on the 1s floor / 5m ceiling would otherwise push the delay to ~800ms/~6m.
+	if d < backoffBase {
+		return backoffBase
+	}
+	if d > backoffMax {
+		return backoffMax
+	}
+	return d
 }
 
 func (j *jitterLimiter) Forget(item reconcile.Request)          { j.inner.Forget(item) }
@@ -45,6 +54,12 @@ func (r *HikyoSecretReconciler) instanceHandler() handler.EventHandler {
 		}
 		var list hikyov1.HikyoSecretList
 		if err := r.Client.List(ctx, &list); err != nil {
+			// Fail loud rather than silently: a swallowed list error means an
+			// instance change fails to enqueue dependent CRs with no diagnostic.
+			// The 5m periodic resync still recovers, but the miss is now visible.
+			if r.Log != nil {
+				r.Log.Error("instance handler: list HikyoSecrets failed", "instance", inst.Name, "err", err)
+			}
 			return nil
 		}
 		var reqs []reconcile.Request

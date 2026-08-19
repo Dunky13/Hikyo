@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -69,6 +69,7 @@ func Run(ctx context.Context, log *slog.Logger) error {
 
 	if err := (&HikyoSecretReconciler{
 		Client:          mgr.GetClient(),
+		Reader:          mgr.GetAPIReader(), // uncached: Secret/SA reads, post-write verify, stamp root
 		Scheme:          mgr.GetScheme(),
 		Recorder:        mgr.GetEventRecorderFor("hikyo-operator"),
 		Config:          cfg,
@@ -99,17 +100,15 @@ func NewManager(restCfg *rest.Config, cfg Config) (manager.Manager, error) {
 	sync := resyncPeriod
 	cacheOpts := cache.Options{SyncPeriod: &sync}
 	if len(cfg.Namespaces) > 0 {
-		// Restrict informers to the bound namespaces. Effective reach is still
-		// the intersection with RBAC (ADR § Scoping) — this only stops the
-		// operator watching namespaces it was never given.
+		// Restrict informers to EXACTLY the bound namespaces — the single-input
+		// authority model (ADR § Scoping). The operator's own namespace is
+		// deliberately NOT added: the stamp-root Secret (and every other Secret)
+		// is read through the uncached APIReader, so the watch set never needs to
+		// widen for it. Adding OwnNamespace here would expand every namespaced
+		// informer beyond HIKYO_OPERATOR_NAMESPACES.
 		cacheOpts.DefaultNamespaces = map[string]cache.Config{}
 		for _, ns := range cfg.Namespaces {
 			cacheOpts.DefaultNamespaces[ns] = cache.Config{}
-		}
-		// The stamp-root Secret lives in the operator's own namespace, which may
-		// be outside the watch set; include it so the cache can serve it.
-		if _, ok := cacheOpts.DefaultNamespaces[cfg.OwnNamespace]; !ok {
-			cacheOpts.DefaultNamespaces[cfg.OwnNamespace] = cache.Config{}
 		}
 	}
 
@@ -138,10 +137,25 @@ func NewManager(restCfg *rest.Config, cfg Config) (manager.Manager, error) {
 // and the referenced workloads are Owns/Watches sources where cheap; the
 // periodic resync is the floor that catches everything else (§ 0.4 refresh).
 func (r *HikyoSecretReconciler) SetupWithManager(mgr manager.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	// No Owns(&Secret{}): the operator holds no list/watch on Secrets (§ 0.7),
+	// so it cannot run a Secret informer. A deleted/tampered managed Secret is
+	// caught instead by the cursor-eligibility check on each reconcile (which
+	// reads the Secret uncached and recomputes its stamp) plus the 5m periodic
+	// requeue — no cached Secret ever exists to leak values or to lag ownership.
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&hikyov1.HikyoSecret{}).
-		Owns(&corev1.Secret{}). // requeue the CR when its managed Secret changes
-		Watches(&hikyov1.HikyoInstance{}, r.instanceHandler()).
+		Watches(&hikyov1.HikyoInstance{}, r.instanceHandler())
+	if r.Config.TriggerRollouts {
+		// Watch opted-in workloads so a Rollout=False/Stalled state is observed
+		// from the workload controller's own status (§ 0.3), not only re-derived
+		// on the next resync. Mapped via the hikyo.dev/secrets annotation to the
+		// HikyoSecrets in that namespace whose target the workload names.
+		h := r.workloadHandler()
+		b = b.Watches(&appsv1.Deployment{}, h).
+			Watches(&appsv1.StatefulSet{}, h).
+			Watches(&appsv1.DaemonSet{}, h)
+	}
+	return b.
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 			RateLimiter:             jitteredExponential(),

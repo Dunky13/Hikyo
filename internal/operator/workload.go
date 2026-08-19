@@ -9,9 +9,48 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	hikyov1 "github.com/Hikyo-Org/hikyo/internal/operator/api/v1alpha1"
 )
+
+// workloadHandler maps a changed Deployment/StatefulSet/DaemonSet to the
+// HikyoSecrets in its namespace whose target it names via the hikyo.dev/secrets
+// opt-in annotation, so a rollout that stalls after a stamp patch is observed
+// from the workload controller's own status (§ 0.3) rather than only on resync.
+func (r *HikyoSecretReconciler) workloadHandler() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		list, ok := obj.GetAnnotations()[hikyov1.AnnotationWorkloadSecrets]
+		if !ok {
+			return nil
+		}
+		named := map[string]bool{}
+		for _, n := range strings.Split(list, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				named[n] = true
+			}
+		}
+		if len(named) == 0 {
+			return nil
+		}
+		var secrets hikyov1.HikyoSecretList
+		if err := r.Client.List(ctx, &secrets, client.InNamespace(obj.GetNamespace())); err != nil {
+			if r.Log != nil {
+				r.Log.Error("workload handler: list HikyoSecrets failed", "namespace", obj.GetNamespace(), "err", err)
+			}
+			return nil
+		}
+		var reqs []reconcile.Request
+		for i := range secrets.Items {
+			cr := &secrets.Items[i]
+			if named[cr.Spec.Target.Name] {
+				reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cr)})
+			}
+		}
+		return reqs
+	})
+}
 
 // patchWorkloads applies § 0.5 step 2: for each Deployment/StatefulSet/DaemonSet
 // in the CR's namespace whose hikyo.dev/secrets annotation names this target and
@@ -95,6 +134,56 @@ func (r *HikyoSecretReconciler) patchWorkloads(ctx context.Context, cr *hikyov1.
 		}
 	}
 
+	return stalled, nil
+}
+
+// observeRollout is the READ-ONLY rollout evaluation used on the `current` path
+// (§ 0.3/decision 8): for each opted-in workload already carrying this target's
+// stamp, report whether the workload controller's own status shows it
+// progressed. It NEVER patches — a current answer writes nothing. stamp is the
+// recorded status.stamp. Gated by TRIGGER_ROLLOUTS.
+func (r *HikyoSecretReconciler) observeRollout(ctx context.Context, cr *hikyov1.HikyoSecret, stamp string) ([]string, error) {
+	if !r.Config.TriggerRollouts || stamp == "" {
+		return nil, nil
+	}
+	annKey := hikyov1.StampAnnotationPrefix + cr.Spec.Target.Name
+	var stalled []string
+
+	deploys := &appsv1.DeploymentList{}
+	if err := r.List(ctx, deploys, client.InNamespace(cr.Namespace)); err != nil {
+		return nil, err
+	}
+	for i := range deploys.Items {
+		d := &deploys.Items[i]
+		if consumesTarget(d.Annotations, cr.Spec.Target.Name) &&
+			podAnnotation(d.Spec.Template.Annotations, annKey) == stamp && !deploymentProgressed(d) {
+			stalled = append(stalled, "Deployment/"+d.Name)
+		}
+	}
+
+	sts := &appsv1.StatefulSetList{}
+	if err := r.List(ctx, sts, client.InNamespace(cr.Namespace)); err != nil {
+		return nil, err
+	}
+	for i := range sts.Items {
+		s := &sts.Items[i]
+		if consumesTarget(s.Annotations, cr.Spec.Target.Name) &&
+			podAnnotation(s.Spec.Template.Annotations, annKey) == stamp && !statefulSetProgressed(s) {
+			stalled = append(stalled, "StatefulSet/"+s.Name)
+		}
+	}
+
+	ds := &appsv1.DaemonSetList{}
+	if err := r.List(ctx, ds, client.InNamespace(cr.Namespace)); err != nil {
+		return nil, err
+	}
+	for i := range ds.Items {
+		d := &ds.Items[i]
+		if consumesTarget(d.Annotations, cr.Spec.Target.Name) &&
+			podAnnotation(d.Spec.Template.Annotations, annKey) == stamp && !daemonSetProgressed(d) {
+			stalled = append(stalled, "DaemonSet/"+d.Name)
+		}
+	}
 	return stalled, nil
 }
 

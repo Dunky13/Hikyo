@@ -147,7 +147,10 @@ func newHarness(t *testing.T, interceptors interceptor.Funcs, objs ...client.Obj
 	rec := record.NewFakeRecorder(200)
 	minter := &stubMinter{token: "fed-token-abc"}
 	r := &HikyoSecretReconciler{
-		Client:   cl,
+		Client: cl,
+		// The fake client serves both cached and uncached reads; wiring it as the
+		// Reader mirrors production's mgr.GetAPIReader() so Secret/SA reads work.
+		Reader:   cl,
 		Scheme:   sch,
 		Recorder: rec,
 		Config:   Config{OwnNamespace: testOwnNS, TriggerRollouts: true},
@@ -236,7 +239,7 @@ func withMapping(pairs ...[2]string) crOpt {
 	return func(cr *hikyov1.HikyoSecret) {
 		cr.Spec.Mapping = nil
 		for _, p := range pairs {
-			cr.Spec.Mapping = append(cr.Spec.Mapping, hikyov1.Mapping{Key: p[0], SecretKey: p[1]})
+			cr.Spec.Mapping = append(cr.Spec.Mapping, hikyov1.Mapping{Key: hikyov1.KeyName(p[0]), SecretKey: p[1]})
 		}
 	}
 }
@@ -415,4 +418,55 @@ func stampAnnotation(d *appsv1.Deployment) string {
 		return ""
 	}
 	return d.Spec.Template.Annotations[hikyov1.StampAnnotationPrefix+testTarget]
+}
+
+// secretWrites counts Create/Update/Patch calls against the managed target
+// Secret, so a test can assert "no write at all" rather than inferring it from
+// final state (a metadata-only write or a failed attempt is invisible to a
+// state check).
+type secretWrites struct{ n int }
+
+func (w *secretWrites) interceptors() interceptor.Funcs {
+	hit := func(obj client.Object) {
+		if s, ok := obj.(*corev1.Secret); ok && s.Namespace == testNS && s.Name == testTarget {
+			w.n++
+		}
+	}
+	return interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			hit(obj)
+			return c.Create(ctx, obj, opts...)
+		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			hit(obj)
+			return c.Update(ctx, obj, opts...)
+		},
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			hit(obj)
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+	}
+}
+
+// statusFields captures the status object written on each SubResourceUpdate, so
+// write-ordering can require the cursor/binding/stamp/RV were all present on the
+// LAST status write rather than accepting any status update.
+type statusField struct {
+	cursor, binding, stamp, rv string
+}
+
+func recordStatusWrites(dst *[]statusField) interceptor.Funcs {
+	return interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if cr, ok := obj.(*hikyov1.HikyoSecret); ok {
+				*dst = append(*dst, statusField{
+					cursor:  cr.Status.Cursor,
+					binding: cr.Status.CursorBinding,
+					stamp:   cr.Status.Stamp,
+					rv:      cr.Status.ManagedSecretResourceVersion,
+				})
+			}
+			return c.Status().Update(ctx, obj, opts...)
+		},
+	}
 }

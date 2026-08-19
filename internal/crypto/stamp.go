@@ -66,6 +66,12 @@ type StampPair struct {
 // a Kubernetes UID is a hyphenated hex UUID and a Secret name obeys RFC 1123,
 // so neither component can contain the `|` separator.
 func StampKey(root []byte, instanceUID, crUID, secretName string) ([]byte, error) {
+	// A root that is not exactly 32 bytes is a missing or corrupted stamp-root
+	// Secret — never a silent shorter/empty key, which would make the derived
+	// stamp publicly reproducible and reopen the offline equality oracle (§ 0.2).
+	if len(root) != KeySize {
+		return nil, fmt.Errorf("crypto: stamp root is %d bytes, want %d", len(root), KeySize)
+	}
 	info := stampInfoLabel + "|" + instanceUID + "|" + crUID + "|" + secretName
 	key, err := hkdf.Key(sha256.New, root, nil, info, KeySize)
 	if err != nil {
@@ -83,11 +89,17 @@ func StampKey(root []byte, instanceUID, crUID, secretName string) ([]byte, error
 // The stamp is a PURE FUNCTION of the delivered content, which is what makes the
 // write path idempotent: a crash-and-redo full fetch delivering unchanged
 // content yields the same stamp and moves no workload (ADR § Write ordering).
-func Stamp(stampKey []byte, pairs []StampPair) string {
+func Stamp(stampKey []byte, pairs []StampPair) (string, error) {
+	// The key must be exactly a derived 32-byte key. An arbitrary or empty HMAC
+	// key would silently produce a stamp anyone can recompute (§ 0.2) — refuse
+	// loudly rather than emit a forgeable value.
+	if len(stampKey) != KeySize {
+		return "", fmt.Errorf("crypto: stamp key is %d bytes, want %d", len(stampKey), KeySize)
+	}
 	mac := hmac.New(sha256.New, stampKey)
 	mac.Write(canonicalStamp(pairs))
 	sum := mac.Sum(nil)
-	return StampVersion + ":" + hex.EncodeToString(sum[:16])
+	return StampVersion + ":" + hex.EncodeToString(sum[:16]), nil
 }
 
 // canonicalStamp renders the delivered pairs injectively: the version prefix,

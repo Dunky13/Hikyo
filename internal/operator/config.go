@@ -2,8 +2,14 @@ package operator
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// dns1123Label is the Kubernetes namespace-name grammar (RFC 1123 label). A
+// namespace that does not match cannot exist, so accepting one is a silent
+// misconfiguration that would surface only as a cache/RBAC failure later.
+var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // Version identifies the operator build in the fetch User-Agent
 // (`hikyo-operator/<version>`). Set from cmd/hikyo/main.go, mirroring app.Version
@@ -44,10 +50,23 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 
 	if ns := strings.TrimSpace(getenv("HIKYO_OPERATOR_NAMESPACES")); ns != "" {
+		seen := map[string]bool{}
 		for _, part := range strings.Split(ns, ",") {
-			if p := strings.TrimSpace(part); p != "" {
-				cfg.Namespaces = append(cfg.Namespaces, p)
+			p := strings.TrimSpace(part)
+			// Fail fast: an empty segment (a stray or trailing comma), an invalid
+			// namespace name, or a duplicate is a configuration mistake, never
+			// silently dropped — the watch set is the authority-derivation input.
+			if p == "" {
+				return Config{}, fmt.Errorf("HIKYO_OPERATOR_NAMESPACES: empty namespace segment in %q", ns)
 			}
+			if len(p) > 63 || !dns1123Label.MatchString(p) {
+				return Config{}, fmt.Errorf("HIKYO_OPERATOR_NAMESPACES: %q is not a valid Kubernetes namespace name", p)
+			}
+			if seen[p] {
+				return Config{}, fmt.Errorf("HIKYO_OPERATOR_NAMESPACES: duplicate namespace %q", p)
+			}
+			seen[p] = true
+			cfg.Namespaces = append(cfg.Namespaces, p)
 		}
 	}
 
