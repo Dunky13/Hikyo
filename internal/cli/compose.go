@@ -691,7 +691,7 @@ func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFla
 		RawComposeYAML: doctorRawCompose(ios, cfgDir),
 		ManagedStamps:  managed,
 		ConfigTargets:  cfg.Targets,
-		ExistingKeyIDs: doctorExistingKeyIDs(ctx, client, org, project),
+		ExistingKeyIDs: doctorExistingKeyIDs(ctx, client, org, project, cfg),
 		StateEntries:   doctorStateEntries(stateDir),
 		TokenFile:      doctorTokenFile(flags.TokenFile),
 
@@ -1204,14 +1204,22 @@ func doctorRawCompose(ios IO, cfgDir string) string {
 	return ""
 }
 
-func doctorExistingKeyIDs(ctx context.Context, client *Client, org, project string) map[string]bool {
+// doctorExistingKeyIDs reads the project key catalogue for the target_key_missing
+// check. A workload credential deliberately CANNOT enumerate the catalogue (it
+// reads values through delivery, not the catalogue), so a 404/403 there is not a
+// drift signal — it means the check is not answerable from this credential. In
+// that case the configured target key ids are treated as existing, making the
+// check a no-op rather than flagging every id as missing. When the catalogue IS
+// readable, the real set drives the check.
+func doctorExistingKeyIDs(ctx context.Context, client *Client, org, project string, cfg *compose.Config) map[string]bool {
 	var list apigen.KeyList
 	path := api.PathPrefix + "/orgs/" + url.PathEscape(org) + "/projects/" + url.PathEscape(project) + "/keys"
 	if err := client.Do(ctx, http.MethodGet, path, nil, &list); err != nil {
-		// Best-effort: an unreachable catalogue leaves the map empty, so
-		// target_key_missing does not fire on a transport blip; server agreement
-		// (server_unreachable) reports the reachability problem.
-		return nil
+		out := map[string]bool{}
+		for _, id := range allTargetKeyIDs(cfg) {
+			out[id] = true
+		}
+		return out
 	}
 	out := make(map[string]bool, len(list.Items))
 	for _, k := range list.Items {
