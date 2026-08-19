@@ -13,6 +13,26 @@ import { BASE_URL } from './e2e/fixtures/instance.ts';
  * assertion set needs `forced-colors` emulation and axe-core's colour
  * sampling, and Chromium is where both are reliable. Cross-browser rendering
  * is a different question from "is this surface accessible and on-token".
+ *
+ * ## Why `workers: 1`, and where the parallelism lives instead
+ *
+ * A run holds ONE administrator per instance, and three pieces of its state are
+ * strictly sequential: the TOTP ledger (a code is single-use per step, and the
+ * spent step travels between processes in a file), the passkey's signature
+ * counter (a counter that does not advance is how a CLONED authenticator is
+ * detected, so a replayed one disables the credential), and the shared session
+ * itself (a flow that changes grants re-mints it for everybody). Two workers in
+ * one process race all three, and each race surfaces as an `unauthenticated`
+ * several tests away from its cause.
+ *
+ * So the suite is parallelised across RUNNERS instead, one per project — see
+ * the `web` job's matrix in .github/workflows/ci.yml. Two runners share none of
+ * that state: each boots its own instances, seeds its own tenant and mints its
+ * own passkey. Both projects run every flow, so a per-project shard still
+ * executes every claim in the registry and the teardown closure check stays
+ * whole. Sharding any finer (`--shard`) splits the flows themselves and breaks
+ * that property; global teardown refuses it by name rather than failing as a
+ * pile of unexecuted claims.
  */
 export default defineConfig({
   testDir: './e2e/flows',
