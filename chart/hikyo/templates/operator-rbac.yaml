@@ -1,0 +1,208 @@
+{{- include "hikyo.operator.validate" . -}}
+{{- if .Values.operator.enabled }}
+{{- $operatorName := include "hikyo.operator.fullname" . -}}
+{{- $designatedNames := list -}}
+{{- range $_, $serviceAccounts := .Values.operator.designatedServiceAccounts -}}
+  {{- range $serviceAccounts -}}
+    {{- $designatedNames = append $designatedNames . -}}
+  {{- end -}}
+{{- end -}}
+{{- $designatedNames = sortAlpha (uniq $designatedNames) -}}
+{{- if empty .Values.operator.namespaces }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyoinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"]
+    verbs: ["get"]
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets/finalizers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Secret list/watch are required by the operator informer, not broader write intent.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- if .Values.operator.triggerRollouts }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "patch"]
+{{- end }}
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+{{- if $designatedNames }}
+  # ClusterRole resourceNames can express only the honest cross-namespace union.
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range $designatedNames }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyoinstances"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    resourceNames: ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $operatorName }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- range $namespace := .Values.operator.namespaces }}
+{{- $serviceAccounts := list }}
+{{- if hasKey $.Values.operator.designatedServiceAccounts $namespace }}
+  {{- $serviceAccounts = index $.Values.operator.designatedServiceAccounts $namespace }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: ["hikyo.dev"]
+    resources: ["hikyosecrets/finalizers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # Secret list/watch are required by the operator informer, not broader write intent.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- if $.Values.operator.triggerRollouts }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch", "patch"]
+{{- end }}
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+{{- if $serviceAccounts }}
+  # TokenRequest authority is omitted unless this namespace has pinned names.
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range $serviceAccounts }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}
+  namespace: {{ $namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ $.Release.Namespace | quote }}
+{{- end }}
+{{- end }}
+---
+# Leader election is namespace-local even when watched authority is cluster-wide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $operatorName }}-leader-election
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $operatorName }}-leader-election
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "hikyo.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $operatorName }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ $operatorName }}
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}
