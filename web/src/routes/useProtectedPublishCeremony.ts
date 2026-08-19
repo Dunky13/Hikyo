@@ -1,20 +1,31 @@
 import { useRef, useState } from 'react';
 
 import { fetchRevealWindow, type EnvRef } from '../api/values.ts';
-import type { CeremonyRequest } from './Ceremony.tsx';
+import type { CeremonyPurpose, CeremonyRequest } from './Ceremony.tsx';
 
 export type ProtectedPublishTarget = {
   readonly environmentId: string;
   readonly environmentName: string;
   readonly keys: CeremonyRequest['keys'];
+  /**
+   * What the human is TOLD they are authorising. `publish` by default, because
+   * that is what publish and copy-into-protected share. The history drawer
+   * (#59) passes `restore` and `pin`: the server gates both as reveals over an
+   * enumerated secret-key unit, so the sequencing and refusal handling here are
+   * exactly the ones those two need, and re-deriving them would be a second
+   * place for the "prompt or not" decision to drift.
+   */
+  readonly purpose?: CeremonyPurpose;
 };
 
 /**
- * Runs the #21 ceremony once per protected destination before one guarded act.
+ * Runs the #21 ceremony once per named target before one guarded act.
  *
  * Copy and publish intentionally share this controller: copying into a
  * protected destination is the same publish-into-protected decision, so both
  * use purpose `publish` and must not drift in sequencing or refusal handling.
+ * Restore staging and historical pinning (#59) join them for the same reason —
+ * one place decides whether a live sliding window already covers the act.
  */
 export function useProtectedPublishCeremony(refData: Omit<EnvRef, 'environment'>) {
   const [request, setRequest] = useState<CeremonyRequest | null>(null);
@@ -50,7 +61,7 @@ export function useProtectedPublishCeremony(refData: Omit<EnvRef, 'environment'>
         void run(targets.slice(1), onComplete, failureMessage);
       };
       setRequest({
-        purpose: 'publish',
+        purpose: target.purpose ?? 'publish',
         environmentId: target.environmentId,
         environmentName: target.environmentName,
         keys: target.keys,

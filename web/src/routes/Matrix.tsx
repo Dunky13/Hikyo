@@ -1,11 +1,13 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 
+import { historyHref } from '../api/history.ts';
 import {
   matrixPublishValidation,
   matrixMutationError,
   pendingConfigPreview,
+  restorePreviewWasAttached,
   useClearMatrixValue,
   useCopyMatrixConfig,
   useMatrixProject,
@@ -20,6 +22,8 @@ import {
   type EnvironmentList,
   type ValueCell,
 } from '../api/values.ts';
+import { HistoryDrawer } from './HistoryDrawer.tsx';
+import type { HistoryCurrentCell } from './history-state.ts';
 import {
   MatrixPublishSheet,
   type MatrixPendingEntry,
@@ -62,7 +66,7 @@ type DisplayRow =
  * cross-environment comparison survive here. Lineage is one gesture away in
  * the row editor as the API's actor, timestamp, and revision facts.
  */
-export function Matrix() {
+export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) {
   const params = useParams();
   const ref: MatrixRef = { org: params['org'] ?? '', project: params['project'] ?? '' };
   const matrix = useMatrixProject(ref);
@@ -83,6 +87,23 @@ export function Matrix() {
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const matrixScroll = useRef<HTMLDivElement>(null);
+  const historyOpener = useRef<HTMLAnchorElement>(null);
+  const [mobileLayout, setMobileLayout] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 800px)').matches,
+  );
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const query = window.matchMedia('(max-width: 800px)');
+    const update = () => setMobileLayout(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   const environmentSignature = environments.map((environment) => environment.id).join('/');
   useEffect(() => {
@@ -198,6 +219,7 @@ export function Matrix() {
   const visibleEnvironments = environments.filter((environment) =>
     visibleEnvironmentIds.includes(environment.id),
   );
+  const firstVisibleEnvironment = visibleEnvironments[0];
   const pendingByEnvironment = useMemo(() => {
     const pending = new Map<string, readonly MatrixPendingEntry[]>();
     environments.forEach((environment, index) => {
@@ -240,7 +262,52 @@ export function Matrix() {
   const protectedEnvironmentIds = environments.flatMap((environment, index) =>
     matrix.settings[index]?.data?.protected === true ? [environment.id] : [],
   );
-
+  const pendingCountByEnvironment = useMemo<ReadonlyMap<string, number>>(
+    () =>
+      new Map(
+        [...pendingByEnvironment.entries()].map(([environmentId, entries]) => [
+          environmentId,
+          entries.length,
+        ]),
+      ),
+    [pendingByEnvironment],
+  );
+  const pendingByOthersByEnvironment = useMemo<ReadonlyMap<string, number>>(() => {
+    const counts = new Map<string, number>();
+    environments.forEach((environment, index) => {
+      counts.set(
+        environment.id,
+        (matrix.signals[index]?.data?.cells ?? []).filter((cell) => cell.pending_by_others).length,
+      );
+    });
+    return counts;
+  }, [environments, matrix.signals]);
+  // The history drawer needs the CURRENT cell state to enumerate the ceremony
+  // unit a restore will need: the comparison opens current secret plaintext only
+  // where a set secret is being replaced.
+  const cellsByEnvironment = useMemo<ReadonlyMap<string, readonly HistoryCurrentCell[]>>(() => {
+    const cells = new Map<string, readonly HistoryCurrentCell[]>();
+    for (const environment of environments) {
+      cells.set(
+        environment.id,
+        keys.map((key) => ({
+          keyId: key.id,
+          classification: key.classification,
+          set: valuesByCell.get(cellID(key.id, environment.id))?.set === true,
+        })),
+      );
+    }
+    return cells;
+  }, [environments, keys, valuesByCell]);
+  const currentValuesByEnvironment = useMemo<
+    ReadonlyMap<string, readonly ValueCell[]>
+  >(() => {
+    const values = new Map<string, readonly ValueCell[]>();
+    environments.forEach((environment, index) => {
+      values.set(environment.id, matrix.values[index]?.data?.items ?? []);
+    });
+    return values;
+  }, [environments, matrix.values]);
   const loading =
     matrix.environments.isPending ||
     matrix.keys.isPending ||
@@ -349,9 +416,13 @@ export function Matrix() {
       : selection.environmentId === undefined
         ? environments[0]
         : environments.find((environment) => environment.id === selection.environmentId);
-
   return (
-    <section className="matrix" aria-labelledby="matrix-title">
+    <>
+    <section
+      className="matrix"
+      aria-labelledby="matrix-title"
+      inert={historyOpen && mobileLayout}
+    >
       <div className="matrix__head">
         <div>
           <h1 id="matrix-title">Environment matrix</h1>
@@ -400,7 +471,15 @@ export function Matrix() {
           problems={problems}
           protectedEnvironmentIds={protectedEnvironmentIds}
           busy={publish.isPending}
-          mutationError={publish.isError ? matrixMutationError(publish.error, 'publish') : null}
+          mutationError={
+            publish.isError
+              ? matrixMutationError(
+                  publish.error,
+                  'publish',
+                  restorePreviewWasAttached(publish.error),
+                )
+              : null
+          }
           onPublish={publishSelected}
         />
       ) : null}
@@ -501,9 +580,26 @@ export function Matrix() {
                 <thead>
                   <tr>
                     <th scope="col">Key</th>
-                    {visibleEnvironments.map((environment) => (
-                      <th scope="col" key={environment.id}>{environment.name}</th>
-                    ))}
+                    {visibleEnvironments.map((environment) => {
+                      const revision = revisionsByEnvironment.get(environment.id);
+                      return (
+                        <th scope="col" key={environment.id}>
+                          <span>{environment.name}</span>
+                          {revision === undefined ? null : (
+                            <Link
+                              className="btn matrix__history-link"
+                              data-history-environment={environment.id}
+                              to={historyHref({ ...ref, env: environment.id })}
+                              onClick={(event) => {
+                                historyOpener.current = event.currentTarget;
+                              }}
+                            >
+                              {`rev ${String(revision)} · history`}
+                            </Link>
+                          )}
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -569,15 +665,25 @@ export function Matrix() {
                         ref={rowVirtualizer.measureElement}
                       >
                         <th scope="row" title={key.name}>
-                          <button
-                            type="button"
+                          {/* The key NAME opens its history (revision-history it-1/6:
+                              "a key name click opens the same drawer filtered to
+                              that key"); any CELL opens the row editor. env-matrix 31
+                              wires nothing to the name, so the history lock is the only
+                              one that speaks. */}
+                          <Link
                             className="matrix__key mono"
-                            aria-label={`Edit ${key.name} across environments`}
-                            onClick={() => setSelection({ keyId: key.id })}
+                            aria-label={`History of ${key.name}`}
+                            to={historyHref({
+                              ...ref,
+                              ...(firstVisibleEnvironment === undefined
+                                ? {}
+                                : { env: firstVisibleEnvironment.id }),
+                              keyId: key.id,
+                            })}
                           >
                             {key.classification === 'secret' ? <span aria-hidden="true">🔒 </span> : null}
                             {key.name}
-                          </button>
+                          </Link>
                           <span className="matrix__required">{requiredLabel(key, environments)}</span>
                         </th>
                         {visibleEnvironments.map((environment) => {
@@ -695,7 +801,24 @@ export function Matrix() {
           }}
         />
       )}
+
     </section>
+
+      {historyOpen ? (
+        <HistoryDrawer
+          refData={ref}
+          environments={environments}
+          keys={keys}
+          currentRevisions={revisionsByEnvironment}
+          protectedEnvironmentIds={protectedEnvironmentIds}
+          cellsByEnvironment={cellsByEnvironment}
+          pendingByEnvironment={pendingCountByEnvironment}
+          pendingByOthersByEnvironment={pendingByOthersByEnvironment}
+          currentValuesByEnvironment={currentValuesByEnvironment}
+          openerRef={historyOpener}
+        />
+      ) : null}
+    </>
   );
 }
 

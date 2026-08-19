@@ -1411,9 +1411,11 @@ func TestAssuranceRefusalOnATenantRouteIsForbidden(t *testing.T) {
 
 const (
 	// testProjectID and testEnvID are declared with the hierarchy fixtures above.
-	testEnvID2     = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56"
-	cloneRoutePath = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/environments/clone"
-	copyRoutePath  = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/values/copy"
+	testEnvID2       = "env_0193f0b4-1f2a-7c31-9c1e-2a4b6d8e0f56"
+	cloneRoutePath   = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/environments/clone"
+	copyRoutePath    = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/values/copy"
+	declareRoutePath = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/values/declare"
+	setRoutePath     = "/orgs/" + testOrgID + "/projects/" + testProjectID + "/environments/" + testEnvID + "/values/API_SECRET"
 )
 
 // newValueServer builds a test server with injectable environment and value
@@ -1455,6 +1457,49 @@ func TestCloneAbortBodyCarriesTheStrandedKeys(t *testing.T) {
 	body := decodeError(t, payload)
 	if body.Error.Detail == nil || !strings.Contains(*body.Error.Detail, "REQUIRED_TOKEN") {
 		t.Fatalf("clone-abort 400 detail = %v, want it to name the stranded key REQUIRED_TOKEN", body.Error.Detail)
+	}
+}
+
+func TestInvalidSecretValueDetailReachesBothWriteRoutesWithoutInstanceData(t *testing.T) {
+	const (
+		plaintext = `{"tenant-leaf-9f4a":"DO-NOT-ECHO-secret-7c31"}`
+		fragment  = "tenant-leaf-9f4a"
+		detail    = `value for "API_SECRET" is invalid (json_schema/additionalProperties: value failed the declared JSON Schema at #/additionalProperties)`
+	)
+	srv := newValueServer(t, stubEnvs{}, stubValues{stubHierarchy{err: safeDetailErr{detail: detail}}})
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{
+			name:   "declare",
+			method: http.MethodPost,
+			path:   api.PathPrefix + declareRoutePath,
+			body:   map[string]any{"key": "API_SECRET", "environment_ids": []string{testEnvID}, "value": plaintext},
+		},
+		{
+			name:   "value write",
+			method: http.MethodPut,
+			path:   api.PathPrefix + setRoutePath,
+			body:   map[string]any{"value": plaintext},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, payload := call(t, srv, tc.method, tc.path, "hik_1_cli_x", tc.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400: %s", resp.StatusCode, payload)
+			}
+			got := decodeError(t, payload).Error.Detail
+			if got == nil || !strings.HasPrefix(*got, `value for "API_SECRET" is invalid (`) {
+				t.Fatalf("detail = %v, want named API_SECRET refusal", got)
+			}
+			if strings.Contains(*got, plaintext) || strings.Contains(*got, fragment) || strings.Contains(*got, "DO-NOT-ECHO-secret-7c31") {
+				t.Fatalf("secret validation detail leaked submitted instance data: %q", *got)
+			}
+		})
 	}
 }
 

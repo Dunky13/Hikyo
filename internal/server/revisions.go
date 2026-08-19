@@ -212,6 +212,24 @@ func wireChangedKeys(changes []service.ChangedKey) []apigen.ChangedKey {
 	return out
 }
 
+// wireRevision is one lineage row.
+//
+// `collected_policy` appears ONLY beside a collected payload: the column
+// carries a default while the payload is live, and emitting that would read as
+// "the policy that collected this revision" about a revision nothing collected.
+func wireRevision(rev service.RevisionView) apigen.Revision {
+	item := apigen.Revision{
+		Revision: rev.Revision, SchemaRevision: rev.SchemaRevision,
+		PublishedBy: rev.PublishedBy, PublishedAt: rev.PublishedAt,
+		ChangedKeys: wireChangedKeys(rev.ChangedKeys), PayloadPresent: rev.PayloadPresent,
+	}
+	if rev.CollectedPolicy != "" {
+		policy := rev.CollectedPolicy
+		item.CollectedPolicy = &policy
+	}
+	return item
+}
+
 func (a *API) ListRevisions(ctx context.Context, req apigen.ListRevisionsRequestObject) (apigen.ListRevisionsResponseObject, error) {
 	history, err := a.Revisions.History(ctx, service.Bearer(bearer(ctx)),
 		envScope(req.Org, req.Project, req.Environment))
@@ -220,11 +238,7 @@ func (a *API) ListRevisions(ctx context.Context, req apigen.ListRevisionsRequest
 	}
 	items := make([]apigen.Revision, 0, len(history))
 	for _, rev := range history {
-		items = append(items, apigen.Revision{
-			Revision: rev.Revision, SchemaRevision: rev.SchemaRevision,
-			PublishedBy: rev.PublishedBy, PublishedAt: rev.PublishedAt,
-			ChangedKeys: wireChangedKeys(rev.ChangedKeys),
-		})
+		items = append(items, wireRevision(rev))
 	}
 	return apigen.ListRevisions200JSONResponse(apigen.RevisionList{
 		Items: items, Count: len(items),

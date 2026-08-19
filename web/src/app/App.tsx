@@ -33,6 +33,10 @@ const ELEMENTS: Record<SurfaceId, ReactElement> = {
   remotes: <Remotes />,
   settings: <Sessions />,
   matrix: <Matrix />,
+  // The same surface with its history drawer open. The route table is the only
+  // place that knows the path, so the element reads the state as a prop rather
+  // than sniffing the location.
+  history: <Matrix historyOpen />,
   values: <Values />,
   'machine-access': <MachineAccess />,
   'cli-reauth': <CLIReauth />,

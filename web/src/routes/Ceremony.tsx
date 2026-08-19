@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 
 import {
   ceremonyRefusalText,
@@ -6,6 +6,7 @@ import {
   runTOTPCeremony,
   type RevealWindow,
 } from '../api/values.ts';
+import { useModalDialog } from './useModalDialog.ts';
 
 /**
  * The purpose-bound ceremony modal (#58, locked prototype #21 iteration 6,
@@ -49,13 +50,15 @@ import {
  * the server — the same route, the same audit surface — but they are not the
  * same sentence to a person, and the modal owes them the true one.
  */
-export type CeremonyPurpose = 'reveal' | 'clipboard' | 'copy' | 'publish';
+export type CeremonyPurpose = 'reveal' | 'clipboard' | 'copy' | 'publish' | 'restore' | 'pin';
 
 const PURPOSE_VERB: Record<CeremonyPurpose, string> = {
   reveal: 'reveal',
   clipboard: 'copy to clipboard',
   copy: 'copy',
   publish: 'publish into',
+  restore: 'restore an earlier revision of',
+  pin: 'pin a historical revision of',
 };
 
 /**
@@ -76,6 +79,14 @@ const SIGNED_OPERATION: Record<CeremonyPurpose, 'reveal' | 'copy' | 'publish'> =
   clipboard: 'reveal',
   copy: 'copy',
   publish: 'publish',
+  // Restore and pin both READ historical secret material: staging an earlier
+  // value decrypts it, and pinning a non-current revision routes it to a
+  // workload. The service gates both with `PurposeReveal` over the enumerated
+  // secret-key unit (`internal/service/{rollback,pins}.go`), so that is what the
+  // assertion has to commit to — while the modal still tells the human which of
+  // the two decisions they are actually taking.
+  restore: 'reveal',
+  pin: 'reveal',
 };
 
 export type CeremonyRequest = {
@@ -102,18 +113,8 @@ export function Ceremony({
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
   const first = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    // showModal, not the `open` attribute: only the former puts the element in
-    // the top layer, makes the rest of the document inert and traps focus.
-    const element = dialog.current;
-    if (element !== null && !element.open) {
-      element.showModal();
-    }
-    first.current?.focus();
-  }, []);
+  const dialog = useModalDialog(first);
 
   const attempt = async (run: () => Promise<void>) => {
     setBusy(true);

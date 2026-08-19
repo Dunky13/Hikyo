@@ -1,11 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { ApiError } from './client.ts';
 import {
   matrixPublishValidation,
+  matrixMutationError,
+  forgetRestorePreviews,
   parseMatrixEnvironmentSignals,
   parseMatrixPendingDrafts,
   pendingConfigPreview,
+  rememberRestorePreview,
+  restorePreviewFor,
   revisionAdvanced,
   signalsRequireValuesRefresh,
 } from './matrix.ts';
@@ -14,6 +18,48 @@ const envDev = 'env_01989abc-def0-7123-8123-123456789abc';
 const keyLog = 'key_01989abc-def0-7123-8123-123456789abc';
 const keyOther = 'key_01989abc-def0-7123-8123-123456789abd';
 const version = 'ver_01989abc-def0-7123-8123-123456789abc';
+const ref = { org: 'org', project: 'project' };
+
+beforeEach(() => {
+  forgetRestorePreviews(ref, [version, 'ver_second', 'ver_other']);
+});
+
+describe('restore preview lifecycle', () => {
+  it('matches exact sorted version sets without overwriting another restore', () => {
+    rememberRestorePreview(ref, [version, 'ver_second'], 'token-one');
+    rememberRestorePreview(ref, ['ver_other'], 'token-two');
+    expect(restorePreviewFor(ref, ['ver_second', version])).toEqual({ token: 'token-one' });
+    expect(restorePreviewFor(ref, ['ver_other'])).toEqual({ token: 'token-two' });
+  });
+
+  it('returns overlapping version ids for a partial selection and null for no overlap', () => {
+    rememberRestorePreview(ref, [version, 'ver_second'], 'token-one');
+    expect(restorePreviewFor(ref, [version, 'ver_other'])).toEqual({ conflict: [version] });
+    expect(restorePreviewFor(ref, ['ver_other'])).toBeNull();
+  });
+
+  it('keeps the client-side exact-selection refusal actionable', () => {
+    rememberRestorePreview(ref, [version, 'ver_second'], 'token-one');
+    const preview = restorePreviewFor(ref, [version, 'ver_other']);
+    expect(preview).toEqual({ conflict: [version] });
+  });
+
+  it('forgets a preview after its versions publish', () => {
+    rememberRestorePreview(ref, [version], 'token-one');
+    forgetRestorePreviews(ref, [version]);
+    expect(restorePreviewFor(ref, [version])).toBeNull();
+  });
+
+  it('names a detail-less 409 as stale only when a preview token was attached', () => {
+    const conflict = new ApiError(409, 'request failed with 409');
+    expect(matrixMutationError(conflict, 'publish', true)).toBe(
+      'Publish refused: the restore preview is stale or missing — stage the restore again from the history drawer.',
+    );
+    expect(matrixMutationError(conflict, 'publish', false)).toBe(
+      'Publish was refused. Fix the named matrix problems, then retry.',
+    );
+  });
+});
 
 describe('matrix signal boundary', () => {
   it('refuses a pending version without its operation', () => {
@@ -114,13 +160,13 @@ describe('pending draft preview boundary', () => {
       count: 1,
     });
     const byVersion = new Map(drafts.items.map((item) => [item.version_id, item]));
-    const signal = {
+    const signal: Parameters<typeof pendingConfigPreview>[0] = {
       key_id: keyLog,
       name: 'LOG_LEVEL',
-      classification: 'config' as const,
+      classification: 'config',
       pending_by_others: false,
       pending_version_id: version,
-      pending_operation: 'set' as const,
+      pending_operation: 'set',
     };
     expect(pendingConfigPreview(signal, byVersion)).toBe('debug');
     expect(pendingConfigPreview({ ...signal, pending_version_id: 'ver_other' }, byVersion)).toBeUndefined();

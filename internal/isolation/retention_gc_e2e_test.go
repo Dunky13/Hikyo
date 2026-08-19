@@ -209,6 +209,31 @@ func runRetentionGCC6(t *testing.T, db *store.DB) {
 	if refusal.Revision != 1 || refusal.Policy != collectedPolicy {
 		t.Fatalf("collected refusal = %+v, want revision 1 and collecting project policy", refusal)
 	}
+	// The collection bit is LINEAGE, so it has to survive on the read that
+	// still works. `Show` refuses a collected revision outright, which is why
+	// the history drawer (#59) can only gate its diff/restore/pin actions if
+	// `listRevisions` carries the bit and the stamped policy through.
+	history, err := revisions.History(t.Context(), actor, scopeEnv(orgA, prjA1, domain.EnvID("env_gc")))
+	if err != nil {
+		t.Fatalf("history after collection: %v", err)
+	}
+	if len(history) != 6 {
+		t.Fatalf("history entries = %d, want 6 (lineage outlives its payload)", len(history))
+	}
+	for _, entry := range history {
+		wantPresent := entry.Revision != 1 && entry.Revision != 3
+		if entry.PayloadPresent != wantPresent {
+			t.Errorf("r%d payload_present = %v, want %v", entry.Revision, entry.PayloadPresent, wantPresent)
+		}
+		wantPolicy := ""
+		if !wantPresent {
+			wantPolicy = collectedPolicy
+		}
+		if entry.CollectedPolicy != wantPolicy {
+			t.Errorf("r%d collected_policy = %q, want %q", entry.Revision, entry.CollectedPolicy, wantPolicy)
+		}
+	}
+
 	pins := &service.Pins{DB: db, Keyring: probeKeyring(t, db), Now: func() time.Time { return now }}
 	_, err = pins.Set(t.Context(), actor, scopeEnv(orgA, prjA1, domain.EnvID("env_gc")), service.SetPinRequest{
 		WorkloadPrincipalID: mchWork,

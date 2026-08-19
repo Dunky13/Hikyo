@@ -41,6 +41,7 @@ import {
   type ServiceAccount,
 } from '../api/identities.ts';
 import { runPasskeyCeremony, useEnvironments } from '../api/values.ts';
+import { useModalDialog } from './useModalDialog.ts';
 
 /**
  * The machine-access surface (#67, locked prototype #31 iteration 3).
@@ -754,24 +755,6 @@ function claimText(pin: ClaimPin): string {
     return String(pin.bool_value);
   }
   return 'unpinned';
-}
-
-/**
- * useModalDialog opens a native `<dialog>` with `showModal()`.
- *
- * The platform gives a real focus trap, an inert document behind it, Escape and
- * the top layer — every part of which a hand-rolled `role="dialog"` has to
- * reimplement, and the focus trap is the part everyone gets wrong.
- */
-function useModalDialog() {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const element = ref.current;
-    if (element !== null && !element.open) {
-      element.showModal();
-    }
-  }, []);
-  return ref;
 }
 
 /**

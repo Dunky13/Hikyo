@@ -9950,7 +9950,7 @@ components:
           type: integer
     Revision:
       type: object
-      required: [revision, schema_revision, published_by, published_at, changed_keys]
+      required: [revision, schema_revision, published_by, published_at, changed_keys, payload_present]
       additionalProperties: false
       properties:
         revision:
@@ -9968,6 +9968,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ChangedKey"
+        payload_present:
+          type: boolean
+          description: |
+            Whether this revision's payload still exists. Lineage is retained
+            forever; a payload collected by retention policy leaves the entry
+            in the history with this bit false, and diff, restore, pin and
+            reveal on it are refused loud rather than reconstructed.
+        collected_policy:
+          type: string
+          description: |
+            The retention policy stamped at collection, verbatim, and present
+            only when `payload_present` is false. It is what the named refusal
+            reports forever, so it is carried as an opaque string.
     RevisionDetail:
       type: object
       required: [revision, schema_revision, published_by, published_at, changed_keys, change_token, keys]

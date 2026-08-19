@@ -894,6 +894,7 @@ select {
   color: var(--tx);
   cursor: pointer;
   text-overflow: ellipsis;
+  text-decoration: none;
   white-space: nowrap;
 }
 
@@ -1212,6 +1213,7 @@ select {
 
   .matrix__key {
     min-height: var(--touch);
+    line-height: var(--touch);
   }
 
   .matrix__environment-picker input,
@@ -1881,4 +1883,403 @@ select {
 
 .form--inline {
   max-width: none;
+}
+
+/* --- Revision history drawer (#59) ---------------------------------------- */
+
+/*
+ * The locked prototype's list + detail panes, rendered OVER the matrix rather
+ * than instead of it: the matrix stays addressable behind the drawer, which is
+ * what makes "rev N · history" feel like opening a drawer rather than leaving
+ * the surface. Below the chrome's own 800px breakpoint the two panes become one
+ * — list, then detail, with a back affordance — because a split 440px drawer is
+ * neither pane.
+ */
+.history {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(640px, 100%);
+  padding: 16px;
+  border-left: 1px solid var(--line);
+  background: var(--bg-raise);
+  color: var(--tx);
+  overflow-y: auto;
+}
+
+.history__head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history__title h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.history__close {
+  margin-left: auto;
+}
+
+.history__current {
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--tx-dim);
+  font-size: 11px;
+}
+
+.history__protected {
+  padding: 2px 7px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-badge);
+  color: var(--danger);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.history__tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history__pending,
+.history__retention,
+.history__filter,
+.history__gate,
+.history__consumers,
+.history__pin-note,
+.history__empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  color: var(--tx-dim);
+  font-size: 12.5px;
+}
+
+.history__retention,
+.history__filter,
+.history__gate {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.history__badge {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-badge);
+  color: var(--tx);
+  font-size: 11px;
+}
+
+.history__settings-pointer {
+  color: var(--tx-dim);
+}
+
+.history__panes {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history__row {
+  justify-content: flex-start;
+  width: 100%;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 10px;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.history__row[aria-current='true'] {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--bg-raise), var(--accent) 12%);
+}
+
+.history__age {
+  margin-left: auto;
+  color: var(--tx-dim);
+  font-size: 11px;
+}
+
+.history__tag {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-badge);
+  color: var(--tx-dim);
+  font-size: 10.5px;
+}
+
+.history__tag--collected {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.history__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.history__detail h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.history__detail h4 {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--tx-dim);
+}
+
+.history__meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 12px;
+}
+
+.history__meta dt {
+  color: var(--tx-dim);
+}
+
+.history__meta dd {
+  margin: 0;
+}
+
+.history__changes,
+.history__pins,
+.history__impact,
+.history__consequences {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history__consequences {
+  padding-left: 18px;
+  list-style: disc;
+  color: var(--tx-dim);
+  font-size: 12.5px;
+}
+
+.history__changes li,
+.history__pins li,
+.history__impact li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+  font-size: 12.5px;
+}
+
+.history__change {
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+
+.history__kind,
+.history__presence,
+.history__expiry,
+.history__warn {
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-badge);
+  color: var(--tx-dim);
+  font-size: 11px;
+}
+
+.history__pin-gap {
+  flex-basis: 100%;
+  color: var(--tx-dim);
+  line-height: 1.4;
+}
+
+/* Never colour alone: `!`, `!!` and `!!!` ride in the text the tier renders. */
+.history__expiry--month,
+.history__expiry--week,
+.history__expiry--day,
+.history__expiry--expired,
+.history__warn {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.history__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.history__impact-values {
+  margin-left: auto;
+  color: var(--tx-dim);
+}
+
+.history__chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.history__chips .count {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--tx);
+  font-size: 11.5px;
+}
+
+.history-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.history__pin-what {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.history__pin-what h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.history__pin-what ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tx-dim);
+  font-size: 12.5px;
+}
+
+.history__field {
+  color: var(--tx-dim);
+  font-size: 13px;
+}
+
+.history__override {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history__comparison {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-container);
+  background: var(--bg);
+}
+
+.history__comparison h3,
+.history__comparison p {
+  margin: 0;
+}
+
+.history__comparison h3 {
+  font-size: 13px;
+}
+
+.history__comparison-lines {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tx-dim);
+  font-size: 12.5px;
+}
+
+.history-sheet input[type='date'] {
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--tx);
+}
+
+.history-sheet select {
+  justify-content: flex-start;
+}
+
+.btn--danger {
+  border-color: var(--danger);
+  background: color-mix(in oklch, var(--bg-raise), var(--danger) 16%);
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.matrix__history-link {
+  min-height: var(--touch);
+  padding: 0 10px;
+  font-size: 11.5px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+@media (min-width: 801px) {
+  /* Both panes are on screen, so the back affordance has nothing to go back to. */
+  .history__back {
+    display: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .history {
+    width: 100%;
+    border-left: none;
+  }
+
+  .history__panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .history:not(.history--detail) .history__detail,
+  .history--detail .history__list {
+    display: none;
+  }
 }

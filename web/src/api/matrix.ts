@@ -27,6 +27,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { z } from 'zod';
 
 import { ApiError, parsed } from './client.ts';
+import { callerSafeRefusal, pinsKey, revisionsKey } from './history.ts';
 import { useEnvironments, valuesKey, type EnvRef } from './values.ts';
 
 /**
@@ -43,6 +44,77 @@ export type MatrixRef = { readonly org: string; readonly project: string };
 export type MatrixKeyList = z.infer<typeof zKeyList>;
 export type MatrixEnvironmentSignals = z.infer<typeof zEnvironmentSignals>;
 export type MatrixSignalCell = MatrixEnvironmentSignals['cells'][number];
+
+type RestorePreview = { readonly versionIds: readonly string[]; readonly token: string };
+
+/**
+ * Restore previews intentionally live only for this page load, but outside any
+ * route component so matrix/history SPA navigation cannot drop them. A browser
+ * reload clears the store and requires the restore to be staged again.
+ */
+const restorePreviews = new Map<string, readonly RestorePreview[]>();
+const previewAttachedErrors = new WeakSet<Error>();
+
+class RestorePreviewSelectionError extends Error {}
+
+const restorePreviewKey = (ref: MatrixRef): string => `${ref.org}/${ref.project}`;
+const sortedVersionIds = (versionIds: readonly string[]): readonly string[] =>
+  [...new Set(versionIds)].sort((left, right) => left.localeCompare(right));
+
+function sameVersionSet(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((versionId, index) => versionId === right[index]);
+}
+
+export function rememberRestorePreview(
+  ref: MatrixRef,
+  versionIds: readonly string[],
+  token: string,
+): void {
+  const normalized = sortedVersionIds(versionIds);
+  if (normalized.length === 0) {
+    throw new Error('Cannot remember a restore preview without version ids.');
+  }
+  const key = restorePreviewKey(ref);
+  const existing = restorePreviews.get(key) ?? [];
+  restorePreviews.set(key, [
+    ...existing.filter((entry) => !sameVersionSet(entry.versionIds, normalized)),
+    { versionIds: normalized, token },
+  ]);
+}
+
+export function restorePreviewFor(
+  ref: MatrixRef,
+  selectedVersionIds: readonly string[],
+): { readonly token: string } | { readonly conflict: readonly string[] } | null {
+  const selected = sortedVersionIds(selectedVersionIds);
+  const remembered = restorePreviews.get(restorePreviewKey(ref)) ?? [];
+  const exact = remembered.find((entry) => sameVersionSet(entry.versionIds, selected));
+  if (exact !== undefined) {
+    return { token: exact.token };
+  }
+  const selectedSet = new Set(selected);
+  const overlaps = sortedVersionIds(
+    remembered.flatMap((entry) => entry.versionIds.filter((versionId) => selectedSet.has(versionId))),
+  );
+  return overlaps.length === 0 ? null : { conflict: overlaps };
+}
+
+export function forgetRestorePreviews(ref: MatrixRef, versionIds: readonly string[]): void {
+  const key = restorePreviewKey(ref);
+  const forgotten = new Set(versionIds);
+  const remaining = (restorePreviews.get(key) ?? []).filter(
+    (entry) => !entry.versionIds.some((versionId) => forgotten.has(versionId)),
+  );
+  if (remaining.length === 0) {
+    restorePreviews.delete(key);
+  } else {
+    restorePreviews.set(key, remaining);
+  }
+}
+
+export function restorePreviewWasAttached(error: Error): boolean {
+  return previewAttachedErrors.has(error);
+}
 
 const zMatrixEnvironmentSignals = zEnvironmentSignals.superRefine((signals, context) => {
   signals.cells.forEach((cell, index) => {
@@ -311,13 +383,32 @@ export function usePublishMatrix(ref: MatrixRef) {
       readonly environmentIds: readonly string[];
       readonly versionIds: readonly string[];
     }) => {
-      const result = await parsed(
-        publishPendingChanges({
-          path: { ...ref, environment: input.addressedEnvironment },
-          body: { version_ids: [...input.versionIds] },
-        }),
-        zPublishResult,
-      );
+      const preview = restorePreviewFor(ref, input.versionIds);
+      if (preview !== null && 'conflict' in preview) {
+        throw new RestorePreviewSelectionError(
+          'Restore drafts must be published exactly as previewed — deselect the other drafts or ' +
+          `stage the restore again. Overlapping version ids: ${preview.conflict.join(', ')}.`,
+        );
+      }
+      const previewToken = preview?.token;
+      let result: z.infer<typeof zPublishResult>;
+      try {
+        result = await parsed(
+          publishPendingChanges({
+            path: { ...ref, environment: input.addressedEnvironment },
+            body: {
+              version_ids: [...input.versionIds],
+              ...(previewToken === undefined ? {} : { preview_token: previewToken }),
+            },
+          }),
+          zPublishResult,
+        );
+      } catch (error) {
+        if (previewToken !== undefined && error instanceof Error) {
+          previewAttachedErrors.add(error);
+        }
+        throw error;
+      }
       const publishedEnvironmentIds = new Set(
         result.environments.map((environment) => environment.environment_id),
       );
@@ -331,12 +422,21 @@ export function usePublishMatrix(ref: MatrixRef) {
       }
       return result;
     },
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (result, input) => {
+      forgetRestorePreviews(ref, input.versionIds);
+      return Promise.all([
         queries.invalidateQueries({ queryKey: ['values', ref.org, ref.project] }),
         queries.invalidateQueries({ queryKey: ['matrix-signals', ref.org, ref.project] }),
         queries.invalidateQueries({ queryKey: ['matrix-pending', ref.org, ref.project] }),
-      ]),
+        ...result.environments.flatMap((published) => {
+          const env = { ...ref, environment: published.environment_id };
+          return [
+            queries.invalidateQueries({ queryKey: revisionsKey(env) }),
+            queries.invalidateQueries({ queryKey: pinsKey(env) }),
+          ];
+        }),
+      ]);
+    },
   });
 }
 
@@ -371,11 +471,34 @@ export function useCopyMatrixConfig(ref: MatrixRef) {
   });
 }
 
+/**
+ * matrixMutationError turns a refusal into something the human can act on.
+ *
+ * The server's caller-safe detail is quoted VERBATIM whenever there is one.
+ * Every refusal that names a key — a presence veto, a value that fails the
+ * current schema, a stale or missing restore preview token — carries it, and
+ * mvp-boundary C5 requires a schema-failing restore to block loud naming the
+ * keys. Paraphrasing would put a second vocabulary in front of the one the CLI
+ * and the audit trail use, and dropping it leaves a 400 with nothing to fix.
+ */
 export function matrixMutationError(
   error: Error,
   action: 'stage' | 'clear' | 'copy' | 'publish',
+  restorePreviewAttached = false,
 ): string {
+  if (error instanceof RestorePreviewSelectionError) {
+    return error.message;
+  }
+  if (action === 'publish' && restorePreviewAttached && error instanceof ApiError && error.status === 409) {
+    return 'Publish refused: the restore preview is stale or missing — stage the restore again from the history drawer.';
+  }
   if (error instanceof ApiError) {
+    const detailed = callerSafeRefusal(error, action === 'publish' ? 'Publish refused' : 'Refused');
+    if (detailed !== null) {
+      return action === 'publish'
+        ? `${detailed} Fix the named key in the matrix row editor, then publish again.`
+        : detailed;
+    }
     if (error.status === 403) {
       return action === 'publish'
         ? 'You do not have permission to publish the selected drafts.'

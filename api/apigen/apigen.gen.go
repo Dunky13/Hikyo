@@ -4087,7 +4087,18 @@ type RevealWindow struct {
 // Revision defines model for Revision.
 type Revision struct {
 	ChangedKeys []ChangedKey `json:"changed_keys"`
-	PublishedAt time.Time    `json:"published_at"`
+
+	// CollectedPolicy The retention policy stamped at collection, verbatim, and present
+	// only when `payload_present` is false. It is what the named refusal
+	// reports forever, so it is carried as an opaque string.
+	CollectedPolicy *string `json:"collected_policy,omitempty"`
+
+	// PayloadPresent Whether this revision's payload still exists. Lineage is retained
+	// forever; a payload collected by retention policy leaves the entry
+	// in the history with this bit false, and diff, restore, pin and
+	// reveal on it are refused loud rather than reconstructed.
+	PayloadPresent bool      `json:"payload_present"`
+	PublishedAt    time.Time `json:"published_at"`
 
 	// PublishedBy A prefixed UUIDv7, e.g. `org_0198…`.
 	PublishedBy    ID    `json:"published_by"`

@@ -30,6 +30,14 @@ type RevisionView struct {
 	PublishedBy    string
 	PublishedAt    time.Time
 	ChangedKeys    []ChangedKey
+	// PayloadPresent is the collection bit (#52/#53). Lineage outlives its
+	// payload, so a history entry says which of the two it still has -- and a
+	// surface that offers diff, restore or pin on a collected revision would be
+	// offering an act the service refuses. CollectedPolicy is the policy
+	// stamped at collection, empty while the payload is present; it is what the
+	// named refusal reports forever.
+	PayloadPresent  bool
+	CollectedPolicy string
 }
 
 // RevisionDetail is one revision, plus the change token derived for it under
@@ -126,7 +134,8 @@ func (s *Revisions) History(ctx context.Context, actor Actor, scope domain.Scope
 			out = append(out, RevisionView{
 				Revision: snapshot.Revision, SchemaRevision: snapshot.SchemaRevision,
 				PublishedBy: snapshot.PublishedBy, PublishedAt: snapshot.PublishedAt,
-				ChangedKeys: changedKeys(changes),
+				ChangedKeys:    changedKeys(changes),
+				PayloadPresent: snapshot.PayloadPresent, CollectedPolicy: collectedPolicy(snapshot),
 			})
 		}
 		return nil
@@ -202,7 +211,9 @@ func (s *Revisions) Show(ctx context.Context, actor Actor, scope domain.Scope, r
 			RevisionView: RevisionView{
 				Revision: snapshot.Revision, SchemaRevision: snapshot.SchemaRevision,
 				PublishedBy: snapshot.PublishedBy, PublishedAt: snapshot.PublishedAt,
-				ChangedKeys: changedKeys(changes),
+				ChangedKeys:     changedKeys(changes),
+				PayloadPresent:  snapshot.PayloadPresent,
+				CollectedPolicy: snapshot.CollectedPolicy,
 			},
 			ChangeToken: token,
 			Keys:        keys,
@@ -222,6 +233,16 @@ func readSnapshot(ctx context.Context, snapshots store.SnapshotReader, p authz.P
 		return snapshots.Latest(ctx, p)
 	}
 	return snapshots.AtRevision(ctx, p, revision)
+}
+
+// collectedPolicy reports the stamped policy only for a collected payload. A
+// live snapshot carries whatever the column defaulted to, and reporting that as
+// "the policy that collected this" would be a fact about nothing.
+func collectedPolicy(snapshot store.Snapshot) string {
+	if snapshot.PayloadPresent {
+		return ""
+	}
+	return snapshot.CollectedPolicy
 }
 
 func collectedRevisionError(snapshot store.Snapshot) error {

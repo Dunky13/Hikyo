@@ -108,13 +108,23 @@ describe('the execution half of closure', () => {
   const claims = FLOWS.flatMap((flow) => flow.surfaces.map((surface) => [flow.id, surface]));
 
   it('is satisfied when every claim ran', () => {
-    expect(unexecutedClaims(log(...claims.map(([f, s]) => `${f}\t${s}\tdark`)))).toEqual([]);
+    expect(
+      unexecutedClaims(
+        log(...claims.flatMap(([f, s]) => [`${f}\t${s}\tdark`, `${f}\t${s}\tlight`])),
+      ),
+    ).toEqual([]);
+  });
+
+  it('fails when every surface ran in only one theme', () => {
+    const problems = unexecutedClaims(log(...claims.map(([f, s]) => `${f}\t${s}\tdark`)));
+    expect(problems).toHaveLength(claims.length);
+    expect(problems.every((problem) => problem.includes('in light theme'))).toBe(true);
   });
 
   it('fails a surface that was claimed but never asserted', () => {
     const [first = ['', '']] = claims;
     const problems = unexecutedClaims(log(`${first[0]}\t${first[1]}\tdark`));
-    expect(problems).toHaveLength(claims.length - 1);
+    expect(problems).toHaveLength(claims.length * 2 - 1);
     for (const [, surface] of claims.slice(1)) {
       expect(problems.join(' ')).toContain(
         `claims surface "${surface}" but the pinned assertion set never ran`,
@@ -123,7 +133,7 @@ describe('the execution half of closure', () => {
   });
 
   it('fails everything when nothing ran at all', () => {
-    expect(unexecutedClaims('')).toHaveLength(claims.length);
+    expect(unexecutedClaims('')).toHaveLength(claims.length * 2);
   });
 
   it('does not accept another flow\'s execution as this one\'s', () => {
@@ -131,6 +141,6 @@ describe('the execution half of closure', () => {
     const problems = unexecutedClaims(log('shell\tlogin\tdark'), [
       { id: 'login', spec: 'flows/login.spec.ts', surfaces: ['login'] },
     ]);
-    expect(problems).toHaveLength(1);
+    expect(problems).toHaveLength(2);
   });
 });
