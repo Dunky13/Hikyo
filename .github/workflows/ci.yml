@@ -428,6 +428,15 @@ jobs:
       - name: Build the binary with the embedded UI
         run: go build -tags ui ./...
 
+      # The release ships the `ui`-tagged binary, so the shipped shape gets
+      # its own govulncheck pass here; `test` scans the untagged build that
+      # every Go-only change exercises. One leg: the binary is identical.
+      - name: govulncheck (vulnerabilities reachable from the release-shaped binary)
+        if: matrix.project == 'desktop'
+        run: |
+          go build -tags ui -o "$RUNNER_TEMP/hikyo-ui" ./cmd/hikyo
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "$RUNNER_TEMP/hikyo-ui"
+
       - name: Go tests (transport, serving rules, browser session)
         # Restored GOCACHE may contain passing test results. Compile from cache,
         # but always execute this job's tests against its fresh build.
@@ -635,17 +644,35 @@ jobs:
         run: |
           set -o pipefail
           failed=0
-          packages=$(go list ./...)
-          while IFS= read -r pkg; do
-            while IFS= read -r target; do
-              [ -n "$target" ] || continue
-              echo "::group::$pkg $target"
-              if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
-                failed=1
-              fi
-              echo "::endgroup::"
-            done < <(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true)
-          done <<<"$packages"
+          ran=0
+          # One listing over the tree: `go test -list` prints each matching
+          # target on its own line, followed by an `ok <pkg>` line for the
+          # package it belongs to, so targets are attributed to the package
+          # that follows them. A listing failure fails the step.
+          listing=$(go test -list '^Fuzz' ./...)
+          pending=()
+          while IFS= read -r line; do
+            case "$line" in
+              Fuzz*) pending+=("$line") ;;
+              "ok "*)
+                pkg=$(printf '%s\n' "$line" | awk '{print $2}')
+                for target in "${pending[@]}"; do
+                  echo "::group::$pkg $target"
+                  if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
+                    failed=1
+                  fi
+                  echo "::endgroup::"
+                  ran=$((ran + 1))
+                done
+                pending=()
+                ;;
+            esac
+          done <<<"$listing"
+          if [ "$ran" -eq 0 ]; then
+            echo "fuzz: no Fuzz* target discovered — the pass cannot be vacuous" >&2
+            exit 1
+          fi
+          echo "fuzz: $ran targets ran"
           exit "$failed"
       - name: Save fuzz Go cache (main push only)
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'

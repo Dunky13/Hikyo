@@ -1,3 +1,7 @@
+# Static analysis on the two languages that ship: Go and the TypeScript of
+# the SPA, client and docs site. Push-to-main, weekly and manual only — this
+# repo never runs PR-controlled YAML with elevated permissions, and results
+# upload needs security-events: write.
 name: codeql
 
 on:
@@ -19,7 +23,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [go, javascript-typescript]
+        include:
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,9 +36,36 @@ jobs:
         uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: ${{ matrix.language }}
-      - name: Autobuild Go
+          build-mode: ${{ matrix.build-mode }}
+
+      # The Go extractor sees what the traced build compiles. The release
+      # ships the `ui`-tagged binary, whose embed file only compiles once the
+      # SPA exists, so build the SPA the way the `web` CI job does and then
+      # compile both tag shapes — untagged first, so the `!ui` file is
+      # extracted too.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.language == 'go'
-        uses: github/codeql-action/autobuild@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        if: matrix.language == 'go'
+        with:
+          node-version-file: .nvmrc
+      - name: Build the SPA (the `ui` build tag embeds it)
+        if: matrix.language == 'go'
+        working-directory: web
+        run: |
+          corepack enable
+          pnpm --dir ../clients/ts install --frozen-lockfile
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Build both tag shapes under the CodeQL tracer
+        if: matrix.language == 'go'
+        run: |
+          go build ./...
+          go build -tags ui ./...
+
       - name: Analyze
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
