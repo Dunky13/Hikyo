@@ -84,6 +84,40 @@ set_value() {
 	pending_versions+="${pending_versions:+,}$version"
 }
 
+trim_space() {
+	python3 - "$1" "$2" <<'PY'
+import pathlib
+import sys
+
+# Match Go strings.TrimSpace exactly: these are the Unicode White_Space runes
+# used by unicode.IsSpace. The demo compares STORED bytes (TrimSpace(input))
+# with DELIVERED bytes; leading/trailing-whitespace rows prove that trim is the
+# only transformation. allow_empty is enabled, so whitespace-only inputs would
+# deliberately be stored and delivered as empty values.
+spaces = {
+    *range(0x0009, 0x000E),
+    0x0020,
+    0x0085,
+    0x00A0,
+    0x1680,
+    *range(0x2000, 0x200B),
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x3000,
+}
+value = pathlib.Path(sys.argv[1]).read_bytes().decode("utf-8")
+start = 0
+end = len(value)
+while start < end and ord(value[start]) in spaces:
+    start += 1
+while end > start and ord(value[end - 1]) in spaces:
+    end -= 1
+pathlib.Path(sys.argv[2]).write_bytes(value[start:end].encode("utf-8"))
+PY
+}
+
 need curl
 need docker
 need expect
@@ -279,6 +313,7 @@ while IFS= read -r row; do
 	name=$(printf '%s' "$row" | jq -r '.name')
 	value_file="$work_dir/value-$name"
 	printf '%s' "$row" | jq -j '.value' >"$value_file"
+	trim_space "$value_file" "$work_dir/expected-$name"
 	key_id=$(printf '%s' "$keys_json" | jq -er --arg name "$name" 'first(.. | objects | select(.name? == $name) | .id)')
 	key_ids+="${key_ids:+, }$key_id"
 	set_value "$name" "$value_file"
@@ -349,7 +384,7 @@ docker compose --project-directory "$demo_dir" up --abort-on-container-exit >/de
 docker compose --project-directory "$demo_dir" logs --no-color app >"$work_dir/container.log"
 while IFS= read -r row; do
 	name=$(printf '%s' "$row" | jq -r '.name')
-	want=$(printf '%s' "$row" | jq -j '.value' | base64 | tr -d '\n')
+	want=$(base64 <"$work_dir/expected-$name" | tr -d '\n')
 	if ! grep -F "$name=$want" "$work_dir/container.log" >/dev/null; then
 		got=$(sed -n "s/^.*$name=//p" "$work_dir/container.log")
 		fail "container did not round-trip $name (want base64 $want, got ${got:-missing})"
@@ -382,6 +417,6 @@ docker compose --project-directory "$demo_dir" logs --no-color app >"$work_dir/s
 updated=$(printf '%s' 'hello after sync' | base64 | tr -d '\n')
 grep -F "GREETING=$updated" "$work_dir/sync.log" >/dev/null || fail 'sync did not restart app with the updated GREETING'
 
-printf 'compose demo passed: %s representable corpus values + GREETING round-tripped byte-exactly\n' "$(wc -l <"$representable" | tr -d ' ')"
+printf 'compose demo passed: %s stored values including GREETING delivered byte-exactly; surrounding whitespace proved trim-only transformation\n' "$(wc -l <"$representable" | tr -d ' ')"
 printf 'compose demo passed: embedded newline refused by name with exit 4 and no generation/stamp change\n'
 printf 'compose demo passed: doctor returned only allowed findings; sync moved the stamp and restarted app\n'

@@ -12,7 +12,14 @@ script performs the operator journey end to end:
 4. Run `hikyo context create demo --instance <url>`, then
    `hikyo compose render --project-directory install/compose/demo`.
 5. Run `docker compose up`; the container receives every target value and
-   prints its exact bytes as base64.
+   prints its exact stored bytes as base64.
+
+Hikyo applies Go `strings.TrimSpace` to every input before storing it. The demo
+therefore compares delivered bytes with `TrimSpace(input)`, not with the raw
+input. Its leading- and trailing-whitespace corpus entries prove that this trim
+is the only transformation; all remaining stored bytes are delivered exactly.
+Declarations use `allow_empty: true`, so an empty or whitespace-only input is
+stored and delivered as an empty value after trimming.
 
 The `${NAME:?message}` forms make Compose refuse an unset or empty generated
 runtime path or stamp instead of silently starting stale containers. The

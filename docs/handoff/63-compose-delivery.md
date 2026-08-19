@@ -302,26 +302,25 @@ tenant operations at org scope: `definitions-edit`, `edit`,
 delivery, render, the embedded-newline refusal, Docker Compose startup, and the
 container byte checks.
 
-Local execution is now blocked by the value-input CLI silently stripping
-leading whitespace. With stdin containing the exact bytes for `"   value"`,
-this command:
+The apparent leading-whitespace failure was an incorrect demo expectation, not
+a CLI defect. The schema ADR requires Go `strings.TrimSpace` on every write
+path, followed by byte-exact storage and delivery. The demo now computes the
+expected stored value with the same Unicode whitespace set and compares those
+stored bytes with the container's delivered bytes. Its leading- and
+trailing-whitespace rows prove that trimming is the only transformation;
+`allow_empty: true` also makes an empty post-trim value representable.
+
+The complete local run passes hierarchy creation, all 20 representable corpus
+values plus `GREETING`, publication, machine delivery, render, the named
+embedded-newline refusal with exit 4 and unchanged generation/stamp, Docker
+Compose startup, the doctor allowlist, publish-to-sync stamp movement, and the
+container restart assertion. Its terminal evidence is:
 
 ```text
-hikyo values set LEADING_SPACE --context demo --org <org_id> \
-  --project <project_id> --env <environment_id> --stdin -o json
+compose demo passed: 21 stored values including GREETING delivered byte-exactly; surrounding whitespace proved trim-only transformation
+compose demo passed: embedded newline refused by name with exit 4 and no generation/stamp change
+compose demo passed: doctor returned only allowed findings; sync moved the stamp and restarted app
 ```
 
-exits `0`; stderr contains the target line followed by
-`staged LEADING_SPACE (set); publish it with: hikyo values publish --versions
-<version_id>`. The rendered container reports base64 `dmFsdWU=` (`value`), not
-the expected `ICAgdmFsdWU=` (`   value`). `--value-file` behaves identically.
-An isolated run of the same `compose.yaml` with the same raw env-file bytes
-reports `ICAgdmFsdWU=`, proving Compose and the Alpine print command preserve
-the bytes. The demo therefore exits `1` with:
-
-```text
-compose demo: container did not round-trip LEADING_SPACE (want base64 ICAgdmFsdWU=, got dmFsdWU=)
-```
-
-Per the stream boundary, no Go change or API/datastore bypass was added.
-Doctor and sync remain unexecuted after this assertion.
+Final run time: `real 95.08s` (`user 8.16s`, `sys 5.53s`). No Go change or
+API/datastore bypass was needed.
