@@ -50,6 +50,7 @@ jobs:
           else
             plan=$(jq -cn '{
               client: true,
+              compose_demo: true,
               docs: true,
               fuzz: true,
               generated: true,
@@ -104,7 +105,7 @@ jobs:
           printf '%s  %s\n' "$SHELLCHECK_SHA256" "$archive" | sha256sum --check --strict
           tar -xJf "$archive" -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VERSION/shellcheck" \
-            scripts/lib/*.sh scripts/ci/*.sh scripts/release/*.sh install/install.sh.in
+            scripts/lib/*.sh scripts/ci/*.sh scripts/release/*.sh scripts/compose-demo.sh install/install.sh.in
       - name: Actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Save lint Go cache
@@ -336,6 +337,33 @@ jobs:
           node-version-file: .nvmrc
       - name: Typecheck, build, and assert O4-O6 policy content
         run: ./scripts/ci/verify-docs.sh
+
+  compose-demo:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).compose_demo }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install terminal automation
+        run: sudo apt-get update && sudo apt-get install --yes expect
+      - name: Require Docker Compose 2.30.0 or newer
+        run: |
+          version=$(docker compose version --short)
+          normalized=${version#v}
+          if [ "$(printf '%s\n' 2.30.0 "$normalized" | sort -V | head -n1)" != 2.30.0 ]; then
+            echo "Docker Compose $version is below required 2.30.0" >&2
+            exit 1
+          fi
+          echo "Docker Compose $version satisfies the 2.30.0 floor"
+      - name: Real Compose delivery round-trip
+        run: ./scripts/compose-demo.sh
 
   # The SPA and its flow suite (#56). One job, because the ordering is the
   # point: the frontend must be BUILT before Go can embed it, the Go tests must
@@ -750,6 +778,7 @@ jobs:
     needs:
       - changes
       - client
+      - compose-demo
       - dco
       - docs
       - fuzz

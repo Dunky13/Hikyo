@@ -271,3 +271,56 @@ Not run (per brief): isolation/conformance suites; `-race`.
 
 Ready for the orchestrator's blocking cross-model (Codex) review of this
 Claude-authored work.
+
+## Stream D
+
+The real-Compose demo lives in `install/compose/demo` and is driven by
+`scripts/compose-demo.sh`. It boots a clean loopback dev instance, establishes
+and MFA-enrols the bootstrap account, creates the hierarchy and complete
+representable raw-dotenv corpus, publishes it, mints an environment-scoped
+read-only workload credential, renders, and starts Alpine through Docker
+Compose. The script asserts byte-exact container values, refusal-by-name for an
+embedded newline with no generation/stamp change, doctor findings, and a
+publish → sync → stamp move → container restart round-trip.
+
+Run it from the repository root with `./scripts/compose-demo.sh`. CI runs the
+same command in the selective `compose-demo` job after enforcing the Docker
+Compose 2.30.0 floor. The required-job checker and changed-path classifier
+include the job and its source paths.
+
+The new `/docs/compose/` page documents both delivery mechanisms, setup,
+project config, raw dotenv, offline behavior, doctor/sync, token custody,
+systemd references, and current limits. The CLI reference now lists `run` and
+`compose`; `install/systemd/hikyo-compose-sync.service` and `.timer` provide the
+documented five-minute one-shot example.
+
+The missing hierarchy grant is fixed: the bootstrap principal receives
+`instance-config` at instance scope and the exact union required by the demo's
+tenant operations at org scope: `definitions-edit`, `edit`,
+`manage-identities`, `manage-members`, `manage-projects`, `publish`, and `read`.
+`project create` and `env create` now succeed, and the demo reaches machine
+delivery, render, the embedded-newline refusal, Docker Compose startup, and the
+container byte checks.
+
+The apparent leading-whitespace failure was an incorrect demo expectation, not
+a CLI defect. The schema ADR requires Go `strings.TrimSpace` on every write
+path, followed by byte-exact storage and delivery. The demo now computes the
+expected stored value with the same Unicode whitespace set and compares those
+stored bytes with the container's delivered bytes. Its leading- and
+trailing-whitespace rows prove that trimming is the only transformation;
+`allow_empty: true` also makes an empty post-trim value representable.
+
+The complete local run passes hierarchy creation, all 20 representable corpus
+values plus `GREETING`, publication, machine delivery, render, the named
+embedded-newline refusal with exit 4 and unchanged generation/stamp, Docker
+Compose startup, the doctor allowlist, publish-to-sync stamp movement, and the
+container restart assertion. Its terminal evidence is:
+
+```text
+compose demo passed: 21 stored values including GREETING delivered byte-exactly; surrounding whitespace proved trim-only transformation
+compose demo passed: embedded newline refused by name with exit 4 and no generation/stamp change
+compose demo passed: doctor returned only allowed findings; sync moved the stamp and restarted app
+```
+
+Final run time: `real 95.08s` (`user 8.16s`, `sys 5.53s`). No Go change or
+API/datastore bypass was needed.

@@ -1,0 +1,142 @@
+---
+title: Docker Compose delivery
+description: Deliver Hikyo values through an exec environment or a raw Compose env file.
+editUrl: https://github.com/Hikyo-Org/hikyo/edit/main/docs/site/src/content/docs/docs/compose.mdx
+---
+
+Hikyo supports two mechanisms. `hikyo run -- docker compose up` puts values in
+the host process environment, where Compose can use them for interpolation;
+containers receive only variables explicitly referenced by `environment:` or
+`${NAME}`. `hikyo compose render` writes a target `env_file`, and that file's
+values go directly into the container. Choose based on that mechanism and on
+whether plaintext may exist briefly in a runtime filesystem.
+
+## Five-step journey
+
+1. Create a workload service account with `hikyo sa create`.
+2. Grant it `read` at the project/environment. A full delivery containing
+   secrets still refuses and names every unavailable secret.
+3. Enable the project's machine-reveal policy, acknowledging that the workload
+   credential becomes a standing decryption capability, then grant `reveal`.
+   Config-only workloads can instead use `--config-only` and never opt in.
+4. Store the minted token in a mode-`0600` file or a systemd credential, create
+   the local context, and run `hikyo compose render`.
+5. Run `docker compose up`; install the reference sync timer when published
+   changes should recreate only the services consuming the changed target.
+
+The runnable version is in `install/compose/demo`; from a checkout, execute
+`scripts/compose-demo.sh`.
+
+## Project configuration
+
+Commit a non-secret `hikyo-compose.yaml` at the Compose project root:
+
+```yaml
+version: 1
+instance: https://hikyo.example.internal
+org: org_...
+project: prj_...
+environment: env_...
+slug: acme-web-production # optional path-safe local name
+runtime_dir: /run/hikyo/acme-web-production
+snapshot:
+  offline_serve: false
+  max_age: 168h
+run:
+  acknowledge_loader_control: []
+targets:
+  api:
+    keys: [key_..., key_...]
+    services: [api, worker]
+    acknowledge_loader_control: [PATH]
+```
+
+Parsing is strict. The origin must be HTTPS, except loopback HTTP in local
+development. Target names match `^[a-z][a-z0-9-]*$`; membership uses immutable
+key IDs. `snapshot.max_age` may lower, never raise, the 7-day maximum. This file
+must not contain `token`, `token_file`, or `credential`: credentials arrive only
+through `--token-file` or `HIKYO_TOKEN`.
+
+## Compose file contract
+
+```yaml
+env_file:
+  - path: ${HIKYO_RUNTIME_DIR:?}/${HIKYO_GEN_API:?run 'hikyo compose render' first}/api.env
+    format: raw
+labels:
+  hikyo.stamp: "${HIKYO_GEN_API:?run 'hikyo compose render' first}"
+```
+
+`format: raw` preserves `$`, quotes, backslashes, and surrounding whitespace;
+it requires Docker Compose 2.30.0 or newer. `${NAME:?message}` makes an absent
+runtime path or generation a startup error. The stamp label moves Compose's
+service hash, while the same generation in the absolute path keeps values and
+stamp inseparable.
+
+Embedded newlines cannot be represented safely and are refused by key name
+before any generation or stamp changes.
+
+## Plaintext and offline operation
+
+`run` writes no plaintext file. Rendered targets exist only in the absolute
+runtime directory, which must be tmpfs: `RuntimeDirectory=` under systemd or
+`$XDG_RUNTIME_DIR` for a user service. Durable mode-`0700` state contains local
+keys, stamps, an encrypted snapshot, cursor, and offline audit records; it is
+not a backup, and the local stamp/snapshot keys should not be backed up.
+
+Offline serving is an explicit per-stack opt-in:
+
+```yaml
+snapshot:
+  offline_serve: true
+  max_age: 168h
+```
+
+The maximum is 7 days and can only be shortened. Before releasing cached
+plaintext, Hikyo fsyncs one local disclosure record per key and later reconciles
+those records before the next fetch. Every cached delivery prints exactly:
+
+```text
+serving stale from <issued_at RFC3339>, generation <stamp>
+```
+
+## Doctor and sync
+
+`hikyo compose doctor -o json` returns `{status, findings}` and refuses on an
+error. Codes are stable automation handles; messages carry the details.
+
+| Code | Meaning |
+| --- | --- |
+| `compose_version_below_floor` | Compose is older than 2.30.0. |
+| `runtime_not_tmpfs` | Rendered plaintext is not on a detected tmpfs. |
+| `never_rendered` | No current managed generation exists. |
+| `server_manifest_drift` | The server manifest and local stamp disagree. |
+| `target_key_missing` | A configured immutable key ID no longer exists. |
+| Stamp/config/generation findings | `:?`, `format: raw`, stamp grammar, managed block, and complete-generation agreement failed. |
+| Token/state mode findings | A credential or state path is readable beyond its owner. |
+
+`hikyo compose sync` runs the local safety checks, conditionally renders, and
+invokes `docker compose up -d` only when a target stamp moved. The shipped
+`install/systemd/hikyo-compose-sync.service` and `.timer` show a 5-minute
+one-shot schedule with `RuntimeDirectory=hikyo` and
+`LoadCredentialEncrypted=`. Copy and edit them; Hikyo ships no generator.
+
+## Credential channels and limits
+
+Prefer an encrypted systemd credential:
+
+```ini
+LoadCredentialEncrypted=hikyo-token:/etc/credstore.encrypted/hikyo-token
+ExecStart=/usr/local/bin/hikyo compose sync --project-directory /srv/my-stack --token-file ${CREDENTIALS_DIRECTORY}/hikyo-token
+```
+
+The fallback order is TPM2-sealed, host-key encrypted, then a plain owner-only
+file. `HIKYO_TOKEN` is the other supported channel; there is no `--token` flag.
+Anyone able to inspect `/proc/<pid>/environ` can read environment-delivered
+values, and membership in the Docker group is effectively root-equivalent.
+
+This build does not include `compose adopt`; author the project file by hand.
+It does not include the human-session exception for `run`; delivery is
+machine-credential-only. It also does not expose the per-project machine-reveal
+opt-in yet, so secret-bearing demo setup requires an operator-provisioned grant;
+config-only delivery works now.
