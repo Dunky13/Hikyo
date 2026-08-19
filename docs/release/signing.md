@@ -10,7 +10,7 @@ an official release.
 - cosign `v3.1.3`
 - Syft `v1.50.0`
 - Helm `v4.2.3`
-- Go `1.26.2` from `go.mod`
+- Go `1.26.6` from `go.mod`
 
 Verify downloaded tool archives against the checksum asset attached to that
 exact upstream release. GitHub Actions are full-SHA pinned in each workflow;
