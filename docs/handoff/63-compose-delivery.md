@@ -272,6 +272,42 @@ Not run (per brief): isolation/conformance suites; `-race`.
 Ready for the orchestrator's blocking cross-model (Codex) review of this
 Claude-authored work.
 
+## Stream C — CLI verbs (Claude Opus 4.8), commits a07d28c..d74d4df
+
+`hikyo run --` and `hikyo compose render|sync|doctor` in
+`internal/cli/compose.go` (+ `exec_unix/windows.go` seams, `IO.Exec`/`IO.Now`),
+all machine-only with no human-session fallback; exit codes closed set + the
+child-side 126/127; stable stderr strings in spellings §6; probe classes
+`cli:run`/`cli:compose` = tenant; e2e in
+`internal/isolation/compose_cli_e2e_test.go`. Full behaviour inventory:
+`.xreview/C-summary.md`, `.xreview/C-fix1-summary.md`,
+`.xreview/C-fix2-summary.md` (gitignored, session-local).
+
+## Review trail (cross-model, blocking, 3-round cap)
+
+- Stream B (Claude-authored) → Codex gpt-5.6-sol high: R1 6 BLOCKER/10 MAJOR →
+  fix round 1 → R2 verify (9 partial/1 new) → fix round 2 → R3 verdict: one
+  remaining MAJOR (runtime-dir symlink TOCTOU), fixed by Codex (856cf74).
+- Stream C (Claude-authored) → Codex: R1 4 BLOCKER/9 MAJOR/2 MINOR → fix
+  round 1 → R2 (2 BLOCKER/3 MAJOR remaining) → fix round 2 → **R3: CLEAN**.
+- Streams A and D are Codex-authored — no Claude review per the standing
+  one-way routing.
+- Orchestrator dispositions accepted during review (for human ratification):
+  sync's pre-render gate excludes the server-drift + generation families (the
+  staleness sync repairs); explicit `runtime_dir` off tmpfs is a doctor error,
+  not a render refusal (default path must be tmpfs on Linux);
+  CREDENTIALS_DIRECTORY is not stripped from child envs (path, not secret);
+  offline serve-vs-reconcile composition is ordered by the CLI, not a
+  compose-package composite API.
+
+## Out of scope, restated for disposition
+
+- Per-project machine-reveal opt-in (grant API): #67's handoff says it "ships
+  with #17/#18" but no open ticket owns it; e2e seeds reveal at the store
+  layer. Needs an owner.
+- `hikyo compose adopt` / scaffold-first rewrite (depends on #70) and
+  `run --use-human-session` (needs the bound reauth ceremony).
+
 ## Stream D
 
 The real-Compose demo lives in `install/compose/demo` and is driven by
@@ -324,3 +360,82 @@ compose demo passed: doctor returned only allowed findings; sync moved the stamp
 
 Final run time: `real 95.08s` (`user 8.16s`, `sys 5.53s`). No Go change or
 API/datastore bypass was needed.
+
+## Reconciliation with #64
+
+origin/main landed #64 (Kubernetes operator, PRs #176 + #177), which built the
+SAME delivery server surface stream A did. #64 is merged and locked, so where
+the two overlap #64's shape won and this branch's duplicate was dropped. This
+branch was reconciled with a `git merge origin/main` (one merge commit), not a
+rebase.
+
+### Yielded to #64 (theirs won)
+
+- **Fetch options struct.** `Delivery.Fetch`/`FetchAs` take
+  `service.FetchOptions{Projection delivery.Mode, AcknowledgedKeys []string}`;
+  our `FetchMode`/`FetchAsMode`/`configOnly bool` pair is gone.
+- **Projection is a `delivery.Mode`, not a bool.** The cursor binds `Mode` +
+  `PinnedHistoricalRevision`; our `Cursor.ConfigOnly` component was superseded.
+- **config-only OMITS secrets entirely** — from the delivery and from the
+  manifest the change token covers (#64's locked comment). Stream A's
+  "presence-only under config-only" server behaviour (C-fix2 R1-7) was
+  **reverted** to theirs.
+- **Per-value delivery disclosure** is `identity.disclosure`
+  (`audit.EventDisclosure`) with `projection`, correlated to the fetch envelope
+  — not our per-key `disclosure.value_revealed` surface:"delivery" emission.
+- **Fetch audit** records `projection` / `acknowledged_keys` / `delivered_count`
+  (theirs), not our `config_only` bool.
+- **Loader-control baseline** now has a single home in
+  `internal/delivery/loadercontrol.go`. `internal/compose/loadercontrol.go`
+  deletes its duplicated table and re-exports `IsLoaderControl` from
+  `delivery.IsLoaderControlKey`; the full-baseline pin test moved to the
+  delivery package.
+
+### Survived (re-applied as additive members)
+
+- `FetchResult.IssuedAt` / `SnapshotExpiresAt` (server-asserted, issued inside
+  the tx; expiry = issued + `delivery.SnapshotMaxAge`) and `CredentialID`.
+- `DeliveredKey.KeyID` (required on the wire) — theirs lacked it.
+- `DeliveryResponse.issued_at` / `snapshot_expires_at` / `credential_id`
+  (required) and `DeliveredKey.key_id` (required) in the OpenAPI, regenerated,
+  not hand-merged.
+- The whole `/delivery/offline-records` path + schemas, the
+  `ReconcileOfflineRecords`/`ReconcileOfflineRecordsAs` service block and its
+  `OfflineRecord`/`ReconcileResult` types, `identity.offline_records_reconciled`,
+  and `OpDeliveryReconcileOffline`.
+
+### Offline per-key disclosure event — kept `EventValueRevealed`
+
+The offline reconcile per-key disclosure stays
+`audit.EventValueRevealed` (`disclosure.value_revealed`, surface:
+`offline-serve`), NOT #64's `identity.disclosure`. Grounds (brief's sanctioned
+fallback): `EventDisclosure.revision` is a required int an offline record has no
+value for; that event references a fetch envelope this path has no equivalent
+for; and it has no slots for `served_credential_id` / `generation` /
+`served_from`. `EventValueRevealed`'s registry schema was extended with those
+four fields as **optional**, so origin/main's other emitters (pins, revisions,
+values export) stay valid.
+
+### config-only client semantics note
+
+Because the server now omits secrets ENTIRELY under config-only, the client
+cannot distinguish a deleted config id from a projected-out secret. So under
+`--config-only` a configured id that is not delivered is a **SKIP** again (the
+C-fix2 R1-7 "refuse in both modes" client change is reverted for config-only;
+the FULL-projection undelivered-id refusal stays). `compose doctor`'s drift
+checks are the compensating control. The CLI flag stays `--config-only`; only
+the wire param changed (`projection=config-only`). The CLI also sends
+`acknowledged_keys` (run: the run block's acks; render: the union of every
+target's acks) so the server records which acknowledgement was in force —
+client-side loader-control refusal stays authoritative.
+
+Tests renamed/updated for the changed wire shape (named here because a wire
+change makes updating the assertion correct, not a weakening):
+`TestComposeRenderConfigOnlyRefusesDeletedKey` →
+`TestComposeRenderConfigOnlySkipsUndeliveredKey` (asserts the SKIP);
+`TestComposeRenderConfigOnlyMixedTarget` keeps but its stub now omits the secret
+entirely; the CLI e2e audit assertion moved from `"config_only":true` to
+`"projection":"config-only"`; `runDeliveryCursorRoundTrip`'s presence-only
+config-only block was removed (config-only is covered by theirs'
+`runDeliveryConfigOnlyProjection`, per-value disclosure by
+`runDeliveryDeliversValues`).
