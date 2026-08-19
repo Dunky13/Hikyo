@@ -155,3 +155,74 @@ Directory and workspace **UI states** are specified in [ui-spec.md](./ui-spec.md
 ## 5. Canonical key grammar
 
 Restated in [domain-model.md](./domain-model.md) § Canonical key grammar, satisfying import-paths.md's delegation.
+
+## 6. Compose delivery ([compose-integration.md](../adr/compose-integration.md), #63)
+
+The verbs the Compose delivery ticket wires. Both families are **machine-only**:
+they accept a credential through `--token-file <path>` or `HIKYO_TOKEN` and
+nothing else, and never fall back to the stored human session (`--token` does
+not exist; the `--use-human-session` exception is not in this build and is a
+refusal). Target resolution is the standard per-dimension chain
+(`--instance/--org/--project/--env`, then `HIKYO_*`, then `./.hikyo.json`, then
+`--context`) with `hikyo-compose.yaml` folded in **after** it: the config fills a
+dimension the chain left unresolved, and a disagreement with an already-resolved
+dimension is a hard error (exit 2) naming both sources.
+
+### Verbs and flags
+
+- `hikyo run [--config-only] [--allow-override KEY[,KEY…]] [--project-directory DIR] [--token-file PATH] -- <command> [args…]`
+  — fetch, merge into the child environment (fetched wins; a differing collision
+  is refused unless the key is named in `--allow-override`), and exec. The `--`
+  separates hikyo's flags from the child command and its own flags.
+- `hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]`
+- `hikyo compose sync [--project-directory DIR] [--token-file PATH]` — one-shot:
+  the doctor checks, then a conditional render, then `docker compose up -d` only
+  when a target's stamp moved.
+- `hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]`
+
+`hikyo-compose.yaml` gains a top-level `run:` block (`acknowledge_loader_control:
+[NAME…]`, the stack-level counterpart of a target's acknowledgement, since `run`
+has no target) and an optional `slug` (the state-dir / default-runtime-dir path
+segment; `^[a-z0-9][a-z0-9-]*$`).
+
+**Not a documented flag:** `HIKYO_COMPOSE_DOCKER` overrides the resolved `docker`
+executable for `compose sync|doctor`. It is a test seam, kept out of the help
+text and documented only here and in the package doc.
+
+### Exit codes
+
+The closed set (0 ok, 1 internal, 2 usage, 3 auth, 4 refused, 5 not-found,
+6 unavailable) applies, plus the two child-side codes that `run` alone uses and
+that are **not** hikyo's own:
+
+| Code | Meaning |
+|------|---------|
+| 127  | the command after `--` was not found on `PATH` |
+| 126  | the command was found but could not be executed |
+
+On a successful exec there is no hikyo process at all (unix `syscall.Exec`;
+Windows spawn-wait-and-exit-with-the-child-code), so the child's own exit status
+and signals are the invocation's, untouched.
+
+Notable mappings: a machine credential missing → **3**; the human-session
+refusal → **3**; all-or-nothing over undeliverable secrets, loader-control
+refusal, merge collision, ARG_MAX overage, an offline-serve refusal (snapshot
+expired / rolled back / undecryptable), and a `compose` lock held by another
+process → **4**; a transport/5xx fetch failure → **6**; a snapshot save failure
+(a silent stale fallback is forbidden) → **1**.
+
+### Stderr strings that are stable surface
+
+`run` and `compose render` print nothing on stdout (`compose doctor` prints its
+findings report there; `-o json` is `{status, findings}`). These stderr lines
+are part of the stable surface:
+
+- `serving stale from <issued_at RFC3339>, generation <stamp>` — one per served
+  target (or once for `run`), on every offline serve.
+- `rendered <target> generation <stamp> → <runtime path>` — a target whose stamp
+  moved.
+- `unchanged <target> generation <stamp>` — a target whose stamp held.
+- `up to date (generation <stamp>)` — per target, when the presented cursor was
+  current.
+- `target: <resolved> [origin <o>, artifact machine-credential]` — the
+  disclosure echo, as every other verb prints it.

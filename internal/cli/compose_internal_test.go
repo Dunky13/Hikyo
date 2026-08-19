@@ -308,6 +308,42 @@ func TestRunStaleLineOnOfflineServe(t *testing.T) {
 	}
 }
 
+func TestRunOfflineExpiredRefused(t *testing.T) {
+	origin := "http://127.0.0.1:1"
+	dir := t.TempDir()
+	writeComposeConfigOffline(t, dir, origin, "org_1", "prj_1", "env_1", "acme")
+	_, stateDir := machineState(t, origin)
+	seedRunSnapshot(t, filepath.Join(stateDir, "compose", "acme"), origin)
+
+	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
+	// The snapshot was issued ~1h ago; advance the clock past the 7 d maximum.
+	ios.Now = func() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
+	ios.Exec = func(_ string, _, _ []string) error { t.Fatal("exec must not run past an expired snapshot"); return nil }
+	code := Run(t.Context(), ios, []string{"run", "--", "true"})
+	if code != ExitRefused {
+		t.Fatalf("expired offline run exit=%d, want ExitRefused; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "maximum stale age") {
+		t.Fatalf("expiry refusal message wrong: %s", stderr)
+	}
+}
+
+func TestRunOfflineNotEnabledRefused(t *testing.T) {
+	origin := "http://127.0.0.1:1"
+	dir := t.TempDir()
+	// offline_serve defaults false.
+	writeComposeConfig(t, dir, origin, "org_1", "prj_1", "env_1", "", "acme")
+	_, stateDir := machineState(t, origin)
+	ios, _, stderr := composeIO(stateDir, dir, "wl_token", nil)
+	code := Run(t.Context(), ios, []string{"run", "--", "true"})
+	if code != ExitUnavailable {
+		t.Fatalf("closed-server run exit=%d, want ExitUnavailable; stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stderr.String(), "offline serve is not enabled") {
+		t.Fatalf("not-enabled message wrong: %s", stderr)
+	}
+}
+
 // ---- helpers ----
 
 func deliveryResp(keys []apigen.DeliveredKey) apigen.DeliveryResponse {
