@@ -189,6 +189,27 @@ segment; `^[a-z0-9][a-z0-9-]*$`).
 executable for `compose sync|doctor`. It is a test seam, kept out of the help
 text and documented only here and in the package doc.
 
+### `sync` pre-render gate — interpretation of "same checks" (for human disposition)
+
+The ADR says, unqualified, "`sync` runs the same checks before its first render."
+This build reads that as: `sync` gates its render on the **local integrity**
+findings only — the Compose version floor, `format: raw`, the required stamp-var
+form and label, the managed-stamp grammar, generation presence/completeness, the
+runtime-dir checks, the docker/catalogue/state fail-closed findings, and the
+token/state-dir modes. It **excludes** the server-agreement family
+(`server_manifest_drift`, `never_rendered`, `server_stamp_unknown`,
+`server_unreachable`) from the gate, because those describe exactly the staleness
+`sync` exists to repair — gating on them would brick `sync` on every publish and
+on every freshly-provisioned box. The `doctor` **verb** keeps the whole family as
+errors: it reports, it does not repair. This is an interpretation offered for a
+human to ratify or amend in the ADR; it is not a defensible reading that the ADR
+sentence dictates on its face.
+
+The default runtime dir (`/run/hikyo/<slug>` or `$XDG_RUNTIME_DIR/hikyo/<slug>`)
+MUST be tmpfs-backed on Linux (`compose.IsTmpfs`) or `render` refuses; an
+**explicit** `runtime_dir` is the operator's call — `doctor` reports
+`runtime_not_tmpfs` but the renderer does not block. (Orchestrator disposition.)
+
 ### Exit codes
 
 The closed set (0 ok, 1 internal, 2 usage, 3 auth, 4 refused, 5 not-found,
@@ -218,7 +239,11 @@ findings report there; `-o json` is `{status, findings}`). These stderr lines
 are part of the stable surface:
 
 - `serving stale from <issued_at RFC3339>, generation <stamp>` — one per served
-  target (or once for `run`), on every offline serve.
+  target (or once for `run`), on every offline serve. `<issued_at>` is the
+  server's issuance instant at sub-second (RFC3339Nano) precision: a snapshot's
+  high-water mark distinguishes two issuances within the same wall-clock second
+  by their content token, so second-truncation would spuriously refuse a
+  publish-then-render inside one second.
 - `rendered <target> generation <stamp> → <runtime path>` — a target whose stamp
   moved.
 - `unchanged <target> generation <stamp>` — a target whose stamp held.

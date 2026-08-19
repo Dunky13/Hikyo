@@ -3,19 +3,22 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -45,14 +48,37 @@ const (
 	// (^[a-z][a-z0-9-]*$) so it can never collide with a real target named
 	// "run".
 	runGenerationKey = "__run__"
-	// offlineMetaFile is the CLI-owned sidecar the offline path needs beyond the
-	// compose snapshot payload: the AAD tuple LoadSnapshot takes as a parameter,
-	// and the name→key_id map the per-key reconciliation records require.
-	offlineMetaFile = "offline.meta.json"
+	// serverCredentialFile records the server-asserted credential_id from the
+	// last successful LIVE fetch. It is NOT the killed offline.meta.json sidecar:
+	// that carried the AAD tuple + name→key_id map, both now inside the
+	// self-describing snapshot (header + sealed payload). This file carries the
+	// EXPECTATION the offline path compares the snapshot header against — and an
+	// expectation cannot, by definition, live inside the artifact being verified
+	// (the box cannot reconstruct a server-asserted id offline). The local
+	// credential fingerprint (credentialFingerprint) is stored ONLY in the cursor
+	// per the compose ADR; this file holds the server id only.
+	serverCredentialFile = "server-credential"
+
+	// credentialFingerprintDomain domain-separates the LOCAL credential
+	// fingerprint that binds a cursor to the presented token (compose ADR
+	// § Cursor rules). It is a purely local identity: swapping tokens changes the
+	// fingerprint and invalidates the cursor before it is presented.
+	credentialFingerprintDomain = "hikyo-cursor-cred-v1\x00"
 
 	machineRevealOptIn = "secret plaintext requires the per-project machine-reveal opt-in and then a `reveal` grant; " +
 		"in this build that opt-in is not exposed, so a machine credential cannot receive these secrets yet"
 )
+
+// credentialFingerprint is the local, offline-derivable identity of the
+// presented credential: hex(sha256(domain ‖ token))[:32] (compose ADR § Cursor
+// rules — "the stored cursor is bound to credential identity"). ONE helper so
+// the save-site and the compare-site cannot drift. The server-asserted
+// credential_id (a different value) binds the snapshot AAD; this binds the
+// cursor.
+func credentialFingerprint(token string) string {
+	sum := sha256.Sum256([]byte(credentialFingerprintDomain + token))
+	return hex.EncodeToString(sum[:])[:32]
+}
 
 // ---------------------------------------------------------------------------
 // hikyo run -- <command>
@@ -93,7 +119,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	client, entry, resolved, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
+	client, entry, resolved, _, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "run")
 	if err != nil {
 		return err
 	}
@@ -103,13 +129,26 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// config file writes nothing and holds nothing pending by construction.
 	stateDir := ""
 	if cfg != nil {
-		stateDir = composeStateDir(st, composeSlug(cfg, org, project, env))
+		slug, serr := composeSlug(cfg, org, project, env)
+		if serr != nil {
+			return serr
+		}
+		stateDir = composeStateDir(st, slug)
 		// Flush-before-fetch (ops-spec § 6 ordering rule): pending offline
 		// records reconcile BEFORE the fetch proceeds; a failure refuses the
 		// fetch.
 		if err := flushOffline(ctx, client, org, project, env, stateDir); err != nil {
 			return err
 		}
+	}
+
+	// Loader-control acknowledgement (compose ADR § "Loader-control keys"): the
+	// config's run block acknowledges by name. Resolved before the fetch so the
+	// offline path can refuse a loader-control key BEFORE it appends any offline
+	// record (finding 6).
+	var ack []string
+	if cfg != nil {
+		ack = cfg.Run.AcknowledgeLoaderControl
 	}
 
 	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, "")
@@ -119,7 +158,7 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 		live    bool
 	)
 	if ferr != nil {
-		f, herr := serveRunOffline(ios, cfg, stateDir, entry, org, project, env, configOnly, ferr)
+		f, herr := serveRunOffline(ios, cfg, stateDir, entry, org, project, env, configOnly, ack, ferr)
 		if herr != nil {
 			return herr
 		}
@@ -138,29 +177,26 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 		live = true
 	}
 
-	// Loader-control (compose ADR § "Loader-control keys"): refuse a
-	// loader-control key the config's run block does not acknowledge by name.
-	var ack []string
-	if cfg != nil {
-		ack = cfg.Run.AcknowledgeLoaderControl
-	}
+	// Loader-control refusal for the LIVE path (the offline path already checked
+	// pre-append inside serveRunOffline).
 	if refused := compose.RefuseUnacknowledged(mapKeys(fetched), ack); len(refused) > 0 {
 		return failf(ExitRefused, "hikyo run: refusing loader-control key(s) %s; acknowledge each by name in the config's `run.acknowledge_loader_control`",
 			strings.Join(refused, ", "))
 	}
 
 	// Merge: fetched wins; a differing collision is a hard error unless named in
-	// --allow-override (compose ADR § "Merge, collisions").
-	merged, _, err := compose.MergeEnv(os.Environ(), fetched, allowOverride)
+	// --allow-override (compose ADR § "Merge, collisions"). The base is the
+	// SANITIZED parent environment — HIKYO_TOKEN (the workload credential) never
+	// reaches the child (finding 1).
+	merged, _, err := compose.MergeEnv(sanitizedEnviron(), fetched, allowOverride)
 	if err != nil {
 		return &Error{Code: ExitRefused, Err: err}
 	}
 
 	// ARG_MAX preflight (ops-spec § 6): the execve composite bound, refused loud
 	// pre-exec rather than as E2BIG at the wrong layer.
-	if total, ok := compose.ExecSizeOK(merged, childArgs, compose.DefaultArgMax()); !ok {
-		return failf(ExitRefused, "hikyo run: the child environment plus argv is %d bytes, over the exec budget (ARG_MAX %d minus a 64 KiB margin); reduce the delivered set or shorten the command",
-			total, compose.DefaultArgMax())
+	if ok, detail := compose.ExecPreflight(merged, childArgs, compose.DefaultArgMax()); !ok {
+		return failf(ExitRefused, "hikyo run: %s; reduce the delivered set or shorten the command", detail)
 	}
 
 	// Snapshot: after a LIVE delivering fetch and only when a config file exists.
@@ -177,9 +213,9 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 	// there is no hikyo process (unix syscall.Exec): the child's status is the
 	// invocation's.
 	command := childArgs[0]
-	resolvedPath, lookErr := exec.LookPath(command)
-	if lookErr != nil {
-		return failf(ExitCommandNotFound, "hikyo run: %s: command not found", command)
+	resolvedPath, cerr := resolveChildCommand(command)
+	if cerr != nil {
+		return cerr
 	}
 	if err := ios.exec(resolvedPath, childArgs, merged); err != nil {
 		return failf(ExitCommandNotExecutable, "hikyo run: %s: %v", command, err)
@@ -190,10 +226,13 @@ func runRun(ctx context.Context, ios IO, args []string) error {
 }
 
 // serveRunOffline handles a failed run fetch: if it failed as UNAVAILABLE and
-// the stack opted into offline serve, it opens the snapshot, prints the stale
-// line, records one offline disclosure per key BEFORE returning the values, and
-// returns them. Any other failure (or no opt-in) is surfaced unchanged.
-func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, fetchErr error) (map[string]string, error) {
+// the stack opted into offline serve, it opens the snapshot, refuses any
+// unacknowledged loader-control key (finding 6, BEFORE any record is written),
+// records one offline disclosure per key BEFORE returning the values, prints the
+// stale line, and returns them. Any other failure (or no opt-in) is surfaced
+// unchanged. The snapshot is bound to run's identity: TargetNames ["__run__"],
+// so a render snapshot cannot be served here (finding 3).
+func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, ack []string, fetchErr error) (map[string]string, error) {
 	if !isUnavailable(fetchErr) {
 		return nil, fetchErr
 	}
@@ -201,33 +240,45 @@ func serveRunOffline(ios IO, cfg *compose.Config, stateDir string, entry TrustEn
 		fmt.Fprintln(ios.Stderr, "hikyo run: offline serve is not enabled for this stack; set snapshot.offline_serve: true in hikyo-compose.yaml to serve stale values during an outage")
 		return nil, fetchErr
 	}
-	payload, meta, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly)
+	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly, []string{runGenerationKey})
 	if err != nil {
 		return nil, err
 	}
+	// Loader-control BEFORE any disclosure record is written (finding 6): an
+	// unacknowledged loader-control key is refused even when serving stale.
+	if refused := compose.RefuseUnacknowledged(rowNames(payload.Rows), ack); len(refused) > 0 {
+		return nil, failf(ExitRefused, "hikyo run: refusing loader-control key(s) %s; acknowledge each by name in the config's `run.acknowledge_loader_control`",
+			strings.Join(refused, ", "))
+	}
 	stamp := payload.GenerationStamps[runGenerationKey]
-	if err := appendOfflineRecords(stateDir, payload.Rows, meta, stamp); err != nil {
+	if err := appendOfflineRecords(ios, stateDir, payload.Rows, aad, stamp); err != nil {
 		return nil, failf(ExitInternal, "hikyo run: recording offline disclosure: %v", err)
 	}
-	fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", meta.AAD.IssuedAt, stamp)
+	fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
 	return rowsToValues(payload.Rows), nil
 }
 
 // saveRunSnapshot seals the delivered env plus one run "generation" stamp and
-// persists the CLI offline sidecar beside it.
+// records the server credential id beside it. The snapshot's TargetNames is
+// ["__run__"] (run holds no render target), so ContextMatches refuses a render
+// snapshot for run and vice versa (finding 3).
 func saveRunSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, resp apigen.DeliveryResponse) error {
+	_ = ios
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
 		return err
 	}
 	rows := deliveredRows(resp.Keys)
-	stamp := compose.TargetStamp(keys, canonicalRows(rows))
+	// run's "generation" stamp is over the canonical row set, keyed to the
+	// run generation key (TargetStamp does not grammar-check the name — only
+	// WriteGeneration does — so the __run__ sentinel is legal here).
+	stamp := compose.TargetStamp(keys, runGenerationKey, canonicalRows(rows))
 	payload := compose.SnapshotPayload{Rows: rows, GenerationStamps: map[string]string{runGenerationKey: stamp}}
-	aad := buildDeliveryAAD(entry, org, project, env, resp, configOnly, cfg.TargetNames())
+	aad := buildDeliveryAAD(entry, org, project, env, resp, configOnly, []string{runGenerationKey})
 	if err := saveSnapshot(stateDir, keys, aad, payload); err != nil {
 		return err
 	}
-	return saveOfflineMeta(stateDir, aad, resp.Keys)
+	return saveServerCredential(stateDir, resp.CredentialId)
 }
 
 // ---------------------------------------------------------------------------
@@ -267,81 +318,108 @@ func runComposeRender(ctx context.Context, ios IO, args []string) (bool, error) 
 	if err := flags.checkNoPositionals("compose render"); err != nil {
 		return false, err
 	}
-	return composeRenderCore(ctx, ios, st, flags, projectDir, configOnly)
+	moved, _, err := composeRenderCore(ctx, ios, st, flags, projectDir, configOnly)
+	return moved, err
+}
+
+// renderPaths carries the resolved project/state directories out of a render so
+// `compose sync` can drive its apply-pending marker without re-resolving (which
+// would echo the target line twice).
+type renderPaths struct {
+	cfgDir   string
+	stateDir string
 }
 
 // composeRenderCore is the render pipeline, shared by `compose render` and the
-// render step of `compose sync`. It returns whether any target's stamp moved,
-// so sync knows whether to recreate.
-func composeRenderCore(ctx context.Context, ios IO, st *State, flags commonFlags, projectDir string, configOnly bool) (bool, error) {
+// render step of `compose sync`. It returns whether any target's stamp moved
+// (so sync knows whether to recreate) and the resolved paths.
+func composeRenderCore(ctx context.Context, ios IO, st *State, flags commonFlags, projectDir string, configOnly bool) (bool, renderPaths, error) {
 	cfg, cfgDir, err := findComposeConfig(startDir(ios, projectDir))
 	if err != nil {
-		return false, err
+		return false, renderPaths{}, err
 	}
 	if cfg == nil {
-		return false, failf(ExitUsage, "hikyo compose render requires a %s (searched up from %s); the .hikyo.json pin file is not enough — the config carries the render targets",
+		return false, renderPaths{}, failf(ExitUsage, "hikyo compose render requires a %s (searched up from %s); the .hikyo.json pin file is not enough — the config carries the render targets",
 			composeConfigName, startDir(ios, projectDir))
 	}
-	client, entry, resolved, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "compose")
+	client, entry, resolved, token, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "compose")
 	if err != nil {
-		return false, err
+		return false, renderPaths{}, err
 	}
 	org, project, env := resolved.Get(DimOrg), resolved.Get(DimProject), resolved.Get(DimEnv)
-	slug := composeSlug(cfg, org, project, env)
-	stateDir := composeStateDir(st, slug)
-	runtimeDir, err := composeRuntimeDir(ios, cfg, slug)
+	slug, err := composeSlug(cfg, org, project, env)
 	if err != nil {
-		return false, err
+		return false, renderPaths{}, err
+	}
+	stateDir := composeStateDir(st, slug)
+	rp := renderPaths{cfgDir: cfgDir, stateDir: stateDir}
+	runtimeDir, explicitRuntime, err := composeRuntimeDir(ios, cfg, slug)
+	if err != nil {
+		return false, rp, err
+	}
+	// The DEFAULT runtime dir MUST be tmpfs-backed or render refuses (compose ADR
+	// § Where plaintext lives; ops-spec § 6). An EXPLICIT runtime_dir is the
+	// operator's accepted disposition (doctor reports `runtime_not_tmpfs` but the
+	// renderer does not block) — the orchestrator's binding call for finding 2.
+	if !explicitRuntime {
+		if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+			return false, rp, failf(ExitInternal, "compose render: create runtime dir: %v", err)
+		}
+		if ok, terr := compose.IsTmpfs(runtimeDir); terr != nil {
+			return false, rp, failf(ExitInternal, "compose render: checking runtime dir filesystem: %v", terr)
+		} else if !ok {
+			return false, rp, failf(ExitRefused, "compose render: default runtime dir %s is not backed by tmpfs; rendered plaintext must live only on tmpfs — set an explicit `runtime_dir` on tmpfs in %s", runtimeDir, composeConfigName)
+		}
 	}
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
-		return false, err
+		return false, rp, err
 	}
 
 	w := compose.NewWriter(stateDir, nil)
-	unlock, err := w.BeginRender()
+	lock, err := w.BeginRender(cfgDir)
 	if err != nil {
-		return false, failf(ExitRefused, "another hikyo compose process holds the lock for %s", slug)
+		return false, rp, failf(ExitRefused, "another hikyo compose process holds the lock for %s", slug)
 	}
-	defer unlock()
+	defer lock.Close()
 
 	// 1. Recover incomplete (torn) generations before anything reads them.
-	if err := w.Recover(runtimeDir); err != nil {
-		return false, failf(ExitInternal, "compose render: recover: %v", err)
+	if err := lock.Recover(runtimeDir); err != nil {
+		return false, rp, failf(ExitInternal, "compose render: recover: %v", err)
 	}
 	// 2. Flush-before-fetch.
 	if err := flushOffline(ctx, client, org, project, env, stateDir); err != nil {
-		return false, err
+		return false, rp, err
 	}
-	// 3. Cursor: present it only when the three-part local test holds.
+	// 3. Cursor: present it only when the full local eligibility test holds.
 	currentStamps, err := compose.CurrentStamps(cfgDir)
 	if err != nil {
-		return false, failf(ExitRefused, "compose render: %v", err)
+		return false, rp, failf(ExitRefused, "compose render: %v", err)
 	}
-	keyIDs := allTargetKeyIDs(cfg)
-	present := eligibleCursor(stateDir, currentStamps, runtimeDir, env, configOnly, keyIDs)
+	present := eligibleCursor(stateDir, cfg, currentStamps, runtimeDir, token, env, configOnly)
 
 	resp, ferr := fetchDelivery(ctx, client, org, project, env, configOnly, present)
 	if ferr != nil {
-		return composeRenderOffline(ctx, ios, w, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, configOnly, ferr)
+		moved, err := composeRenderOffline(ctx, ios, lock, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, configOnly, ferr)
+		return moved, rp, err
 	}
 	if resp.Current {
 		for _, t := range cfg.TargetNames() {
 			fmt.Fprintf(ios.Stderr, "up to date (generation %s)\n", currentStamps[t])
 		}
-		return false, nil
+		return false, rp, nil
 	}
-	return composeRenderApply(ios, w, cfg, cfgDir, stateDir, runtimeDir, keys, entry, org, project, env, configOnly, resp, currentStamps, keyIDs)
+	moved, err := composeRenderApply(ios, lock, cfg, stateDir, runtimeDir, keys, entry, org, project, env, token, configOnly, resp, currentStamps)
+	return moved, rp, err
 }
 
 // composeRenderApply renders each target from a live full delivery. On ANY
 // refusal it writes no generation and does not advance the cursor.
-func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env string, configOnly bool, resp apigen.DeliveryResponse, currentStamps map[string]string, keyIDs []string) (bool, error) {
+func composeRenderApply(ios IO, lock *compose.RenderLock, cfg *compose.Config, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env, token string, configOnly bool, resp apigen.DeliveryResponse, currentStamps map[string]string) (bool, error) {
 	byID := deliveredByID(resp.Keys)
 
 	type rendered struct {
 		name    string
-		stamp   string
 		content []byte
 		rows    []compose.SnapshotRow
 	}
@@ -356,19 +434,28 @@ func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, 
 		for _, id := range tgt.Keys {
 			k, ok := byID[id]
 			if !ok {
-				// A target key id the server did not deliver: at render time the
-				// target cannot be rendered as declared, so refuse (the ADR's
-				// doctor-time "id no longer exists" becomes a render-time refusal).
-				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server", name, id))
+				// A target key id the server did not deliver. Under --config-only
+				// the server omits secrets ENTIRELY, so a missing id there is a
+				// legitimately-projected-out secret → SKIP (finding 7). Under the
+				// FULL projection a missing id means the target cannot render as
+				// declared → refuse.
+				if configOnly {
+					continue
+				}
+				refusals = append(refusals, fmt.Sprintf("%s: %s: key id was not delivered by the server under the full projection", name, id))
 				continue
 			}
 			if !configOnly && isUnrevealedSecret(k) {
 				refusals = append(refusals, fmt.Sprintf("%s: %s: secret has no value — %s", name, k.Name, machineRevealOptIn))
 				continue
 			}
-			val := valueOf(k)
-			rows = append(rows, compose.Row{Name: k.Name, Value: val})
-			srows = append(srows, compose.SnapshotRow{Name: k.Name, Classification: string(k.Classification), Value: val})
+			// A delivered row with no value is genuinely unset / projected-out:
+			// never emit NAME= for a nil value (finding 7).
+			if k.Value == nil {
+				continue
+			}
+			rows = append(rows, compose.Row{Name: k.Name, Value: *k.Value})
+			srows = append(srows, compose.SnapshotRow{Name: k.Name, KeyID: k.KeyId, Classification: string(k.Classification), Value: *k.Value})
 			names = append(names, k.Name)
 		}
 		for _, ln := range compose.RefuseUnacknowledged(names, tgt.AcknowledgeLoaderControl) {
@@ -381,7 +468,7 @@ func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, 
 		for _, r := range encRefusals {
 			refusals = append(refusals, fmt.Sprintf("%s: %s: %s", name, r.Key, r.Reason))
 		}
-		results = append(results, rendered{name: name, stamp: compose.TargetStamp(keys, content), content: content, rows: srows})
+		results = append(results, rendered{name: name, content: content, rows: srows})
 	}
 
 	if len(refusals) > 0 {
@@ -390,29 +477,32 @@ func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, 
 	}
 
 	// Write generations (idempotent — a no-op when present+complete, a rewrite
-	// when a reboot lost the tmpfs copy), then the single stamp commit, then GC,
-	// then snapshot + cursor.
+	// when a reboot lost the tmpfs copy). WriteGeneration computes each target's
+	// stamp with the target bound into the domain (finding 5: two targets with
+	// identical content get distinct stamps and distinct dirs). Then the single
+	// stamp commit, then GC, then snapshot + cursor.
 	finalStamps := map[string]string{}
 	var allRows []compose.SnapshotRow
 	var lines []string
 	moved := false
 	for _, r := range results {
-		finalStamps[r.name] = r.stamp
 		allRows = append(allRows, r.rows...)
-		if err := w.WriteGeneration(runtimeDir, r.stamp, map[string][]byte{r.name: r.content}); err != nil {
+		stamp, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+		if err != nil {
 			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
 		}
-		if currentStamps[r.name] != r.stamp {
+		finalStamps[r.name] = stamp
+		if currentStamps[r.name] != stamp {
 			moved = true
-			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, r.stamp, filepath.Join(runtimeDir, r.stamp, r.name+".env")))
+			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
 		} else {
-			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, r.stamp))
+			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, stamp))
 		}
 	}
-	if err := w.CommitStamps(cfgDir, finalStamps); err != nil {
+	if err := lock.CommitStamps(finalStamps); err != nil {
 		return false, failf(ExitInternal, "compose render: commit stamps: %v", err)
 	}
-	if err := w.GC(runtimeDir, finalStamps, compose.DefaultGenerationsKept); err != nil {
+	if err := lock.GC(runtimeDir, compose.DefaultGenerationsKept); err != nil {
 		return false, failf(ExitInternal, "compose render: gc: %v", err)
 	}
 
@@ -424,10 +514,10 @@ func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, 
 	if err := saveSnapshot(stateDir, keys, aad, compose.SnapshotPayload{Rows: allRows, GenerationStamps: finalStamps}); err != nil {
 		return false, failf(ExitInternal, "compose render: save snapshot: %v", err)
 	}
-	if err := saveOfflineMeta(stateDir, aad, resp.Keys); err != nil {
-		return false, failf(ExitInternal, "compose render: save offline metadata: %v", err)
+	if err := saveServerCredential(stateDir, resp.CredentialId); err != nil {
+		return false, failf(ExitInternal, "compose render: save credential record: %v", err)
 	}
-	if err := saveCursor(stateDir, resp, env, configOnly, keyIDs, finalStamps); err != nil {
+	if err := saveCursor(stateDir, cfg, resp, token, env, configOnly, finalStamps); err != nil {
 		return false, failf(ExitInternal, "compose render: save cursor: %v", err)
 	}
 
@@ -438,8 +528,9 @@ func composeRenderApply(ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, 
 }
 
 // composeRenderOffline renders each target from the last snapshot when the
-// server is unreachable and the stack opted in.
-func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *compose.Config, cfgDir, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env string, configOnly bool, fetchErr error) (bool, error) {
+// server is unreachable and the stack opted in. Row→key_id now comes from the
+// sealed payload's rows (finding 3: no cleartext sidecar).
+func composeRenderOffline(ctx context.Context, ios IO, lock *compose.RenderLock, cfg *compose.Config, cfgDir, stateDir, runtimeDir string, keys *crypto.LocalKeys, entry TrustEntry, org, project, env string, configOnly bool, fetchErr error) (bool, error) {
 	_ = ctx
 	if !isUnavailable(fetchErr) {
 		return false, fetchErr
@@ -448,20 +539,14 @@ func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *c
 		fmt.Fprintln(ios.Stderr, "hikyo compose render: offline serve is not enabled for this stack; set snapshot.offline_serve: true to render from the last snapshot during an outage")
 		return false, fetchErr
 	}
-	payload, meta, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly)
+	payload, aad, err := loadOfflineSnapshot(ios, cfg, stateDir, entry, org, project, env, configOnly, cfg.TargetNames())
 	if err != nil {
 		return false, err
 	}
 	byID := map[string]compose.SnapshotRow{}
-	nameToID := meta.KeyIDs
-	// Snapshot rows are keyed by name; the sidecar carries name→key_id.
-	rowByName := map[string]compose.SnapshotRow{}
 	for _, r := range payload.Rows {
-		rowByName[r.Name] = r
-	}
-	for name, id := range nameToID {
-		if r, ok := rowByName[name]; ok {
-			byID[id] = r
+		if r.KeyID != "" {
+			byID[r.KeyID] = r
 		}
 	}
 
@@ -470,29 +555,31 @@ func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *c
 		stamp   string
 		content []byte
 		rows    []compose.SnapshotRow
-		ids     []string
 	}
 	var results []rendered
 	var refusals []string
 	for _, name := range cfg.TargetNames() {
 		tgt := cfg.Targets[name]
-		stamp, ok := payload.GenerationStamps[name]
-		if !ok {
-			refusals = append(refusals, fmt.Sprintf("%s: no stamp in the last snapshot", name))
-			continue
-		}
 		var rows []compose.Row
 		var srows []compose.SnapshotRow
-		var ids []string
+		var names []string
 		for _, id := range tgt.Keys {
 			r, ok := byID[id]
 			if !ok {
+				// Config-only projection legitimately omits secrets (finding 7).
+				if configOnly {
+					continue
+				}
 				refusals = append(refusals, fmt.Sprintf("%s: %s: not present in the last snapshot", name, id))
 				continue
 			}
 			rows = append(rows, compose.Row{Name: r.Name, Value: r.Value})
 			srows = append(srows, r)
-			ids = append(ids, id)
+			names = append(names, r.Name)
+		}
+		// Loader-control BEFORE any offline record or write (finding 6).
+		for _, ln := range compose.RefuseUnacknowledged(names, tgt.AcknowledgeLoaderControl) {
+			refusals = append(refusals, fmt.Sprintf("%s: %s: loader-control key not acknowledged (add it to this target's acknowledge_loader_control)", name, ln))
 		}
 		content, encRefusals, err := compose.EncodeRaw(rows)
 		if err != nil {
@@ -501,7 +588,9 @@ func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *c
 		for _, rr := range encRefusals {
 			refusals = append(refusals, fmt.Sprintf("%s: %s: %s", name, rr.Key, rr.Reason))
 		}
-		results = append(results, rendered{name: name, stamp: stamp, content: content, rows: srows, ids: ids})
+		// The stamp is bound to the target name (finding 5); it must match the
+		// stamp WriteGeneration will compute below.
+		results = append(results, rendered{name: name, stamp: compose.TargetStamp(keys, name, content), content: content, rows: srows})
 	}
 	if len(refusals) > 0 {
 		sort.Strings(refusals)
@@ -512,15 +601,15 @@ func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *c
 	// written, then the generations, then the stamp commit and GC.
 	var records []compose.OfflineRecord
 	for _, r := range results {
-		for i, sr := range r.rows {
+		for _, sr := range r.rows {
 			id, err := compose.NewRecordID()
 			if err != nil {
 				return false, failf(ExitInternal, "compose render: record id: %v", err)
 			}
 			records = append(records, compose.OfflineRecord{
-				RecordID: id, KeyID: r.ids[i], KeyName: sr.Name, Classification: sr.Classification,
-				OccurredAt: ios.now().UTC().Format(time.RFC3339), CredentialID: meta.AAD.CredentialID,
-				Generation: r.stamp, ServedFrom: meta.AAD.IssuedAt,
+				RecordID: id, KeyID: sr.KeyID, KeyName: sr.Name, Classification: sr.Classification,
+				OccurredAt: ios.now().UTC().Format(time.RFC3339), CredentialID: aad.CredentialID,
+				Generation: r.stamp, ServedFrom: aad.IssuedAt,
 			})
 		}
 	}
@@ -536,22 +625,23 @@ func composeRenderOffline(ctx context.Context, ios IO, w *compose.Writer, cfg *c
 	var lines []string
 	moved := false
 	for _, r := range results {
-		finalStamps[r.name] = r.stamp
-		if err := w.WriteGeneration(runtimeDir, r.stamp, map[string][]byte{r.name: r.content}); err != nil {
+		stamp, err := lock.WriteGeneration(runtimeDir, keys, r.name, r.content)
+		if err != nil {
 			return false, failf(ExitInternal, "compose render: write generation %s: %v", r.name, err)
 		}
-		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", meta.AAD.IssuedAt, r.stamp)
-		if currentStamps[r.name] != r.stamp {
+		finalStamps[r.name] = stamp
+		fmt.Fprintf(ios.Stderr, "serving stale from %s, generation %s\n", aad.IssuedAt, stamp)
+		if currentStamps[r.name] != stamp {
 			moved = true
-			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, r.stamp, filepath.Join(runtimeDir, r.stamp, r.name+".env")))
+			lines = append(lines, fmt.Sprintf("rendered %s generation %s → %s", r.name, stamp, filepath.Join(runtimeDir, stamp, r.name+".env")))
 		} else {
-			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, r.stamp))
+			lines = append(lines, fmt.Sprintf("unchanged %s generation %s", r.name, stamp))
 		}
 	}
-	if err := w.CommitStamps(cfgDir, finalStamps); err != nil {
+	if err := lock.CommitStamps(finalStamps); err != nil {
 		return false, failf(ExitInternal, "compose render: commit stamps: %v", err)
 	}
-	if err := w.GC(runtimeDir, finalStamps, compose.DefaultGenerationsKept); err != nil {
+	if err := lock.GC(runtimeDir, compose.DefaultGenerationsKept); err != nil {
 		return false, failf(ExitInternal, "compose render: gc: %v", err)
 	}
 	for _, l := range lines {
@@ -576,38 +666,58 @@ func runComposeSync(ctx context.Context, ios IO, args []string) error {
 		return err
 	}
 
-	// (1) Doctor checks run BEFORE the first render; any error finding refuses
-	// without rendering. Findings go to stderr — stdout stays empty. The
-	// server-agreement axis is DELIBERATELY EXCLUDED here: `never_rendered` and
-	// `server_manifest_drift` describe exactly the staleness this sync is about
-	// to repair, so gating on them would make every publish (and every fresh box)
-	// brick sync forever. Sync's gate is the LOCAL integrity checks (version
-	// floor, format raw, stamp grammar, token/state modes); the drift stays an
-	// error for the doctor VERB, which reports rather than repairs.
+	// (1) Doctor checks run BEFORE the first render; any BLOCKING error finding
+	// refuses without rendering. Findings go to stderr — stdout stays empty. The
+	// server-agreement family (`server_manifest_drift`, `never_rendered`,
+	// `server_stamp_unknown`, `server_unreachable`) is DELIBERATELY EXCLUDED from
+	// the gate: those describe exactly the staleness this sync is about to repair,
+	// so gating on them would brick sync on every publish and every fresh box.
+	// Sync's gate is the LOCAL integrity checks (version floor, format raw, stamp
+	// grammar, token/state modes); the drift stays an error for the doctor VERB,
+	// which reports rather than repairs (finding 11 — this is the interpretation
+	// of the ADR "same checks" sentence offered for human disposition; see the
+	// spellings § Compose delivery).
 	findings, err := composeDoctorGather(ctx, ios, st, flags, projectDir, false)
 	if err != nil {
 		return err
 	}
-	if hasErrorFinding(findings) {
-		renderComposeFindings(ios.Stderr, FormatTable, findings)
+	if hasBlockingError(findings) {
+		if rerr := renderComposeFindings(ios.Stderr, FormatTable, findings); rerr != nil {
+			return failf(ExitInternal, "hikyo compose sync: rendering findings: %v", rerr)
+		}
 		return failf(ExitRefused, "hikyo compose sync: doctor found errors; not rendering")
 	}
 
 	// (2) Render (conditional).
-	moved, err := composeRenderCore(ctx, ios, st, flags, projectDir, false)
+	moved, rp, err := composeRenderCore(ctx, ios, st, flags, projectDir, false)
 	if err != nil {
 		return err
-	}
-	if !moved {
-		return nil
 	}
 
-	// (3) A stamp moved: recreate through docker compose up -d in the project dir.
-	_, cfgDir, err := findComposeConfig(startDir(ios, projectDir))
-	if err != nil {
-		return err
+	// (3) Apply through `docker compose up -d` when a stamp moved, OR when a prior
+	// sync left an apply-pending marker (its docker call failed, or a reboot lost
+	// the tmpfs generation and it was re-materialized): the marker forces a retry
+	// even when nothing moved this time (finding 10). The marker is written BEFORE
+	// docker and removed only after docker succeeds, so a failed apply is retried
+	// on the next sync rather than left permanently stale.
+	pending := applyPendingExists(rp.stateDir)
+	if !moved && !pending {
+		return nil
 	}
-	return dockerComposeUp(ctx, ios, cfgDir)
+	stamps, err := compose.CurrentStamps(rp.cfgDir)
+	if err != nil {
+		return failf(ExitRefused, "hikyo compose sync: %v", err)
+	}
+	if err := writeApplyPending(rp.stateDir, stamps); err != nil {
+		return failf(ExitInternal, "hikyo compose sync: writing apply-pending marker: %v", err)
+	}
+	if err := dockerComposeUp(ctx, ios, rp.cfgDir); err != nil {
+		return err // marker stays: the next sync retries the apply
+	}
+	if err := removeApplyPending(rp.stateDir); err != nil {
+		return failf(ExitInternal, "hikyo compose sync: clearing apply-pending marker: %v", err)
+	}
+	return nil
 }
 
 func dockerComposeUp(ctx context.Context, ios IO, projectDir string) error {
@@ -618,14 +728,45 @@ func dockerComposeUp(ctx context.Context, ios IO, projectDir string) error {
 	cmd := exec.CommandContext(ctx, bin, "compose", "up", "-d")
 	cmd.Dir = projectDir
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = ios.Stdout
+	// `compose sync` is a delivery operation: nothing is printed on hikyo stdout
+	// (output ADR). Docker's own stdout is diagnostic, so it is routed to hikyo
+	// STDERR, keeping sync stdout empty (finding 14).
+	cmd.Stdout = ios.Stderr
 	cmd.Stderr = ios.Stderr
+	// The workload credential never reaches a subprocess (finding 1).
+	cmd.Env = sanitizedEnviron()
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return failf(ExitInternal, "hikyo compose sync: `docker compose up -d` exited %d", ee.ExitCode())
 		}
 		return failf(ExitInternal, "hikyo compose sync: `docker compose up -d`: %v", err)
+	}
+	return nil
+}
+
+const applyPendingFile = "apply-pending"
+
+// applyPendingExists reports whether a prior sync left an unfinished apply.
+func applyPendingExists(stateDir string) bool {
+	_, err := os.Stat(filepath.Join(stateDir, applyPendingFile))
+	return err == nil
+}
+
+// writeApplyPending records the stamps to apply, atomically, BEFORE docker runs.
+func writeApplyPending(stateDir string, stamps map[string]string) error {
+	data, err := json.Marshal(stamps)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic0600(filepath.Join(stateDir, applyPendingFile), data)
+}
+
+// removeApplyPending clears the marker after a successful docker apply.
+func removeApplyPending(stateDir string) error {
+	err := os.Remove(filepath.Join(stateDir, applyPendingFile))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	return nil
 }
@@ -657,7 +798,12 @@ func runComposeDoctor(ctx context.Context, ios IO, args []string) error {
 	if err != nil {
 		return err
 	}
-	renderComposeFindings(ios.Stdout, f, findings)
+	// Propagate a rendering failure as ExitInternal (finding 15): doctor must not
+	// return success or its findings-derived refusal when its required output
+	// never reached the caller.
+	if rerr := renderComposeFindings(ios.Stdout, f, findings); rerr != nil {
+		return failf(ExitInternal, "hikyo compose doctor: rendering findings: %v", rerr)
+	}
 	if hasErrorFinding(findings) {
 		return failf(ExitRefused, "hikyo compose doctor found errors")
 	}
@@ -676,14 +822,24 @@ func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFla
 	if cfg == nil {
 		return nil, failf(ExitUsage, "hikyo compose doctor requires a %s (searched up from %s)", composeConfigName, startDir(ios, projectDir))
 	}
-	client, _, resolved, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "compose")
+	client, _, resolved, token, err := resolveMachineTarget(st, ios, flags, cfg, cfgDir, "compose")
 	if err != nil {
 		return nil, err
 	}
 	org, project, env := resolved.Get(DimOrg), resolved.Get(DimProject), resolved.Get(DimEnv)
-	slug := composeSlug(cfg, org, project, env)
+	slug, err := composeSlug(cfg, org, project, env)
+	if err != nil {
+		return nil, err
+	}
 	stateDir := composeStateDir(st, slug)
-	runtimeDir, rerr := composeRuntimeDir(ios, cfg, slug)
+	runtimeDir, _, rerr := composeRuntimeDir(ios, cfg, slug)
+
+	// Flush-before-fetch (ops-spec § 6): reconcile pending offline records BEFORE
+	// any doctor network request (the catalogue and agreement fetches), so a POST
+	// always precedes every GET (finding 9). A flush failure is a hard error.
+	if err := flushOffline(ctx, client, org, project, env, stateDir); err != nil {
+		return nil, err
+	}
 
 	var findings []compose.Finding
 
@@ -696,32 +852,69 @@ func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFla
 		return nil, failf(ExitRefused, "compose doctor: %v", err)
 	}
 
+	existingKeyIDs, catFinding := doctorExistingKeyIDs(ctx, client, org, project, cfg)
+	if catFinding != nil {
+		findings = append(findings, *catFinding)
+	}
+	stateEntries, scanFinding := doctorStateEntries(stateDir)
+	if scanFinding != nil {
+		findings = append(findings, *scanFinding)
+	}
+
 	in := compose.DoctorInput{
 		ComposeVersion: version,
 		Config:         resolvedConfig,
 		RawComposeYAML: doctorRawCompose(ios, cfgDir),
 		ManagedStamps:  managed,
 		ConfigTargets:  cfg.Targets,
-		ExistingKeyIDs: doctorExistingKeyIDs(ctx, client, org, project, cfg),
-		StateEntries:   doctorStateEntries(stateDir),
+		ExistingKeyIDs: existingKeyIDs,
+		StateEntries:   stateEntries,
 		TokenFile:      doctorTokenFile(flags.TokenFile),
 
 		SystemdInvocation:       ios.Env.Getenv("INVOCATION_ID") != "",
 		TokenFromCredentialsDir: tokenFromCredentialsDir(ios, flags.TokenFile),
 	}
-	if rerr == nil {
+	// runtime_dir must resolve; when it cannot (not root, no XDG_RUNTIME_DIR, no
+	// explicit config), surface it as its own error and do not let the derived
+	// runtime checks fire on an empty path (finding 12).
+	runtimeResolved := rerr == nil
+	if runtimeResolved {
 		in.RuntimeDir = runtimeDir
+		in.RuntimeTmpfs = doctorRuntimeTmpfs(runtimeDir)
+	}
+
+	// Server agreement: feed compose.Doctor the per-target server stamps it needs
+	// (finding 4). The structural check then compares them against the managed
+	// stamp and the label. Only the DOCTOR verb reaches the server; sync repairs
+	// freshness and must not gate on it (finding 11).
+	var serverStamps map[string]string
+	var serverFindings []compose.Finding
+	haveServerStamps := false
+	if includeServerAgreement {
+		serverStamps, serverFindings, haveServerStamps = doctorServerStamps(ctx, client, cfg, stateDir, managed, runtimeDir, org, project, env, token)
+		in.ServerStamps = serverStamps
 	}
 
 	findings = append(findings, compose.Doctor(in)...)
+	findings = append(findings, serverFindings...)
+
 	// A docker_missing finding makes the version check redundant; drop the
 	// compose.Doctor floor finding so the two do not both fire for one cause.
 	if hasCode(findings, "docker_missing") {
 		findings = dropCode(findings, "compose_version_below_floor")
 	}
-
-	if includeServerAgreement {
-		findings = append(findings, doctorServerAgreement(ctx, client, stateDir, managed, runtimeDir, org, project, env, allTargetKeyIDs(cfg))...)
+	if !runtimeResolved {
+		findings = dropCode(findings, "runtime_not_tmpfs")
+		findings = dropCode(findings, "runtime_dir_not_absolute")
+		findings = append(findings, compose.Finding{Severity: compose.SeverityError, Code: "runtime_dir_unresolved",
+			Message: fmt.Sprintf("could not resolve a runtime dir: %v", rerr)})
+	}
+	// server_stamp_unknown is compose.Doctor's honest "no server stamp to compare"
+	// finding. Drop it whenever we deliberately did not (or could not) obtain the
+	// server stamps — sync never fetches, and doctor's never_rendered /
+	// server_unreachable / drift cases explain the gap directly.
+	if !haveServerStamps {
+		findings = dropCode(findings, "server_stamp_unknown")
 	}
 
 	sortFindings(findings)
@@ -729,8 +922,9 @@ func composeDoctorGather(ctx context.Context, ios IO, st *State, flags commonFla
 }
 
 // doctorDocker runs `docker compose version --short` and `docker compose config
-// --format json`. A missing docker binary is the docker_missing error finding
-// and leaves version/config empty.
+// --format json`. A missing docker binary is docker_missing; a config invocation
+// or JSON parse failure is docker_config_failed (fail closed — a nil config used
+// to silently disable the service checks, finding 12).
 func doctorDocker(ctx context.Context, ios IO, cfgDir string) ([]compose.Finding, string, *compose.ComposeConfig) {
 	bin, found := dockerBinary(ios)
 	if !found {
@@ -742,39 +936,51 @@ func doctorDocker(ctx context.Context, ios IO, cfgDir string) ([]compose.Finding
 		return []compose.Finding{{Severity: compose.SeverityError, Code: "docker_missing",
 			Message: fmt.Sprintf("`docker compose version` failed: %v", err)}}, "", nil
 	}
-	var cfg *compose.ComposeConfig
-	if raw, err := runCapture(ctx, ios, bin, cfgDir, "compose", "config", "--format", "json"); err == nil {
-		if parsed, perr := compose.ParseComposeConfig([]byte(raw)); perr == nil {
-			cfg = parsed
-		}
+	raw, cerr := runCapture(ctx, ios, bin, cfgDir, "compose", "config", "--format", "json")
+	if cerr != nil {
+		return []compose.Finding{{Severity: compose.SeverityError, Code: "docker_config_failed",
+			Message: fmt.Sprintf("`docker compose config` failed: %v", cerr)}}, strings.TrimSpace(version), nil
 	}
-	return nil, strings.TrimSpace(version), cfg
+	parsed, perr := compose.ParseComposeConfig([]byte(raw))
+	if perr != nil {
+		return []compose.Finding{{Severity: compose.SeverityError, Code: "docker_config_failed",
+			Message: fmt.Sprintf("could not parse `docker compose config` JSON: %v", perr)}}, strings.TrimSpace(version), nil
+	}
+	return nil, strings.TrimSpace(version), parsed
 }
 
-// doctorServerAgreement performs a conditional fetch presenting the stored
-// cursor when eligible, so no plaintext crosses the wire on a "current" answer.
-func doctorServerAgreement(ctx context.Context, client *Client, stateDir string, managed map[string]string, runtimeDir, org, project, env string, keyIDs []string) []compose.Finding {
-	present := eligibleCursor(stateDir, managed, runtimeDir, env, false, keyIDs)
+// doctorServerStamps performs the conditional agreement fetch and returns the
+// per-target server stamps to feed compose.Doctor's structural check, plus any
+// standalone findings. The bool reports whether server stamps were obtained (so
+// the caller can drop the honest server_stamp_unknown when they were not).
+func doctorServerStamps(ctx context.Context, client *Client, cfg *compose.Config, stateDir string, managed map[string]string, runtimeDir, org, project, env, token string) (map[string]string, []compose.Finding, bool) {
+	present := eligibleCursor(stateDir, cfg, managed, runtimeDir, token, env, false)
 	if present == "" {
-		// No eligible cursor: either never rendered, or the local render is gone.
-		// A full fetch would be a disclosure, so doctor does not do one.
-		return []compose.Finding{{Severity: compose.SeverityError, Code: "never_rendered",
-			Message: "no eligible cursor: this box has not rendered, or its render is gone; run `hikyo compose render`"}}
+		// No eligible cursor: never rendered, or the local render is gone. A full
+		// fetch would be a disclosure, so doctor does not do one.
+		return nil, []compose.Finding{{Severity: compose.SeverityError, Code: "never_rendered",
+			Message: "no eligible cursor: this box has not rendered, or its render is gone; run `hikyo compose render`"}}, false
 	}
 	resp, err := fetchDelivery(ctx, client, org, project, env, false, present)
 	if err != nil {
+		sev := compose.SeverityError
+		msg := fmt.Sprintf("the server refused the agreement check: %v", err)
 		if isUnavailable(err) {
-			return []compose.Finding{{Severity: compose.SeverityWarn, Code: "server_unreachable",
-				Message: fmt.Sprintf("could not reach the server to confirm agreement: %v", err)}}
+			sev = compose.SeverityWarn
+			msg = fmt.Sprintf("could not reach the server to confirm agreement: %v", err)
 		}
-		return []compose.Finding{{Severity: compose.SeverityError, Code: "server_unreachable",
-			Message: fmt.Sprintf("the server refused the agreement check: %v", err)}}
+		return nil, []compose.Finding{{Severity: sev, Code: "server_unreachable", Message: msg}}, false
 	}
-	if !resp.Current {
-		return []compose.Finding{{Severity: compose.SeverityError, Code: "server_manifest_drift",
-			Message: "the server's current manifest is not the one this box rendered — run `hikyo compose render`"}}
+	if resp.Current {
+		// The server agrees the presented cursor is current: our managed stamps ARE
+		// the server's, no plaintext crossed the wire.
+		return managed, nil, true
 	}
-	return nil
+	// Drift: the cursor is not current. We cannot always recompute the server's
+	// per-target stamp (a read-only credential holds no secret plaintext), so
+	// report the drift directly and leave the stamps unknown.
+	return nil, []compose.Finding{{Severity: compose.SeverityError, Code: "server_manifest_drift",
+		Message: "the server's current manifest is not the one this box rendered — run `hikyo compose render`"}}, false
 }
 
 // ---------------------------------------------------------------------------
@@ -785,10 +991,10 @@ func doctorServerAgreement(ctx context.Context, client *Client, stateDir string,
 // dimensions in (a disagreement with an already-resolved dimension is a hard
 // error), and REQUIRES a machine credential. It never falls back to the stored
 // human session — that path is a refusal in this build.
-func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Config, cfgPath, verb string) (*Client, TrustEntry, Resolved, error) {
+func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Config, cfgPath, verb string) (*Client, TrustEntry, Resolved, string, error) {
 	resolved, err := Resolve(st, ios.Env, flags.Flags, ios.Workdir)
 	if err != nil {
-		return nil, TrustEntry{}, Resolved{}, err
+		return nil, TrustEntry{}, Resolved{}, "", err
 	}
 	if cfg != nil {
 		for _, d := range []struct {
@@ -796,37 +1002,37 @@ func resolveMachineTarget(st *State, ios IO, flags commonFlags, cfg *compose.Con
 			val string
 		}{{DimOrg, cfg.Org}, {DimProject, cfg.Project}, {DimEnv, cfg.Environment}} {
 			if err := foldConfigDim(&resolved, d.dim, d.val, cfgPath); err != nil {
-				return nil, TrustEntry{}, Resolved{}, err
+				return nil, TrustEntry{}, Resolved{}, "", err
 			}
 		}
 	}
 
 	entry, err := machineEntry(st, resolved, cfg)
 	if err != nil {
-		return nil, TrustEntry{}, Resolved{}, err
+		return nil, TrustEntry{}, Resolved{}, "", err
 	}
 	for _, d := range []Dimension{DimOrg, DimProject, DimEnv} {
 		if _, err := resolved.Require(d); err != nil {
-			return nil, TrustEntry{}, Resolved{}, err
+			return nil, TrustEntry{}, Resolved{}, "", err
 		}
 	}
 
 	token, err := machineToken(ios, flags.TokenFile)
 	if err != nil {
-		return nil, TrustEntry{}, Resolved{}, err
+		return nil, TrustEntry{}, Resolved{}, "", err
 	}
 	if token == "" {
-		return nil, TrustEntry{}, Resolved{}, failf(ExitAuth,
+		return nil, TrustEntry{}, Resolved{}, "", failf(ExitAuth,
 			"hikyo %s accepts only a machine credential (--token-file or HIKYO_TOKEN); the --use-human-session path is not in this build", verb)
 	}
 	client, err := NewClient(entry, token)
 	if err != nil {
-		return nil, TrustEntry{}, Resolved{}, err
+		return nil, TrustEntry{}, Resolved{}, "", err
 	}
 	if echo := resolved.Echo(); echo != "" {
 		fmt.Fprintf(ios.Stderr, "target: %s [origin %s, artifact machine-credential]\n", echo, entry.Origin)
 	}
-	return client, entry, resolved, nil
+	return client, entry, resolved, token, nil
 }
 
 // foldConfigDim fills an unresolved dimension from the config, or refuses when
@@ -969,7 +1175,7 @@ func flushOffline(ctx context.Context, client *Client, org, project, env, stateD
 			return err // refuses the fetch: ExitUnavailable or the server's mapped code
 		}
 	}
-	if err := compose.MarkFlushed(files); err != nil {
+	if err := compose.MarkFlushed(stateDir, files); err != nil {
 		return failf(ExitInternal, "marking offline records flushed: %v", err)
 	}
 	return nil
@@ -991,116 +1197,147 @@ func toAPIRecords(recs []compose.OfflineRecord) []apigen.OfflineDeliveryRecord {
 }
 
 // ---------------------------------------------------------------------------
-// snapshot / cursor / offline-meta helpers (thin wrappers over internal/compose)
+// snapshot / cursor / server-credential helpers (thin wrappers over internal/compose)
 // ---------------------------------------------------------------------------
-
-// offlineMeta is the CLI-owned sidecar the offline path needs beyond the
-// compose snapshot payload: the AAD tuple LoadSnapshot takes as a parameter, and
-// the name→key_id map the per-key reconciliation records require. Kept in the
-// CLI layer deliberately — the compose snapshot format is being reworked to be
-// self-describing; saveOfflineMeta/loadOfflineMeta are the one place to
-// reconcile when it lands.
-type offlineMeta struct {
-	AAD    crypto.SnapshotAAD `json:"aad"`
-	KeyIDs map[string]string  `json:"key_ids"`
-}
 
 func saveSnapshot(stateDir string, keys *crypto.LocalKeys, aad crypto.SnapshotAAD, payload compose.SnapshotPayload) error {
 	return compose.SaveSnapshot(stateDir, keys, aad, payload)
 }
 
-func saveOfflineMeta(stateDir string, aad crypto.SnapshotAAD, keys []apigen.DeliveredKey) error {
-	ids := make(map[string]string, len(keys))
-	for _, k := range keys {
-		ids[k.Name] = k.KeyId
+// saveServerCredential records the server-asserted credential_id from the last
+// live fetch (see serverCredentialFile). It is written atomically 0600 AFTER the
+// snapshot is durable.
+func saveServerCredential(stateDir, credentialID string) error {
+	if strings.TrimSpace(credentialID) == "" {
+		return fmt.Errorf("server credential id is empty")
 	}
-	data, err := json.Marshal(offlineMeta{AAD: aad, KeyIDs: ids})
-	if err != nil {
-		return fmt.Errorf("marshal offline metadata: %w", err)
-	}
-	return writeFileAtomic0600(filepath.Join(stateDir, offlineMetaFile), data)
+	return writeFileAtomic0600(filepath.Join(stateDir, serverCredentialFile), []byte(credentialID))
 }
 
-func loadOfflineMeta(stateDir string) (offlineMeta, bool, error) {
-	b, err := os.ReadFile(filepath.Join(stateDir, offlineMetaFile))
+// loadServerCredential reads the recorded server credential id. A missing
+// record is a hard refusal, never a silent skip: the offline path cannot verify
+// a snapshot's credential binding without it.
+func loadServerCredential(stateDir string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(stateDir, serverCredentialFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return offlineMeta{}, false, nil
+			return "", failf(ExitRefused, "offline serve is enabled but no credential record has been saved for this stack yet")
 		}
-		return offlineMeta{}, false, err
+		return "", failf(ExitRefused, "offline serve: reading credential record: %v", err)
 	}
-	var m offlineMeta
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil {
-		return offlineMeta{}, false, fmt.Errorf("parse offline metadata: %w", err)
+	id := strings.TrimSpace(string(b))
+	if id == "" {
+		return "", failf(ExitRefused, "offline serve: credential record is empty")
 	}
-	return m, true, nil
+	return id, nil
 }
 
-// loadOfflineSnapshot opens the persisted snapshot for offline serve. It
-// cross-checks the sidecar's context-derivable AAD fields against the current
-// invocation, so a snapshot is not merely self-consistent but still belongs to
-// THIS stack, then opens it under the persisted AAD.
-func loadOfflineSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool) (compose.SnapshotPayload, offlineMeta, error) {
-	var zero compose.SnapshotPayload
+// loadOfflineSnapshot opens the persisted snapshot for offline serve under the
+// SnapshotContext the box can reconstruct offline: origin/org/project/env from
+// the invocation, config_only, the mode's target set (["__run__"] for run, the
+// configured targets for render), and the recorded server credential id.
+// ContextMatches refuses a transplanted snapshot BY NAME before any crypto.
+func loadOfflineSnapshot(ios IO, cfg *compose.Config, stateDir string, entry TrustEntry, org, project, env string, configOnly bool, targetNames []string) (compose.SnapshotPayload, crypto.SnapshotAAD, error) {
+	var zeroP compose.SnapshotPayload
+	var zeroA crypto.SnapshotAAD
 	keys, err := loadLocalKeys(stateDir)
 	if err != nil {
-		return zero, offlineMeta{}, err
+		return zeroP, zeroA, err
 	}
-	meta, ok, err := loadOfflineMeta(stateDir)
+	credID, err := loadServerCredential(stateDir)
 	if err != nil {
-		return zero, offlineMeta{}, failf(ExitRefused, "offline serve: %v", err)
+		return zeroP, zeroA, err
 	}
-	if !ok {
-		return zero, offlineMeta{}, failf(ExitRefused, "offline serve is enabled but no snapshot has been saved for this stack yet")
-	}
-	if meta.AAD.InstanceOrigin != entry.Origin || meta.AAD.OrgID != org || meta.AAD.ProjectID != project ||
-		meta.AAD.EnvironmentID != env || meta.AAD.ConfigOnly != configOnly {
-		return zero, offlineMeta{}, failf(ExitRefused, "offline snapshot belongs to a different context (origin/org/project/env/config-only mismatch) and will not be served")
-	}
-	payload, _, err := compose.LoadSnapshot(stateDir, keys, meta.AAD, ios.now(), cfg.SnapshotMaxAge())
+	ctx := snapshotContext(entry, org, project, env, credID, configOnly, targetNames)
+	payload, aad, err := compose.LoadSnapshot(stateDir, keys, ctx, ios.now(), cfg.SnapshotMaxAge())
 	if err != nil {
-		if errors.Is(err, compose.ErrSnapshotExpired) || errors.Is(err, compose.ErrSnapshotRollback) || errors.Is(err, crypto.ErrDecrypt) {
-			return zero, offlineMeta{}, failf(ExitRefused,
-				"offline serve refused: snapshot issued %s, expires %s — past the maximum stale age (%s) or otherwise unusable (%v)",
-				meta.AAD.IssuedAt, meta.AAD.ExpiresAt, cfg.SnapshotMaxAge(), err)
+		if errors.Is(err, compose.ErrSnapshotContext) {
+			return zeroP, zeroA, failf(ExitRefused, "offline snapshot belongs to a different context and will not be served: %v", err)
 		}
-		return zero, offlineMeta{}, failf(ExitRefused, "offline serve: %v", err)
+		if errors.Is(err, os.ErrNotExist) {
+			return zeroP, zeroA, failf(ExitRefused, "offline serve is enabled but no snapshot has been saved for this stack yet")
+		}
+		if errors.Is(err, compose.ErrSnapshotExpired) || errors.Is(err, compose.ErrSnapshotRollback) || errors.Is(err, crypto.ErrDecrypt) {
+			return zeroP, zeroA, failf(ExitRefused,
+				"offline serve refused: snapshot issued %s, expires %s — past the maximum stale age (%s) or otherwise unusable (%v)",
+				aad.IssuedAt, aad.ExpiresAt, cfg.SnapshotMaxAge(), err)
+		}
+		return zeroP, zeroA, failf(ExitRefused, "offline serve: %v", err)
 	}
-	return payload, meta, nil
+	return payload, aad, nil
 }
 
-func saveCursor(stateDir string, resp apigen.DeliveryResponse, env string, configOnly bool, keyIDs []string, stamps map[string]string) error {
-	pinGen := ""
+// snapshotContext assembles the offline-known SnapshotContext (crypto ADR
+// § "AAD binds the container to its context").
+func snapshotContext(entry TrustEntry, org, project, env, credentialID string, configOnly bool, targetNames []string) crypto.SnapshotContext {
+	names := append([]string(nil), targetNames...)
+	sort.Strings(names)
+	return crypto.SnapshotContext{
+		InstanceOrigin: entry.Origin,
+		OrgID:          org, ProjectID: project, EnvironmentID: env,
+		CredentialID: credentialID, ConfigOnly: configOnly,
+		TargetNames: names,
+	}
+}
+
+// cursorBinding builds the eligibility binding. The credential identity is the
+// LOCAL fingerprint of the PRESENTED token (finding 8) — not a stored value, so
+// swapping tokens invalidates the cursor before it is presented. The env,
+// config_only, and per-target key-id membership are local truth; the pinned
+// revision and projection are server-asserted (unknowable pre-fetch, and the
+// server re-binds anyway), so they come from the stored cursor when present.
+func cursorBinding(cfg *compose.Config, token, env string, configOnly bool, stored *compose.CursorState) compose.CursorBinding {
+	b := compose.CursorBinding{
+		CredentialID: credentialFingerprint(token),
+		Environment:  env,
+		ConfigOnly:   configOnly,
+		TargetKeyIDs: targetKeyIDs(cfg),
+	}
+	if stored != nil {
+		b.PinnedRevision = stored.Binding.PinnedRevision
+		b.Projection = stored.Binding.Projection
+	}
+	return b
+}
+
+// saveCursor persists the cursor with its full binding after a committed render.
+func saveCursor(stateDir string, cfg *compose.Config, resp apigen.DeliveryResponse, token, env string, configOnly bool, stamps map[string]string) error {
+	pinned := int64(0)
 	if resp.PinnedRevision != nil {
-		pinGen = strconv.FormatInt(*resp.PinnedRevision, 10)
+		pinned = *resp.PinnedRevision
+	}
+	binding := compose.CursorBinding{
+		CredentialID:   credentialFingerprint(token),
+		Environment:    env,
+		ConfigOnly:     configOnly,
+		PinnedRevision: pinned,
+		Projection:     deliveryProjection(resp.Keys),
+		TargetKeyIDs:   targetKeyIDs(cfg),
 	}
 	return compose.SaveCursor(stateDir, compose.CursorState{
-		Cursor: resp.Cursor, CredentialID: resp.CredentialId, Environment: env,
-		ConfigOnly: configOnly, TargetIDsHash: compose.HashTargetIDs(keyIDs),
-		PinGeneration: pinGen, GenerationStamps: stamps,
+		Cursor: resp.Cursor, Binding: binding, GenerationStamps: stamps,
 	})
 }
 
-// eligibleCursor returns the stored cursor when the three-part local test holds,
-// or "". The credential id compared is the cursor's own last-fetch value: the
-// live server credential id is not known pre-fetch, and the server re-binds the
-// cursor to the presenting credential anyway (a mismatch just yields a full
-// fetch, never a wrong "current").
-func eligibleCursor(stateDir string, currentStamps map[string]string, runtimeDir, env string, configOnly bool, keyIDs []string) string {
+// eligibleCursor returns the stored cursor iff the full local eligibility test
+// holds against the currently presented token, env, mode, and target set.
+func eligibleCursor(stateDir string, cfg *compose.Config, currentStamps map[string]string, runtimeDir, token, env string, configOnly bool) string {
 	state, err := compose.LoadCursor(stateDir)
 	if err != nil || state == nil {
 		return ""
 	}
-	c, ok := compose.EligibleCursor(state, currentStamps, runtimeDir, state.CredentialID, env, configOnly, keyIDs)
+	want := cursorBinding(cfg, token, env, configOnly, state)
+	c, ok := compose.EligibleCursor(state, want, currentStamps, runtimeDir)
 	if !ok {
 		return ""
 	}
 	return c
 }
 
-func appendOfflineRecords(stateDir string, rows []compose.SnapshotRow, meta offlineMeta, generation string) error {
+// appendOfflineRecords writes one durable, fsynced disclosure record per served
+// row BEFORE the plaintext is released (compose ADR § "Audit during offline
+// serve"). KeyID travels inside the sealed payload's rows now.
+func appendOfflineRecords(ios IO, stateDir string, rows []compose.SnapshotRow, aad crypto.SnapshotAAD, generation string) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1111,9 +1348,9 @@ func appendOfflineRecords(stateDir string, rows []compose.SnapshotRow, meta offl
 			return err
 		}
 		recs = append(recs, compose.OfflineRecord{
-			RecordID: id, KeyID: meta.KeyIDs[r.Name], KeyName: r.Name, Classification: r.Classification,
-			OccurredAt: time.Now().UTC().Format(time.RFC3339), CredentialID: meta.AAD.CredentialID,
-			Generation: generation, ServedFrom: meta.AAD.IssuedAt,
+			RecordID: id, KeyID: r.KeyID, KeyName: r.Name, Classification: r.Classification,
+			OccurredAt: ios.now().UTC().Format(time.RFC3339), CredentialID: aad.CredentialID,
+			Generation: generation, ServedFrom: aad.IssuedAt,
 		})
 	}
 	return compose.Append(stateDir, recs)
@@ -1154,11 +1391,34 @@ func findComposeConfig(startDir string) (*compose.Config, string, error) {
 	}
 }
 
-func composeSlug(cfg *compose.Config, org, project, env string) string {
+// composeIDGrammar is the repo's canonical resource-id grammar
+// (api/openapi.yaml:8754 `^[a-z]{2,8}_[0-9a-fA-F-]{36}$`). There is no Go
+// constant for it, so it is anchored here for the slug derivation.
+var composeIDGrammar = regexp.MustCompile(`^[a-z]{2,8}_[0-9a-fA-F-]{36}$`)
+
+// composeSlug derives the project slug. An explicit config slug (already
+// grammar-checked as a path segment in ParseConfig) wins. Otherwise it is
+// "<org>-<project>-<env>", but ONLY after validating each id against the repo id
+// grammar so an unvalidated string cannot become a path segment (finding 2), and
+// asserting containment so the derived state dir cannot escape.
+func composeSlug(cfg *compose.Config, org, project, env string) (string, error) {
 	if cfg != nil && strings.TrimSpace(cfg.Slug) != "" {
-		return cfg.Slug
+		return cfg.Slug, nil
 	}
-	return org + "-" + project + "-" + env
+	for _, id := range []string{org, project, env} {
+		if !composeIDGrammar.MatchString(id) {
+			return "", failf(ExitUsage,
+				"hikyo compose: cannot derive a project slug from %q — it is not a valid id (want %s); set an explicit `slug` in %s",
+				id, composeIDGrammar.String(), composeConfigName)
+		}
+	}
+	slug := org + "-" + project + "-" + env
+	// Containment: the slug is a single path segment under the state dir, so a
+	// join must not climb out of it (defence in depth over the grammar).
+	if rel, err := filepath.Rel(".", slug); err != nil || rel != slug || strings.ContainsRune(slug, filepath.Separator) || strings.Contains(slug, "..") {
+		return "", failf(ExitUsage, "hikyo compose: derived slug %q is not a safe path segment", slug)
+	}
+	return slug, nil
 }
 
 func composeStateDir(st *State, slug string) string {
@@ -1168,19 +1428,38 @@ func composeStateDir(st *State, slug string) string {
 // composeRuntimeDir resolves the tmpfs runtime directory (ops-spec § 6):
 // config runtime_dir, else /run/hikyo/<slug> as root, else
 // $XDG_RUNTIME_DIR/hikyo/<slug>. No runtime dir and not root is a usage error
-// naming runtime_dir rather than a silent guess.
-func composeRuntimeDir(ios IO, cfg *compose.Config, slug string) (string, error) {
+// naming runtime_dir rather than a silent guess. The bool reports whether the
+// path came from an EXPLICIT config runtime_dir (the operator's call on tmpfs)
+// versus a derived DEFAULT (which the renderer requires to be tmpfs).
+func composeRuntimeDir(ios IO, cfg *compose.Config, slug string) (string, bool, error) {
 	if cfg != nil && strings.TrimSpace(cfg.RuntimeDir) != "" {
-		return cfg.RuntimeDir, nil
+		return cfg.RuntimeDir, true, nil
 	}
 	if os.Geteuid() == 0 {
-		return filepath.Join("/run/hikyo", slug), nil
+		return filepath.Join("/run/hikyo", slug), false, nil
 	}
 	if xdg := ios.Env.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
-		return filepath.Join(xdg, "hikyo", slug), nil
+		return filepath.Join(xdg, "hikyo", slug), false, nil
 	}
-	return "", failf(ExitUsage,
+	return "", false, failf(ExitUsage,
 		"no runtime directory: not root and XDG_RUNTIME_DIR is unset. Set `runtime_dir` in %s, or run under a session with XDG_RUNTIME_DIR", composeConfigName)
+}
+
+// doctorRuntimeTmpfs reports whether the runtime dir (or its nearest existing
+// ancestor, since the dir may not exist yet) is tmpfs-backed. On non-Linux
+// IsTmpfs returns true, so this never falsely flags there.
+func doctorRuntimeTmpfs(dir string) bool {
+	for dir != "" {
+		if ok, err := compose.IsTmpfs(dir); err == nil {
+			return ok
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return true
 }
 
 func loadLocalKeys(stateDir string) (*crypto.LocalKeys, error) {
@@ -1219,36 +1498,57 @@ func doctorRawCompose(ios IO, cfgDir string) string {
 
 // doctorExistingKeyIDs reads the project key catalogue for the target_key_missing
 // check. A workload credential deliberately CANNOT enumerate the catalogue (it
-// reads values through delivery, not the catalogue), so a 404/403 there is not a
-// drift signal — it means the check is not answerable from this credential. In
-// that case the configured target key ids are treated as existing, making the
-// check a no-op rather than flagging every id as missing. When the catalogue IS
-// readable, the real set drives the check.
-func doctorExistingKeyIDs(ctx context.Context, client *Client, org, project string, cfg *compose.Config) map[string]bool {
-	var list apigen.KeyList
-	path := api.PathPrefix + "/orgs/" + url.PathEscape(org) + "/projects/" + url.PathEscape(project) + "/keys"
-	if err := client.Do(ctx, http.MethodGet, path, nil, &list); err != nil {
+// reads values through delivery, not the catalogue), so a UNIFORM not-found /
+// unauthorized there (unauthorized ≡ nonexistent) is not a drift signal — it
+// means the check is not answerable from this credential, and the configured ids
+// are treated as existing (a no-op). Any OTHER failure — transport, 5xx, decode
+// — is NOT swallowed: it fails closed as `catalogue_unavailable` (finding 12),
+// while still treating the ids as existing so target_key_missing does not fire
+// on an unknown set.
+func doctorExistingKeyIDs(ctx context.Context, client *Client, org, project string, cfg *compose.Config) (map[string]bool, *compose.Finding) {
+	allExist := func() map[string]bool {
 		out := map[string]bool{}
 		for _, id := range allTargetKeyIDs(cfg) {
 			out[id] = true
 		}
 		return out
 	}
+	var list apigen.KeyList
+	path := api.PathPrefix + "/orgs/" + url.PathEscape(org) + "/projects/" + url.PathEscape(project) + "/keys"
+	if err := client.Do(ctx, http.MethodGet, path, nil, &list); err != nil {
+		if isNotFound(err) {
+			// Uniform 404/unauthorized: unanswerable from this credential, no-op.
+			return allExist(), nil
+		}
+		return allExist(), &compose.Finding{Severity: compose.SeverityError, Code: "catalogue_unavailable",
+			Message: fmt.Sprintf("could not read the key catalogue to confirm target key ids: %v", err)}
+	}
 	out := make(map[string]bool, len(list.Items))
 	for _, k := range list.Items {
 		out[k.Id] = true
 	}
-	return out
+	return out, nil
 }
 
-func doctorStateEntries(stateDir string) []compose.StateEntry {
+// doctorStateEntries walks the client state dir for mode/ownership checks. A
+// walk or stat error is NOT swallowed: it fails closed as `state_scan_failed`
+// (finding 12) rather than silently reporting an incomplete tree.
+func doctorStateEntries(stateDir string) ([]compose.StateEntry, *compose.Finding) {
 	var entries []compose.StateEntry
+	var scanErr error
 	_ = filepath.WalkDir(stateDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			// A missing state dir is legitimate (nothing rendered yet); any other
+			// walk error is a real scan failure.
+			if errors.Is(err, os.ErrNotExist) && path == stateDir {
+				return nil
+			}
+			scanErr = fmt.Errorf("%s: %w", path, err)
 			return nil
 		}
 		info, ierr := d.Info()
 		if ierr != nil {
+			scanErr = fmt.Errorf("%s: %w", path, ierr)
 			return nil
 		}
 		entries = append(entries, compose.StateEntry{
@@ -1256,7 +1556,11 @@ func doctorStateEntries(stateDir string) []compose.StateEntry {
 		})
 		return nil
 	})
-	return entries
+	if scanErr != nil {
+		return entries, &compose.Finding{Severity: compose.SeverityError, Code: "state_scan_failed",
+			Message: fmt.Sprintf("could not fully scan the client state dir: %v", scanErr)}
+	}
+	return entries, nil
 }
 
 func doctorTokenFile(tokenFile string) *compose.FileMode {
@@ -1298,7 +1602,7 @@ type composeDoctorReport struct {
 	Findings []composeFinding `json:"findings"`
 }
 
-func renderComposeFindings(w io.Writer, f Format, findings []compose.Finding) {
+func renderComposeFindings(w io.Writer, f Format, findings []compose.Finding) error {
 	report := composeDoctorReport{Status: "ok", Findings: []composeFinding{}}
 	rows := make([][]string, 0, len(findings))
 	for _, fd := range findings {
@@ -1316,7 +1620,7 @@ func renderComposeFindings(w io.Writer, f Format, findings []compose.Finding) {
 	if len(rows) == 0 {
 		rows = append(rows, []string{"ok", "compose", "no findings"})
 	}
-	_ = Render(w, f, Table{Columns: []string{"STATUS", "CHECK", "MESSAGE"}, Rows: rows, JSON: report})
+	return Render(w, f, Table{Columns: []string{"STATUS", "CHECK", "MESSAGE"}, Rows: rows, JSON: report})
 }
 
 // ---------------------------------------------------------------------------
@@ -1341,6 +1645,8 @@ func runCapture(ctx context.Context, ios IO, bin, dir string, args ...string) (s
 	_ = ios
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
+	// The workload credential never reaches a subprocess (finding 1).
+	cmd.Env = sanitizedEnviron()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
@@ -1412,9 +1718,18 @@ func deliveredRows(keys []apigen.DeliveredKey) []compose.SnapshotRow {
 		if k.Value == nil {
 			continue
 		}
-		rows = append(rows, compose.SnapshotRow{Name: k.Name, Classification: string(k.Classification), Value: *k.Value})
+		rows = append(rows, compose.SnapshotRow{Name: k.Name, KeyID: k.KeyId, Classification: string(k.Classification), Value: *k.Value})
 	}
 	return rows
+}
+
+// rowNames returns the snapshot row names (for the loader-control check).
+func rowNames(rows []compose.SnapshotRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 func deliveredByID(keys []apigen.DeliveredKey) map[string]apigen.DeliveredKey {
@@ -1464,22 +1779,45 @@ func allTargetKeyIDs(cfg *compose.Config) []string {
 	return out
 }
 
+// targetKeyIDs is the per-target key-id membership map the cursor binds to
+// (compose ADR § Cursor rules — membership is by immutable key id, per target).
+func targetKeyIDs(cfg *compose.Config) map[string][]string {
+	out := make(map[string][]string, len(cfg.Targets))
+	for name, t := range cfg.Targets {
+		out[name] = append([]string(nil), t.Keys...)
+	}
+	return out
+}
+
+// buildDeliveryAAD assembles the snapshot header AAD. PinnedRevision is the
+// resolved pin when the server served a pin, else 0 (unpinned "current") — it is
+// NOT the schema revision. ChangeToken is the server's keyed manifest token
+// binding content identity into the header (findings 7/8, on the wire).
 func buildDeliveryAAD(entry TrustEntry, org, project, env string, resp apigen.DeliveryResponse, configOnly bool, targetNames []string) crypto.SnapshotAAD {
-	rev := int64(resp.SchemaRevision)
-	pinned := resp.PinnedRevision != nil
-	if pinned {
-		rev = *resp.PinnedRevision
+	pinned := int64(0)
+	if resp.PinnedRevision != nil {
+		pinned = *resp.PinnedRevision
 	}
 	names := append([]string(nil), targetNames...)
 	sort.Strings(names)
 	return crypto.SnapshotAAD{
 		InstanceOrigin: entry.Origin,
 		OrgID:          org, ProjectID: project, EnvironmentID: env,
-		CredentialID: resp.CredentialId, Revision: rev, Pinned: pinned,
-		Projection: deliveryProjection(resp.Keys), ConfigOnly: configOnly,
+		CredentialID:   resp.CredentialId,
+		PinnedRevision: pinned,
+		ChangeToken:    resp.ChangeToken,
+		Projection:     deliveryProjection(resp.Keys), ConfigOnly: configOnly,
 		TargetNames: names,
-		IssuedAt:    resp.IssuedAt.UTC().Format(time.RFC3339),
-		ExpiresAt:   resp.SnapshotExpiresAt.UTC().Format(time.RFC3339),
+		// RFC3339Nano (not RFC3339): the server issues at sub-second precision, and
+		// second-truncation would make two fetches within the same wall-clock
+		// second collide on the snapshot high-water mark (equal issuance, different
+		// ChangeToken → refused as a rollback) even though the second is legitimate
+		// forward progress — bricking a publish-then-sync inside one second. Nano
+		// precision keeps distinct issuances distinct; a true rollback still has a
+		// strictly-older instant and is still refused. RFC3339Nano is valid RFC3339
+		// (fractional seconds are permitted), so the stale-line spelling holds.
+		IssuedAt:  resp.IssuedAt.UTC().Format(time.RFC3339Nano),
+		ExpiresAt: resp.SnapshotExpiresAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -1500,6 +1838,90 @@ func deliveryProjection(keys []apigen.DeliveredKey) []string {
 
 func hasErrorFinding(findings []compose.Finding) bool {
 	return hasSeverity(findings, compose.SeverityError)
+}
+
+// serverAgreementCodes is the family sync's pre-render gate excludes: these are
+// the freshness findings sync exists to REPAIR, not the local integrity it must
+// not proceed past (finding 11).
+var serverAgreementCodes = map[string]bool{
+	"server_manifest_drift": true,
+	"never_rendered":        true,
+	"server_stamp_unknown":  true,
+	"server_unreachable":    true,
+}
+
+// hasBlockingError reports whether any error finding OUTSIDE the server-agreement
+// family is present — the set sync gates on before rendering.
+func hasBlockingError(findings []compose.Finding) bool {
+	for _, f := range findings {
+		if f.Severity == compose.SeverityError && !serverAgreementCodes[f.Code] {
+			return true
+		}
+	}
+	return false
+}
+
+// isNotFound reports the uniform not-found/unauthorized response (unauthorized ≡
+// nonexistent), the only catalogue answer doctor treats as "unanswerable".
+func isNotFound(err error) bool {
+	var ce *Error
+	return asCLIError(err, &ce) && (ce.Code == ExitNotFound || ce.Code == ExitAuth)
+}
+
+// sanitizedEnviron returns the process environment with the workload credential
+// (HIKYO_TOKEN) removed: it is the ONLY credential-transport env var (the token
+// file is a flag, not an env var), and it must never reach the child or any
+// subprocess the CLI spawns (finding 1). Building the child env from this — not
+// os.Environ() — means the credential was never present, not stripped after.
+func sanitizedEnviron() []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	for _, e := range src {
+		if strings.HasPrefix(e, "HIKYO_TOKEN=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// resolveChildCommand resolves the command after `--`, distinguishing 127 (not
+// found) from 126 (found but not executable). exec.LookPath alone is
+// insufficient: for a BARE name it swallows a found-but-non-executable file as
+// ErrNotFound (verified on darwin), so that case is detected by scanning PATH; a
+// command containing a path separator is stat'd directly and LookPath surfaces
+// fs.ErrPermission (finding 13).
+func resolveChildCommand(command string) (string, error) {
+	path, err := exec.LookPath(command)
+	if err == nil || errors.Is(err, exec.ErrDot) {
+		return path, nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return "", failf(ExitCommandNotExecutable, "hikyo run: %s: found but not executable", command)
+	}
+	if !strings.ContainsRune(command, filepath.Separator) && pathHasNonExecutable(command) {
+		return "", failf(ExitCommandNotExecutable, "hikyo run: %s: found on PATH but not executable", command)
+	}
+	return "", failf(ExitCommandNotFound, "hikyo run: %s: command not found", command)
+}
+
+// pathHasNonExecutable reports whether a bare command name matches a regular
+// file on PATH that lacks execute permission. It reads the PROCESS PATH (the
+// same one exec.LookPath consulted), not an injected env, so the two agree.
+func pathHasNonExecutable(command string) bool {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			dir = "."
+		}
+		fi, err := os.Stat(filepath.Join(dir, command))
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		if fi.Mode().Perm()&0o111 == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func hasSeverity(findings []compose.Finding, sev compose.Severity) bool {

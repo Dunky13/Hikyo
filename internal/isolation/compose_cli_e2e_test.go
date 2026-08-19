@@ -283,7 +283,7 @@ func runComposeCLIRenderAndDoctor(t *testing.T, engine store.Engine) {
 	_, tokenFile := rig.mintWorkload(t)
 
 	work := t.TempDir()
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	runtimeDir := tmpfsRuntimeDir(t)
 	writeRenderConfig(t, work, rig.origin, runtimeDir)
 
 	base := []string{"compose", "render", "--token-file", tokenFile}
@@ -306,15 +306,42 @@ func runComposeCLIRenderAndDoctor(t *testing.T, engine store.Engine) {
 		t.Fatalf("second render did not present the cursor: %s", stderr)
 	}
 
-	// doctor with a fake docker at the floor passes.
-	docker230 := fakeDocker(t, "2.30.0")
+	// doctor with a REALISTIC fake docker at the floor passes: a service with the
+	// right env_file/label, resolving to the managed stamp, satisfies the hardened
+	// structural check (finding 4).
+	docker230 := fakeDockerRealistic(t, "2.30.0", runtimeDir)
 	code, stdout, stderr := rig.runCLIDocker(t, work, docker230, "compose", "doctor", "--token-file", tokenFile, "-o", "json")
 	if code != cli.ExitOK {
 		t.Fatalf("doctor exit=%d; stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
+	// doctor with EMPTY services FAILS the structural check with a specific code
+	// (finding 4): the required `api` service is missing entirely.
+	dockerEmpty := fakeDockerEmptyServices(t, "2.30.0")
+	code, stdout, stderr = rig.runCLIDocker(t, work, dockerEmpty, "compose", "doctor", "--token-file", tokenFile, "-o", "json")
+	if code != cli.ExitRefused {
+		t.Fatalf("doctor with empty services exit=%d, want ExitRefused; stdout=%s", code, stdout)
+	}
+	// The raw YAML still declares the service, but the RESOLVED config omits it,
+	// so the env_file/label resolve to nothing: a structural mismatch (finding 4).
+	if !strings.Contains(stdout, "stamp_mismatch") && !strings.Contains(stdout, "label_stamp_mismatch") &&
+		!strings.Contains(stdout, "env_file_missing_stamp_var") && !strings.Contains(stdout, "label_absent") {
+		t.Fatalf("doctor did not flag the missing service structurally: stdout=%s", stdout)
+	}
+
+	// doctor fails CLOSED when `docker compose config` fails: a nil config used to
+	// silently disable the service checks (finding 12).
+	dockerCfgFail := fakeDockerConfigFails(t, "2.30.0")
+	code, stdout, stderr = rig.runCLIDocker(t, work, dockerCfgFail, "compose", "doctor", "--token-file", tokenFile, "-o", "json")
+	if code != cli.ExitRefused {
+		t.Fatalf("doctor with failing config exit=%d, want ExitRefused; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "docker_config_failed") {
+		t.Fatalf("doctor did not fail closed on a config failure: stdout=%s", stdout)
+	}
+
 	// doctor below the floor refuses.
-	docker229 := fakeDocker(t, "2.29.7")
+	docker229 := fakeDockerRealistic(t, "2.29.7", runtimeDir)
 	code, stdout, stderr = rig.runCLIDocker(t, work, docker229, "compose", "doctor", "--token-file", tokenFile)
 	if code != cli.ExitRefused {
 		t.Fatalf("doctor below floor exit=%d, want ExitRefused; stderr=%s", code, stderr)
@@ -324,15 +351,17 @@ func runComposeCLIRenderAndDoctor(t *testing.T, engine store.Engine) {
 		t.Fatalf("doctor did not report the version floor: stdout=%s", stdout)
 	}
 
-	// tmpfs-only: no file under the STATE dir contains a delivered plaintext.
-	assertNoPlaintextInState(t, rig.stateDir, "postgres://dev")
+	// tmpfs-only: no delivered plaintext under the STATE dir (ciphertext snapshot)
+	// OR the project dir (.env holds only stamps) — finding 2.
+	assertNoPlaintextUnder(t, rig.stateDir, "postgres://dev")
+	assertNoPlaintextUnder(t, work, "postgres://dev")
 }
 
 func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
 	rig := bootComposeRig(t, store.EngineSQLite)
 	_, tokenFile := rig.mintWorkload(t)
 	work := t.TempDir()
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	runtimeDir := tmpfsRuntimeDir(t)
 	writeRenderConfigTwo(t, work, rig.origin, runtimeDir)
 
 	// First render materializes both targets.
@@ -344,11 +373,15 @@ func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
 	// Publish a change to ONE target's key.
 	publishComposeValues(t, rig.db, map[string]string{"DATABASE_URL": "postgres://changed"})
 
-	// sync: doctor, render (only api moves), docker compose up -d.
-	docker, dockerLog := fakeDockerRecording(t)
-	code, _, stderr = rig.runCLIDocker(t, work, docker, "compose", "sync", "--token-file", tokenFile)
+	// sync: doctor, render (only api moves), docker compose up -d. Docker's own
+	// stdout must land on hikyo STDERR, keeping sync stdout empty (finding 14).
+	docker, dockerLog := fakeDockerRecording(t, runtimeDir)
+	code, stdout, stderr := rig.runCLIDocker(t, work, docker, "compose", "sync", "--token-file", tokenFile)
 	if code != cli.ExitOK {
 		t.Fatalf("sync exit=%d; stderr=%s", code, stderr)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Fatalf("sync wrote to stdout (must be empty): %q", stdout)
 	}
 	if !strings.Contains(stderr, "rendered api generation v1-") {
 		t.Fatalf("sync did not re-render the changed target: %s", stderr)
@@ -361,7 +394,7 @@ func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
 	}
 
 	// A no-change sync recreates nothing.
-	docker2, dockerLog2 := fakeDockerRecording(t)
+	docker2, dockerLog2 := fakeDockerRecording(t, runtimeDir)
 	code, _, stderr = rig.runCLIDocker(t, work, docker2, "compose", "sync", "--token-file", tokenFile)
 	if code != cli.ExitOK {
 		t.Fatalf("no-change sync exit=%d; stderr=%s", code, stderr)
@@ -371,11 +404,52 @@ func TestComposeCLISyncBlastRadiusSQLite(t *testing.T) {
 	}
 }
 
+// TestComposeCLISyncApplyPendingRetry: a sync whose `docker compose up -d` FAILS
+// leaves an apply-pending marker, so the NEXT sync — even with nothing to move —
+// retries the apply and, on success, clears the marker (finding 10).
+func TestComposeCLISyncApplyPendingRetrySQLite(t *testing.T) {
+	rig := bootComposeRig(t, store.EngineSQLite)
+	_, tokenFile := rig.mintWorkload(t)
+	work := t.TempDir()
+	runtimeDir := tmpfsRuntimeDir(t)
+	writeRenderConfig(t, work, rig.origin, runtimeDir)
+
+	// Render once so the stack is materialized and the next sync has nothing to
+	// move on its own.
+	if code, _, stderr := rig.runCLI(t, work, nil, "compose", "render", "--token-file", tokenFile); code != cli.ExitOK {
+		t.Fatalf("render exit=%d; stderr=%s", code, stderr)
+	}
+	sd := filepath.Join(rig.stateDir, "compose", "acme")
+
+	// Publish a change so this sync moves the stamp, then FAIL docker: the marker
+	// must remain.
+	publishComposeValues(t, rig.db, map[string]string{"DATABASE_URL": "postgres://retry"})
+	dockerFail := fakeDockerFailingUp(t, runtimeDir)
+	if code, _, _ := rig.runCLIDocker(t, work, dockerFail, "compose", "sync", "--token-file", tokenFile); code != cli.ExitInternal {
+		t.Fatalf("failing docker sync exit=%d, want ExitInternal", code)
+	}
+	if !fileExists(filepath.Join(sd, "apply-pending")) {
+		t.Fatalf("failed sync did not leave an apply-pending marker")
+	}
+
+	// Next sync: nothing moves (already rendered), but the marker FORCES a retry.
+	docker, dockerLog := fakeDockerRecording(t, runtimeDir)
+	if code, _, stderr := rig.runCLIDocker(t, work, docker, "compose", "sync", "--token-file", tokenFile); code != cli.ExitOK {
+		t.Fatalf("retry sync exit=%d; stderr=%s", code, stderr)
+	}
+	if log := readFile(t, dockerLog); !strings.Contains(log, "compose up -d") {
+		t.Fatalf("retry sync did not re-run docker up: %q", log)
+	}
+	if fileExists(filepath.Join(sd, "apply-pending")) {
+		t.Fatalf("apply-pending marker not cleared after a successful retry")
+	}
+}
+
 func TestComposeCLIReconcileSQLite(t *testing.T) {
 	rig := bootComposeRig(t, store.EngineSQLite)
 	_, tokenFile := rig.mintWorkload(t)
 	work := t.TempDir()
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+	runtimeDir := tmpfsRuntimeDir(t)
 	writeRenderConfig(t, work, rig.origin, runtimeDir)
 
 	// Buffer an offline-served disclosure record under the stack's state dir.
@@ -470,22 +544,125 @@ func writeRenderConfigTwo(t *testing.T, dir, origin, runtimeDir string) {
 	}
 }
 
-// fakeDockerRecording is fakeDocker that also appends every invocation's args to
-// a log file, so a test can assert whether `compose up -d` ran.
-func fakeDockerRecording(t *testing.T) (bin, logPath string) {
+// fakeDockerRecording is a realistic fake docker that also appends every
+// invocation's args to a log file, so a test can assert whether `compose up -d`
+// ran. Its `compose config` output is derived from the actual managed .env so it
+// AGREES with the hardened doctor's structural check (finding 4).
+func fakeDockerRecording(t *testing.T, runtimeDir string) (bin, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	logPath = filepath.Join(dir, "calls.log")
-	bin = filepath.Join(dir, "docker")
-	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> " + logPath + "\n" +
-		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo 2.30.0; exit 0; fi\n" +
-		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then echo '{\"services\":{}}'; exit 0; fi\n" +
+	bin = writeFakeDocker(t, dir, "2.30.0", runtimeDir, logPath, false)
+	return bin, logPath
+}
+
+// fakeDockerRealistic is a fake docker whose `compose config --format json`
+// output is computed from the project's managed .env (each HIKYO_GEN_<T>=<stamp>
+// becomes a service <t> whose env_file resolves to
+// <runtimeDir>/<stamp>/<t>.env with format raw and a matching hikyo.stamp
+// label), so a correctly-rendered stack PASSES the structural check (finding 4).
+func fakeDockerRealistic(t *testing.T, version, runtimeDir string) string {
+	t.Helper()
+	return writeFakeDocker(t, t.TempDir(), version, runtimeDir, "", false)
+}
+
+// writeFakeDocker generates the sh script. logPath != "" records every call;
+// failUp makes `compose up -d` exit non-zero.
+func writeFakeDocker(t *testing.T, dir, version, runtimeDir, logPath string, failUp bool) string {
+	t.Helper()
+	bin := filepath.Join(dir, "docker")
+	logLine := ""
+	if logPath != "" {
+		logLine = "echo \"$@\" >> " + logPath + "\n"
+	}
+	upLine := ""
+	if failUp {
+		upLine = "if [ \"$1\" = compose ] && [ \"$2\" = up ]; then echo boom 1>&2; exit 1; fi\n"
+	}
+	// The config leg reads ./.env (cwd is the project dir), turning each managed
+	// stamp variable into a resolved service entry. tr maps HIKYO_GEN_API→api.
+	script := "#!/bin/sh\n" + logLine +
+		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo " + version + "; exit 0; fi\n" +
+		upLine +
+		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then\n" +
+		"  printf '{\"services\":{'\n" +
+		"  first=1\n" +
+		"  while IFS='=' read k v; do\n" +
+		"    case \"$k\" in\n" +
+		"      HIKYO_GEN_*)\n" +
+		"        tsvc=$(printf '%s' \"${k#HIKYO_GEN_}\" | tr 'A-Z_' 'a-z-')\n" +
+		"        [ $first -eq 1 ] || printf ','\n" +
+		"        first=0\n" +
+		"        printf '\"%s\":{\"env_file\":[{\"path\":\"" + runtimeDir + "/%s/%s.env\",\"format\":\"raw\",\"required\":true}],\"labels\":{\"hikyo.stamp\":\"%s\"}}' \"$tsvc\" \"$v\" \"$tsvc\" \"$v\"\n" +
+		"        ;;\n" +
+		"    esac\n" +
+		"  done < .env\n" +
+		"  printf '}}\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
 		"exit 0\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return bin, logPath
+	return bin
+}
+
+// fakeDockerFailingUp emits a realistic config (so doctor passes) but exits
+// non-zero on `compose up -d`, to drive the apply-pending retry (finding 10).
+func fakeDockerFailingUp(t *testing.T, runtimeDir string) string {
+	t.Helper()
+	return writeFakeDocker(t, t.TempDir(), "2.30.0", runtimeDir, "", true)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// fakeDockerConfigFails answers `compose version` but exits non-zero on
+// `compose config`, to exercise doctor's fail-closed docker_config_failed
+// (finding 12).
+func fakeDockerConfigFails(t *testing.T, version string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo " + version + "; exit 0; fi\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then echo 'boom' 1>&2; exit 1; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// fakeDockerEmptyServices emits an empty resolved config regardless of .env, so
+// a required service is MISSING and the structural check must FAIL (finding 4).
+func fakeDockerEmptyServices(t *testing.T, version string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "docker")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo " + version + "; exit 0; fi\n" +
+		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then echo '{\"services\":{}}'; exit 0; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// tmpfsRuntimeDir returns a runtime dir that IsTmpfs accepts: on Linux a fresh
+// dir under /dev/shm (tmpfs), elsewhere an ordinary temp dir (the non-Linux
+// IsTmpfs returns true). The render/doctor checks then do not falsely flag it.
+func tmpfsRuntimeDir(t *testing.T) string {
+	t.Helper()
+	if fi, err := os.Stat("/dev/shm"); err == nil && fi.IsDir() {
+		d, err := os.MkdirTemp("/dev/shm", "hikyo-rt-")
+		if err == nil {
+			t.Cleanup(func() { _ = os.RemoveAll(d) })
+			return d
+		}
+	}
+	return filepath.Join(t.TempDir(), "runtime")
 }
 
 func readFile(t *testing.T, path string) string {
@@ -526,19 +703,6 @@ func countOfflineFiles(t *testing.T, stateDir string) int {
 	return len(files)
 }
 
-func fakeDocker(t *testing.T, version string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "docker")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = compose ] && [ \"$2\" = version ]; then echo " + version + "; exit 0; fi\n" +
-		"if [ \"$1\" = compose ] && [ \"$2\" = config ]; then echo '{\"services\":{}}'; exit 0; fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
 func assertRendered(t *testing.T, runtimeDir string) {
 	t.Helper()
 	var found bool
@@ -560,9 +724,9 @@ func assertRendered(t *testing.T, runtimeDir string) {
 	}
 }
 
-func assertNoPlaintextInState(t *testing.T, stateDir, plaintext string) {
+func assertNoPlaintextUnder(t *testing.T, dir, plaintext string) {
 	t.Helper()
-	_ = filepath.WalkDir(stateDir, func(p string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
@@ -571,7 +735,7 @@ func assertNoPlaintextInState(t *testing.T, stateDir, plaintext string) {
 			return nil
 		}
 		if strings.Contains(string(b), plaintext) {
-			t.Errorf("delivered plaintext found in state file %s", p)
+			t.Errorf("delivered plaintext found in file %s", p)
 		}
 		return nil
 	})

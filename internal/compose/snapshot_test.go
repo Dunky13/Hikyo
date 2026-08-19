@@ -47,7 +47,7 @@ func TestSnapshotSaveLoadRoundTrip(t *testing.T) {
 	state, keys := snapState(t)
 	aad := snapAAD("2026-08-19T10:00:00Z", "2026-08-26T10:00:00Z")
 	payload := SnapshotPayload{
-		Rows:             []SnapshotRow{{Name: "API_KEY", Classification: "secret", Value: "s3cr3t"}},
+		Rows:             []SnapshotRow{{Name: "API_KEY", KeyID: "key_api", Classification: "secret", Value: "s3cr3t"}},
 		GenerationStamps: map[string]string{"api": "v1-" + hex32()},
 	}
 	if err := SaveSnapshot(state, keys, aad, payload); err != nil {
@@ -60,6 +60,10 @@ func TestSnapshotSaveLoadRoundTrip(t *testing.T) {
 	}
 	if len(got.Rows) != 1 || got.Rows[0].Value != "s3cr3t" {
 		t.Errorf("payload = %+v", got)
+	}
+	// KeyID travels inside the sealed payload (subsumes the old cleartext sidecar).
+	if got.Rows[0].KeyID != "key_api" {
+		t.Errorf("KeyID not round-tripped inside the sealed payload: %+v", got.Rows[0])
 	}
 	// Server-asserted fields come back from the header, not reconstructed.
 	if hdr.PinnedRevision != 3 || hdr.IssuedAt != "2026-08-19T10:00:00Z" || hdr.ExpiresAt != "2026-08-26T10:00:00Z" {

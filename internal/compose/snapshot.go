@@ -59,9 +59,13 @@ var (
 	errSnapshotFraming  = errors.New("compose: snapshot container is malformed")
 )
 
-// SnapshotRow is one delivered key inside a snapshot.
+// SnapshotRow is one delivered key inside a snapshot. KeyID is the immutable
+// server key id: it travels INSIDE the sealed payload so the offline path can
+// map row→key_id for its per-key reconciliation records without a cleartext
+// sidecar (the self-describing snapshot subsumed the old offline.meta.json).
 type SnapshotRow struct {
 	Name           string `json:"name"`
+	KeyID          string `json:"key_id"`
 	Classification string `json:"classification"`
 	Value          string `json:"value"`
 }
