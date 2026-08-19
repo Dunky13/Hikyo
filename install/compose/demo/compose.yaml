@@ -2,7 +2,7 @@ services:
   app:
     image: alpine:3.21
     env_file:
-      - path: ${HIKYO_RUNTIME_DIR:?}/${HIKYO_GEN_APP:?run 'hikyo compose render' first}/app.env
+      - path: /tmp/hikyo-demo-runtime/${HIKYO_GEN_APP:?run 'hikyo compose render' first}/app.env
         format: raw
     labels:
       hikyo.stamp: "${HIKYO_GEN_APP:?run 'hikyo compose render' first}"

@@ -9,8 +9,9 @@ script performs the operator journey end to end:
 2. Create the keys and values, then publish them.
 3. Mint a workload service account, grant it `read` on the environment, and
    write its credential to a mode-`0600` file.
-4. Run `hikyo context create demo --instance <url>`, then
-   `hikyo compose render --project-directory install/compose/demo`.
+4. Materialize the Compose and Hikyo configuration in a temporary project
+   directory with the same literal, normalized absolute `runtime_dir`, then run
+   `hikyo context create demo --instance <url>` and `hikyo compose render`.
 5. Run `docker compose up`; the container receives every target value and
    prints its exact stored bytes as base64.
 

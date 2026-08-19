@@ -4,36 +4,24 @@ set -euo pipefail
 repo_root=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 demo_dir="$repo_root/install/compose/demo"
 docker_config_dir=${DOCKER_CONFIG:-${HOME:?}/.docker}
-work_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-compose-demo.XXXXXX")
+tmp_dir=${TMPDIR:-/tmp}
+tmp_dir=${tmp_dir%/}
+work_dir=$(mktemp -d "$tmp_dir/hikyo-compose-demo.XXXXXX")
+project_dir="$work_dir/project"
 runtime_dir="$work_dir/runtime"
 state_dir="$work_dir/state"
 home_dir="$work_dir/home"
 binary="$work_dir/hikyo"
 token_file="$work_dir/hikyo-token"
 server_pid=''
-config_backup="$work_dir/hikyo-compose.yaml.template"
-env_backup="$work_dir/project.env"
-had_env=false
 pending_versions=''
-
-cp "$demo_dir/hikyo-compose.yaml" "$config_backup"
-if [[ -f "$demo_dir/.env" ]]; then
-	cp "$demo_dir/.env" "$env_backup"
-	had_env=true
-fi
 
 cleanup() {
 	if [[ -n "$server_pid" ]]; then
 		kill "$server_pid" 2>/dev/null || true
 		wait "$server_pid" 2>/dev/null || true
 	fi
-	docker compose --project-directory "$demo_dir" down --remove-orphans >/dev/null 2>&1 || true
-	cp "$config_backup" "$demo_dir/hikyo-compose.yaml"
-	if [[ "$had_env" == true ]]; then
-		cp "$env_backup" "$demo_dir/.env"
-	else
-		rm -f -- "$demo_dir/.env"
-	fi
+	docker compose --project-directory "$project_dir" down --remove-orphans >/dev/null 2>&1 || true
 	chmod -R u+w "$work_dir" 2>/dev/null || true
 	rm -rf -- "$work_dir"
 }
@@ -124,7 +112,24 @@ need expect
 need jq
 need python3
 
-mkdir -m 700 "$runtime_dir" "$state_dir" "$home_dir"
+mkdir -m 700 "$project_dir" "$runtime_dir" "$state_dir" "$home_dir"
+python3 - "$demo_dir" "$project_dir" "$runtime_dir" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+runtime_dir = sys.argv[3]
+
+compose = (source / "compose.yaml").read_text()
+compose = compose.replace("/tmp/hikyo-demo-runtime", runtime_dir)
+(destination / "compose.yaml").write_text(compose)
+(destination / "hikyo-compose.yaml").write_text(
+    (source / "hikyo-compose.yaml").read_text().replace(
+        "/tmp/hikyo-demo-runtime", runtime_dir
+    )
+)
+PY
 
 (
 	cd "$repo_root"
@@ -333,7 +338,7 @@ sa_principal=$(printf '%s' "$sa_json" | jq -er 'first(.. | objects | select(.nam
 	--sa "$sa_id" --output-file "$token_file" >/dev/null
 chmod 600 "$token_file"
 
-python3 - "$demo_dir/hikyo-compose.yaml" "$origin" "$org_id" "$project_id" "$env_id" "$runtime_dir" "$key_ids" <<'PY'
+python3 - "$project_dir/hikyo-compose.yaml" "$origin" "$org_id" "$project_id" "$env_id" "$key_ids" <<'PY'
 import pathlib
 import sys
 
@@ -343,17 +348,15 @@ text = text.replace("http://127.0.0.1:1", sys.argv[2])
 text = text.replace("__HIKYO_ORG__", sys.argv[3])
 text = text.replace("__HIKYO_PROJECT__", sys.argv[4])
 text = text.replace("__HIKYO_ENVIRONMENT__", sys.argv[5])
-text = text.replace("/tmp/hikyo-demo-runtime", sys.argv[6])
-text = text.replace("__HIKYO_KEYS__", sys.argv[7])
+text = text.replace("__HIKYO_KEYS__", sys.argv[6])
 path.write_text(text)
 PY
 
-export HIKYO_RUNTIME_DIR="$runtime_dir"
-HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose render --project-directory "$demo_dir"
-initial_env=$(cksum "$demo_dir/.env")
+HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose render --project-directory "$project_dir"
+initial_env=$(cksum "$project_dir/.env")
 initial_runtime=$(find "$runtime_dir" -type f -print | sort | while IFS= read -r file; do cksum "$file"; done)
 
-python3 - "$demo_dir/hikyo-compose.yaml" "$newline_key" <<'PY'
+python3 - "$project_dir/hikyo-compose.yaml" "$newline_key" <<'PY'
 import pathlib
 import sys
 
@@ -362,15 +365,15 @@ text = path.read_text().replace("keys: [", "keys: [" + sys.argv[2] + ", ", 1)
 path.write_text(text)
 PY
 set +e
-refusal=$(HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose render --project-directory "$demo_dir" 2>&1)
+refusal=$(HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose render --project-directory "$project_dir" 2>&1)
 refusal_code=$?
 set -e
 [[ $refusal_code -eq 4 ]] || fail "embedded-newline render exited $refusal_code, want 4: $refusal"
 grep -F 'EMBEDDED_NL' <<<"$refusal" >/dev/null || fail 'embedded-newline refusal did not name EMBEDDED_NL'
-[[ "$(cksum "$demo_dir/.env")" == "$initial_env" ]] || fail 'refused render changed .env'
+[[ "$(cksum "$project_dir/.env")" == "$initial_env" ]] || fail 'refused render changed .env'
 after_refusal_runtime=$(find "$runtime_dir" -type f -print | sort | while IFS= read -r file; do cksum "$file"; done)
 [[ "$after_refusal_runtime" == "$initial_runtime" ]] || fail 'refused render changed a generation'
-python3 - "$demo_dir/hikyo-compose.yaml" "$newline_key" <<'PY'
+python3 - "$project_dir/hikyo-compose.yaml" "$newline_key" <<'PY'
 import pathlib
 import sys
 
@@ -379,9 +382,9 @@ text = path.read_text().replace("keys: [" + sys.argv[2] + ", ", "keys: [", 1)
 path.write_text(text)
 PY
 
-docker compose --project-directory "$demo_dir" config >/dev/null
-docker compose --project-directory "$demo_dir" up --abort-on-container-exit >/dev/null
-docker compose --project-directory "$demo_dir" logs --no-color app >"$work_dir/container.log"
+docker compose --project-directory "$project_dir" config >/dev/null
+docker compose --project-directory "$project_dir" up --abort-on-container-exit >/dev/null
+docker compose --project-directory "$project_dir" logs --no-color app >"$work_dir/container.log"
 while IFS= read -r row; do
 	name=$(printf '%s' "$row" | jq -r '.name')
 	want=$(base64 <"$work_dir/expected-$name" | tr -d '\n')
@@ -391,8 +394,33 @@ while IFS= read -r row; do
 	fi
 done <"$representable"
 
+docker_wrapper_dir="$work_dir/docker-wrapper"
+mkdir -m 700 "$docker_wrapper_dir"
+real_docker=$(command -v docker)
+python3 - "$docker_wrapper_dir/docker" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+has_config=false
+has_no_env_resolution=false
+for arg in "$@"; do
+    [[ "$arg" == config ]] && has_config=true
+    [[ "$arg" == --no-env-resolution ]] && has_no_env_resolution=true
+done
+if [[ "$has_config" == true && "$has_no_env_resolution" == false ]]; then
+    exec "${DEMO_REAL_DOCKER:?}" "$@" --no-env-resolution
+fi
+exec "${DEMO_REAL_DOCKER:?}" "$@"
+""")
+path.chmod(0o700)
+PY
 set +e
-HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose doctor --project-directory "$demo_dir" -o json >"$work_dir/doctor.json"
+DEMO_REAL_DOCKER="$real_docker" PATH="$docker_wrapper_dir:$PATH" \
+	HIKYO_TOKEN=$(tr -d '\n' <"$token_file") \
+	"$binary" compose doctor --project-directory "$project_dir" -o json >"$work_dir/doctor.json"
 doctor_code=$?
 set -e
 [[ $doctor_code -eq 0 || $doctor_code -eq 4 ]] || fail "doctor exited $doctor_code"
@@ -405,15 +433,17 @@ jq -e 'all(.findings[]?; .code == "runtime_not_tmpfs")' "$work_dir/doctor.json" 
 printf '%s' 'hello after sync' >"$work_dir/value-GREETING-updated"
 set_value GREETING "$work_dir/value-GREETING-updated"
 publish_pending
-before_sync_env=$(cksum "$demo_dir/.env")
-HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose sync --project-directory "$demo_dir"
-after_sync_env=$(cksum "$demo_dir/.env")
+before_sync_env=$(cksum "$project_dir/.env")
+DEMO_REAL_DOCKER="$real_docker" PATH="$docker_wrapper_dir:$PATH" \
+	HIKYO_TOKEN=$(tr -d '\n' <"$token_file") \
+	"$binary" compose sync --project-directory "$project_dir"
+after_sync_env=$(cksum "$project_dir/.env")
 [[ "$after_sync_env" != "$before_sync_env" ]] || fail 'sync did not move the managed stamp'
 for _ in {1..100}; do
-	[[ -z "$(docker compose --project-directory "$demo_dir" ps --status running -q)" ]] && break
+	[[ -z "$(docker compose --project-directory "$project_dir" ps --status running -q)" ]] && break
 	sleep 0.1
 done
-docker compose --project-directory "$demo_dir" logs --no-color app >"$work_dir/sync.log"
+docker compose --project-directory "$project_dir" logs --no-color app >"$work_dir/sync.log"
 updated=$(printf '%s' 'hello after sync' | base64 | tr -d '\n')
 grep -F "GREETING=$updated" "$work_dir/sync.log" >/dev/null || fail 'sync did not restart app with the updated GREETING'
 
