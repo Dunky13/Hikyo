@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -78,11 +79,7 @@ const (
 // <target>.env. Keep the two domain prefixes in their two layers — this one
 // here, crypto.Stamp's inside.
 func TargetStamp(keys *crypto.LocalKeys, target string, content []byte) string {
-	buf := make([]byte, 0, len(targetContentDomain)+len(target)+len(targetSep)+len(content))
-	buf = append(buf, targetContentDomain...)
-	buf = append(buf, target...)
-	buf = append(buf, targetSep...)
-	buf = append(buf, content...)
+	buf := slices.Concat([]byte(targetContentDomain), []byte(target), []byte(targetSep), content)
 	return keys.Stamp(buf)
 }
 

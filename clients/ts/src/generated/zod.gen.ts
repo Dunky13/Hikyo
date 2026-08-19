@@ -918,6 +918,11 @@ export const zFederatedBinding = z.object({
     replaced_id: zId.optional()
 });
 
+export const zReconcileOfflineRecordsResponse = z.object({
+    accepted: z.int().gte(0),
+    duplicates: z.int().gte(0)
+});
+
 export const zCredentialPolicy = z.object({
     max_finite_lifetime_seconds: z.int().gte(1),
     allow_indefinite: z.boolean(),
@@ -1400,6 +1405,7 @@ export const zValueDiff = z.object({
  *
  */
 export const zDeliveredKey = z.object({
+    key_id: zId,
     name: z.string().max(256),
     classification: zKeyClassification,
     value: z.string().max(65536).optional(),
@@ -1418,6 +1424,7 @@ export const zDeliveredKey = z.object({
  *
  */
 export const zDeliveryResponse = z.object({
+    credential_id: zId,
     current: z.boolean(),
     cursor: z.string().max(128),
     change_token: z.string().max(128),
@@ -1425,7 +1432,24 @@ export const zDeliveryResponse = z.object({
     schema_revision: z.int().gte(0),
     pinned_revision: z.coerce.bigint().gte(BigInt(1)).max(BigInt('9223372036854775807'), { error: 'Invalid value: Expected int64 to be <= 9223372036854775807' }).optional(),
     pin_expired: z.boolean(),
-    keys: z.array(zDeliveredKey)
+    keys: z.array(zDeliveredKey),
+    issued_at: zTimestamp,
+    snapshot_expires_at: zTimestamp
+});
+
+export const zOfflineDeliveryRecord = z.object({
+    record_id: z.string().min(1).max(64),
+    key_id: z.string().min(1).max(64),
+    key_name: z.string().min(1).max(256),
+    classification: zKeyClassification,
+    occurred_at: zTimestamp,
+    credential_id: z.string().min(1).max(64),
+    generation: z.string().min(1).max(64),
+    served_from: zTimestamp
+});
+
+export const zReconcileOfflineRecordsRequest = z.object({
+    records: z.array(zOfflineDeliveryRecord).min(1).max(1000)
 });
 
 /**
@@ -3837,6 +3861,19 @@ export const zFetchDeliveryQuery = z.object({
  * The authorized projection, or the statement that the cursor is current.
  */
 export const zFetchDeliveryResponse = zDeliveryResponse;
+
+export const zReconcileOfflineRecordsBody = zReconcileOfflineRecordsRequest;
+
+export const zReconcileOfflineRecordsPath = z.object({
+    org: zId,
+    project: zId,
+    environment: zId
+});
+
+/**
+ * The idempotent batch outcome.
+ */
+export const zReconcileOfflineRecordsResponse2 = zReconcileOfflineRecordsResponse;
 
 export const zListScimBindingsPath = z.object({
     org: zId

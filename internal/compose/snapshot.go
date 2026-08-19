@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/Hikyo-Org/hikyo/internal/crypto"
@@ -98,6 +100,13 @@ func SaveSnapshot(stateDir string, keys *crypto.LocalKeys, aad crypto.SnapshotAA
 	header, err := aad.Canonical()
 	if err != nil {
 		return err
+	}
+	// The container writes the header length as a 4-byte prefix, so a header
+	// beyond uint32 range cannot be framed. It never happens (the AAD is a
+	// fixed handful of short fields), but the bound is asserted rather than
+	// silently truncated.
+	if len(header) > math.MaxUint32 {
+		return fmt.Errorf("compose: snapshot header is %d bytes, exceeds the framing limit", len(header))
 	}
 	digest := headerDigest(header)
 
@@ -221,13 +230,10 @@ func headerDigest(header []byte) string {
 }
 
 // frameSnapshot builds the container: magic ‖ uint32-BE(len(header)) ‖ header ‖ sealed.
+// The caller (SaveSnapshot) guarantees len(header) fits uint32.
 func frameSnapshot(header, sealed []byte) []byte {
-	out := make([]byte, 0, len(snapshotMagic)+4+len(header)+len(sealed))
-	out = append(out, snapshotMagic...)
-	out = binary.BigEndian.AppendUint32(out, uint32(len(header)))
-	out = append(out, header...)
-	out = append(out, sealed...)
-	return out
+	lenPrefix := binary.BigEndian.AppendUint32(nil, uint32(len(header)))
+	return slices.Concat([]byte(snapshotMagic), lenPrefix, header, sealed)
 }
 
 // unframeSnapshot validates the magic and header length prefix and splits the
