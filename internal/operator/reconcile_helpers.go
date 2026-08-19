@@ -191,8 +191,8 @@ func (r *HikyoSecretReconciler) eligibleCursor(
 
 func bindingInputFor(cr *hikyov1.HikyoSecret, inst *hikyov1.HikyoInstance, cred credential) bindingInput {
 	return bindingInput{
-		credentialUID:             cred.uid,
-		credentialResourceVersion: cred.resourceVersion,
+		authObjectUID:             cred.uid,
+		authObjectResourceVersion: cred.resourceVersion,
 		org:                       string(cr.Spec.Scope.Org),
 		project:                   string(cr.Spec.Scope.Project),
 		environment:               string(cr.Spec.Scope.Environment),

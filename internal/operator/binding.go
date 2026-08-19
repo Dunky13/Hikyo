@@ -23,8 +23,8 @@ const stampKeyVersion = "v1"
 // changed projection, an edited mapping (source OR destination), a retargeted
 // Secret, a different instance, a stamp-scheme bump.
 type bindingInput struct {
-	credentialUID             string
-	credentialResourceVersion string
+	authObjectUID             string
+	authObjectResourceVersion string
 	org, project, environment string
 	projection                string
 	mapping                   []hikyov1.Mapping
@@ -38,7 +38,8 @@ type bindingInput struct {
 // is deliberately used, not the keyed stamp construction: this digest is
 // local-only status metadata, never workload-visible, so there is nothing to
 // key against — its only job is to detect local change, and it is compared only
-// against a value this same code wrote.
+// against a value this same code wrote. The digest covers only object identity
+// metadata, never credential material.
 func bindingDigest(in bindingInput) string {
 	pairs := make([][2]string, 0, len(in.mapping))
 	for _, m := range in.mapping {
@@ -53,8 +54,8 @@ func bindingDigest(in bindingInput) string {
 
 	var buf []byte
 	buf = lp(buf, "hikyo/k8s-cursor-binding/"+stampKeyVersion)
-	buf = lp(buf, in.credentialUID)
-	buf = lp(buf, in.credentialResourceVersion)
+	buf = lp(buf, in.authObjectUID)
+	buf = lp(buf, in.authObjectResourceVersion)
 	buf = lp(buf, in.org)
 	buf = lp(buf, in.project)
 	buf = lp(buf, in.environment)
