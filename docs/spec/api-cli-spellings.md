@@ -1,4 +1,4 @@
-# Wenv — API & CLI spellings deferred to synthesis (2026-08-06)
+# Hikyo — API & CLI spellings deferred to synthesis (2026-08-06)
 
 [api-cli-surface.md](../adr/api-cli-surface.md) is the API/CLI spec's skeleton; several later ADRs joined its closed grammar at declared join points and delegated their **exact spellings** to this document. Every spelling here is bound by the locked grammar (noun-verb families, output classes, print triad, exit codes, parity rules) and by the delegating ADR's constraints; a spelling that would violate either is a defect here, not a licence to reinterpret the ADR. Nothing here adds a verb class, an output class, or an endpoint outside the declared join points.
 
@@ -7,23 +7,23 @@
 Human-session verbs (full UI↔CLI parity: binding CRUD, mapping-table administration, credential mint/rotate/revoke, provisioned directory views; the *wire* endpoints under `/api/v1/orgs/{org}/scim/v2/{binding}/…` are fixed in the ADR and are parity-exempt protocol paths):
 
 ```
-wenv scim binding create --org <org> --provider <provider>
-wenv scim binding list   [--org <org>]
-wenv scim binding show   <binding>
-wenv scim binding delete <binding>            # runs the ADR's atomic 4-step teardown
+hikyo scim binding create --org <org> --provider <provider>
+hikyo scim binding list   [--org <org>]
+hikyo scim binding show   <binding>
+hikyo scim binding delete <binding>            # runs the ADR's atomic 4-step teardown
 
-wenv scim mapping add    <binding> --group <idp-group-id> --template <template>
-wenv scim mapping update <binding> --group <idp-group-id> --template <template>
-wenv scim mapping remove <binding> --group <idp-group-id>
-wenv scim mapping list   <binding>
+hikyo scim mapping add    <binding> --group <idp-group-id> --template <template>
+hikyo scim mapping update <binding> --group <idp-group-id> --template <template>
+hikyo scim mapping remove <binding> --group <idp-group-id>
+hikyo scim mapping list   <binding>
 
-wenv scim credential mint   <binding>                    # a NEW credential; several may be live
-wenv scim credential list   <binding>                    # ids + metadata, never token material
-wenv scim credential show   <binding> <credential-id>
-wenv scim credential revoke <binding> <credential-id>
+hikyo scim credential mint   <binding>                    # a NEW credential; several may be live
+hikyo scim credential list   <binding>                    # ids + metadata, never token material
+hikyo scim credential show   <binding> <credential-id>
+hikyo scim credential revoke <binding> <credential-id>
 
-wenv scim user  list <binding>                           # provisioned directory views
-wenv scim group list <binding>
+hikyo scim user  list <binding>                           # provisioned directory views
+hikyo scim group list <binding>
 ```
 
 Credentials are **plural and id-addressable**: overlap rotation is mint-new → update IdP → revoke-old, identical authority throughout, per the machine-identity credential model the ADR inherits. `mint` is display-once under the print triad; formula `manage-members(org)` ∧ reauth.
@@ -35,20 +35,20 @@ Admin REST resources (ordinary `/api/v1` grammar, proof-carrying): `/api/v1/orgs
 Joins the **existing `instance-config` verb surface** — no new top-level verb family. Identity providers are a resource under that family (OIDC providers administer identically; `--kind` selects):
 
 ```
-wenv instance-config provider create --kind saml --name <name> \
+hikyo instance-config provider create --kind saml --name <name> \
     --entity-id <byte-exact-entityID> \
     (--metadata-file <xml> | --metadata-url <url>)    # URL fetch runs the fingerprint ceremony
-wenv instance-config provider list
-wenv instance-config provider show    <name>
-wenv instance-config provider update  <name> …
-wenv instance-config provider disable <name>
-wenv instance-config provider remove  <name>
-wenv instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
+hikyo instance-config provider list
+hikyo instance-config provider show    <name>
+hikyo instance-config provider update  <name> …
+hikyo instance-config provider disable <name>
+hikyo instance-config provider remove  <name>
+hikyo instance-config provider refresh-metadata <name>   # diff-and-confirm ceremony
 
-wenv instance-config saml-sp-key list
-wenv instance-config saml-sp-key rotate                 # old active becomes retiring; both publish
-wenv instance-config saml-sp-key retire <fingerprint>   # retiring only; erases the private key
-wenv instance-config saml-sp-key compromise-retire <fingerprint> # active only; replace atomically
+hikyo instance-config saml-sp-key list
+hikyo instance-config saml-sp-key rotate                 # old active becomes retiring; both publish
+hikyo instance-config saml-sp-key retire <fingerprint>   # retiring only; erases the private key
+hikyo instance-config saml-sp-key compromise-retire <fingerprint> # active only; replace atomically
 ```
 
 All under `instance-config` capability, grant-evaluated `InstanceProof`, network path — never the local-admin class. `refresh-metadata` is the ADR's "action on the provider resource". SP keys are instance-wide, so their noun is deliberately a sibling of `provider`, not a provider subresource. Fingerprints are `sha256:` plus URL-safe unpadded base64 of SubjectPublicKeyInfo, so the exact value is safe as one path segment. `rotate` atomically marks the active key retiring and mints its replacement. Ordinary `retire` accepts only a retiring fingerprint; `compromise-retire` accepts only the active fingerprint and atomically erases and replaces it without an overlap window.
@@ -60,7 +60,7 @@ Admin REST resources (ordinary `/api/v1` grammar, proof-carrying):
 - `DELETE /api/v1/instance/saml-sp-keys/{fingerprint}`
 - `POST /api/v1/instance/saml-sp-keys/{fingerprint}/compromise-retire`
 
-Provider list/show responses carry a required `warnings` array. Its closed warning codes are `metadata_expires_soon`, `metadata_expired`, `signing_certificate_not_yet_valid`, and `signing_certificate_expired`; each item carries `severity`, the relevant timestamp, a server-authored message, and a certificate fingerprint where applicable. The 30-day metadata threshold is server-authoritative. Provider table output names warnings, JSON preserves the structured array, and the existing top-level `wenv doctor [--instance REF] [-o table|json]` reports the same server-authoritative items (no second warning calculation and no additional endpoint). Doctor returns success for no findings or warning-severity findings; metadata-expired is error severity and returns the stable refused exit code after rendering the findings.
+Provider list/show responses carry a required `warnings` array. Its closed warning codes are `metadata_expires_soon`, `metadata_expired`, `signing_certificate_not_yet_valid`, and `signing_certificate_expired`; each item carries `severity`, the relevant timestamp, a server-authored message, and a certificate fingerprint where applicable. The 30-day metadata threshold is server-authoritative. Provider table output names warnings, JSON preserves the structured array, and the existing top-level `hikyo doctor [--instance REF] [-o table|json]` reports the same server-authoritative items (no second warning calculation and no additional endpoint). Doctor returns success for no findings or warning-severity findings; metadata-expired is error severity and returns the stable refused exit code after rendering the findings.
 
 Identity-protocol endpoints (exception class, per-provider, parity-exempt):
 
@@ -75,9 +75,9 @@ Per-provider ACS paths satisfy the validation algorithm's per-provider `Destinat
 One top-level human-only verb `import`; the ADR fixes **three entry modes** — the spellings:
 
 ```
-wenv import                                   # wizard: TTY, no source arguments
-wenv import --from <k8s|sops|vault|infisical> --project <p> --environment <e> [selectors]
-wenv import --mapping <mapping.json>          # replay, non-interactive
+hikyo import                                   # wizard: TTY, no source arguments
+hikyo import --from <k8s|sops|vault|infisical> --project <p> --environment <e> [selectors]
+hikyo import --mapping <mapping.json>          # replay, non-interactive
 ```
 
 `import` without a TTY and without `--from`/`--mapping` is a hard error. Flag-mode selectors per connector: `--file <path>` (file mode, all connectors); live mode: `--live --namespace <ns> [--name <secret>]` (k8s), `--live --mount <m> [--path <prefix>] [--kv-version <1|2>]` (vault; version auto-detected from the mount when omitted); `--env <slug>` selects the source environment inside an Infisical export; SOPS and Infisical are file-only in v1. Flag mode targets exactly one `(project, environment)` and declares every value `string`. Common: `--out-dir <dir>` for the emitted artifacts (values files under the secret-file discipline: dirfd-parent-checked `O_EXCL`, `0600`).

@@ -1,4 +1,4 @@
-# Wenv — Post-spec open items (synthesis, 2026-08-06)
+# Hikyo — Post-spec open items (synthesis, 2026-08-06)
 
 The map's fog sweep, discharged: everything still unspecified at synthesis is recorded here explicitly. **None of these is a foundational question** — an implementing team is not blocked by any row; each names its owner and its resolution moment. The post-v1 feature register (with dispositions and reopen triggers) is [mvp-boundary.md](../adr/mvp-boundary.md) §4 and is *not* duplicated here.
 
@@ -11,7 +11,7 @@ The map's fog sweep, discharged: everything still unspecified at synthesis is re
 | Forgejo + GitHub PAT minimal-scope exact spellings; GitHub expiry header pin; contract-test fixtures (POST-409 oracle, sealed-box vectors); non-UTF-8 disposition | [deployment-adapter.md](../adr/deployment-adapter.md), [github-adapter.md](../adr/github-adapter.md) | Implementation, against fixture evidence |
 | Exact pinned CI action SHAs, pipeline steps | [oss-mechanics.md](../adr/oss-mechanics.md), [system-architecture.md](../adr/system-architecture.md) | Implementation under #22's pinning rules |
 | Golden-snapshot CLI scenario matrix; S3 closed flow registry enumeration | [api-cli-surface.md](../adr/api-cli-surface.md), [mvp-boundary.md](../adr/mvp-boundary.md) | First CI wiring; gate exists before any build |
-| Repository transfer `Dunky13/wenv` → GitHub organization | [oss-mechanics.md](../adr/oss-mechanics.md) | Fixed implementation step |
+| Repository transfer to `Hikyo-Org/Hikyo` | [oss-mechanics.md](../adr/oss-mechanics.md) | Fixed implementation step |
 
 ## Open items proper (no owner-locked answer yet; none foundational)
 
