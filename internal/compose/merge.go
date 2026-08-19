@@ -17,13 +17,14 @@ import (
 // The escape hatch names the colliding keys explicitly (allowOverride) — there
 // is no blanket override flag.
 
-// Collision reports a key present in both sources with differing values that
-// was permitted by allowOverride (informational; hard-error collisions come
-// back as the error).
+// Collision reports, by KEY NAME ONLY, a key present in both sources with
+// differing values that was permitted by allowOverride (informational;
+// hard-error collisions come back as the error). It carries NO values: a
+// value in a result or error string reaches a `docker compose up` warning or a
+// structured `%v` log and discloses a secret, and only the colliding name is
+// needed.
 type Collision struct {
-	Key          string
-	InheritedVal string
-	FetchedVal   string
+	Key string
 }
 
 // MergeEnv merges fetched values into the inherited environment. inherited is a
@@ -64,7 +65,7 @@ func MergeEnv(inherited []string, fetched map[string]string, allowOverride []str
 			continue // identical: no-op
 		}
 		if _, allowed := allow[key]; allowed {
-			collisions = append(collisions, Collision{Key: key, InheritedVal: val, FetchedVal: fv})
+			collisions = append(collisions, Collision{Key: key})
 			continue
 		}
 		hardErrors = append(hardErrors, key)

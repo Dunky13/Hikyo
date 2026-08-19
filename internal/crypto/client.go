@@ -5,13 +5,11 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"regexp"
+	"sort"
 )
 
 // Client-side key material for the Compose delivery path (compose-integration
@@ -69,17 +67,14 @@ type LocalKeys struct {
 // LoadOrCreateLocalKey loads the local key from dir/local.key, creating it (and
 // dir) on first use. The state directory MUST be 0700 and the key file 0600,
 // both owned by the invoking user (system-architecture ADR § Client local
-// state — protection model). An existing directory or file that is
-// group/other-accessible or not owned by the euid is REFUSED, not repaired:
-// silently chmod-ing someone else's file would hide exactly the tampering the
-// check exists to surface, and the caller reports it as a doctor finding.
+// state — protection model). Every access goes through directory-relative,
+// no-symlink-follow descriptors (§ *Client local state*): the directory is
+// opened with O_NOFOLLOW and its mode/ownership verified through the descriptor
+// (never a path stat followed by a separate open), and the key is opened
+// relative to that directory. A directory or key that is a symlink,
+// group/other-accessible, or not owned by the euid is REFUSED, not repaired.
 func LoadOrCreateLocalKey(dir string) (*LocalKeys, error) {
-	if err := ensureSecureDir(dir); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, localKeyName)
-
-	master, err := readOrCreateKeyFile(path)
+	master, err := loadOrCreateMasterKey(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -94,67 +89,6 @@ func LoadOrCreateLocalKey(dir string) (*LocalKeys, error) {
 		return nil, fmt.Errorf("crypto: derive snapshot key: %w", err)
 	}
 	return &LocalKeys{stampKey: stampKey, snapshotKey: snapshotKey}, nil
-}
-
-// readOrCreateKeyFile returns the 32-byte local key. When the file exists it is
-// permission/owner-checked and read; when absent it is created with O_EXCL and
-// 0600 and filled with fresh randomness (a short random read aborts — never a
-// key with weak randomness), fsynced before use.
-func readOrCreateKeyFile(path string) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	switch {
-	case err == nil:
-		defer f.Close()
-		if err := checkSecureFile(f); err != nil {
-			return nil, err
-		}
-		key := make([]byte, KeySize)
-		if _, err := io.ReadFull(f, key); err != nil {
-			return nil, fmt.Errorf("crypto: read %s: %w", path, err)
-		}
-		// A short/oversized key file is corruption, not a shorter key.
-		if extra, _ := f.Read(make([]byte, 1)); extra != 0 {
-			return nil, fmt.Errorf("crypto: %s is not a %d-byte local key", path, KeySize)
-		}
-		return key, nil
-	case os.IsNotExist(err):
-		return createKeyFile(path)
-	default:
-		return nil, fmt.Errorf("crypto: open %s: %w", path, err)
-	}
-}
-
-func createKeyFile(path string) ([]byte, error) {
-	key := make([]byte, KeySize)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return nil, fmt.Errorf("crypto: randomness unavailable, refusing to create local key: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		Zero(key)
-		return nil, fmt.Errorf("crypto: create %s: %w", path, err)
-	}
-	// Umask-independent: 0600 exactly whatever the process umask was.
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		Zero(key)
-		return nil, fmt.Errorf("crypto: chmod %s: %w", path, err)
-	}
-	if _, err := f.Write(key); err != nil {
-		f.Close()
-		Zero(key)
-		return nil, fmt.Errorf("crypto: write %s: %w", path, err)
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		Zero(key)
-		return nil, fmt.Errorf("crypto: fsync %s: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
-		Zero(key)
-		return nil, fmt.Errorf("crypto: close %s: %w", path, err)
-	}
-	return key, nil
 }
 
 // Stamp is "v1-" + hex(HMAC-SHA256(stampKey, stampDomain+content)[:16]) — 128
@@ -183,84 +117,151 @@ func ParseStamp(s string) error {
 // § "AAD binds the container to its context"). A snapshot is therefore not
 // transplantable across environments, projects, principals, or projections.
 //
+// The list fields (Projection, TargetNames) are sorted and deduplicated INSIDE
+// Canonical(), so a caller-visible ordering choice or an accidental duplicate
+// cannot change the authenticated bytes: identical sets always canonicalize
+// identically.
+//
 // IssuedAt and ExpiresAt are the EXACT RFC3339 UTC strings the server returned;
-// they are bound verbatim, never re-formatted through time.Time (re-formatting
-// would silently break every OpenSnapshot). The caller parses them separately
-// for expiry/high-water-mark arithmetic.
+// they are carried verbatim, never re-formatted through time.Time.
+// InstanceOrigin is the instance identity the client actually holds: the
+// client's trust store is origin-keyed, so the origin is the stable identity it
+// can compare offline.
 type SnapshotAAD struct {
+	InstanceOrigin string `json:"instance_origin"`
+	OrgID          string `json:"org_id"`
+	ProjectID      string `json:"project_id"`
+	EnvironmentID  string `json:"environment_id"`
+	CredentialID   string `json:"credential_id"`
+	ConfigOnly     bool   `json:"config_only"`
+	// TargetNames is the render-target id set.
+	TargetNames []string `json:"target_names"`
+	// PinnedRevision is the resolved historical revision when the snapshot was
+	// served from a pin, or 0 when serving current material (unpinned). It
+	// replaces the earlier Revision+Pinned pair: a pin is exactly a non-zero
+	// resolved revision, so one field is both necessary and sufficient.
+	PinnedRevision int64 `json:"pinned_revision"`
+	// Projection is the authorized delivery capability list.
+	Projection []string `json:"projection"`
+	IssuedAt   string   `json:"issued_at"`
+	ExpiresAt  string   `json:"expires_at"`
+}
+
+// SnapshotContext is the offline-known subset of the AAD: the identity, org,
+// project, environment, credential, config-only mode, and target set the box
+// can reconstruct WITHOUT reaching the server. LoadSnapshot compares it against
+// the stored header; the remaining fields (revision/projection/issued/expires)
+// are taken from the header and returned to the caller.
+type SnapshotContext struct {
 	InstanceOrigin string
 	OrgID          string
 	ProjectID      string
 	EnvironmentID  string
 	CredentialID   string
-	Revision       int64
-	Pinned         bool
-	// Projection is the authorized delivery capability list, sorted by the
-	// caller; ConfigOnly is the distinct config-only projection flag.
-	Projection []string
-	ConfigOnly bool
-	// TargetNames is the render-target id set, sorted by the caller.
-	TargetNames []string
-	IssuedAt    string
-	ExpiresAt   string
+	ConfigOnly     bool
+	TargetNames    []string
 }
 
-func (a SnapshotAAD) kind() Kind { return KindComposeSnapshot }
-
-func (a SnapshotAAD) fields() [][]byte {
-	return [][]byte{
-		[]byte(a.InstanceOrigin),
-		[]byte(a.OrgID),
-		[]byte(a.ProjectID),
-		[]byte(a.EnvironmentID),
-		[]byte(a.CredentialID),
-		be64(uint64(a.Revision)),
-		boolByte(a.Pinned),
-		encodeList(a.Projection),
-		boolByte(a.ConfigOnly),
-		encodeList(a.TargetNames),
-		[]byte(a.IssuedAt),
-		[]byte(a.ExpiresAt),
+// Canonical is the deterministic header-bytes encoding of the full AAD tuple:
+// the two list fields are sorted and deduplicated, then the struct is marshalled
+// to JSON (Go marshals struct fields in declaration order, so the bytes are
+// stable). These bytes are BOTH the cleartext container header and the AEAD's
+// associated data, so tampering the header fails the open.
+func (a SnapshotAAD) Canonical() ([]byte, error) {
+	c := a
+	c.TargetNames = CanonicalStringSet(a.TargetNames)
+	c.Projection = CanonicalStringSet(a.Projection)
+	b, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: marshal snapshot header: %w", err)
 	}
+	return b, nil
 }
 
-// SealSnapshot encrypts plaintext under the snapshot key with the container's
-// AAD, reusing the module's XChaCha20-Poly1305 envelope (versioned header,
-// fresh 192-bit nonce). No second AEAD wrapper.
-func (k *LocalKeys) SealSnapshot(aad SnapshotAAD, plaintext []byte) ([]byte, error) {
-	return seal(rand.Reader, k.snapshotKey, []byte(snapshotKeyID), 1, aad, plaintext)
+// ParseSnapshotHeader decodes canonical header bytes back into a SnapshotAAD.
+func ParseSnapshotHeader(b []byte) (SnapshotAAD, error) {
+	var a SnapshotAAD
+	if err := json.Unmarshal(b, &a); err != nil {
+		return SnapshotAAD{}, fmt.Errorf("crypto: parse snapshot header: %w", err)
+	}
+	return a, nil
 }
 
-// OpenSnapshot decrypts a snapshot container, requiring the AAD to match the
-// caller's context exactly. Any tampered component fails as ErrDecrypt.
-func (k *LocalKeys) OpenSnapshot(aad SnapshotAAD, record []byte) ([]byte, error) {
-	return open(k.snapshotKey, []byte(snapshotKeyID), 1, aad, record)
+// ContextMatches checks the offline-known local context against the header,
+// field by field, comparing the target set as a sorted/deduplicated set. A
+// mismatch is refused BY NAME (not as a decrypt failure) so the operator sees
+// which coordinate a transplanted snapshot disagrees on.
+func (a SnapshotAAD) ContextMatches(expect SnapshotContext) error {
+	for _, f := range []struct {
+		name     string
+		got, exp string
+	}{
+		{"instance", a.InstanceOrigin, expect.InstanceOrigin},
+		{"org", a.OrgID, expect.OrgID},
+		{"project", a.ProjectID, expect.ProjectID},
+		{"environment", a.EnvironmentID, expect.EnvironmentID},
+		{"credential", a.CredentialID, expect.CredentialID},
+	} {
+		if f.got != f.exp {
+			return fmt.Errorf("crypto: snapshot %s %q does not match local context %q", f.name, f.got, f.exp)
+		}
+	}
+	if a.ConfigOnly != expect.ConfigOnly {
+		return fmt.Errorf("crypto: snapshot config_only=%v does not match local context config_only=%v", a.ConfigOnly, expect.ConfigOnly)
+	}
+	got := CanonicalStringSet(a.TargetNames)
+	exp := CanonicalStringSet(expect.TargetNames)
+	if len(got) != len(exp) {
+		return fmt.Errorf("crypto: snapshot target set %v does not match local context %v", got, exp)
+	}
+	for i := range got {
+		if got[i] != exp[i] {
+			return fmt.Errorf("crypto: snapshot target set %v does not match local context %v", got, exp)
+		}
+	}
+	return nil
 }
 
-// encodeList canonicalises a string list into ONE AAD field with inner
-// length-prefixing, so the list boundary is injective: without it,
-// (["a"],["bc"]) and (["a","bc"],[]) at adjacent fields could encode
-// identically. The caller sorts; we do not, so a caller-visible ordering choice
-// is not silently reordered — but the two list fields (projection, targets) are
-// documented as sorted.
-func encodeList(items []string) []byte {
-	var out []byte
-	out = binary.BigEndian.AppendUint32(out, uint32(len(items)))
-	for _, s := range items {
-		out = appendLP(out, []byte(s))
+// SealSnapshot encrypts plaintext under the snapshot key with headerCanonical as
+// the associated data — reusing the module's XChaCha20-Poly1305 envelope
+// (versioned header, fresh 192-bit nonce). The caller passes the exact canonical
+// header bytes it also stores in the container, so the cleartext header is
+// authenticated by the AEAD.
+func (k *LocalKeys) SealSnapshot(headerCanonical, plaintext []byte) ([]byte, error) {
+	return seal(rand.Reader, k.snapshotKey, []byte(snapshotKeyID), 1, rawAAD(headerCanonical), plaintext)
+}
+
+// OpenSnapshot decrypts a snapshot payload, requiring the associated data to be
+// byte-identical to the header bytes sealed alongside it. Any tampered
+// header/payload byte fails as ErrDecrypt.
+func (k *LocalKeys) OpenSnapshot(headerCanonical, record []byte) ([]byte, error) {
+	return open(k.snapshotKey, []byte(snapshotKeyID), 1, rawAAD(headerCanonical), record)
+}
+
+// rawAAD carries opaque, pre-canonicalized associated-data bytes as one
+// length-prefixed AAD field under the compose-snapshot kind. It is how the
+// self-describing snapshot container binds its cleartext header to the payload.
+type rawAAD []byte
+
+func (r rawAAD) kind() Kind       { return KindComposeSnapshot }
+func (r rawAAD) fields() [][]byte { return [][]byte{r} }
+
+// CanonicalStringSet returns a sorted, deduplicated copy of items. It is the
+// ONE canonicalizer shared between the snapshot AAD's list fields and the
+// compose cursor's projection / target-key-id membership, so "the authorized
+// projection, sorted as the CLI derives it" means exactly the same bytes in
+// both places.
+func CanonicalStringSet(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	cp := append([]string(nil), items...)
+	sort.Strings(cp)
+	out := cp[:0]
+	for i, s := range cp {
+		if i == 0 || s != cp[i-1] {
+			out = append(out, s)
+		}
 	}
 	return out
-}
-
-func be64(v uint64) []byte {
-	var b [8]byte
-	binary.BigEndian.PutUint64(b[:], v)
-	return b[:]
-}
-
-func boolByte(b bool) []byte {
-	if b {
-		return []byte{1}
-	}
-	return []byte{0}
 }

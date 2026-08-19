@@ -67,6 +67,13 @@ func loadCorpus(t *testing.T) []corpusFile {
 	return out
 }
 
+// TestEncodeRawCorpus is SUPPLEMENTAL coverage only. decodeRaw is a hand-written
+// reader of the grammar this package ASSUMES, so a round-trip here cannot detect
+// Docker Compose behaviour drift or a wrong assumption about whitespace, quotes,
+// `$`, or backslashes. The AUTHORITATIVE round-trip is stream D's CI job, which
+// runs this same corpus through a pinned real `docker compose` with `format:
+// raw` and compares the resulting container environment byte-for-byte
+// (compose-integration ADR § Dotenv encoding: "MUST be round-trip tested in CI").
 func TestEncodeRawCorpus(t *testing.T) {
 	for _, cf := range loadCorpus(t) {
 		t.Run(cf.Name, func(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 
 func osMkdir(p string, perm os.FileMode) error { return os.Mkdir(p, perm) }
 
+func osReadFile(p string) ([]byte, error) { return os.ReadFile(p) }
+
 func removeFile(p string) error { return os.Remove(p) }
 
 // hex32 returns 32 lowercase hex chars, a syntactically valid stamp body.

@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,25 @@ func codes(f []Finding) map[string]Finding {
 func hasCode(f []Finding, code string) bool {
 	_, ok := codes(f)[code]
 	return ok
+}
+
+// healthyServiceYAML writes one service's env_file + label in the required form.
+func healthyServiceYAML(runtimeDir, svc, v, target string) string {
+	return fmt.Sprintf(`  %s:
+    env_file:
+      - path: %s/${%s:?render}/%s.env
+        format: raw
+    labels:
+      hikyo.stamp: "${%s:?render}"
+`, svc, runtimeDir, v, target, v)
+}
+
+// resolvedService builds the resolved config for a service/target/stamp.
+func resolvedService(runtimeDir, stamp, target string) ComposeService {
+	return ComposeService{
+		EnvFile: []EnvFileRef{{Path: filepath.Join(runtimeDir, stamp, target+".env"), Format: "raw", Required: true}},
+		Labels:  map[string]string{"hikyo.stamp": stamp},
+	}
 }
 
 func TestParseComposeVersion(t *testing.T) {
@@ -46,84 +66,19 @@ func TestCheckComposeVersionFloor(t *testing.T) {
 	}
 }
 
-func TestStampVarUsage(t *testing.T) {
-	yaml := `
-services:
-  api:
-    env_file:
-      - path: /run/hikyo/p/${HIKYO_GEN_API:?run hikyo compose render}/api.env
-`
-	present, req := stampVarUsage(yaml, "HIKYO_GEN_API")
-	if !present || !req {
-		t.Errorf("required form should be present: present=%v req=%v", present, req)
-	}
-	present, req = stampVarUsage("x ${HIKYO_GEN_API} y", "HIKYO_GEN_API")
-	if !present || req {
-		t.Errorf("bare form should be present but not required: present=%v req=%v", present, req)
-	}
-	present, _ = stampVarUsage("no var here", "HIKYO_GEN_API")
-	if present {
-		t.Error("absent var should not be present")
-	}
-	// One good and one bad occurrence → not required form.
-	_, req = stampVarUsage("${HIKYO_GEN_API:?ok} and ${HIKYO_GEN_API:-bad}", "HIKYO_GEN_API")
-	if req {
-		t.Error("any non-required occurrence fails the check")
-	}
-	// Prefix-collision: HIKYO_GEN_API must NOT match inside HIKYO_GEN_API_SERVER.
-	yaml2 := "path: /p/${HIKYO_GEN_API_SERVER:?render}/x.env"
-	if present, _ := stampVarUsage(yaml2, "HIKYO_GEN_API"); present {
-		t.Error("HIKYO_GEN_API must not match inside HIKYO_GEN_API_SERVER")
-	}
-	if present, req := stampVarUsage(yaml2, "HIKYO_GEN_API_SERVER"); !present || !req {
-		t.Errorf("HIKYO_GEN_API_SERVER should match its own var: present=%v req=%v", present, req)
-	}
-}
-
-func TestDoctorPrefixCollisionTargets(t *testing.T) {
-	// A correct compose file for both `api` and `api-server` must produce no
-	// stamp-var findings for either.
-	runtime := filepath.Join(t.TempDir(), "runtime")
-	keys := testKeys(t)
-	sApi := TargetStamp(keys, []byte("a"))
-	sSrv := TargetStamp(keys, []byte("b"))
-	w := NewWriter(t.TempDir(), nil)
-	if err := w.WriteGeneration(runtime, sApi, map[string][]byte{"api": []byte("a")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.WriteGeneration(runtime, sSrv, map[string][]byte{"api-server": []byte("b")}); err != nil {
-		t.Fatal(err)
-	}
-	in := DoctorInput{
-		ComposeVersion: "2.31.0",
-		RawComposeYAML: "a: ${HIKYO_GEN_API:?r}\nb: ${HIKYO_GEN_API_SERVER:?r}\n",
-		ManagedStamps:  map[string]string{"api": sApi, "api-server": sSrv},
-		RuntimeDir:     runtime,
-		ServerStamps:   map[string]string{"api": sApi, "api-server": sSrv},
-		ConfigTargets: map[string]Target{
-			"api":        {Keys: []string{"key_1"}, Services: []string{"api"}},
-			"api-server": {Keys: []string{"key_2"}, Services: []string{"api-server"}},
-		},
-		ExistingKeyIDs: map[string]bool{"key_1": true, "key_2": true},
-	}
-	if f := Doctor(in); len(f) != 0 {
-		t.Fatalf("prefix-collision pair produced findings: %+v", f)
-	}
-}
-
 // fullyHealthyInput builds a doctor input with no findings.
 func fullyHealthyInput(t *testing.T) DoctorInput {
 	t.Helper()
 	runtime := filepath.Join(t.TempDir(), "runtime")
 	keys := testKeys(t)
-	stamp := TargetStamp(keys, []byte("content"))
-	w := NewWriter(t.TempDir(), nil)
-	if err := w.WriteGeneration(runtime, stamp, map[string][]byte{"api": []byte("content")}); err != nil {
+	rl := begin(t, t.TempDir(), nil)
+	stamp, err := rl.WriteGeneration(runtime, keys, "api", []byte("content"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	rawYAML := "services:\n  api:\n    env_file:\n      - path: /run/hikyo/p/${HIKYO_GEN_API:?render}/api.env\n"
+	rawYAML := "services:\n" + healthyServiceYAML(runtime, "api", "HIKYO_GEN_API", "api")
 	cfg := &ComposeConfig{Services: map[string]ComposeService{
-		"api": {EnvFile: []EnvFileRef{{Path: "/run/hikyo/p/" + stamp + "/api.env", Format: "raw", Required: true}}},
+		"api": resolvedService(runtime, stamp, "api"),
 	}}
 	return DoctorInput{
 		ComposeVersion: "2.31.0",
@@ -131,6 +86,7 @@ func fullyHealthyInput(t *testing.T) DoctorInput {
 		RawComposeYAML: rawYAML,
 		ManagedStamps:  map[string]string{"api": stamp},
 		RuntimeDir:     runtime,
+		RuntimeTmpfs:   true,
 		ServerStamps:   map[string]string{"api": stamp},
 		ConfigTargets:  map[string]Target{"api": {Keys: []string{"key_1"}, Services: []string{"api"}}},
 		ExistingKeyIDs: map[string]bool{"key_1": true},
@@ -148,13 +104,64 @@ func TestDoctorHealthy(t *testing.T) {
 	}
 }
 
+func TestDoctorPrefixCollisionTargets(t *testing.T) {
+	runtime := filepath.Join(t.TempDir(), "runtime")
+	keys := testKeys(t)
+	rl := begin(t, t.TempDir(), nil)
+	sApi, err := rl.WriteGeneration(runtime, keys, "api", []byte("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sSrv, err := rl.WriteGeneration(runtime, keys, "api-server", []byte("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawYAML := "services:\n" +
+		healthyServiceYAML(runtime, "api", "HIKYO_GEN_API", "api") +
+		healthyServiceYAML(runtime, "api-server", "HIKYO_GEN_API_SERVER", "api-server")
+	cfg := &ComposeConfig{Services: map[string]ComposeService{
+		"api":        resolvedService(runtime, sApi, "api"),
+		"api-server": resolvedService(runtime, sSrv, "api-server"),
+	}}
+	in := DoctorInput{
+		ComposeVersion: "2.31.0",
+		Config:         cfg,
+		RawComposeYAML: rawYAML,
+		ManagedStamps:  map[string]string{"api": sApi, "api-server": sSrv},
+		RuntimeDir:     runtime,
+		RuntimeTmpfs:   true,
+		ServerStamps:   map[string]string{"api": sApi, "api-server": sSrv},
+		ConfigTargets: map[string]Target{
+			"api":        {Keys: []string{"key_1"}, Services: []string{"api"}},
+			"api-server": {Keys: []string{"key_2"}, Services: []string{"api-server"}},
+		},
+		ExistingKeyIDs: map[string]bool{"key_1": true, "key_2": true},
+	}
+	if f := Doctor(in); len(f) != 0 {
+		t.Fatalf("prefix-collision pair produced findings: %+v", f)
+	}
+}
+
+func TestDoctorRuntimeChecks(t *testing.T) {
+	in := fullyHealthyInput(t)
+	in.RuntimeTmpfs = false
+	if !hasCode(Doctor(in), "runtime_not_tmpfs") {
+		t.Error("expected runtime_not_tmpfs")
+	}
+	in = fullyHealthyInput(t)
+	in.RuntimeDir = "relative/runtime"
+	if !hasCode(Doctor(in), "runtime_dir_not_absolute") {
+		t.Error("expected runtime_dir_not_absolute")
+	}
+}
+
 func TestDoctorStampMismatch(t *testing.T) {
 	in := fullyHealthyInput(t)
-	// Config interpolates a different (valid) generation than the stamp file.
+	// Resolved env_file points at a different (valid) generation than the stamp.
 	other := TargetStamp(testKeys(t), []byte("other"))
-	in.Config.Services["api"] = ComposeService{EnvFile: []EnvFileRef{
-		{Path: "/run/hikyo/p/" + other + "/api.env", Format: "raw"},
-	}}
+	svc := in.Config.Services["api"]
+	svc.EnvFile[0].Path = filepath.Join(in.RuntimeDir, other, "api.env")
+	in.Config.Services["api"] = svc
 	if !hasCode(Doctor(in), "stamp_mismatch") {
 		t.Error("expected stamp_mismatch")
 	}
@@ -162,9 +169,14 @@ func TestDoctorStampMismatch(t *testing.T) {
 
 func TestDoctorFormatRawMissing(t *testing.T) {
 	in := fullyHealthyInput(t)
-	svc := in.Config.Services["api"]
-	svc.EnvFile[0].Format = "" // default parsing, not raw
-	in.Config.Services["api"] = svc
+	// Drop `format: raw` from the raw YAML.
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    env_file:
+      - path: %s/${HIKYO_GEN_API:?render}/api.env
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_API:?render}"
+`, in.RuntimeDir)
 	if !hasCode(Doctor(in), "format_raw_missing") {
 		t.Error("expected format_raw_missing")
 	}
@@ -172,13 +184,8 @@ func TestDoctorFormatRawMissing(t *testing.T) {
 
 func TestDoctorGenerationAbsentAndDrift(t *testing.T) {
 	in := fullyHealthyInput(t)
-	// Point managed + config at a generation that was never written.
 	ghost := TargetStamp(testKeys(t), []byte("ghost"))
 	in.ManagedStamps["api"] = ghost
-	in.Config.Services["api"] = ComposeService{EnvFile: []EnvFileRef{
-		{Path: "/run/hikyo/p/" + ghost + "/api.env", Format: "raw"},
-	}}
-	// server still names the old stamp → drift too.
 	f := Doctor(in)
 	if !hasCode(f, "generation_absent") {
 		t.Error("expected generation_absent")
@@ -188,15 +195,99 @@ func TestDoctorGenerationAbsentAndDrift(t *testing.T) {
 	}
 }
 
+func TestDoctorServerStampUnknown(t *testing.T) {
+	in := fullyHealthyInput(t)
+	in.ServerStamps = map[string]string{} // no server agreement input
+	if !hasCode(Doctor(in), "server_stamp_unknown") {
+		t.Error("a missing server stamp must be a finding, never a pass")
+	}
+}
+
 func TestDoctorRequiredFormAndMissingVar(t *testing.T) {
 	in := fullyHealthyInput(t)
-	in.RawComposeYAML = "services:\n  api:\n    env_file:\n      - path: /run/hikyo/p/${HIKYO_GEN_API}/api.env\n"
+	// Path uses ${VAR} without :?.
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    env_file:
+      - path: %s/${HIKYO_GEN_API}/api.env
+        format: raw
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_API:?r}"
+`, in.RuntimeDir)
 	if !hasCode(Doctor(in), "stamp_var_not_required_form") {
-		t.Error("expected stamp_var_not_required_form")
+		t.Error("expected stamp_var_not_required_form for ${VAR}")
 	}
+	// Path uses ${VAR:-default} — also not the required form.
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    env_file:
+      - path: %s/${HIKYO_GEN_API:-x}/api.env
+        format: raw
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_API:?r}"
+`, in.RuntimeDir)
+	if !hasCode(Doctor(in), "stamp_var_not_required_form") {
+		t.Error("expected stamp_var_not_required_form for ${VAR:-x}")
+	}
+	// Service absent from compose entirely → env_file_missing_stamp_var.
 	in.RawComposeYAML = "services: {}\n"
 	if !hasCode(Doctor(in), "env_file_missing_stamp_var") {
 		t.Error("expected env_file_missing_stamp_var")
+	}
+}
+
+// TestDoctorVarInCommentOnly: a :? form present only in a comment must NOT
+// satisfy the check — only scalar nodes are inspected.
+func TestDoctorVarInCommentOnly(t *testing.T) {
+	in := fullyHealthyInput(t)
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    # env_file path was: %s/${HIKYO_GEN_API:?render}/api.env
+    env_file:
+      - path: %s/static/api.env
+        format: raw
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_API:?render}"
+`, in.RuntimeDir, in.RuntimeDir)
+	if !hasCode(Doctor(in), "env_file_missing_stamp_var") {
+		t.Error("a :? form in a comment must not satisfy the stamp-var check")
+	}
+}
+
+func TestDoctorLabelChecks(t *testing.T) {
+	// Label absent.
+	in := fullyHealthyInput(t)
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    env_file:
+      - path: %s/${HIKYO_GEN_API:?render}/api.env
+        format: raw
+`, in.RuntimeDir)
+	if !hasCode(Doctor(in), "label_absent") {
+		t.Error("expected label_absent")
+	}
+
+	// Label references the wrong variable.
+	in = fullyHealthyInput(t)
+	in.RawComposeYAML = fmt.Sprintf(`services:
+  api:
+    env_file:
+      - path: %s/${HIKYO_GEN_API:?render}/api.env
+        format: raw
+    labels:
+      hikyo.stamp: "${HIKYO_GEN_WORKER:?render}"
+`, in.RuntimeDir)
+	if !hasCode(Doctor(in), "label_wrong_var") {
+		t.Error("expected label_wrong_var")
+	}
+
+	// Label resolves to the wrong stamp.
+	in = fullyHealthyInput(t)
+	svc := in.Config.Services["api"]
+	svc.Labels = map[string]string{"hikyo.stamp": TargetStamp(testKeys(t), []byte("nope"))}
+	in.Config.Services["api"] = svc
+	if !hasCode(Doctor(in), "label_stamp_mismatch") {
+		t.Error("expected label_stamp_mismatch")
 	}
 }
 
@@ -221,6 +312,14 @@ func TestDoctorTargetKeyMissing(t *testing.T) {
 	}
 }
 
+func TestDoctorManagedStampAbsent(t *testing.T) {
+	in := fullyHealthyInput(t)
+	in.ManagedStamps = map[string]string{} // configured target with no stamp
+	if !hasCode(Doctor(in), "managed_stamp_absent") {
+		t.Error("expected managed_stamp_absent")
+	}
+}
+
 func TestDoctorSystemdWarn(t *testing.T) {
 	in := fullyHealthyInput(t)
 	in.SystemdInvocation = true
@@ -230,7 +329,6 @@ func TestDoctorSystemdWarn(t *testing.T) {
 	if !ok || got.Severity != SeverityWarn {
 		t.Errorf("expected a systemd_plain_token_file warn, got %+v", got)
 	}
-	// From CREDENTIALS_DIRECTORY → no warning.
 	in.TokenFromCredentialsDir = true
 	if hasCode(Doctor(in), "systemd_plain_token_file") {
 		t.Error("credential-sourced token should not warn")
@@ -251,7 +349,6 @@ func TestParseComposeConfigJSON(t *testing.T) {
 
 func TestDoctorGenerationIncomplete(t *testing.T) {
 	in := fullyHealthyInput(t)
-	// Remove the completion marker of the current generation.
 	stamp := in.ManagedStamps["api"]
 	if err := os.Remove(filepath.Join(in.RuntimeDir, stamp, completeMarker)); err != nil {
 		t.Fatal(err)
