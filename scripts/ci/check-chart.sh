@@ -81,46 +81,66 @@ def one(docs, kind, name=None, namespace=None):
 
 OP = "fixture-hikyo-operator"
 
-def rule_for(rules, resources, group=""):
-    want = set(resources)
-    for r in rules:
-        if r.get("apiGroups", [""]) == [group] and set(r.get("resources", [])) == want:
-            return r
-    return None
+# Exact rule model: normalize each rendered rule to a canonical, order-independent
+# tuple, then compare the WHOLE rule set of every operator (Cluster)Role to an
+# expected list per mode. A set comparison — not per-rule spot checks — is what
+# catches a stray rule, a widened verb, or a dropped restriction; nothing may be
+# present that is not expected, and nothing expected may be missing.
+def norm(r):
+    return (
+        tuple(sorted(r.get("apiGroups", []))),
+        tuple(sorted(r.get("resources", []))),
+        tuple(sorted(r.get("verbs", []))),
+        tuple(sorted(r.get("resourceNames", []))),
+    )
 
-def assert_secrets_rule(rules, where):
-    # Secrets: exactly get/create/update/patch, never list/watch.
-    r = rule_for(rules, ["secrets"])
-    if r is None:
-        fail(f"{where}: no secrets rule")
-    if sorted(r["verbs"]) != sorted(["get", "create", "update", "patch"]):
-        fail(f"{where}: secrets verbs = {r['verbs']}, want get/create/update/patch exactly")
+def rule(groups, resources, verbs, names=()):
+    return (tuple(sorted(groups)), tuple(sorted(resources)), tuple(sorted(verbs)), tuple(sorted(names)))
 
-def assert_no_secret_listwatch(rules, where):
-    for r in rules:
-        if "secrets" in r.get("resources", []):
-            for v in r.get("verbs", []):
-                if v in ("list", "watch"):
-                    fail(f"{where}: secrets rule carries forbidden verb {v}")
+def expect_rules(rules, expected, where):
+    got = sorted(norm(r) for r in rules)
+    want = sorted(expected)
+    if got != want:
+        missing = [r for r in want if r not in got]
+        extra = [r for r in got if r not in want]
+        fail(f"{where}: RBAC rule set mismatch; missing={missing} extra={extra}")
 
-def assert_no_token_rule(rules, where):
-    for r in rules:
-        if "serviceaccounts/token" in r.get("resources", []):
-            fail(f"{where}: must NOT carry a serviceaccounts/token rule")
+# Rule building blocks (the operator's full ADR verb surface, § 0.10).
+INSTANCES = rule(["hikyo.dev"], ["hikyoinstances"], ["get", "list", "watch"])
+CRD = rule(["apiextensions.k8s.io"], ["customresourcedefinitions"], ["get"],
+           ["hikyoinstances.hikyo.dev", "hikyosecrets.hikyo.dev"])
+HIKYOSECRETS = rule(["hikyo.dev"], ["hikyosecrets"], ["get", "list", "watch", "patch"])
+STATUS = rule(["hikyo.dev"], ["hikyosecrets/status"], ["update", "patch"])
+FINALIZERS = rule(["hikyo.dev"], ["hikyosecrets/finalizers"], ["update"])
+EVENTS = rule([""], ["events"], ["create", "patch"])
+SECRETS = rule([""], ["secrets"], ["get", "create", "update", "patch"])
+WORKLOAD = rule(["apps"], ["deployments", "statefulsets", "daemonsets"], ["get", "list", "watch", "patch"])
+SERVICEACCOUNTS = rule([""], ["serviceaccounts"], ["get"])
 
-def assert_workload_rule(rules, where, present):
-    r = rule_for(rules, ["deployments", "statefulsets", "daemonsets"], group="apps")
-    if present and r is None:
-        fail(f"{where}: missing workload rule")
-    if present and sorted(r["verbs"]) != sorted(["get", "list", "watch", "patch"]):
-        fail(f"{where}: workload verbs = {r['verbs']}")
-    if not present and r is not None:
-        fail(f"{where}: workload rule present but triggering disabled")
-    # No stray apps rules either way.
-    if not present:
-        for r2 in rules:
-            if r2.get("apiGroups") == ["apps"]:
-                fail(f"{where}: an apps rule survived triggerRollouts=false")
+# Cluster-scoped reads that always live on the ClusterRole.
+CLUSTER_READS = [INSTANCES, CRD]
+# Per-CR converge rules; secrets is get/create/update/patch ONLY (never list/watch).
+CONVERGE = [HIKYOSECRETS, STATUS, FINALIZERS, EVENTS, SECRETS, SERVICEACCOUNTS]
+
+def assert_rbac_inventory(docs, expected, mode):
+    # Closure over WHICH RBAC objects exist, not only their rules: a brand-new
+    # stray Role/ClusterRole (e.g. a rogue secrets list/watch grant under an
+    # unexpected name) passes every per-role rule check because nothing looks at it.
+    # Compare the full (kind, name, namespace) inventory to the expected set.
+    got = set()
+    for d in docs:
+        if d.get("kind") in ("Role", "ClusterRole"):
+            m = d.get("metadata", {})
+            got.add((d["kind"], m.get("name"), m.get("namespace")))
+    want = set(expected)
+    if got != want:
+        fail(f"{mode}: RBAC object inventory mismatch; missing={sorted(want - got)} extra={sorted(got - want)}")
+
+def assert_leader_election(docs, mode):
+    le = one(docs, "Role", f"{OP}-leader-election", "default")
+    expect_rules(le["rules"], [
+        rule(["coordination.k8s.io"], ["leases"], ["get", "create", "update"]),
+    ], f"{mode} leader-election Role")
 
 def assert_token_role(docs, ns, want_names):
     role = one(docs, "Role", f"{OP}-token", ns)
@@ -164,66 +184,92 @@ def assert_hardened(docs, mode):
         fail(f"{mode}: no operator container")
     if op.get("args") != ["operator"]:
         fail(f"{mode}: operator args = {op.get('args')}, want [operator]")
-    for e in op.get("env", []):
-        if e["name"].startswith("HIKYO_DB"):
-            fail(f"{mode}: operator env leaks database config {e['name']}")
+    assert_env_allowlist(op, mode)
     return op
 
+# The operator container's env is an EXACT allowlist: only the operator's own
+# scoping/config vars, never database or listener config. Set equality catches
+# both an extra variable (leak) and a missing one (drift).
+ALLOWED_ENV = {
+    "HIKYO_OPERATOR_NAMESPACES",
+    "HIKYO_OPERATOR_TRIGGER_ROLLOUTS",
+    "HIKYO_OPERATOR_NAMESPACE",
+    "POD_NAMESPACE",
+}
+
+def assert_env_allowlist(op, mode):
+    names = [e["name"] for e in op.get("env", [])]
+    if len(names) != len(set(names)):
+        fail(f"{mode}: duplicate operator env names: {names}")
+    if set(names) != ALLOWED_ENV:
+        fail(f"{mode}: operator env = {sorted(names)}, want exactly {sorted(ALLOWED_ENV)}")
+
 # ---- cluster-wide ----
+# The single ClusterRole carries cluster reads + all converge rules + workload.
 cw = load(cluster_wide)
+assert_rbac_inventory(cw, [
+    ("ClusterRole", OP, None),
+    ("Role", f"{OP}-token", "ns-a"),
+    ("Role", f"{OP}-token", "ns-b"),
+    ("Role", f"{OP}-leader-election", "default"),
+], "cluster-wide")
 cr = one(cw, "ClusterRole", OP)
-assert_secrets_rule(cr["rules"], "cluster-wide ClusterRole")
-assert_no_secret_listwatch(cr["rules"], "cluster-wide ClusterRole")
-assert_no_token_rule(cr["rules"], "cluster-wide ClusterRole")
-assert_workload_rule(cr["rules"], "cluster-wide ClusterRole", present=True)
+expect_rules(cr["rules"], CLUSTER_READS + CONVERGE + [WORKLOAD], "cluster-wide ClusterRole")
 # TokenRequest is per-namespace even under cluster-wide watch.
 assert_token_role(cw, "ns-a", ["sa-a", "sa-shared"])
 assert_token_role(cw, "ns-b", ["sa-b", "sa-shared"])
 # No stamp-root Role in cluster-wide mode (the ClusterRole covers Secrets).
 if by(cw, "Role", f"{OP}-stamp-root"):
     fail("cluster-wide: unexpected stamp-root Role (ClusterRole already covers Secrets)")
+assert_leader_election(cw, "cluster-wide")
 assert_hardened(cw, "cluster-wide")
 
 # ---- namespaced ----
+# The ClusterRole is cluster-scoped reads ONLY; each per-namespace Role carries the
+# converge rules + workload (no cluster reads, no token rule).
 ns = load(namespaced)
+assert_rbac_inventory(ns, [
+    ("ClusterRole", OP, None),
+    ("Role", OP, "ns-a"),
+    ("Role", OP, "ns-b"),
+    ("Role", f"{OP}-token", "ns-a"),
+    ("Role", f"{OP}-token", "ns-b"),
+    ("Role", f"{OP}-stamp-root", "default"),
+    ("Role", f"{OP}-leader-election", "default"),
+], "namespaced")
 cr = one(ns, "ClusterRole", OP)
-# The namespaced ClusterRole is cluster-scoped reads ONLY — no Secrets.
-if rule_for(cr["rules"], ["secrets"]) is not None:
-    fail("namespaced ClusterRole must not grant Secrets")
-assert_no_token_rule(cr["rules"], "namespaced ClusterRole")
+expect_rules(cr["rules"], CLUSTER_READS, "namespaced ClusterRole")
 for n in ("ns-a", "ns-b"):
     role = one(ns, "Role", OP, n)
-    assert_secrets_rule(role["rules"], f"namespaced Role {n}")
-    assert_no_secret_listwatch(role["rules"], f"namespaced Role {n}")
-    assert_no_token_rule(role["rules"], f"namespaced Role {n}")
-    assert_workload_rule(role["rules"], f"namespaced Role {n}", present=True)
+    expect_rules(role["rules"], CONVERGE + [WORKLOAD], f"namespaced Role {n}")
 assert_token_role(ns, "ns-a", ["sa-a", "sa-shared"])
 assert_token_role(ns, "ns-b", ["sa-b"])
-# Stamp-root Role lives in the release namespace, name-restricted get/update + create.
+# Stamp-root Role lives in the release namespace: name-restricted get/update on the
+# fixed stamp-root Secret + an unrestricted create, and NOTHING else.
 sr = one(ns, "Role", f"{OP}-stamp-root", "default")
-restricted = None
-create = None
-for r in sr["rules"]:
-    if r.get("resourceNames") == ["hikyo-operator-stamp-root"]:
-        restricted = r
-    elif r.get("resources") == ["secrets"] and r.get("verbs") == ["create"]:
-        create = r
-if restricted is None or sorted(restricted["verbs"]) != sorted(["get", "update"]):
-    fail(f"stamp-root Role: name-restricted rule wrong: {restricted}")
-if create is None:
-    fail("stamp-root Role: missing unrestricted create rule")
+expect_rules(sr["rules"], [
+    rule([""], ["secrets"], ["get", "update"], ["hikyo-operator-stamp-root"]),
+    rule([""], ["secrets"], ["create"]),
+], "stamp-root Role")
+assert_leader_election(ns, "namespaced")
 op = assert_hardened(ns, "namespaced")
 env = {e["name"]: e.get("value") for e in op.get("env", [])}
 if env.get("HIKYO_OPERATOR_NAMESPACES") != "ns-a,ns-b":
     fail(f"operator watch env = {env.get('HIKYO_OPERATOR_NAMESPACES')}, want ns-a,ns-b")
 
 # ---- no-rollouts ----
+# triggerRollouts=false drops the workload rule ENTIRELY and nothing else changes.
 nr = load(no_rollouts)
+assert_rbac_inventory(nr, [
+    ("ClusterRole", OP, None),
+    ("Role", f"{OP}-leader-election", "default"),
+], "no-rollouts")
 cr = one(nr, "ClusterRole", OP)
-assert_workload_rule(cr["rules"], "no-rollouts ClusterRole", present=False)
+expect_rules(cr["rules"], CLUSTER_READS + CONVERGE, "no-rollouts ClusterRole")
+assert_leader_election(nr, "no-rollouts")
 assert_hardened(nr, "no-rollouts")
 
-print("Chart check: RBAC rules, TokenRequest scope, stamp-root grant, hardening, args and env asserted structurally")
+print("Chart check: every RBAC rule set, TokenRequest scope, stamp-root grant, hardening, args and the exact env allowlist asserted")
 PY
 
 # Refusal fixtures: the server listener is invalid without both a database Secret

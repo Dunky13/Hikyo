@@ -241,13 +241,28 @@ func TestTargetClaimedLoserRefused(t *testing.T) {
 		// higher-UID CR is the loser.
 		winner := makeCR("aaa", withCreation(ts, "uid-aaa"))
 		loser := makeCR("zzz", withCreation(ts, "uid-zzz"))
-		h := newHarness(t, interceptor.Funcs{},
-			makeInstance(""), makeBootstrapSecret("boot", testInstance, "tok", true), winner, loser)
+		// A target Secret owned by the winner, so the UID-tie loser's refusal can be
+		// proven to write nothing and leave the winner's bytes intact.
+		owned := makeOwnedSecret(t, testScheme(t), winner, map[string][]byte{"API_KEY": []byte("winner-bytes")})
+		writes := &secretWrites{}
+		h := newHarness(t, writes.interceptors(),
+			makeInstance(""), makeBootstrapSecret("boot", testInstance, "tok", true), owned, winner, loser)
 		h.stub.set(200, deliveryJSON(false, "v1:c", "v1:t", []deliveredKey{secretVal("API_KEY", "v")}, nil))
 		if _, err := h.reconcile("zzz"); err != nil {
 			t.Fatalf("reconcile: %v", err)
 		}
 		requireCond(t, h.getCR("zzz"), hikyov1.ConditionConflict, metav1.ConditionTrue, hikyov1.ReasonTargetClaimed)
+		// The UID-tie loser refuses PRE-fetch and PRE-write: no Secret op, no fetch,
+		// and the target bytes are untouched.
+		if writes.n != 0 {
+			t.Fatalf("UID-tie loser wrote the Secret %d time(s)", writes.n)
+		}
+		if h.stub.requests != 0 {
+			t.Fatalf("UID-tie loser fetched (requests=%d)", h.stub.requests)
+		}
+		if sec, _ := h.getSecret(testNS, testTarget); string(sec.Data["API_KEY"]) != "winner-bytes" || len(sec.Data) != 1 {
+			t.Fatalf("UID-tie loser mutated the target bytes: %v", sec.Data)
+		}
 	})
 }
 
@@ -503,6 +518,22 @@ func TestFaultAfterSecretLeavesCursorEmpty(t *testing.T) {
 		t.Fatalf("cursor/binding not cleared after a post-Secret fault: cursor=%q binding=%q", got.Status.Cursor, got.Status.CursorBinding)
 	}
 	requireCond(t, got, hikyov1.ConditionRollout, metav1.ConditionFalse, hikyov1.ReasonStalled)
+
+	// Reconcile 3: the fault clears. Because the post-Secret fault invalidated the
+	// binding (cleared cursor+binding), the re-fetch MUST be a cursor-less full
+	// fetch — the stale cursor must never be presented, or the server could answer
+	// "current" and permanently skip the pending patch.
+	faultActive = false
+	h.stub.set(200, deliveryJSON(false, "v1:cur3", "v1:t3", []deliveredKey{secretVal("API_KEY", "v3")}, nil))
+	if _, err := h.reconcile("app"); err != nil {
+		t.Fatalf("reconcile3: %v", err)
+	}
+	if h.stub.lastCursor != "" {
+		t.Fatalf("post-fault recovery presented cursor %q, want a cursor-less full fetch", h.stub.lastCursor)
+	}
+	if recovered := h.getCR("app"); recovered.Status.Cursor != "v1:cur3" {
+		t.Fatalf("recovery did not re-establish a cursor: %q", recovered.Status.Cursor)
+	}
 }
 
 func Test401RetainsAndFetchFailed(t *testing.T) {
@@ -609,8 +640,22 @@ func TestCurrentWritesNothing(t *testing.T) {
 	// cursor. Establish one with a full delivery, then answer current and prove
 	// nothing was written and the delivered data/stamp are unchanged.
 	writes := &secretWrites{}
+	workloadPatches := 0
+	// Count BOTH managed-Secret writes and opted-in workload patch calls through the
+	// recording client, so "current writes nothing" is asserted against actual API
+	// calls — a state check cannot see a patch that rewrote the same annotation.
+	base := writes.interceptors()
+	base.Patch = func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+		if _, ok := obj.(*appsv1.Deployment); ok {
+			workloadPatches++
+		}
+		if s, ok := obj.(*corev1.Secret); ok && s.Namespace == testNS && s.Name == testTarget {
+			writes.n++
+		}
+		return c.Patch(ctx, obj, patch, opts...)
+	}
 	cr := makeCR("app")
-	h := newHarness(t, writes.interceptors(),
+	h := newHarness(t, base,
 		makeInstance(""), makeBootstrapSecret("boot", testInstance, "tok", true),
 		makeOptedInDeployment("web", testTarget), cr)
 
@@ -627,6 +672,7 @@ func TestCurrentWritesNothing(t *testing.T) {
 	rv1, data1 := sec1.ResourceVersion, string(sec1.Data["API_KEY"])
 	stamp1 := stampAnnotation(h.getDeployment("web"))
 	writes.n = 0
+	workloadPatches = 0
 
 	// Reconcile 2: eligible cursor presented, server answers current.
 	h.stub.set(200, deliveryJSON(true, "v1:cur1", "v1:t", nil, nil))
@@ -639,6 +685,9 @@ func TestCurrentWritesNothing(t *testing.T) {
 	requireCond(t, h.getCR("app"), hikyov1.ConditionSynced, metav1.ConditionTrue, hikyov1.ReasonCurrent)
 	if writes.n != 0 {
 		t.Fatalf("current answer wrote the managed Secret %d time(s)", writes.n)
+	}
+	if workloadPatches != 0 {
+		t.Fatalf("current answer patched opted-in workloads %d time(s)", workloadPatches)
 	}
 	sec2, _ := h.getSecret(testNS, testTarget)
 	if sec2.ResourceVersion != rv1 || string(sec2.Data["API_KEY"]) != data1 {

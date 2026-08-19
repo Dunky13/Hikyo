@@ -116,7 +116,7 @@ func (r *HikyoSecretReconciler) writeManagedSecret(
 		if err := r.Create(ctx, sec); err != nil {
 			return nil, fmt.Errorf("operator: create managed Secret: %w", err)
 		}
-		return r.verifyManagedSecret(ctx, cr, data)
+		return r.verifyManagedSecret(ctx, cr, data, sec.UID)
 	}
 
 	// Defensive re-check: the ownership was verified in reconcileActive, but the
@@ -131,12 +131,17 @@ func (r *HikyoSecretReconciler) writeManagedSecret(
 	if err := r.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("operator: update managed Secret: %w", err)
 	}
-	return r.verifyManagedSecret(ctx, cr, data)
+	return r.verifyManagedSecret(ctx, cr, data, existing.UID)
 }
 
-// verifyManagedSecret re-Gets the managed Secret and confirms its data is
-// byte-exact what was written (§ 0.5 step 1's verify).
-func (r *HikyoSecretReconciler) verifyManagedSecret(ctx context.Context, cr *hikyov1.HikyoSecret, want map[string][]byte) (*corev1.Secret, error) {
+// verifyManagedSecret re-Gets the managed Secret and confirms it is byte-exact
+// what was written (§ 0.5 step 1's verify): the object still carries this CR's
+// controller ownerRef, its UID matches the object we just wrote, and its data is
+// byte-exact. The UID check closes the delete/recreate-and-re-own window that
+// IsControlledBy alone misses — a racing actor that deletes our Secret and
+// recreates an identically-controlled one gets a fresh UID, so a mismatch means
+// the bytes we verified are not the bytes we wrote.
+func (r *HikyoSecretReconciler) verifyManagedSecret(ctx context.Context, cr *hikyov1.HikyoSecret, want map[string][]byte, wantUID types.UID) (*corev1.Secret, error) {
 	// Uncached read-after-write: proves the write actually landed AND that the
 	// object we own is still ours. A cached read could return a pre-write copy,
 	// or miss a concurrent delete/recreate/re-own between write and verify.
@@ -146,6 +151,9 @@ func (r *HikyoSecretReconciler) verifyManagedSecret(ctx context.Context, cr *hik
 	}
 	if !metav1.IsControlledBy(&got, cr) {
 		return nil, fmt.Errorf("operator: managed Secret %q is not controlled by this CR after write (deleted/recreated/re-owned)", cr.Spec.Target.Name)
+	}
+	if got.UID != wantUID {
+		return nil, fmt.Errorf("operator: managed Secret %q UID %q after write does not match the written UID %q (deleted/recreated between write and verify)", cr.Spec.Target.Name, got.UID, wantUID)
 	}
 	if !dataEqual(got.Data, want) {
 		return nil, fmt.Errorf("operator: managed Secret data did not match what was written")

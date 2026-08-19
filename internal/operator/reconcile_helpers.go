@@ -298,6 +298,16 @@ func (r *HikyoSecretReconciler) event(cr *hikyov1.HikyoSecret, etype, reason, fo
 // error rather than discarded — losing the condition/cursor write is itself a
 // fault that must surface (finding: fail-loud handling).
 func (r *HikyoSecretReconciler) done(ctx context.Context, cr *hikyov1.HikyoSecret, res ctrl.Result, err error) (ctrl.Result, error) {
+	// Clear a stale Unreconciled/NamespaceNotBound on every outcome except the
+	// RBAC-forbidden one (the only path that sets LifecycleUnreconciled) — otherwise
+	// a recovered CR keeps reporting an authority loss that no longer holds (§ 0.3).
+	// The two pre-credential exits that never touched a namespaced object (invalid
+	// resyncInterval, HikyoInstance NotFound) also clear here; that is accepted —
+	// they set Ready=False via FetchFailed regardless, and the next reconcile that
+	// reaches the forbidden read re-detects and re-asserts Unreconciled.
+	if cr.Status.Lifecycle != hikyov1.LifecycleUnreconciled {
+		meta.RemoveStatusCondition(&cr.Status.Conditions, hikyov1.ConditionUnreconciled)
+	}
 	r.setReady(cr)
 	cr.Status.ObservedGeneration = cr.Generation
 	if uerr := r.Status().Update(ctx, cr); uerr != nil {
@@ -307,9 +317,9 @@ func (r *HikyoSecretReconciler) done(ctx context.Context, cr *hikyov1.HikyoSecre
 }
 
 // setReady computes the Ready summary: True only when Synced is True and no
-// blocking refusal (Designation=False, Conflict=True, Scrubbed=True, or a
-// blocking Delivery refusal) is active. KeysMissing and EnvFromSkip are
-// informational and do not block Ready (delivery happened).
+// blocking refusal (Designation=False, Conflict=True, Scrubbed=True,
+// Unreconciled=True, or a blocking Delivery refusal) is active. KeysMissing and
+// EnvFromSkip are informational and do not block Ready (delivery happened).
 func (r *HikyoSecretReconciler) setReady(cr *hikyov1.HikyoSecret) {
 	ready := meta.IsStatusConditionTrue(cr.Status.Conditions, hikyov1.ConditionSynced)
 	blockingReason := ""
@@ -319,7 +329,10 @@ func (r *HikyoSecretReconciler) setReady(cr *hikyov1.HikyoSecret) {
 			if c.Status == metav1.ConditionFalse {
 				ready, blockingReason = false, c.Reason
 			}
-		case hikyov1.ConditionConflict, hikyov1.ConditionScrubbed:
+		case hikyov1.ConditionConflict, hikyov1.ConditionScrubbed, hikyov1.ConditionUnreconciled:
+			// Unreconciled=True is an active RBAC authority loss (§ 0.3
+			// NamespaceNotBound): a previously synced CR must not report Ready while
+			// its namespace is unbound.
 			if c.Status == metav1.ConditionTrue {
 				ready, blockingReason = false, c.Reason
 			}

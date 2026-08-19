@@ -49,4 +49,23 @@ refute 'operator database env leak' \
 	templates/operator-deployment.yaml \
 	's/- name: HIKYO_OPERATOR_NAMESPACES/- name: HIKYO_DB\n              value: leaked\n            - name: HIKYO_OPERATOR_NAMESPACES/'
 
-printf 'Chart fixture: valid chart accepted; RBAC/args/hardening mutations refused\n'
+# Add an EXTRA operator env var that is not on the allowlist — the exact allowlist
+# must reject anything beyond the four permitted names, not just HIKYO_DB leaks.
+refute 'extra operator env var' \
+	templates/operator-deployment.yaml \
+	's/- name: HIKYO_OPERATOR_NAMESPACES/- name: EXTRA_SIDE_CHANNEL\n              value: nope\n            - name: HIKYO_OPERATOR_NAMESPACES/'
+
+# Add an EXTRA RBAC rule (configmaps read) — the full-rule-set comparison must
+# reject any rule beyond the expected set, even a benign-looking read.
+refute 'extra RBAC rule' \
+	templates/_helpers.tpl \
+	's|  resources: \["serviceaccounts"\]|  resources: ["configmaps"]\n  verbs: ["get", "list", "watch"]\n- apiGroups: [""]\n  resources: ["serviceaccounts"]|'
+
+# Add a STRAY ClusterRole document under an unexpected name — the per-mode object
+# inventory must reject any Role/ClusterRole beyond the expected set, even one whose
+# own rules would pass in isolation.
+refute 'stray RBAC object' \
+	templates/operator-rbac.yaml \
+	's|    verbs: \["get", "create", "update"\]|    verbs: ["get", "create", "update"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: {{ $operatorName }}-rogue\nrules:\n  - apiGroups: [""]\n    resources: ["secrets"]\n    verbs: ["get", "list", "watch"]|'
+
+printf 'Chart fixture: valid chart accepted; RBAC/env/args/hardening mutations refused\n'
