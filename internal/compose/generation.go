@@ -187,27 +187,51 @@ func (rl *RenderLock) WriteGeneration(runtimeDir string, keys *crypto.LocalKeys,
 	stamp := TargetStamp(keys, target, content)
 	envName := target + ".env"
 
-	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
-		return "", fmt.Errorf("compose: create runtime dir: %w", err)
-	}
-	// The runtime dir itself must not be a symlink: os.OpenRoot below confines
-	// lookups WITHIN the root but follows a symlinked root path, and the Chmod
-	// would follow it too. Lstat the final component and refuse a symlink before
-	// touching it; all further I/O then goes through the os.Root.
-	if li, err := os.Lstat(runtimeDir); err != nil {
-		return "", fmt.Errorf("compose: lstat runtime dir: %w", err)
-	} else if li.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("compose: runtime dir %s is a symlink; refusing", runtimeDir)
-	}
-	// Explicit 0700, not umask-dependent (ADR § Where plaintext lives).
-	if err := os.Chmod(runtimeDir, 0o700); err != nil {
-		return "", fmt.Errorf("compose: chmod runtime dir: %w", err)
-	}
-	root, err := os.OpenRoot(runtimeDir)
+	parent, err := os.OpenRoot(filepath.Dir(runtimeDir))
 	if err != nil {
-		return "", fmt.Errorf("compose: open runtime dir: %w", err)
+		return "", fmt.Errorf("compose: open runtime dir parent: %w", err)
+	}
+	defer parent.Close()
+	base := filepath.Base(runtimeDir)
+	created := false
+	if err := parent.Mkdir(base, 0o700); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("compose: create runtime dir: %w", err)
+		}
+	} else {
+		created = true
+	}
+	// Bootstrap search permission before opening the directory: on macOS an
+	// os.Root cannot Stat, Chmod, or OpenFile(".") when a hostile umask made a
+	// freshly-created directory 0600. Limit this bootstrap to the entry this
+	// call created; existing entries go directly through the identity checks.
+	if created {
+		if err := parent.Chmod(base, 0o700); err != nil {
+			return "", fmt.Errorf("compose: bootstrap runtime dir mode %s: %w", runtimeDir, err)
+		}
+	}
+	info, err := parent.Lstat(base)
+	if err != nil {
+		return "", fmt.Errorf("compose: lstat runtime dir %s: %w", runtimeDir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("compose: runtime dir %s is not a directory; refusing", runtimeDir)
+	}
+	root, err := parent.OpenRoot(base)
+	if err != nil {
+		return "", fmt.Errorf("compose: open runtime dir %s: %w", runtimeDir, err)
 	}
 	defer root.Close()
+	st, err := root.Stat(".")
+	if err != nil {
+		return "", fmt.Errorf("compose: stat opened runtime dir %s: %w", runtimeDir, err)
+	}
+	if !os.SameFile(info, st) {
+		return "", fmt.Errorf("compose: runtime dir %s was swapped while opening; refusing", runtimeDir)
+	}
+	if err := root.Chmod(".", 0o700); err != nil {
+		return "", fmt.Errorf("compose: chmod runtime dir %s: %w", runtimeDir, err)
+	}
 
 	present, complete := generationStateRoot(root, stamp)
 	if present && complete {

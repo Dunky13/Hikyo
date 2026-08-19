@@ -561,6 +561,25 @@ func TestWriteGenerationRefusesSymlinkedRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestWriteGenerationAcceptsExistingPlainRuntimeDir(t *testing.T) {
+	_, rt := dirs(t)
+	if err := os.Mkdir(rt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keys := testKeys(t)
+	rl := begin(t, t.TempDir(), nil)
+	if _, err := rl.WriteGeneration(rt, keys, "api", []byte("x")); err != nil {
+		t.Fatalf("WriteGeneration with existing plain runtime dir: %v", err)
+	}
+	info, err := os.Stat(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("runtime dir mode = %04o, want 0700", info.Mode().Perm())
+	}
+}
+
 // TestRenderLockRefusedAfterClose: every verb is spent once the lock is
 // released, and a second Close is refused too (#11).
 func TestRenderLockRefusedAfterClose(t *testing.T) {
