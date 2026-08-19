@@ -12,6 +12,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Hikyo-Org/hikyo/api"
 	"github.com/Hikyo-Org/hikyo/api/apigen"
@@ -44,6 +45,32 @@ type IO struct {
 	// OpenURL launches a browser without printing the opaque handoff state.
 	// Nil uses the platform browser opener.
 	OpenURL func(string) error
+	// Exec replaces the current process image with argv0 (unix syscall.Exec) or
+	// spawns-waits-and-exits-with-the-child-code (windows). `hikyo run --` is the
+	// only caller. Nil uses the real platform Exec (execRun, build-tagged). Tests
+	// inject it to capture the child's argv/env without a real exec.
+	Exec func(argv0 string, argv, env []string) error
+	// Now is the clock the compose verbs read for snapshot expiry. Nil means
+	// time.Now — there is deliberately no HIKYO_NOW env knob, because a clock a
+	// hostile config file could set is the rollback surface the snapshot high-
+	// water mark exists to bound.
+	Now func() time.Time
+}
+
+// now returns the injected clock or the real one.
+func (ios IO) now() time.Time {
+	if ios.Now != nil {
+		return ios.Now()
+	}
+	return time.Now()
+}
+
+// exec runs the injected Exec seam or the real platform exec.
+func (ios IO) exec(argv0 string, argv, env []string) error {
+	if ios.Exec != nil {
+		return ios.Exec(argv0, argv, env)
+	}
+	return execRun(argv0, argv, env)
 }
 
 // Run dispatches one invocation and returns its exit code.
@@ -90,6 +117,8 @@ var verbHandlers = map[string]func(context.Context, IO, []string) error{
 	"remote-credential": runRemoteCredential,
 	"import":            runImport,
 	"adapter":           runAdapter,
+	"run":               runRun,
+	"compose":           runCompose,
 }
 
 // Usage is the frozen help text. Its exact bytes are a committed golden
@@ -218,6 +247,20 @@ adapters:
   adapter credentials are read with terminal echo disabled, from stdin, or
   from --value-file. There is no credential-value argv flag.
 
+delivery:                                          machine credential only
+  hikyo run [--config-only] [--allow-override KEY,KEY] [--project-directory DIR]
+      [--token-file PATH] -- <command> [args...]   fetch, merge, exec
+
+compose:                                           machine credential only
+  hikyo compose render [--project-directory DIR] [--config-only] [--token-file PATH]
+  hikyo compose sync [--project-directory DIR] [--token-file PATH]
+  hikyo compose doctor [--project-directory DIR] [-o table|json] [--token-file PATH]
+
+  run and compose accept ONLY a machine credential (--token-file or HIKYO_TOKEN);
+  the stored human session is never used. run execs the command after '--' with
+  the fetched values merged in (fetched wins; a differing collision is refused
+  unless named in --allow-override). exit 127 is command-not-found, 126 is
+  command-not-executable - the child's own convention, not hikyo's.
 
 instance configuration:
   hikyo instance-config provider create --kind saml --name <name> --entity-id <entityID> \

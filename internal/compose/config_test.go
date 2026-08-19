@@ -45,6 +45,29 @@ func TestParseConfigValid(t *testing.T) {
 	}
 }
 
+func TestParseConfigRunBlockAndSlug(t *testing.T) {
+	src := validConfig + "run:\n  acknowledge_loader_control: [NODE_OPTIONS]\nslug: acme-web-production\n"
+	c, err := ParseConfig([]byte(src))
+	if err != nil {
+		t.Fatalf("config with run/slug rejected: %v", err)
+	}
+	if got := c.Run.AcknowledgeLoaderControl; len(got) != 1 || got[0] != "NODE_OPTIONS" {
+		t.Errorf("run.acknowledge_loader_control = %v", got)
+	}
+	if c.Slug != "acme-web-production" {
+		t.Errorf("slug = %q", c.Slug)
+	}
+}
+
+func TestParseConfigRejectsBadSlug(t *testing.T) {
+	for _, bad := range []string{"../escape", "Has Space", "UPPER", "-leading"} {
+		src := validConfig + "slug: " + `"` + bad + `"` + "\n"
+		if _, err := ParseConfig([]byte(src)); err == nil {
+			t.Errorf("slug %q: expected rejection", bad)
+		}
+	}
+}
+
 func TestParseConfigDefaultsMaxAge(t *testing.T) {
 	src := strings.Replace(validConfig, "  offline_serve: true\n  max_age: 24h\n", "  offline_serve: false\n", 1)
 	c, err := ParseConfig([]byte(src))

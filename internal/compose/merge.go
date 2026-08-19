@@ -85,7 +85,7 @@ func MergeEnv(inherited []string, fetched map[string]string, allowOverride []str
 	if len(hardErrors) > 0 {
 		sort.Strings(hardErrors)
 		return nil, nil, fmt.Errorf("refusing to run: inherited environment and fetched values disagree on %s; "+
-			"the values differ. Add each key to the target's override list to accept the fetched value",
+			"the values differ. Add each key to --allow-override to accept the fetched value",
 			strings.Join(hardErrors, ", "))
 	}
 	return out, collisions, nil

@@ -52,19 +52,39 @@ const DefaultSnapshotMaxAge = 7 * 24 * time.Hour
 
 var targetNameGrammar = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// slugGrammar constrains an explicit `slug`: it becomes a filesystem path
+// segment, so `/`, `..` and whitespace are refused rather than allowed to
+// escape the state directory.
+var slugGrammar = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 // Config is a parsed, validated hikyo-compose.yaml.
 type Config struct {
-	Version     int               `yaml:"version"`
-	Instance    string            `yaml:"instance"`
-	Org         string            `yaml:"org"`
-	Project     string            `yaml:"project"`
-	Environment string            `yaml:"environment"`
-	RuntimeDir  string            `yaml:"runtime_dir"`
-	Snapshot    SnapshotSettings  `yaml:"snapshot"`
-	Targets     map[string]Target `yaml:"targets"`
+	Version     int    `yaml:"version"`
+	Instance    string `yaml:"instance"`
+	Org         string `yaml:"org"`
+	Project     string `yaml:"project"`
+	Environment string `yaml:"environment"`
+	RuntimeDir  string `yaml:"runtime_dir"`
+	// Slug is the OPTIONAL explicit project slug. When empty the CLI derives
+	// one from the org/project/env ids; when set it becomes the state-dir and
+	// default-runtime-dir path segment, so it is grammar-checked as a path
+	// segment. It carries no delivery meaning.
+	Slug     string            `yaml:"slug"`
+	Snapshot SnapshotSettings  `yaml:"snapshot"`
+	Run      RunSettings       `yaml:"run"`
+	Targets  map[string]Target `yaml:"targets"`
 
 	// maxAge is the parsed, clamped snapshot max age, filled by ParseConfig.
 	maxAge time.Duration
+}
+
+// RunSettings is the top-level `run:` block: policy for `hikyo run --`, which
+// delivers the whole environment rather than a per-target subset. Its
+// loader-control acknowledgement mirrors the per-target field (compose ADR
+// § "Loader-control keys"): `run` has no target, so the acknowledgement lives
+// at the stack level.
+type RunSettings struct {
+	AcknowledgeLoaderControl []string `yaml:"acknowledge_loader_control"`
 }
 
 // SnapshotSettings is the per-stack offline snapshot policy.
@@ -127,6 +147,9 @@ func (c *Config) validate() error {
 		if strings.TrimSpace(v) == "" {
 			return fmt.Errorf("hikyo-compose.yaml: `%s` is required", field)
 		}
+	}
+	if s := strings.TrimSpace(c.Slug); s != "" && !slugGrammar.MatchString(s) {
+		return fmt.Errorf("hikyo-compose.yaml: `slug` %q must match ^[a-z0-9][a-z0-9-]*$ (it is a filesystem path segment)", c.Slug)
 	}
 	if len(c.Targets) == 0 {
 		return fmt.Errorf("hikyo-compose.yaml: at least one target is required under `targets`")
