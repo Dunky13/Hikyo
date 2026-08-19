@@ -19,10 +19,11 @@ import (
 // authorization and the fetch path; revision-model ADR § Revision identity).
 //
 // The acceptance criterion these discharge is mvp-boundary M1's "cursor
-// bind-tuple falsification (all four components) forces full fetch". Each
-// component is falsified INDEPENDENTLY — the cursor is recomputed with exactly
-// one component replaced and everything else held — because a test that changed
-// two at once would pass even if the implementation ignored one of them.
+// bind-tuple falsification forces full fetch", extended by #64 with the
+// projection-mode component. Each component is falsified INDEPENDENTLY — the
+// cursor is recomputed with exactly one component replaced and everything else
+// held — because a test that changed two at once would pass even if the
+// implementation ignored one of them.
 
 func TestDeliveryCursorRoundTripSQLite(t *testing.T) {
 	runDeliveryCursorRoundTrip(t, seededDB(t, openSQLite))
@@ -42,7 +43,7 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 	caller := service.LocalPrincipal(identAdmin)
 	env := scopeEnv(orgA, prjA1, envA1)
 
-	first, err := del.FetchAs(t.Context(), caller, env, "")
+	first, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
@@ -78,14 +79,14 @@ func runDeliveryCursorRoundTrip(t *testing.T, db *store.DB) {
 		t.Fatal("a full delivery returned no cursor or no change token")
 	}
 	// Both keyed values carry the scheme's version prefix. This is a PUBLIC
-	// machine contract — the change token flows into pod annotations — so a
-	// consumer's comparison must be able to tell a scheme change from a content
-	// change.
+	// machine contract — the change token is the consumer's change-detection
+	// input — so a consumer's comparison must be able to tell a scheme change
+	// from a content change.
 	if got := first.ChangeToken[:3]; got != crypto.TokenVersion+":" {
 		t.Errorf("change token prefix %q, want %q", got, crypto.TokenVersion+":")
 	}
 
-	second, err := del.FetchAs(t.Context(), caller, env, first.Cursor)
+	second, err := del.FetchAs(t.Context(), caller, env, first.Cursor, service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("conditional fetch: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestDeliveryCursorFalsificationPostgres(t *testing.T) {
 	runDeliveryCursorFalsification(t, seededDB(t, openPostgres))
 }
 
-// runDeliveryCursorFalsification falsifies EACH of the four components
+// runDeliveryCursorFalsification falsifies EACH cursor component
 // independently and asserts every one forces a full fetch.
 //
 // It forges the cursors rather than provoking real state changes, and that is the
@@ -145,12 +146,12 @@ func runDeliveryCursorFalsification(t *testing.T, db *store.DB) {
 	caller := service.LocalPrincipal(identAdmin)
 	env := scopeEnv(orgA, prjA1, envA1)
 
-	live, err := del.FetchAs(t.Context(), caller, env, "")
+	live, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("baseline fetch: %v", err)
 	}
 
-	// The server's own four-tuple, reconstructed from the same sources the
+	// The server's own tuple, reconstructed from the same sources the
 	// service reads. The baseline assertion below proves the reconstruction is
 	// faithful before any component is falsified — without it, a forged cursor
 	// forcing a full fetch would prove only that the test cannot build a cursor.
@@ -175,7 +176,7 @@ func runDeliveryCursorFalsification(t *testing.T, db *store.DB) {
 		return got
 	}
 	if cursorOf(truth) != live.Cursor {
-		t.Fatalf("reconstructed cursor %q does not match the served one %q — the fixture's model of the four-tuple is wrong, so the falsifications below would prove nothing",
+		t.Fatalf("reconstructed cursor %q does not match the served one %q — the fixture's model of the tuple is wrong, so the falsifications below would prove nothing",
 			cursorOf(truth), live.Cursor)
 	}
 
@@ -220,6 +221,18 @@ func runDeliveryCursorFalsification(t *testing.T, db *store.DB) {
 				return c
 			},
 		},
+		{
+			// (5) PROJECTION MODE — the delivery projection moved (`full` vs
+			// `config-only`). The served fetch is `full`, so a cursor claiming
+			// `config-only` describes a strictly smaller delivery and must not be
+			// accepted as current. This is the #64 leg: every pre-projection
+			// cursor mismatches exactly once, the designed upgrade path.
+			component: "projection mode",
+			mutate: func(c delivery.Cursor) delivery.Cursor {
+				c.Mode = delivery.ModeConfigOnly
+				return c
+			},
+		},
 	}
 	for _, f := range falsifications {
 		t.Run(f.component, func(t *testing.T) {
@@ -227,7 +240,7 @@ func runDeliveryCursorFalsification(t *testing.T, db *store.DB) {
 			if forged == live.Cursor {
 				t.Fatal("falsifying this component produced the SAME cursor: it is not in the bind-tuple")
 			}
-			res, err := del.FetchAs(t.Context(), caller, env, forged)
+			res, err := del.FetchAs(t.Context(), caller, env, forged, service.FetchOptions{})
 			if err != nil {
 				t.Fatalf("fetch with a falsified cursor: %v", err)
 			}
@@ -279,11 +292,11 @@ func runAuthorizationMovementInvalidatesCursor(t *testing.T, db *store.DB) {
 	}
 	grantMachineRead(t, db, sa.Principal, envA1)
 
-	first, err := del.Fetch(t.Context(), minted.Value, env, "")
+	first, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("machine fetch: %v", err)
 	}
-	current, err := del.Fetch(t.Context(), minted.Value, env, first.Cursor)
+	current, err := del.Fetch(t.Context(), minted.Value, env, first.Cursor, service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("machine conditional fetch: %v", err)
 	}
@@ -298,7 +311,7 @@ func runAuthorizationMovementInvalidatesCursor(t *testing.T, db *store.DB) {
 		service.GrantSpec{Target: sa.Principal, Capability: domain.CapRead, Scope: envScope(envProd)}); err != nil {
 		t.Fatalf("grant read(env_prod): %v", err)
 	}
-	afterGrant, err := del.Fetch(t.Context(), minted.Value, env, first.Cursor)
+	afterGrant, err := del.Fetch(t.Context(), minted.Value, env, first.Cursor, service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("fetch after a grant mutation: %v", err)
 	}
@@ -315,7 +328,7 @@ func runAuthorizationMovementInvalidatesCursor(t *testing.T, db *store.DB) {
 	if err := advancePinGeneration(t, db, sa.Principal, envA1); err != nil {
 		t.Fatalf("advance pin generation: %v", err)
 	}
-	afterPin, err := del.Fetch(t.Context(), minted.Value, env, afterGrant.Cursor)
+	afterPin, err := del.Fetch(t.Context(), minted.Value, env, afterGrant.Cursor, service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("fetch after a pin-generation change: %v", err)
 	}
@@ -363,7 +376,7 @@ func runDeliveryUnauthorized(t *testing.T, db *store.DB) {
 	}
 	grantMachineRead(t, db, sa.Principal, envA1)
 
-	served, err := del.Fetch(t.Context(), minted.Value, env, "")
+	served, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatalf("fetch while authorized: %v", err)
 	}
@@ -374,8 +387,8 @@ func runDeliveryUnauthorized(t *testing.T, db *store.DB) {
 		t.Fatalf("revoke read(env_a1): %v", err)
 	}
 
-	withCursor, err := del.Fetch(t.Context(), minted.Value, env, served.Cursor)
-	withoutCursor, errNoCursor := del.Fetch(t.Context(), minted.Value, env, "")
+	withCursor, err := del.Fetch(t.Context(), minted.Value, env, served.Cursor, service.FetchOptions{})
+	withoutCursor, errNoCursor := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("conditional fetch after losing read = (%+v, %v), want the uniform nonexistent response",
 			withCursor, err)
@@ -392,7 +405,7 @@ func runDeliveryUnauthorized(t *testing.T, db *store.DB) {
 
 	// And an environment that genuinely does not exist answers identically.
 	missing, missingErr := del.Fetch(t.Context(), minted.Value,
-		scopeEnv(orgA, prjA1, domain.EnvID("env_not_there")), "")
+		scopeEnv(orgA, prjA1, domain.EnvID("env_not_there")), "", service.FetchOptions{})
 	if !errors.Is(missingErr, domain.ErrNotFound) || missingErr.Error() != err.Error() {
 		t.Fatalf("nonexistent environment = (%+v, %v), want the same shape as the unauthorized one (%v)",
 			missing, missingErr, err)
@@ -407,7 +420,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	caller := service.LocalPrincipal(identAdmin)
 	env := scopeEnv(orgA, prjA1, envA1)
 
-	before, err := del.FetchAs(t.Context(), caller, env, "")
+	before, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +430,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	// exists: a rotated credential that did not move the token would never fire
 	// the consumer's rollout.
 	publishDeliveryValues(t, db, envA1, map[string]string{"DATABASE_URL": "postgres://dev-rotated"})
-	afterValue, err := del.FetchAs(t.Context(), caller, env, "")
+	afterValue, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +452,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 		"key_fed_url", "secret"); err != nil {
 		t.Fatalf("reclassify: %v", err)
 	}
-	afterClass, err := del.FetchAs(t.Context(), caller, env, "")
+	afterClass, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +482,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 		}); err != nil {
 		t.Fatalf("presence-rule change: %v", err)
 	}
-	afterPresence, err := del.FetchAs(t.Context(), caller, env, "")
+	afterPresence, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +498,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 	// environment). Without that, an attacker who can write values in their own
 	// project could construct a candidate payload, read its token, and compare it
 	// against a target environment's pod annotation.
-	otherEnv, err := del.FetchAs(t.Context(), caller, scopeEnv(orgA, prjA1, envProd), "")
+	otherEnv, err := del.FetchAs(t.Context(), caller, scopeEnv(orgA, prjA1, envProd), "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +506,7 @@ func TestDeliveryChangeTokenTracksTheManifestSQLite(t *testing.T) {
 		t.Fatal("two environments produced the same change token: the token key is not scoped")
 	}
 	// …and a cursor from one environment is not current in another.
-	crossed, err := del.FetchAs(t.Context(), caller, scopeEnv(orgA, prjA1, envProd), afterPresence.Cursor)
+	crossed, err := del.FetchAs(t.Context(), caller, scopeEnv(orgA, prjA1, envProd), afterPresence.Cursor, service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +534,7 @@ func deliverySvc(t *testing.T, db *store.DB) *service.Delivery {
 }
 
 // principalGeneration reads the AUTHORIZATION REVISION component straight from
-// the table, so the fixture's model of the four-tuple is built from the same
+// the table, so the fixture's model of the tuple is built from the same
 // source the service reads rather than from a guess about its value.
 //
 // It is `principals.session_generation`: the counter every grant writer advances
@@ -546,4 +559,370 @@ func advancePinGeneration(t *testing.T, db *store.DB, p domain.PrincipalID, env 
 		}
 		return az.SetPinGeneration(ctx, p, env, current+1)
 	})
+}
+
+// The value-delivery slice (#64, k8s ADR § Refresh; machine-identities ADR §
+// Audit attribution). A fetch now delivers PLAINTEXT where the caller is
+// authorized, and records one disclosure per delivered value.
+
+func TestDeliveryDeliversValuesUnderAuthoritySQLite(t *testing.T) {
+	runDeliveryDeliversValues(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryDeliversValuesUnderAuthorityPostgres(t *testing.T) {
+	runDeliveryDeliversValues(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryDeliversValues is the per-key value rule made empirical: a config
+// value crosses under `read`, a secret value only under `reveal`, and each
+// delivered value leaves exactly one immutable disclosure record referencing
+// the fetch.
+func runDeliveryDeliversValues(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	del := deliverySvc(t, db)
+	ident := identitySvc(db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "value-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+
+	// WITHOUT `reveal`: the config value crosses, the secret is presence-only.
+	first, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("fetch without reveal: %v", err)
+	}
+	got := deliveredByName(first.Keys)
+	if v := got["DATABASE_URL"].Value; v == nil || *v != "postgres://dev" {
+		t.Errorf("config value = %v, want the delivered plaintext under read", v)
+	}
+	if pw := got["DATABASE_PASSWORD"]; pw.Value != nil {
+		t.Errorf("secret value delivered without reveal: %q — it must be presence-only", *pw.Value)
+	}
+	if got["DATABASE_PASSWORD"].Presence != delivery.PresenceSet {
+		t.Errorf("presence-only secret presence = %q, want set", got["DATABASE_PASSWORD"].Presence)
+	}
+	// A finite credential surfaces its expiry.
+	if first.CredentialExpiresAt.IsZero() {
+		t.Error("a finite credential delivered no credential_expires_at")
+	}
+	// The record: two keys, one delivered value, projection full.
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'
+		AND payload LIKE '%"key_count":2%' AND payload LIKE '%"delivered_count":1%' AND payload LIKE '%"projection":"full"%'`); n != 1 {
+		t.Errorf("delivery record with 2 keys / 1 value / full = %d, want 1", n)
+	}
+	// One disclosure, for the config value only, correlated to the fetch.
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'`); n != 1 {
+		t.Errorf("disclosure rows after a config-only-authorized fetch = %d, want 1", n)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'
+		AND payload LIKE '%"key":"DATABASE_URL"%' AND payload LIKE '%"classification":"config"%'`); n != 1 {
+		t.Errorf("config disclosure row = %d, want 1", n)
+	}
+	// The correlation id is the fetch record's id.
+	fetchID := queryString(t, db, `SELECT id FROM audit_tenant_events WHERE type = 'identity.delivery_fetched' LIMIT 1`)
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'
+		AND correlation_id = '`+fetchID+`'`); n != 1 {
+		t.Errorf("disclosure correlated to the fetch = %d, want 1", n)
+	}
+
+	// SEED `reveal` at store level, exactly as #17/#58's opt-in will (the grant
+	// API refuses machine reveal today). Now the secret value crosses too.
+	seedMachineReveal(t, db, "g_val_reveal", sa.Principal, domain.CapReveal, envA1)
+	second, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("fetch with reveal: %v", err)
+	}
+	got = deliveredByName(second.Keys)
+	if v := got["DATABASE_PASSWORD"].Value; v == nil || *v != "dev-secret" {
+		t.Errorf("secret value with reveal = %v, want the delivered plaintext", v)
+	}
+	// Both values delivered → delivered_count 2 → two more disclosure rows
+	// (three total: one config from the first fetch, config+secret from this).
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'
+		AND payload LIKE '%"delivered_count":2%'`); n != 1 {
+		t.Errorf("delivery record with 2 delivered values = %d, want 1", n)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'`); n != 3 {
+		t.Errorf("cumulative disclosure rows = %d, want 3 (1 + config + secret)", n)
+	}
+
+	// A `current` answer delivers nothing, so it emits NO disclosure and no
+	// value crosses.
+	before := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'`)
+	current, err := del.Fetch(t.Context(), minted.Value, env, second.Cursor, service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("conditional fetch: %v", err)
+	}
+	if !current.Current {
+		t.Fatal("the cursor a value fetch just returned was not current")
+	}
+	if len(current.Keys) != 0 {
+		t.Fatalf("a `current` answer carried %d keys, want none", len(current.Keys))
+	}
+	if after := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'`); after != before {
+		t.Errorf("a `current` answer emitted %d disclosure rows, want 0", after-before)
+	}
+}
+
+func TestDeliveryConfigOnlyProjectionSQLite(t *testing.T) {
+	runDeliveryConfigOnlyProjection(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryConfigOnlyProjectionPostgres(t *testing.T) {
+	runDeliveryConfigOnlyProjection(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryConfigOnlyProjection pins the server-side authorized term:
+// `config-only` omits secret keys ENTIRELY (not presence-only), computes a
+// different change token because the manifest is smaller, and yields a cursor
+// that a full fetch's cursor does not answer.
+func runDeliveryConfigOnlyProjection(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	del := deliverySvc(t, db)
+	caller := service.LocalPrincipal(identAdmin)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	full, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{Projection: delivery.ModeFull})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confOnly, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{Projection: delivery.ModeConfigOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The secret is GONE from config-only, not presence-only.
+	if _, present := deliveredByName(confOnly.Keys)["DATABASE_PASSWORD"]; present {
+		t.Error("config-only delivered the secret key; it must be omitted entirely")
+	}
+	if _, present := deliveredByName(confOnly.Keys)["DATABASE_URL"]; !present {
+		t.Error("config-only dropped the config key")
+	}
+	if _, present := deliveredByName(full.Keys)["DATABASE_PASSWORD"]; !present {
+		t.Error("full projection dropped the secret key")
+	}
+
+	// The manifest is smaller, so the change token differs, and the cursor is
+	// mode-bound, so a config-only cursor is not current against a full fetch.
+	if confOnly.ChangeToken == full.ChangeToken {
+		t.Error("config-only and full produced the same change token: the manifest is not projected")
+	}
+	if confOnly.Cursor == full.Cursor {
+		t.Error("config-only and full produced the same cursor: the mode is not bound in")
+	}
+	crossed, err := del.FetchAs(t.Context(), caller, env, confOnly.Cursor, service.FetchOptions{Projection: delivery.ModeFull})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crossed.Current {
+		t.Error("a config-only cursor was accepted as current for a full fetch")
+	}
+	// The config-only cursor IS current for a repeat config-only fetch.
+	same, err := del.FetchAs(t.Context(), caller, env, confOnly.Cursor, service.FetchOptions{Projection: delivery.ModeConfigOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !same.Current {
+		t.Error("a config-only cursor was not current for a repeat config-only fetch")
+	}
+
+	// An unrecognized projection is refused loudly BEFORE any work — the
+	// exported below-the-network path has no OpenAPI enum in front of it.
+	if _, err := del.FetchAs(t.Context(), caller, env, "", service.FetchOptions{Projection: delivery.Mode("bogus")}); !errors.Is(err, domain.ErrInvalid) {
+		t.Errorf("bogus projection = %v, want ErrInvalid", err)
+	}
+}
+
+func TestDeliveryAcknowledgedKeysAreRecordedSQLite(t *testing.T) {
+	db := seededDB(t, openSQLite)
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	del := deliverySvc(t, db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	// The list lands on the record AS PRESENTED — order preserved, nothing
+	// filtered — and it changes nothing about what is delivered.
+	if _, err := del.FetchAs(t.Context(), service.LocalPrincipal(identAdmin), env, "",
+		service.FetchOptions{AcknowledgedKeys: []string{"PATH", "LD_PRELOAD"}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'
+		AND payload LIKE '%"acknowledged_keys":["PATH","LD_PRELOAD"]%'`); n != 1 {
+		t.Errorf("acknowledged_keys recorded verbatim = %d, want 1", n)
+	}
+	// An unacknowledged fetch records the empty list rather than omitting it.
+	if _, err := del.FetchAs(t.Context(), service.LocalPrincipal(identAdmin), env, "", service.FetchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.delivery_fetched'
+		AND payload LIKE '%"acknowledged_keys":[]%'`); n != 1 {
+		t.Errorf("empty acknowledged_keys recorded = %d, want 1", n)
+	}
+}
+
+func TestDeliveryCredentialExpiryIsFiniteOrAbsentSQLite(t *testing.T) {
+	db := seededDB(t, openSQLite)
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db)
+	del := deliverySvc(t, db)
+	ident := identitySvc(db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "expiry-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+
+	// A finite credential carries its expiry.
+	finite, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := del.Fetch(t.Context(), finite.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.CredentialExpiresAt.Equal(finite.Credential.ExpiresAt) {
+		t.Errorf("finite credential_expires_at = %v, want %v", res.CredentialExpiresAt, finite.Credential.ExpiresAt)
+	}
+
+	// An indefinite credential (under the opt-in) carries none.
+	policy, err := ident.Policy(t.Context(), service.LocalPrincipal(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ident.SetPolicy(t.Context(), service.LocalPrincipal(root), service.PolicyChange{
+		MaxFiniteLifetime: policy.MaxFiniteLifetime, AllowIndefinite: true,
+		MaxLiveCredentials: policy.MaxLiveCredentials,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	forever, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{Indefinite: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indef, err := del.Fetch(t.Context(), forever.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !indef.CredentialExpiresAt.IsZero() {
+		t.Errorf("indefinite credential_expires_at = %v, want the zero time", indef.CredentialExpiresAt)
+	}
+}
+
+// deliveredByName indexes a delivered projection by key name.
+func deliveredByName(keys []service.DeliveredKey) map[string]service.DeliveredKey {
+	out := make(map[string]service.DeliveredKey, len(keys))
+	for _, k := range keys {
+		out[k.Name] = k
+	}
+	return out
+}
+
+func TestDeliveryPinnedNonCurrentRequiresRevealHistorySQLite(t *testing.T) {
+	runDeliveryPinnedNonCurrent(t, seededDB(t, openSQLite))
+}
+
+func TestDeliveryPinnedNonCurrentRequiresRevealHistoryPostgres(t *testing.T) {
+	runDeliveryPinnedNonCurrent(t, seededDB(t, openPostgres))
+}
+
+// runDeliveryPinnedNonCurrent pins the reveal-history branch of the value rule:
+// a pinned delivery of a NON-CURRENT revision discloses history, so a secret
+// value crosses only under `reveal-history`, and `reveal` alone leaves it
+// presence-only. The disclosure record names the pinned revision, which also
+// exercises the snapshot-revision-vs-schema-revision distinction.
+func runDeliveryPinnedNonCurrent(t *testing.T, db *store.DB) {
+	identityFixtures(t, db)
+	seedDeliveryCatalogue(t, db) // env_a1 at revision 1, both keys
+	del := deliverySvc(t, db)
+	ident := identitySvc(db)
+	env := scopeEnv(orgA, prjA1, envA1)
+
+	// A second revision, so revision 1 is genuinely non-current.
+	publishDeliveryValues(t, db, envA1, map[string]string{"DATABASE_URL": "postgres://dev-v2"})
+	if latest := latestRevision(t, db, "env_a1"); latest < 2 {
+		t.Fatalf("expected a second revision, latest = %d", latest)
+	}
+
+	// The pin authority (identAdmin) needs `pin` ∧ `publish` (OpPinSet) and
+	// `reveal-history` (OpPinSetHistory) at env_a1 to pin to a non-current
+	// revision; `publish` it already holds from the catalogue seed.
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_adm_pin','`+string(identAdmin)+`','pin','org_a','prj_a1','env_a1',`+ts+`)`)
+	execRaw(t, db, `INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_adm_revh','`+string(identAdmin)+`','reveal-history','org_a','prj_a1','env_a1',`+ts+`)`)
+	seedOrigins(t, db)
+
+	sa, err := ident.CreateServiceAccount(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), "pinned-workload", domain.ClassWorkload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted, err := ident.MintCredential(t.Context(), service.LocalPrincipal(identAdmin),
+		prjScope(), sa.ID, service.MintRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantMachineRead(t, db, sa.Principal, envA1)
+
+	pins := &service.Pins{DB: db, Keyring: probeKeyring(t, db)}
+	if _, err := pins.Set(t.Context(), service.LocalPrincipal(identAdmin), env,
+		service.SetPinRequest{WorkloadPrincipalID: sa.Principal, Revision: 1}); err != nil {
+		t.Fatalf("pin the workload to revision 1: %v", err)
+	}
+
+	// read only: config crosses, the secret is presence-only, pin is revision 1.
+	res, err := del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("pinned fetch under read: %v", err)
+	}
+	if res.PinnedRevision != 1 {
+		t.Fatalf("PinnedRevision = %d, want the pinned revision 1", res.PinnedRevision)
+	}
+	got := deliveredByName(res.Keys)
+	if got["DATABASE_URL"].Value == nil {
+		t.Error("the config value did not cross under read on a pinned delivery")
+	}
+	if got["DATABASE_PASSWORD"].Value != nil {
+		t.Error("the secret crossed under read on a pinned non-current delivery")
+	}
+
+	// `reveal` is NOT sufficient for a pinned non-current revision.
+	seedMachineReveal(t, db, "g_wl_reveal", sa.Principal, domain.CapReveal, envA1)
+	res, err = del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("pinned fetch with reveal: %v", err)
+	}
+	if deliveredByName(res.Keys)["DATABASE_PASSWORD"].Value != nil {
+		t.Error("`reveal` delivered a pinned non-current secret; it requires `reveal-history`")
+	}
+
+	// `reveal-history` delivers it, and the disclosure names the pinned revision.
+	seedMachineReveal(t, db, "g_wl_revh", sa.Principal, domain.CapRevealHistory, envA1)
+	res, err = del.Fetch(t.Context(), minted.Value, env, "", service.FetchOptions{})
+	if err != nil {
+		t.Fatalf("pinned fetch with reveal-history: %v", err)
+	}
+	pw := deliveredByName(res.Keys)["DATABASE_PASSWORD"]
+	if pw.Value == nil || *pw.Value != "dev-secret" {
+		t.Errorf("pinned secret with reveal-history = %v, want the revision-1 plaintext", pw.Value)
+	}
+	if n := queryInt(t, db, `SELECT COUNT(*) FROM audit_tenant_events WHERE type = 'identity.disclosure'
+		AND payload LIKE '%"key":"DATABASE_PASSWORD"%' AND payload LIKE '%"revision":1%'`); n != 1 {
+		t.Errorf("disclosure naming pinned revision 1 = %d, want 1", n)
+	}
 }

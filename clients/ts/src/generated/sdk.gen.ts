@@ -2314,17 +2314,19 @@ export const createFederatedBinding = <ThrowOnError extends boolean = false>(opt
  * The machine fetch surface. Presenting a current cursor answers
  * `current: true` with NO content and no key names — only a fetch that
  * actually delivers values is a disclosure — and either disposition emits
- * exactly one immutable access record.
+ * exactly one immutable access record, plus one immutable disclosure
+ * record per delivered value.
  *
  * Authorization is evaluated on the conditional path EXACTLY as on the
  * delivering path, so a caller who has lost `read` receives the uniform
  * nonexistent response rather than "current".
  *
- * Today there are no value tables, so what is delivered is the key
- * catalogue and each key's declared presence for this environment: config
- * keys and secret PRESENCE only, no plaintext anywhere. That is the surface
- * the Compose and Kubernetes integrations consume, and it is the seam the
- * value tables land behind.
+ * What a key delivers is decided server-side, per key, in-transaction: a
+ * `config` key carries its plaintext under `read`; a `secret` key carries
+ * its plaintext under `read ∧ reveal` (or `read ∧ reveal-history` for a
+ * pinned non-current revision), and otherwise arrives presence-only with
+ * no value. This is the surface the Compose and Kubernetes integrations
+ * consume to converge their delivery targets.
  *
  * Both a `hik_` bearer credential and an externally issued OIDC ID token
  * authenticate here, with identical authority: a machine principal's
@@ -2335,6 +2337,7 @@ export const createFederatedBinding = <ThrowOnError extends boolean = false>(opt
  *
  */
 export const fetchDelivery = <ThrowOnError extends boolean = false>(options: Options<FetchDeliveryData, ThrowOnError>) => (options.client ?? client).get<FetchDeliveryResponses, FetchDeliveryErrors, ThrowOnError>({
+    querySerializer: { parameters: { acknowledged_keys: { array: { explode: false } } } },
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery',
     ...options

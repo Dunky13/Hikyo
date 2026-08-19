@@ -1639,15 +1639,26 @@ export type FederatedBinding = {
 };
 
 /**
- * One key as the machine surface delivers it. There is deliberately NO
- * value property, and its absence is not a placeholder: no plaintext
- * crosses this surface, so the ticket that adds values has to add the
- * member deliberately.
+ * One key as the machine surface delivers it. `value` is present IFF the
+ * plaintext was actually delivered to this caller; its absence means
+ * presence-only — the key exists and the snapshot delivers it, but this
+ * caller was not authorized to receive the plaintext (a `secret` key
+ * without `reveal`), so no plaintext crossed. Whether a value crosses is
+ * decided server-side per key: `config` under `read`, `secret` under
+ * `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
+ * revision).
  *
  */
 export type DeliveredKey = {
     name: string;
     classification: KeyClassification;
+    /**
+     * The delivered plaintext. Present ONLY when the caller was
+     * authorized to receive it (see the schema description); absent for a
+     * presence-only key. The maxLength matches the value-write bound.
+     *
+     */
+    value?: string;
     /**
      * What the fetch reports about this key in the addressed
      * environment. `set` is a key the committed snapshot actually
@@ -1677,22 +1688,34 @@ export type DeliveryResponse = {
      * BOTH dispositions so a caller told "current" can keep polling without
      * re-fetching to learn its own cursor.
      *
-     * It is bound to four things — the change token, the caller's
-     * authorized delivery projection, the principal's authorization
-     * revision, and the pin generation — never to content alone. Any
-     * authorization movement therefore invalidates it and produces a full
-     * authorized delivery rather than a "current" answer.
+     * It is bound to the change token, the caller's authorized delivery
+     * projection, the principal's authorization revision, the pin
+     * generation, and the projection mode — never to content alone. Any
+     * authorization or projection movement therefore invalidates it and
+     * produces a full authorized delivery rather than a "current" answer.
      *
      */
     cursor: string;
     /**
-     * The keyed delivery-manifest token, `v1:`-prefixed. Keyed rather than
-     * a content digest, so it is unforgeable and un-invertible without the
-     * server key and may flow into pod annotations, logs and
+     * The keyed delivery-manifest token, `v1:`-prefixed. It is
+     * change-detection material ONLY — the conditional-fetch cursor's
+     * input — and is never itself a workload-visible value (k8s ADR §
+     * Declared amendment): what reaches a pod annotation is the
+     * consumer's client-side per-target keyed stamp, not this token.
+     * Keyed rather than a content digest, so it is unforgeable and
+     * un-invertible without the server key and may flow into logs and
      * change-detection caches as ordinary non-secret metadata.
      *
      */
     change_token: string;
+    /**
+     * The presenting credential's expiry when it is finite — a bearer
+     * credential's `expires_at`, a federated binding's expiry. ABSENT for
+     * an indefinite credential. The operator surfaces it as the ADR's
+     * ahead-of-time expiry condition and event.
+     *
+     */
+    credential_expires_at?: Timestamp;
     /**
      * The project's monotonic key-catalogue revision.
      */
@@ -3249,6 +3272,29 @@ export type FederationIssuerId = Id;
  *
  */
 export type DeliveryCursor = string;
+
+/**
+ * A SERVER-SIDE AUTHORIZED TERM, never a client-side filter (k8s ADR §
+ * Refresh). `config-only` omits `secret` keys from the delivery entirely
+ * — not presence-only, gone — and from the manifest the change token is
+ * computed over, and the mode is bound into the conditional-fetch cursor
+ * so a projection change invalidates it. `full` (the default) delivers
+ * every key the caller is authorized to see.
+ *
+ */
+export type DeliveryProjection = 'full' | 'config-only';
+
+/**
+ * The loader-control keys the consumer explicitly acknowledges, so the
+ * server's fetch audit record carries which acknowledgement was in force
+ * for this delivery (k8s ADR § Loader-control). The server RECORDS it and
+ * otherwise ignores it — it filters nothing and refuses nothing; the
+ * loader-control refusal is enforced by the operator against its mapping,
+ * which the server cannot see. Comma-separated, each item under the key
+ * grammar, at most 64.
+ *
+ */
+export type DeliveryAcknowledgedKeys = Array<KeyName>;
 
 /**
  * SCIM binding identifier.
@@ -11838,6 +11884,27 @@ export type FetchDeliveryData = {
          *
          */
         cursor?: string;
+        /**
+         * A SERVER-SIDE AUTHORIZED TERM, never a client-side filter (k8s ADR §
+         * Refresh). `config-only` omits `secret` keys from the delivery entirely
+         * — not presence-only, gone — and from the manifest the change token is
+         * computed over, and the mode is bound into the conditional-fetch cursor
+         * so a projection change invalidates it. `full` (the default) delivers
+         * every key the caller is authorized to see.
+         *
+         */
+        projection?: 'full' | 'config-only';
+        /**
+         * The loader-control keys the consumer explicitly acknowledges, so the
+         * server's fetch audit record carries which acknowledgement was in force
+         * for this delivery (k8s ADR § Loader-control). The server RECORDS it and
+         * otherwise ignores it — it filters nothing and refuses nothing; the
+         * loader-control refusal is enforced by the operator against its mapping,
+         * which the server cannot see. Comma-separated, each item under the key
+         * grammar, at most 64.
+         *
+         */
+        acknowledged_keys?: Array<KeyName>;
     };
     url: '/api/v1/orgs/{org}/projects/{project}/environments/{environment}/delivery';
 };
