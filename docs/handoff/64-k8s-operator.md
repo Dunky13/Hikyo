@@ -157,6 +157,8 @@ is active) and type `Synced` plus the specific ones:
 
 | Condition | Reason | When |
 |---|---|---|
+| `Ready=True` | `Reconciled` | `Synced=True` and no refusal or failure is active |
+| `Ready=False` | `Blocked` | a refusal or failure is active |
 | `Synced=True` | `Delivered` / `Current` | full delivery written / cursor answered current |
 | `Synced=False` | `FetchFailed` | network error, 5xx, 429, **401** — retain last Secret, requeue with backoff |
 | `Synced=False` | `NotMaterialized` | server says no published revision (409) — retain/empty, requeue |
@@ -167,7 +169,7 @@ is active) and type `Synced` plus the specific ones:
 | `Delivery=False` | `UndeliveredSecrets` | all-or-nothing: mapped secret keys arrived presence-only; message names keys + the opt-in |
 | `Delivery=False` | `KeysMissing` | mapped source keys absent from the manifest → converge (drop them); condition lists them |
 | `Delivery=False` | `LoaderControlUnacknowledged` | mapped `secretKey` on the baseline without exact acknowledgement; names keys |
-| `Delivery=False` | `EnvFromSkip` (warning, `Synced` still True) | a `secretKey` is not a valid env identifier — documented Kubernetes caveat |
+| `Delivery=True` | `EnvFromSkip` (warning, `Synced` still True) | a `secretKey` is not a valid env identifier — documented Kubernetes caveat |
 | `Scrubbed=True` | `AuthorizationWithdrawn` | 404 under an authenticating credential → Secret converged to empty |
 | `Rollout=False` | `Stalled` | opted-in workload not progressed after the stamp patch (observedGeneration/unavailable per the workload controller's own status) |
 | `CredentialExpiry=True` | `ExpiresSoon` / `Expired` | `credential_expires_at` within 7 days / passed |
@@ -240,9 +242,10 @@ Lives in `internal/delivery/loadercontrol.go` (shared with #63 later). A
 mapping whose `secretKey` matches the baseline is refused
 (`LoaderControlUnacknowledged`) unless `spec.acknowledgedLoaderKeys` lists
 **exactly** those keys (extra acknowledged names that are not mapped are
-also a refusal — the acknowledgement is exact, not a wildcard). The
-acknowledged list is sent as `acknowledged_keys` on every fetch so the server's
-record carries it.
+also a refusal — the acknowledgement is exact, not a wildcard). When the
+acknowledged list is non-empty, the operator sends it as `acknowledged_keys`.
+When it is empty, the operator omits the parameter; the server records an empty
+list on every fetch.
 
 ### 0.7 Operator deployable, scoping, chart
 
@@ -336,7 +339,8 @@ added to `scripts/ci/classify-changed-paths.sh` AND `ci-required.needs`.
   `FetchFailed` (retain). Any failure between the Secret write and the status
   write clears `status.cursor`/`cursorBinding`.
 - Loader-control acknowledgement = set equality with the mapped loader-control
-  subset; `acknowledged_keys` is sent on every fetch, empty included.
+  subset. The operator sends `acknowledged_keys` only when the list is
+  non-empty; when omitted, the server still records `[]` for every fetch.
 - Cursor gains `PinnedHistoricalRevision` (server): a pinned workload whose
   pinned revision stops being current flips its secret authority from `reveal`
   to `reveal-history`, so the transition must invalidate the cursor.
