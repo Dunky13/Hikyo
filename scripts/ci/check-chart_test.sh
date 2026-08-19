@@ -5,7 +5,7 @@ set -eu
 # the structural checker actually constrains RBAC verbs, TokenRequest scope,
 # container args and hardening, not just that the chart renders.
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 chart="$script_dir/../../chart/hikyo"
 
 "$script_dir/check-chart.sh" "$chart" >/dev/null
@@ -64,6 +64,8 @@ refute 'extra RBAC rule' \
 # Add a STRAY ClusterRole document under an unexpected name — the per-mode object
 # inventory must reject any Role/ClusterRole beyond the expected set, even one whose
 # own rules would pass in isolation.
+# The sed script deliberately carries a literal {{ $operatorName }} template expression.
+# shellcheck disable=SC2016
 refute 'stray RBAC object' \
 	templates/operator-rbac.yaml \
 	's|    verbs: \["get", "create", "update"\]|    verbs: ["get", "create", "update"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: {{ $operatorName }}-rogue\nrules:\n  - apiGroups: [""]\n    resources: ["secrets"]\n    verbs: ["get", "list", "watch"]|'
