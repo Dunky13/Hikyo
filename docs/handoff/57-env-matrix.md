@@ -27,8 +27,8 @@ drift signal anywhere in this surface).
   refusals), filter bar "⚠ filter active: problems — showing n of m keys" +
   "✕ show all keys", filter survives group jumps, filtered-out groups render dimmed
   and inert (title "hidden by the problems filter"), group badges carry counts.
-- `web/src/routes/MatrixRowEditor.tsx` — centered row editor opened from the key name
-  or a cell: one field per readable environment, protected markers, fill-all,
+- `web/src/routes/MatrixRowEditor.tsx` — centered row editor opened from a cell
+  (since #59 the key NAME opens that key's history, per revision-history it-6): one field per readable environment, protected markers, fill-all,
   write-only secret placeholders, live per-field declaration checks, per-cell clear,
   and provenance per environment. Dirty state distinguishes untouched, explicit
   empty `set`, and `unset`. Config copy-to keeps its protected confirmation + ceremony;

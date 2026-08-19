@@ -219,6 +219,7 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
   const visibleEnvironments = environments.filter((environment) =>
     visibleEnvironmentIds.includes(environment.id),
   );
+  const firstVisibleEnvironment = visibleEnvironments[0];
   const pendingByEnvironment = useMemo(() => {
     const pending = new Map<string, readonly MatrixPendingEntry[]>();
     environments.forEach((environment, index) => {
@@ -664,15 +665,25 @@ export function Matrix({ historyOpen = false }: { historyOpen?: boolean } = {}) 
                         ref={rowVirtualizer.measureElement}
                       >
                         <th scope="row" title={key.name}>
-                          <button
-                            type="button"
+                          {/* The key NAME opens its history (revision-history it-1/6:
+                              "a key name click opens the same drawer filtered to
+                              that key"); any CELL opens the row editor. env-matrix 31
+                              wires nothing to the name, so the history lock is the only
+                              one that speaks. */}
+                          <Link
                             className="matrix__key mono"
-                            aria-label={`Edit ${key.name} across environments`}
-                            onClick={() => setSelection({ keyId: key.id })}
+                            aria-label={`History of ${key.name}`}
+                            to={historyHref({
+                              ...ref,
+                              ...(firstVisibleEnvironment === undefined
+                                ? {}
+                                : { env: firstVisibleEnvironment.id }),
+                              keyId: key.id,
+                            })}
                           >
                             {key.classification === 'secret' ? <span aria-hidden="true">🔒 </span> : null}
                             {key.name}
-                          </button>
+                          </Link>
                           <span className="matrix__required">{requiredLabel(key, environments)}</span>
                         </th>
                         {visibleEnvironments.map((environment) => {

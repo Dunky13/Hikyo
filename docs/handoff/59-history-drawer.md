@@ -195,11 +195,17 @@ written at all.
     code so copy changes cannot hide the offer. `pinSchemaOverrideOffered`
     positively matches all three `validateResolved` schema-refusal shapes: value
     rule, presence rule and key-group rule. The value-rule browser path is green.
-14. **Key-name click has a prototype conflict, disposition pending Marc.**
-    Environment-matrix iteration 31 makes the name open the row editor;
-    revision-history iteration 1 makes it open the history drawer. Shipped
-    matrix behavior keeps row editing; the explicit `History for <KEY>` action
-    opens history until Marc dispositions the conflict.
+14. **The matrix KEY NAME opens the drawer filtered to that key** (Marc's
+    disposition "a", 2026-08-19). The first cut kept #57's key-name → row-editor
+    binding and called it a prototype-vs-prototype conflict; that was wrong:
+    env-matrix iteration 31 wires NOTHING to the key name (`.kn` is a plain span),
+    the row-editor-on-name was #57's own choice, and revision-history it-1/it-6
+    is the only lock that speaks ("a key name click opens the same drawer
+    filtered to that key"). So the name is now a link (`History of <KEY>`), any
+    cell opens the row editor (unchanged, #57), and the row editor keeps its
+    `History for <KEY>` link. `matrix.spec.ts` opens the editor from a cell;
+    `history.spec.ts` proves both entries (matrix name, changed-key row) and the
+    deep link. #57's handoff line is corrected in place.
 15. **The pin-sheet comparison is a READ, not a disclosure.** It calls
     `exportValues` with `reveal:false`: config plaintext rides `read` (the same
     authority the matrix reads config under), secret lines are lineage

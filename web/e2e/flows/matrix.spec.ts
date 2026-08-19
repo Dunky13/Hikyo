@@ -184,7 +184,7 @@ test.describe('environment matrix', () => {
         await page.setViewportSize({ width: 375, height: 812 });
       }
 
-      await page.getByRole('button', { name: 'Edit LOG_LEVEL across environments' }).click();
+      await page.getByRole('button', { name: /^LOG_LEVEL in development:/ }).click();
       const editor = page.getByRole('dialog');
       await expect(editor).toBeVisible();
       await expect(editor).toContainText('Updated by');
@@ -233,7 +233,7 @@ test.describe('environment matrix', () => {
       await expect(page.locator('.notice')).toContainText('whitespace was removed from 2 values');
       await expect(page.getByRole('button', { name: /LOG_LEVEL in development:.*draft set/ })).toBeVisible();
 
-      await page.getByRole('button', { name: 'Edit LOG_LEVEL across environments' }).click();
+      await page.getByRole('button', { name: /^LOG_LEVEL in development:/ }).click();
       const reopened = page.getByRole('dialog');
       await expect(reopened.getByLabel('development value')).toHaveValue(value);
       await expect(reopened.getByLabel('production value')).toHaveValue(`${value}-production`);

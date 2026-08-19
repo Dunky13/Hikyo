@@ -357,8 +357,21 @@ test.describe('revision history', () => {
   });
 
   test('filters the timeline to one key, by click and by URL', async ({ page }) => {
-    await page.goto(DEV_HISTORY);
+    // Entry 1: the matrix KEY NAME opens the drawer filtered to that key
+    // (revision-history it-1/6 — the name is history; any cell is the editor).
+    await page.goto(MATRIX_PATH);
+    await page.getByRole('link', { name: `History of ${seed.history.configKey}` }).click();
     const drawer = page.getByRole('complementary', { name: 'Revision history' });
+    await expect(drawer.locator('.history__filter')).toContainText(
+      `filter active: history of ${seed.history.configKey}`,
+    );
+    await expect(page).toHaveURL(
+      new RegExp(`key=${encodeURIComponent(seed.history.configKeyId)}`),
+    );
+    await expectNoFixtureSecret(drawer);
+
+    // Entry 2: a changed-key row inside a revision's detail pane.
+    await page.goto(DEV_HISTORY);
     await expectNoFixtureSecret(drawer);
     const list = drawer.getByRole('list', { name: 'Revisions, newest first' });
 

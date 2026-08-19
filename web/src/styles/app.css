@@ -894,6 +894,7 @@ select {
   color: var(--tx);
   cursor: pointer;
   text-overflow: ellipsis;
+  text-decoration: none;
   white-space: nowrap;
 }
 
@@ -1212,6 +1213,7 @@ select {
 
   .matrix__key {
     min-height: var(--touch);
+    line-height: var(--touch);
   }
 
   .matrix__environment-picker input,
