@@ -147,8 +147,14 @@ export function surfacesForFlow(flowID: string): readonly Surface[] {
 // A plain append-only file rather than anything cleverer: Playwright workers
 // are separate processes, this suite runs with `workers: 1`, and a line per
 // surface-and-theme is a few dozen bytes per run.
-// ponytail: single-writer append; if the suite ever goes parallel, switch to
-// one file per worker and merge at teardown.
+//
+// CI parallelism does not change that. It shards by PROJECT, one runner each,
+// and a runner is a whole run: its own log, its own single writer, and — since
+// both projects run every flow — its own complete set of claims to check.
+// ponytail: single-writer append. The shapes that would need merging are a
+// worker split (blocked by the fixture's single administrator, see
+// playwright.config.ts) and a `--shard` split of the flows, which global
+// teardown refuses by name for exactly this reason.
 
 export const RUN_LOG = fileURLToPath(new URL('.runs/pinned.log', import.meta.url));
 

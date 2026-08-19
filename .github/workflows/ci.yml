@@ -340,10 +340,31 @@ jobs:
   # pass before a browser is worth starting, and the flow registry's closure
   # check runs first of all — a locked surface without a flow should fail in
   # seconds, not after a full browser suite has passed.
+  #
+  # One job, TWO RUNNERS: the flow suite is sharded by viewport project, which
+  # is the only axis that parallelises it without weakening anything. The
+  # harness holds one administrator per run — a TOTP ledger where a code is
+  # single-use per step, a passkey whose signature counter must advance, a
+  # shared browser session flows re-mint — so two workers inside one process
+  # would race all three. Two RUNNERS share none of it: each boots its own pair
+  # of instances, seeds its own tenant, mints its own passkey. And because both
+  # projects run every flow, each shard still executes every claim the registry
+  # makes, so the teardown closure check keeps its full force on both.
+  #
+  # The matrix stays inside the `web` job rather than becoming a second job:
+  # `needs.web.result` already aggregates the legs, so branch protection and
+  # `check-required-jobs.sh` need no adjustment, and each leg keeps the ordering
+  # above intact instead of starting a browser behind a Go suite that failed.
   web:
     needs: changes
     if: ${{ fromJSON(needs.changes.outputs.plan).web }}
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    strategy:
+      # A flow that only passes at 1280px has not passed, so the viewport that
+      # broke must be named — cancelling its sibling would hide half the answer.
+      fail-fast: false
+      matrix:
+        project: [desktop, mobile]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -414,18 +435,25 @@ jobs:
         working-directory: web
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Flow suite (desktop + mobile)
+      # `playwright test` directly, not `pnpm run e2e`: the script rebuilds the
+      # SPA so a developer cannot run the flows against a stale bundle, and the
+      # step above has already built this run's.
+      - name: Flow suite (${{ matrix.project }})
         working-directory: web
-        run: pnpm run e2e
+        run: pnpm exec playwright test --project=${{ matrix.project }}
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.project }}
           path: web/test-results/
           retention-days: 7
+      # One leg writes the cache. Both legs compile the same packages against
+      # the same key, so the second upload is 378 MB spent to lose a race.
       - name: Save web Go cache
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: >-
+          success() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          matrix.project == 'desktop'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
