@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root=$(CDPATH='' cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 demo_dir="$repo_root/install/compose/demo"
+docker_config_dir=${DOCKER_CONFIG:-${HOME:?}/.docker}
 work_dir=$(mktemp -d "${TMPDIR:-/tmp}/hikyo-compose-demo.XXXXXX")
 runtime_dir="$work_dir/runtime"
 state_dir="$work_dir/state"
@@ -13,6 +14,7 @@ server_pid=''
 config_backup="$work_dir/hikyo-compose.yaml.template"
 env_backup="$work_dir/project.env"
 had_env=false
+pending_versions=''
 
 cp "$demo_dir/hikyo-compose.yaml" "$config_backup"
 if [[ -f "$demo_dir/.env" ]]; then
@@ -70,16 +72,16 @@ PY
 }
 
 publish_pending() {
-	local pending versions
-	pending=$("$binary" values pending --context demo --org "$org_id" --project "$project_id" --env "$env_id" -o json)
-	versions=$(printf '%s' "$pending" | jq -r '[.. | objects | .version_id? // empty] | unique | join(",")')
-	[[ -n "$versions" ]] || fail 'no staged versions to publish'
-	"$binary" values publish --context demo --org "$org_id" --project "$project_id" --env "$env_id" --versions "$versions" >/dev/null
+	[[ -n "$pending_versions" ]] || fail 'no staged versions to publish'
+	"$binary" values publish --context demo --org "$org_id" --project "$project_id" --env "$env_id" --versions "$pending_versions" >/dev/null
+	pending_versions=''
 }
 
 set_value() {
-	local key_id=$1 value_file=$2
-	"$binary" values set "$key_id" --context demo --org "$org_id" --project "$project_id" --env "$env_id" --value-file "$value_file" >/dev/null
+	local key_name=$1 value_file=$2 response version
+	response=$("$binary" values set "$key_name" --context demo --org "$org_id" --project "$project_id" --env "$env_id" --stdin -o json <"$value_file")
+	version=$(printf '%s' "$response" | jq -er '.version_id')
+	pending_versions+="${pending_versions:+,}$version"
 }
 
 need curl
@@ -96,6 +98,7 @@ mkdir -m 700 "$runtime_dir" "$state_dir" "$home_dir"
 )
 export HOME="$home_dir"
 export HIKYO_STATE_DIR="$state_dir"
+export DOCKER_CONFIG="$docker_config_dir"
 
 port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
 origin="http://127.0.0.1:$port"
@@ -133,13 +136,11 @@ admin_log="$work_dir/admin.log"
 admin_principal=$(sed -n 's/.*principal \([^)]*\)).*/\1/p' "$admin_log")
 [[ -n "$admin_principal" ]] || fail 'admin create did not report its principal id'
 
-for capability in instance-directory edit publish definitions-edit manage-identities read; do
-	(
-		cd "$work_dir"
-		HIKYO_DB=sqlite:hikyo-dev.db HIKYO_ROOT_KEY="$root_key" \
-			"$binary" admin grant --principal "$admin_principal" --capability "$capability" >/dev/null
-	)
-done
+(
+	cd "$work_dir"
+	HIKYO_DB=sqlite:hikyo-dev.db HIKYO_ROOT_KEY="$root_key" \
+		"$binary" admin grant --principal "$admin_principal" --capability instance-config >/dev/null
+)
 
 authority=$(tr -d '\n' <"$work_dir/authority")
 password='compose-demo-password-long-enough'
@@ -207,7 +208,7 @@ EOF
 "$binary" org create --context demo --name compose-demo >/dev/null
 org_json=$("$binary" org list --context demo -o json)
 org_id=$(printf '%s' "$org_json" | jq -er 'first(.. | objects | select(.name? == "compose-demo") | .id)')
-for capability in edit publish definitions-edit manage-identities manage-members read; do
+for capability in definitions-edit edit manage-identities manage-members manage-projects publish read; do
 	(
 		cd "$work_dir"
 		HIKYO_DB=sqlite:hikyo-dev.db HIKYO_ROOT_KEY="$root_key" \
@@ -248,7 +249,13 @@ if (( project_create_code != 0 )); then
 fi
 project_json=$("$binary" project list --context demo --org "$org_id" -o json)
 project_id=$(printf '%s' "$project_json" | jq -er 'first(.. | objects | select(.name? == "stack") | .id)')
-"$binary" env create --context demo --org "$org_id" --project "$project_id" --name demo >/dev/null
+set +e
+environment_create_error=$("$binary" env create --context demo --org "$org_id" --project "$project_id" --name demo 2>&1)
+environment_create_code=$?
+set -e
+if (( environment_create_code != 0 )); then
+	fail "CLI blocker: env create after org-scoped grants and fresh MFA session exited $environment_create_code: $environment_create_error"
+fi
 env_json=$("$binary" env list --context demo --org "$org_id" --project "$project_id" -o json)
 env_id=$(printf '%s' "$env_json" | jq -er 'first(.. | objects | select(.name? == "demo") | .id)')
 
@@ -261,10 +268,10 @@ jq -cn '{name:"GREETING",value:"hello from hikyo"}' >>"$representable"
 while IFS= read -r row; do
 	name=$(printf '%s' "$row" | jq -r '.name')
 	"$binary" key create --context demo --org "$org_id" --project "$project_id" \
-		--name "$name" --classification config --declaration '{"rule":{"type":"string"}}' >/dev/null
+		--name "$name" --classification config --declaration '{"rule":{"type":"string","allow_empty":true}}' >/dev/null
 done <"$representable"
 "$binary" key create --context demo --org "$org_id" --project "$project_id" \
-	--name EMBEDDED_NL --classification config --declaration '{"rule":{"type":"string"}}' >/dev/null
+	--name EMBEDDED_NL --classification config --declaration '{"rule":{"type":"string","allow_empty":true}}' >/dev/null
 
 keys_json=$("$binary" key list --context demo --org "$org_id" --project "$project_id" -o json)
 key_ids=''
@@ -274,11 +281,11 @@ while IFS= read -r row; do
 	printf '%s' "$row" | jq -j '.value' >"$value_file"
 	key_id=$(printf '%s' "$keys_json" | jq -er --arg name "$name" 'first(.. | objects | select(.name? == $name) | .id)')
 	key_ids+="${key_ids:+, }$key_id"
-	set_value "$key_id" "$value_file"
+	set_value "$name" "$value_file"
 done <"$representable"
 newline_key=$(printf '%s' "$keys_json" | jq -er 'first(.. | objects | select(.name? == "EMBEDDED_NL") | .id)')
 printf 'line1\nline2' >"$work_dir/value-EMBEDDED_NL"
-set_value "$newline_key" "$work_dir/value-EMBEDDED_NL"
+set_value EMBEDDED_NL "$work_dir/value-EMBEDDED_NL"
 publish_pending
 
 "$binary" sa create --context demo --org "$org_id" --project "$project_id" --name compose-demo --kind workload >/dev/null
@@ -306,6 +313,7 @@ text = text.replace("__HIKYO_KEYS__", sys.argv[7])
 path.write_text(text)
 PY
 
+export HIKYO_RUNTIME_DIR="$runtime_dir"
 HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose render --project-directory "$demo_dir"
 initial_env=$(cksum "$demo_dir/.env")
 initial_runtime=$(find "$runtime_dir" -type f -print | sort | while IFS= read -r file; do cksum "$file"; done)
@@ -342,7 +350,10 @@ docker compose --project-directory "$demo_dir" logs --no-color app >"$work_dir/c
 while IFS= read -r row; do
 	name=$(printf '%s' "$row" | jq -r '.name')
 	want=$(printf '%s' "$row" | jq -j '.value' | base64 | tr -d '\n')
-	grep -F "$name=$want" "$work_dir/container.log" >/dev/null || fail "container did not round-trip $name"
+	if ! grep -F "$name=$want" "$work_dir/container.log" >/dev/null; then
+		got=$(sed -n "s/^.*$name=//p" "$work_dir/container.log")
+		fail "container did not round-trip $name (want base64 $want, got ${got:-missing})"
+	fi
 done <"$representable"
 
 set +e
@@ -356,9 +367,8 @@ jq -e 'all(.findings[]?; .code == "runtime_not_tmpfs")' "$work_dir/doctor.json" 
 	fail 'doctor returned a finding other than runtime_not_tmpfs'
 }
 
-greeting_id=$(printf '%s' "$keys_json" | jq -er 'first(.. | objects | select(.name? == "GREETING") | .id)')
 printf '%s' 'hello after sync' >"$work_dir/value-GREETING-updated"
-set_value "$greeting_id" "$work_dir/value-GREETING-updated"
+set_value GREETING "$work_dir/value-GREETING-updated"
 publish_pending
 before_sync_env=$(cksum "$demo_dir/.env")
 HIKYO_TOKEN=$(tr -d '\n' <"$token_file") "$binary" compose sync --project-directory "$demo_dir"

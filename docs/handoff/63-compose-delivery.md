@@ -274,14 +274,14 @@ Claude-authored work.
 
 ## Stream D
 
-The real-Compose demo now lives in `install/compose/demo` and is driven by
+The real-Compose demo lives in `install/compose/demo` and is driven by
 `scripts/compose-demo.sh`. It boots a clean loopback dev instance, establishes
 and MFA-enrols the bootstrap account, creates the hierarchy and complete
 representable raw-dotenv corpus, publishes it, mints an environment-scoped
 read-only workload credential, renders, and starts Alpine through Docker
-Compose. It proves byte-exact container values, refusal-by-name for an embedded
-newline with no generation/stamp change, doctor findings, and a publish → sync
-→ stamp move → container restart round-trip.
+Compose. The script asserts byte-exact container values, refusal-by-name for an
+embedded newline with no generation/stamp change, doctor findings, and a
+publish → sync → stamp move → container restart round-trip.
 
 Run it from the repository root with `./scripts/compose-demo.sh`. CI runs the
 same command in the selective `compose-demo` job after enforcing the Docker
@@ -294,17 +294,34 @@ systemd references, and current limits. The CLI reference now lists `run` and
 `compose`; `install/systemd/hikyo-compose-sync.service` and `.timer` provide the
 documented five-minute one-shot example.
 
-Local execution is blocked before key creation by the hierarchy CLI. After a
-fresh dev server, bootstrap establishment, TOTP enrollment, CLI login and
-step-up, successful `org create`, explicit `edit`, `publish`,
-`definitions-edit`, `manage-identities`, `manage-members`, and `read` grants at
-that org, then another fresh login and TOTP step-up, this command:
+The missing hierarchy grant is fixed: the bootstrap principal receives
+`instance-config` at instance scope and the exact union required by the demo's
+tenant operations at org scope: `definitions-edit`, `edit`,
+`manage-identities`, `manage-members`, `manage-projects`, `publish`, and `read`.
+`project create` and `env create` now succeed, and the demo reaches machine
+delivery, render, the embedded-newline refusal, Docker Compose startup, and the
+container byte checks.
+
+Local execution is now blocked by the value-input CLI silently stripping
+leading whitespace. With stdin containing the exact bytes for `"   value"`,
+this command:
 
 ```text
-hikyo project create --context demo --org <org_id> --name stack
+hikyo values set LEADING_SPACE --context demo --org <org_id> \
+  --project <project_id> --env <environment_id> --stdin -o json
 ```
 
-exits `5` with the exact stderr `hikyo: not found`. The demo script fails loud
-with that evidence. No Go code or datastore shortcut was added; the Compose
-render/container/refusal/doctor/sync legs remain unexecuted until the CLI can
-create the project through its public surface.
+exits `0`; stderr contains the target line followed by
+`staged LEADING_SPACE (set); publish it with: hikyo values publish --versions
+<version_id>`. The rendered container reports base64 `dmFsdWU=` (`value`), not
+the expected `ICAgdmFsdWU=` (`   value`). `--value-file` behaves identically.
+An isolated run of the same `compose.yaml` with the same raw env-file bytes
+reports `ICAgdmFsdWU=`, proving Compose and the Alpine print command preserve
+the bytes. The demo therefore exits `1` with:
+
+```text
+compose demo: container did not round-trip LEADING_SPACE (want base64 ICAgdmFsdWU=, got dmFsdWU=)
+```
+
+Per the stream boundary, no Go change or API/datastore bypass was added.
+Doctor and sync remain unexecuted after this assertion.
