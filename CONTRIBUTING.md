@@ -40,3 +40,7 @@ banner) rather than silently diverging — see
 
 Run the checks relevant to the changed package and the full test suite before
 requesting review. CI is the source of truth for the complete release gates.
+CI also runs the race detector over every package except `./internal/isolation/`
+(which runs race-instrumented on the weekly `race-isolation` workflow), a bounded
+fuzz pass over every `Fuzz*` target, and `govulncheck`. To fuzz one target
+locally: `go test -run='^$' -fuzz='^FuzzParseHeader$' -fuzztime=30s ./internal/crypto/`.

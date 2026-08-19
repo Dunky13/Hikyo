@@ -10,9 +10,11 @@ mode=$1
 
 client=false
 docs=false
+fuzz=false
 generated=false
 headline_guarantee=false
 lint=false
+race=false
 release_snapshot=false
 supply_chain_checks=false
 test=false
@@ -22,9 +24,11 @@ saw_path=false
 all_jobs() {
 	client=true
 	docs=true
+	fuzz=true
 	generated=true
 	headline_guarantee=true
 	lint=true
+	race=true
 	release_snapshot=true
 	supply_chain_checks=true
 	test=true
@@ -82,6 +86,8 @@ else
 			generated=true
 			headline_guarantee=true
 			release_snapshot=true
+			fuzz=true
+			race=true
 			test=true
 			web=true
 			;;
@@ -96,9 +102,11 @@ else
 			supply_chain_checks=true
 			;;
 		*.go | *.sql)
+			fuzz=true
 			generated=true
 			headline_guarantee=true
 			release_snapshot=true
+			race=true
 			test=true
 			web=true
 			;;
@@ -116,9 +124,11 @@ fi
 jq -cn \
 	--argjson client "$client" \
 	--argjson docs "$docs" \
+	--argjson fuzz "$fuzz" \
 	--argjson generated "$generated" \
 	--argjson headline_guarantee "$headline_guarantee" \
 	--argjson lint "$lint" \
+	--argjson race "$race" \
 	--argjson release_snapshot "$release_snapshot" \
 	--argjson supply_chain_checks "$supply_chain_checks" \
 	--argjson test "$test" \
@@ -126,9 +136,11 @@ jq -cn \
 	'{
 		client: $client,
 		docs: $docs,
+		fuzz: $fuzz,
 		generated: $generated,
 		headline_guarantee: $headline_guarantee,
 		lint: $lint,
+		race: $race,
 		release_snapshot: $release_snapshot,
 		supply_chain_checks: $supply_chain_checks,
 		test: $test,
