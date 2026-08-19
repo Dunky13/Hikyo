@@ -1,0 +1,26 @@
+{
+  "name": "surrounding whitespace preserved",
+  "rows": [
+    {
+      "name": "LEADING_SPACE",
+      "value": "   value"
+    },
+    {
+      "name": "TRAILING_SPACE",
+      "value": "value   "
+    },
+    {
+      "name": "LEADING_TAB",
+      "value": "\t\tvalue"
+    },
+    {
+      "name": "TRAILING_TAB",
+      "value": "value\t"
+    },
+    {
+      "name": "BOTH",
+      "value": "  \t spaced \t  "
+    }
+  ],
+  "expectRefusals": []
+}

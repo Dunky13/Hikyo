@@ -1,0 +1,22 @@
+{
+  "name": "unicode: emoji, CJK, combining marks, RTL",
+  "rows": [
+    {
+      "name": "EMOJI",
+      "value": "🔐🚀"
+    },
+    {
+      "name": "CJK",
+      "value": "密码テスト"
+    },
+    {
+      "name": "COMBINING",
+      "value": "éà"
+    },
+    {
+      "name": "RTL",
+      "value": "סוד سر"
+    }
+  ],
+  "expectRefusals": []
+}

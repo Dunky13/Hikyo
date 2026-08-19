@@ -1,0 +1,10 @@
+{
+  "name": "empty value",
+  "rows": [
+    {
+      "name": "EMPTY",
+      "value": ""
+    }
+  ],
+  "expectRefusals": []
+}
