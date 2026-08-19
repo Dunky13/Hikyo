@@ -435,7 +435,7 @@ func scenarioDeliveryRetryClearsPinMetadata(t *testing.T, db *store.DB) {
 	publishValue(t, db, values, actor, dev, "VERSION", "one")
 	probe := &deliveryRetryResetProbe{t: t}
 	delivery := &service.Delivery{DB: db, Keyring: sharedKeyring(t, db), FetchProbe: probe}
-	result, err := delivery.FetchAs(t.Context(), actor, dev, "")
+	result, err := delivery.FetchAs(t.Context(), actor, dev, "", service.FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,12 +557,12 @@ func scenarioPinLifecycle(t *testing.T, db *store.DB) {
 	}
 	publishValue(t, db, values, actor, dev, "VERSION", "three")
 	deliverySvc := &service.Delivery{DB: db, Keyring: sharedKeyring(t, db), Now: func() time.Time { return clock }}
-	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, ""); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "", service.FetchOptions{}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("pin that became historical without reveal-history = %v, want refusal", err)
 	}
 	grantOrg(t, db, who, scope.Org, "pinlifecycle_history", "reveal-history")
 	disclosuresBeforeRenewal := auditEventCount(t, db, string(dev.Env), "disclosure.value_revealed")
-	fetched, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	fetched, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "", service.FetchOptions{})
 	if err != nil || fetched.PinnedRevision != latestRevision {
 		t.Fatalf("current-at-creation pin after later publish = %+v, %v", fetched, err)
 	}
@@ -588,14 +588,14 @@ func scenarioPinLifecycle(t *testing.T, db *store.DB) {
 		t.Fatalf("pin list = %+v, %v", listed, err)
 	}
 	deliverySvc.Now = func() time.Time { return clock.Add(2 * time.Hour) }
-	fetched, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	fetched, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "", service.FetchOptions{})
 	if err != nil || fetched.PinnedRevision != oldRevision || !fetched.PinExpired {
 		t.Fatalf("pinned delivery = %+v, %v", fetched, err)
 	}
 	seed(t, db, []string{`DELETE FROM grants WHERE id = 'grt_pinlifecycle_pin_0'`})
 	denialsBeforeFetch := auditEventCount(t, db, string(dev.Env), "grant.denied")
 	attributedBeforeFetch := attributedDenialCount(t, db, string(dev.Env), string(workload), string(who))
-	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, ""); !errors.Is(err, domain.ErrInvalid) {
+	if _, err := deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "", service.FetchOptions{}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("pinned delivery after authority grant removal = %v, want loud refusal", err)
 	}
 	if got := auditEventCount(t, db, string(dev.Env), "grant.denied"); got != denialsBeforeFetch+1 {
@@ -609,7 +609,7 @@ func scenarioPinLifecycle(t *testing.T, db *store.DB) {
 	seed(t, db, []string{fmt.Sprintf(
 		"UPDATE snapshots SET payload_present = FALSE, collected_at = '2026-08-15T12:00:00.000000Z', collected_policy = '%s' WHERE environment_id = '%s' AND revision = %d",
 		collectedPolicy, dev.Env, oldRevision)})
-	_, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "")
+	_, err = deliverySvc.FetchAs(t.Context(), service.LocalPrincipal(workload), dev, "", service.FetchOptions{})
 	var collected *domain.CollectedRevisionError
 	if !errors.As(err, &collected) || !errors.Is(err, domain.ErrConflict) ||
 		collected.Revision != oldRevision || collected.Policy != collectedPolicy {

@@ -472,22 +472,24 @@ const (
 	// delivered nothing — never aggregated, never a counter, never a mutable
 	// last-seen field.
 	EventDeliveryFetched EventType = "identity.delivery_fetched"
+	// identity.disclosure is the per-VALUE disclosure event on a machine fetch
+	// (#64, machine-identities ADR § Audit attribution). #15's locked
+	// cardinality holds: one immutable event per delivered value, never
+	// collapsed, never counted. It fires only for keys whose PLAINTEXT actually
+	// crossed — a `config` value under `read`, a `secret` value under
+	// `read ∧ reveal` (or `read ∧ reveal-history` for a pinned non-current
+	// revision) — so a presence-only key emits nothing, because no value
+	// crossed, and a `current` answer emits nothing at all. Each event
+	// references the fetch record (identity.delivery_fetched) by correlation
+	// id: the fetch is the envelope, the per-value events are its contents
+	// (audit-model ADR § envelope).
+	EventDisclosure EventType = "identity.disclosure"
 
-	// STILL NOT REGISTERED HERE, deliberately: `identity.disclosure`, the
-	// per-key disclosure event on a machine fetch. #15's locked cardinality —
-	// one immutable event per disclosed key, never collapsed, never counted —
-	// is unchanged and binding. The fetch path now exists, but it delivers NO
-	// PLAINTEXT: there are no value tables yet (#50/#51), so what it delivers
-	// is the key catalogue and presence, and a disclosure event naming a key
-	// whose value was not disclosed would be a false record of a disclosure.
-	// #61's accepted disposition stands: the criterion transfers to the ticket
-	// that ships values.
-	// The same reasoning applies to a machine authentication-failure event.
+	// NOT REGISTERED HERE, deliberately: a machine AUTHENTICATION-FAILURE event.
 	// A failed machine presentation today rides the SAME silent path a failed
 	// human session does at the chokepoint; giving machines a failure event
 	// humans do not have would claim an asymmetry the system does not
-	// implement. Both land with the fetch surface and the pre-authentication
-	// admission wiring.
+	// implement. It lands with the pre-authentication admission wiring.
 
 	// scim.* — SCIM provisioning (#73, scim-provisioning ADR §10). The set is
 	// CLOSED at that ADR's lock, with a versioned v1 payload schema per entry
@@ -630,15 +632,6 @@ const (
 	EventAdapterScrub             EventType = "adapter.scrub"
 	EventAdapterSuperseded        EventType = "adapter.superseded"
 
-	// NOT REGISTERED HERE, deliberately: `identity.disclosure`, the per-key
-	// disclosure event on a machine fetch. #15's locked cardinality — one
-	// immutable event per disclosed key, never collapsed, never counted — is
-	// unchanged and binding, but there is no fetch path in this repository
-	// yet (no secret values, no delivery manifest, no cursor), so there is no
-	// key for a per-key event to name. This registry's closure invariant
-	// refuses a type with no emitter, and it is right to: registering it now
-	// would be dead catalogue asserting a guarantee nothing upholds.
-	//
 	// remote.* — the multi-instance categories (#71, multi-instance ADR §
 	// Audit) ARE registered above, every one of them that has an honest
 	// emitter, including remote.directory_served; its audited_exemptions.json
@@ -665,8 +658,8 @@ const (
 	// existed). There is therefore no moment at which this instance could
 	// truthfully emit it, and the closure invariant below refuses a type with
 	// no emitter — rightly, because registering it would be dead catalogue
-	// asserting a guarantee nothing upholds. It lands with a scheduler, exactly
-	// as #61's per-key disclosure event lands with the fetch surface.
+	// asserting a guarantee nothing upholds. It lands with a scheduler, the way
+	// #64's per-value disclosure event landed with the value-delivering fetch.
 )
 
 // TypeSpec is one registry row: the payload schema with its version, the
@@ -2096,8 +2089,26 @@ var registry = map[EventType]TypeSpec{
 			"scope":           {Kind: KindString, Required: true},
 			// The delivered key count, and NOT the key names: a "current" answer
 			// delivers no names, so recording them on the full answer only would
-			// make the two rows different shapes for one operation.
+			// make the two rows different shapes for one operation. Under
+			// `config-only` it counts the config-only projection.
 			"key_count": {Kind: KindInt, Required: true},
+			// The projection this fetch was served under: `full` or
+			// `config-only`. It is a server-side authorized term and part of the
+			// cursor's bind-tuple, so recording it makes "which projection was in
+			// force" answerable from the trail.
+			"projection": {Kind: KindString, Required: true, Enum: []string{"full", "config-only"}},
+			// The loader-control keys the consumer acknowledged, RECORDED AS
+			// PRESENTED — not sorted, not deduped — because the audit answer the
+			// ADR wants is "which acknowledgement was in force for this delivery"
+			// (k8s ADR § Loader-control). The list may be empty. Key names are
+			// schema, never values, so recording them is safe.
+			"acknowledged_keys": {Kind: KindStringList, MaxLen: 64, MaxBytes: 128},
+			// The number of VALUES actually delivered — config values plus the
+			// secret values this caller was authorized to receive. It is the
+			// count of identity.disclosure rows this fetch emitted, and it is
+			// distinct from key_count because a full delivery can carry
+			// presence-only keys that delivered no value.
+			"delivered_count": {Kind: KindInt, Required: true},
 			// The change token version prefix, so a consumer's comparison
 			// failure can be traced to a scheme change rather than guessed at.
 			"change_token_version": {Kind: KindString, Required: true},
@@ -2107,6 +2118,31 @@ var registry = map[EventType]TypeSpec{
 			// derivable from the disposition: a stale cursor and no cursor both
 			// produce a full delivery.
 			"cursor_presented": {Kind: KindBool, Required: true},
+		},
+	},
+	EventDisclosure: {
+		SchemaVersion: 1,
+		Retention:     RetentionAccess,
+		Outcomes:      map[Outcome]bool{OutcomeSuccess: true},
+		Trails:        map[Trail]bool{TrailTenant: true},
+		Schema: Schema{
+			// The key whose plaintext crossed, its classification, and the
+			// revision that supplied it (pinned or latest). Names and
+			// classifications are schema and are recorded; nothing derived from
+			// the material itself ever appears — the disclosure is that a value
+			// was delivered, never what it was.
+			"key":            {Kind: KindFreeText, Required: true},
+			"classification": {Kind: KindString, Required: true},
+			"revision":       {Kind: KindInt, Required: true},
+			// Which credential received it — the forensic answer to "which token
+			// read this", the same attribution the fetch envelope carries.
+			"credential_id":   {Kind: KindString, Required: true},
+			"credential_kind": {Kind: KindString, Required: true},
+			"principal_class": {Kind: KindString, Required: true},
+			"scope":           {Kind: KindString, Required: true},
+			// The projection in force, so a config-only delivery's disclosures
+			// are legible as such without joining back to the envelope.
+			"projection": {Kind: KindString, Required: true, Enum: []string{"full", "config-only"}},
 		},
 	},
 

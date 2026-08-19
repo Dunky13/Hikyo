@@ -98,12 +98,13 @@ func (a *TxAuthorizer) authenticateMachine(ctx context.Context, presented string
 	}
 
 	return Identity{
-		Principal:    sa.PrincipalID,
-		Artifact:     string(cred.Kind),
-		Class:        sa.Kind,
-		CredentialID: cred.ID,
-		CreatedAt:    cred.CreatedAt,
-		LastSeenAt:   cred.LastUsedAt,
+		Principal:           sa.PrincipalID,
+		Artifact:            string(cred.Kind),
+		Class:               sa.Kind,
+		CredentialID:        cred.ID,
+		CredentialExpiresAt: cred.ExpiresAt,
+		CreatedAt:           cred.CreatedAt,
+		LastSeenAt:          cred.LastUsedAt,
 	}, nil
 }
 
