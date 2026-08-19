@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-// The two keyed values the machine delivery path publishes (#62; revision ADR
+// The two keyed values the machine delivery path publishes (#62; revision-model ADR
 // § Revision identity, as amended by schema-model ADR § The change token covers
 // a delivery manifest).
 //
@@ -38,7 +38,7 @@ const TokenVersion = "v1"
 
 // ChangeToken is HMAC-SHA256(scopedTokenKey, manifest), base64url, prefixed.
 //
-// Keyed, never a bare digest, and the revision ADR's reasoning is worth
+// Keyed, never a bare digest, and the revision-model ADR's reasoning is worth
 // restating because the naive version looks fine: a bare digest over delivered
 // content is a function of secret plaintexts, so a low-entropy secret is
 // brute-forceable offline by anyone holding the digest — and the Kubernetes

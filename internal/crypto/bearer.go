@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Bearer artifacts (machine-identity ADR § The bearer token, adopted for
+// Bearer artifacts (machine-identities ADR § The bearer token, adopted for
 // human artifacts too).
 //
 //	hik_<version>_<type>_<body><checksum>
@@ -66,7 +66,7 @@ const (
 	ArtifactWorkload   ArtifactType = "wl"
 	ArtifactAutomation ArtifactType = "au"
 	// ArtifactSCIM is a SCIM provisioning connection's credential — the
-	// machine-identity ADR's closed type list gaining `scim` by the
+	// machine-identities ADR's closed type list gaining `scim` by the
 	// scim-provisioning amendment (#73 §7). One scanner family is preserved:
 	// everything else about it (>=256-bit body, checksum, unsalted SHA-256
 	// verifier, overlap rotation, lifetime ceiling, revocation at next request,

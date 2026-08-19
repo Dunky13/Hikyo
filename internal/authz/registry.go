@@ -9,7 +9,7 @@ import (
 )
 
 // Operation names one entry in the operation registry — the single table
-// mapping each operation to its authorization formula (permission ADR: per
+// mapping each operation to its authorization formula (permission-model ADR: per
 // operation formulas, never "the capability for this endpoint"). authorize()
 // evaluates the named formula and the proof records which operation it was
 // minted for; the store boundary rejects a proof minted for a different
@@ -49,9 +49,9 @@ const (
 	// PROJECT depth: a key is declared once per project and the scope lattice
 	// has no key level (permission-model ADR: no key-scoped grants in v1).
 	//
-	// The atom is `definitions-edit`, which the permission ADR fixes as the
+	// The atom is `definitions-edit`, which the permission-model ADR fixes as the
 	// definitions bundle — "keys, rules, folder paths, and environment
-	// topology" — and which explicitly RETIRES the schema ADR's earlier
+	// topology" — and which explicitly RETIRES the schema-model ADR's earlier
 	// `schema-edit` name for the same grant.
 	OpKeyCreate            Operation = "key.create"
 	OpKeyGet               Operation = "key.get"
@@ -71,7 +71,7 @@ const (
 	// of them and would be a parallel authorization path.
 	//
 	// Both are evaluated BEFORE any evaluation of the changed rule against a
-	// value, per the schema ADR's load-bearing security rule: the operation is
+	// value, per the schema-model ADR's load-bearing security rule: the operation is
 	// rejected without evaluating, because timing and abort/success are
 	// themselves the channel.
 	OpKeySecretRuleChange Operation = "key.secret-rule-change"
@@ -84,7 +84,7 @@ const (
 	//
 	// The formulas, and why each is what it is:
 	//
-	//   - read      → `read(E)`. The permission ADR's `read` carries "the
+	//   - read      → `read(E)`. The permission-model ADR's `read` carries "the
 	//                 project key catalogue … validation status, diffs
 	//                 (write-presence only for `secret` keys); **`config`
 	//                 values**". Presence is write-presence; `config`
@@ -148,7 +148,7 @@ const (
 	// that would leave a `mode: all` required secret absent aborts naming the
 	// keys" — would be unreachable text. The gate is classification-scoped in
 	// its own wording ("begin delivering a **`secret`** value occurrence the
-	// publisher did not supply"), and the permission ADR puts `config` values
+	// publisher did not supply"), and the permission-model ADR puts `config` values
 	// under `read`.
 	OpValueCopyDestinationConfig Operation = "value.copy-destination-config"
 
@@ -203,7 +203,7 @@ const (
 	OpAdvisoryWatch Operation = "advisory.watch"
 	OpAdvisoryEvent Operation = "advisory.event"
 
-	// `rotate-token-key` rides `rotate-dek`: the permission ADR's capability
+	// `rotate-token-key` rides `rotate-dek`: the permission-model ADR's capability
 	// set is CLOSED and names four rotation atoms for five rotation verbs, and
 	// the root token key is a tier-3 key alongside the DEKs -- same master,
 	// same one-active-per-scope index, same retirement path.
@@ -867,7 +867,7 @@ const (
 
 // Atom is one conjunct of an authorization formula: the principal must hold
 // Cap at the resolved chain truncated to level At, or at any scope above it
-// (grants inherit downward; permission ADR § scope lattice).
+// (grants inherit downward; permission-model ADR § scope lattice).
 type Atom struct {
 	Cap domain.Capability
 	At  domain.Level
@@ -899,7 +899,7 @@ type opSpec struct {
 }
 
 // operations is the operation registry. Every formula is built from capability
-// atoms the permission ADR already fixes — this ticket adds no atom and
+// atoms the permission-model ADR already fixes — this ticket adds no atom and
 // invents no capability. Registry completeness is invariant 6.
 var operations = map[Operation]opSpec{
 	// The Org aggregate (#48). Creation and enumeration are instance-scoped
@@ -1087,7 +1087,7 @@ var operations = map[Operation]opSpec{
 		events:  []audit.EventType{audit.EventAuthCredentialResetIssued},
 	},
 
-	// The Project aggregate (#48). `manage-projects` is the permission ADR's
+	// The Project aggregate (#48). `manage-projects` is the permission-model ADR's
 	// own wording for project lifecycle ("create and delete projects"), and a
 	// rename is lifecycle too — identity is the immutable id, so a rename
 	// changes the label an org administrator owns, nothing a reader depends on.
@@ -1218,13 +1218,13 @@ var operations = map[Operation]opSpec{
 	},
 
 	// The key catalogue (#49). Every mutation takes the project row first
-	// (StoreProjectsLock): the schema ADR binds ONE serialization domain per
+	// (StoreProjectsLock): the schema-model ADR binds ONE serialization domain per
 	// project covering the schema, environment create/delete and presence
 	// cascades, and the named race is a presence rule naming an environment
 	// another transaction is deleting.
 	//
 	// Reads take the audited-none permit (tenant class, bare `read`, mutating
-	// nothing) exactly as the hierarchy reads do. The permission ADR's
+	// nothing) exactly as the hierarchy reads do. The permission-model ADR's
 	// "any environment-scoped grant implies visibility of the project's key
 	// names, descriptions and schemas" is why the read atom sits at project
 	// depth: the key catalogue is project-scoped, values are not.
@@ -1302,7 +1302,7 @@ var operations = map[Operation]opSpec{
 		},
 		events: []audit.EventType{audit.EventKeyDeclarationChanged},
 	},
-	// Metadata is the schema ADR's one exemption: description, deprecated,
+	// Metadata is the schema-model ADR's one exemption: description, deprecated,
 	// deprecation_note and folder path cannot change what any environment
 	// delivers or whether it validates, so they need `definitions-edit` alone,
 	// take no reveal gate, and move no revision — hence no revision bump in
@@ -1438,7 +1438,7 @@ var operations = map[Operation]opSpec{
 			// values are `read`-class material, so duplicating them needs no
 			// reveal-gated read anywhere.
 			StoreCatalogueList: true, StoreValuesList: true, StoreValuesGet: true,
-			// The presence rules are project schema, which the permission ADR
+			// The presence rules are project schema, which the permission-model ADR
 			// puts under `read` along with the rest of the catalogue. The
 			// clone preflight reads them here to answer "would this leave a
 			// required secret absent?" before anything is written.
@@ -1460,7 +1460,7 @@ var operations = map[Operation]opSpec{
 		storeOps:    map[StoreOp]bool{},
 		auditedNone: true,
 	},
-	// The disclosure operation. `read ∧ reveal` is the permission ADR's locked
+	// The disclosure operation. `read ∧ reveal` is the permission-model ADR's locked
 	// row for current `secret` material; the MFA-mandatory rule rides along
 	// automatically, because `reveal` is in MFAMandatory and the chokepoint
 	// evaluates that after the grant check.
@@ -1572,7 +1572,7 @@ var operations = map[Operation]opSpec{
 	OpImportPresence: {
 		class: ClassTenant,
 		level: domain.LevelEnv,
-		// The import ADR's split formula is project-scoped structure read ∧
+		// The import-paths ADR's split formula is project-scoped structure read ∧
 		// read(E) per consulted environment. Grants inherit downward, so
 		// read@project subsumes read@environment on the same chain — the env
 		// conjunct is never independently deniable and the registry carries
@@ -1623,7 +1623,7 @@ var operations = map[Operation]opSpec{
 
 	// DRAFTS AND PUBLISHING (#51).
 	//
-	// `edit` ALONE stages. The permission ADR is explicit that `edit` confers
+	// `edit` ALONE stages. The permission-model ADR is explicit that `edit` confers
 	// no delivery power and that a draft is never a disclosure, so staging must
 	// not require `publish` -- edit-without-publish IS the propose-and-review
 	// flow v1 ships instead of an approval engine.
@@ -1937,7 +1937,7 @@ var operations = map[Operation]opSpec{
 	},
 
 	// The Folder aggregate (#48). Folders are organizational only: the
-	// permission ADR forbids folder-scoped grants outright, and names the
+	// permission-model ADR forbids folder-scoped grants outright, and names the
 	// folder path as `definitions-edit` territory. Every folder operation
 	// therefore addresses PROJECT depth — there is no folder scope to address.
 	OpFolderCreate: {
@@ -2718,7 +2718,7 @@ var operations = map[Operation]opSpec{
 	},
 
 	// The viewing side. `instance-config` for custody, `instance-directory`
-	// for the reads — the ADR's split, following the audit ADR's precedent
+	// for the reads — the ADR's split, following the audit-model ADR's precedent
 	// that reading is power and is never bundled.
 	//
 	// Both READS carry two events, not one: the directory view itself and, per

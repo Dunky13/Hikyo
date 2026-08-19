@@ -46,7 +46,7 @@ WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id
 DELETE FROM environments WHERE org_id = sqlc.arg(chain_org_id) AND project_id = sqlc.arg(chain_project_id) AND id = sqlc.arg(chain_env_id);
 
 -- Protected-environment flag and per-environment reauthentication window
--- (#55, permission ADR - The reveal guard). Both live under
+-- (#55, permission-model ADR - The reveal guard). Both live under
 -- `project-settings`; a NULL window means "inherit the instance default".
 
 -- name: GetEnvironmentSettings :one

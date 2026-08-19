@@ -130,7 +130,7 @@ type GetEnvironmentSettingsRow struct {
 }
 
 // Protected-environment flag and per-environment reauthentication window
-// (#55, permission ADR - The reveal guard). Both live under
+// (#55, permission-model ADR - The reveal guard). Both live under
 // `project-settings`; a NULL window means "inherit the instance default".
 func (q *Queries) GetEnvironmentSettings(ctx context.Context, arg GetEnvironmentSettingsParams) (GetEnvironmentSettingsRow, error) {
 	row := q.db.QueryRowContext(ctx, getEnvironmentSettings, arg.OrgID, arg.ProjectID, arg.ID)

@@ -15,7 +15,7 @@ INSERT INTO grant_origins (id, grant_id, kind, subject, created_at)
 VALUES (?, ?, ?, ?, ?);
 
 -- Releasing one origin. The grant row survives while another origin holds it;
--- only the last release deletes the row (permission ADR, scim amendment (a)).
+-- only the last release deletes the row (permission-model ADR, scim amendment (a)).
 -- hikyo:authn-resolution
 -- name: DeleteGrantOrigin :execrows
 DELETE FROM grant_origins WHERE grant_id = ? AND kind = ? AND subject = ?;
@@ -69,7 +69,7 @@ ORDER BY g.principal_id, g.capability, g.id, o.kind, o.subject;
 --
 -- The project_id IS NULL conjunct is load-bearing: a project-scope
 -- manage-members grant lives at org_id = ? too, and without it a project
--- member manager would count toward the org census. The permission ADR draws
+-- member manager would count toward the org census. The permission-model ADR draws
 -- the lockout line at org and instance scope, so a project-scope holder is
 -- not one of the org's holders.
 -- hikyo:authn-resolution

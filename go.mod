@@ -1,6 +1,6 @@
 module github.com/Hikyo-Org/hikyo
 
-go 1.26.2
+go 1.26.6
 
 require (
 	filippo.io/age v1.3.1

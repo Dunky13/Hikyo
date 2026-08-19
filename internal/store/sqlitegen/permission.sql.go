@@ -33,7 +33,7 @@ type DeleteGrantOriginParams struct {
 }
 
 // Releasing one origin. The grant row survives while another origin holds it;
-// only the last release deletes the row (permission ADR, scim amendment (a)).
+// only the last release deletes the row (permission-model ADR, scim amendment (a)).
 // hikyo:authn-resolution
 func (q *Queries) DeleteGrantOrigin(ctx context.Context, arg DeleteGrantOriginParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteGrantOrigin, arg.GrantID, arg.Kind, arg.Subject)
@@ -426,7 +426,7 @@ ORDER BY principal_id
 //
 // The project_id IS NULL conjunct is load-bearing: a project-scope
 // manage-members grant lives at org_id = ? too, and without it a project
-// member manager would count toward the org census. The permission ADR draws
+// member manager would count toward the org census. The permission-model ADR draws
 // the lockout line at org and instance scope, so a project-scope holder is
 // not one of the org's holders.
 // hikyo:authn-resolution

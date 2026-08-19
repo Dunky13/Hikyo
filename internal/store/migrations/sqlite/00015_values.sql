@@ -1,5 +1,5 @@
 -- +goose Up
--- The flat value model (#50, flat-model ADR, encryption ADR § Envelope format).
+-- The flat value model (#50, flat-model ADR, encryption-model ADR § Envelope format).
 -- Roll-forward only: no Down section by policy (system-architecture ADR).
 --
 -- THE WHOLE MODEL IS THIS TABLE. A Value attaches to a (key, environment) and
@@ -34,7 +34,7 @@
 -- `ciphertext` is a sealed envelope under the PROJECT DEK, kind `value`, whose
 -- AAD binds org_id, project_id, environment_id, key_id, THIS ROW'S id, and the
 -- field tag — so a ciphertext lifted onto any other row, environment or
--- project stops decrypting (encryption ADR § Envelope format; env_id per the
+-- project stops decrypting (encryption-model ADR § Envelope format; env_id per the
 -- flat-model amendment). Config values are sealed exactly like secret ones:
 -- classification is the DISCLOSURE boundary, never the storage boundary, and a
 -- table where only some rows are encrypted invites the reclassification

@@ -292,7 +292,7 @@ func TestAccessWireQueryTracePostgres(t *testing.T) {
 //     caller could count its way to which level exists.
 //   - a DENIAL against an object that exists costs exactly one query more —
 //     the grant lookup, which a miss skips. That difference is structural and
-//     is the residual the isolation ADR already accepts.
+//     is the residual the tenant-isolation ADR already accepts.
 func runAccessWireQueryTrace(t *testing.T, db *store.DB) {
 	e := newAccessWireEnv(t, db)
 	stripMemberManagement(t, db, e.admin)

@@ -432,7 +432,7 @@ func (r *Resolver) CreateAccount(ctx context.Context, a Account) error {
 }
 
 // CreateGrant writes one grant row. The bootstrap path uses it to apply the
-// `admin` template, which the permission ADR requires to expand into separate,
+// `admin` template, which the permission-model ADR requires to expand into separate,
 // visible, individually revocable rows rather than an implicit bundle. The
 // general grant API — dedup, revocation, session-generation advance — is #55's.
 func (r *Resolver) CreateGrant(ctx context.Context, id string, p domain.PrincipalID, g domain.Grant, at time.Time) error {

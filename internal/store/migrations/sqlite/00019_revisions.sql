@@ -3,7 +3,7 @@
 -- flat-model ADR; schema-model ADR for validation timing and key groups).
 -- Roll-forward only: no Down section by policy (system-architecture ADR).
 --
--- FOUR TABLES, TWO RETENTION CLASSES. The revision ADR splits history in two
+-- FOUR TABLES, TWO RETENTION CLASSES. The revision-model ADR splits history in two
 -- and the split is structural here rather than a policy note:
 --
 --   * `snapshots` + `revision_key_changes` are LINEAGE, retained indefinitely.
@@ -24,7 +24,7 @@
 -- hikyo:table snapshot_entries class=environment chain=org_id,project_id
 -- hikyo:table revision_key_changes class=environment chain=org_id,project_id
 
--- PENDING CHANGES -- per-user working state (revision ADR, Draft model).
+-- PENDING CHANGES -- per-user working state (revision-model ADR, Draft model).
 --
 -- A pending change attaches to a `(key, environment)` per the flat-model
 -- amendment, is OWNED by one principal, and carries an IMMUTABLE VERSION ID:
@@ -35,7 +35,7 @@
 -- whatever the owner typed since.
 --
 -- SUPERSEDED VERSIONS ARE COLLECTED IMMEDIATELY, which is the strictest
--- reading of the schema ADR's Bounds amendment ("garbage collection of
+-- reading of the schema-model ADR's Bounds amendment ("garbage collection of
 -- superseded pending versions; only the latest version per (owner, key,
 -- environment) is publishable and revalidated"). The UNIQUE below is that
 -- bound expressed as a schema fact: one live version per (owner, cell), so a
@@ -62,7 +62,7 @@
 -- `project_field`, owner_table `pending_changes`, owner_row_id THIS ROW'S id,
 -- additionally bound to this row's environment_id and key_id.
 -- A draft holds real material and is stored exactly like a published value:
--- the permission ADR's "a pending secret's plaintext remains reveal-gated
+-- the permission-model ADR's "a pending secret's plaintext remains reveal-gated
 -- exactly as a published one is" is a storage statement as much as an
 -- authorization one. It is NULL for an `unset` draft and only then, which the
 -- CHECK enforces rather than trusting a writer.
@@ -129,7 +129,7 @@ CREATE TABLE snapshots (
 -- that environment, UNDER THE SCHEMA REVISION THAT SNAPSHOT PINNED". A rename
 -- or a reclassification after the fact must not retroactively change what a
 -- historical revision delivered, and classification is sticky to the stored
--- occurrence per the revision ADR's diff rules.
+-- occurrence per the revision-model ADR's diff rules.
 --
 -- `value_entry_id` is the pinned value-entry revision -- the published cell
 -- this entry materialized from. It is metadata, not a reference: the cell is
@@ -139,7 +139,7 @@ CREATE TABLE snapshots (
 -- `ciphertext` is RE-SEALED into this row (kind `project_field`, owner_table
 -- `snapshot_entries`, owner_row_id this row's id, additionally bound to this
 -- row's environment_id, key_id and snapshot_id), never copied from the value
--- entry: the encryption ADR's never-copy-ciphertext rule, and the reason a
+-- entry: the encryption-model ADR's never-copy-ciphertext rule, and the reason a
 -- lifted snapshot ciphertext stops decrypting anywhere else.
 CREATE TABLE snapshot_entries (
     id TEXT PRIMARY KEY,
@@ -163,7 +163,7 @@ CREATE TABLE snapshot_entries (
 -- key's name at that revision, and one of three transitions -- nothing derived
 -- from a value, not a length, not a digest, not a changed-from marker.
 --
--- It is also the "recently changed" matrix signal's source (revision ADR,
+-- It is also the "recently changed" matrix signal's source (revision-model ADR,
 -- Matrix UI): a value publish writes rows for exactly the environments it
 -- touched, so the signal recomputes for exactly those environments without any
 -- service-side bookkeeping deciding which.

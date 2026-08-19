@@ -272,7 +272,7 @@ func truncate(s domain.Scope, l domain.Level) domain.Scope {
 
 // covers reports whether grant scope g is an ancestor-or-equal of target.
 // The instance scope (zero) covers everything — instance grants inherit
-// downward like every other scope (permission ADR). A grant deeper than the
+// downward like every other scope (permission-model ADR). A grant deeper than the
 // target never covers it.
 func covers(g, target domain.Scope) bool {
 	if g.Org == "" {

@@ -51,9 +51,11 @@ jobs:
             plan=$(jq -cn '{
               client: true,
               docs: true,
+              fuzz: true,
               generated: true,
               headline_guarantee: true,
               lint: true,
+              race: true,
               release_snapshot: true,
               supply_chain_checks: true,
               test: true,
@@ -426,6 +428,15 @@ jobs:
       - name: Build the binary with the embedded UI
         run: go build -tags ui ./...
 
+      # The release ships the `ui`-tagged binary, so the shipped shape gets
+      # its own govulncheck pass here; `test` scans the untagged build that
+      # every Go-only change exercises. One leg: the binary is identical.
+      - name: govulncheck (vulnerabilities reachable from the release-shaped binary)
+        if: matrix.project == 'desktop'
+        run: |
+          go build -tags ui -o "$RUNNER_TEMP/hikyo-ui" ./cmd/hikyo
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "$RUNNER_TEMP/hikyo-ui"
+
       - name: Go tests (transport, serving rules, browser session)
         # Restored GOCACHE may contain passing test results. Compile from cache,
         # but always execute this job's tests against its fresh build.
@@ -511,6 +522,15 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Binary mode scans the artifact that ships: what the linker kept is what
+      # can be reached, and it finishes in seconds where source mode over the
+      # ~1000-package import graph takes minutes and gigabytes. Standard-library
+      # findings gate the toolchain pin in go.mod; module findings gate go.sum.
+      - name: govulncheck (vulnerabilities reachable from the shipped binary)
+        run: |
+          go build -o "$RUNNER_TEMP/hikyo" ./cmd/hikyo
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -mode=binary "$RUNNER_TEMP/hikyo"
+
       - name: Test (sqlite + postgres conformance)
         env:
           HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
@@ -533,6 +553,133 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: ${{ steps.go-module-cache.outputs.cache-primary-key }}
+
+  # Race detector as its own context: a concurrent server with transaction
+  # retry and a single-writer SQLite pool gets its data races found here, not
+  # in production. The probe-based isolation E2E suite exceeds the per-package
+  # timeout under the detector, so its race-instrumented run lives in the
+  # scheduled race-isolation workflow instead of on the PR wall-clock.
+  race:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).race }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+        env:
+          POSTGRES_USER: hikyo
+          POSTGRES_PASSWORD: hikyo
+          POSTGRES_DB: hikyo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hikyo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore race Go cache
+        id: race-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-race-${{ runner.os }}-
+      - name: Race detector (all packages except the isolation suite)
+        env:
+          HIKYO_TEST_POSTGRES_DSN: postgres://hikyo:hikyo@127.0.0.1:5432/hikyo_test
+        run: go list ./... | grep -v '/internal/isolation$' | xargs go test -race -count=1
+      - name: Save race Go cache (main push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.race-go-cache.outputs.cache-primary-key }}
+
+  # Seed corpora already run in `test`; this bounded exploration pass discovers
+  # targets dynamically so a new fuzz target cannot be forgotten.
+  fuzz:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.plan).fuzz }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Restore shared Go module cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+      - name: Restore fuzz Go cache
+        id: fuzz-go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            go-fuzz-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-fuzz-${{ runner.os }}-
+      - name: Fuzz every target for a bounded time
+        run: |
+          set -o pipefail
+          failed=0
+          ran=0
+          # One listing over the tree: `go test -list` prints each matching
+          # target on its own line, followed by an `ok <pkg>` line for the
+          # package it belongs to, so targets are attributed to the package
+          # that follows them. A listing failure fails the step.
+          listing=$(go test -list '^Fuzz' ./...)
+          pending=()
+          while IFS= read -r line; do
+            case "$line" in
+              Fuzz*) pending+=("$line") ;;
+              "ok "*)
+                pkg=$(printf '%s\n' "$line" | awk '{print $2}')
+                for target in "${pending[@]}"; do
+                  echo "::group::$pkg $target"
+                  if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=15s "$pkg"; then
+                    failed=1
+                  fi
+                  echo "::endgroup::"
+                  ran=$((ran + 1))
+                done
+                pending=()
+                ;;
+            esac
+          done <<<"$listing"
+          if [ "$ran" -eq 0 ]; then
+            echo "fuzz: no Fuzz* target discovered — the pass cannot be vacuous" >&2
+            exit 1
+          fi
+          echo "fuzz: $ran targets ran"
+          exit "$failed"
+      - name: Save fuzz Go cache (main push only)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.fuzz-go-cache.outputs.cache-primary-key }}
 
   # The headline guarantee, as its own named context (#76, mvp-boundary K3):
   # a stolen database and a stolen backup, without the root key, yield no
@@ -605,9 +752,11 @@ jobs:
       - client
       - dco
       - docs
+      - fuzz
       - generated
       - headline-guarantee
       - lint
+      - race
       - release-snapshot
       - supply-chain-checks
       - test

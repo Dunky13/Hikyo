@@ -323,7 +323,7 @@ func runTemplateExpansion(t *testing.T, db *store.DB) {
 			t.Errorf("admin template did not create %q as its own row", c)
 		}
 	}
-	// The ADR's amendment to the revision ADR: `reveal` and `reveal-history`
+	// The ADR's amendment to the revision-model ADR: `reveal` and `reveal-history`
 	// are separate revocable rows inside `admin`, so an installation can strip
 	// one without dismantling the administrative authority.
 	if err := g.Revoke(ctx, service.LocalPrincipal(root), service.GrantSpec{
@@ -348,7 +348,7 @@ func runTemplateExpansion(t *testing.T, db *store.DB) {
 	}
 
 	// `operator` seeds NEITHER reveal nor reveal-history: crypto custody is
-	// not data reading, and the encryption ADR forbids the bundle.
+	// not data reading, and the encryption-model ADR forbids the bundle.
 	if _, err := g.ApplyTemplate(ctx, service.LocalPrincipal(root), domain.TemplateOperator, grantee, domain.Scope{}); err != nil {
 		t.Fatalf("apply operator at instance scope: %v", err)
 	}

@@ -37,7 +37,7 @@ type RestoreState struct {
 	RestoreEpoch    int64
 	// ReactivatedAt is the instant the restored instance came back, and the
 	// zero time when it never was. It anchors the federated-token skew
-	// predicate the machine-identity ADR fixes (iat > reactivated_at + 60 s).
+	// predicate the machine-identities ADR fixes (iat > reactivated_at + 60 s).
 	ReactivatedAt time.Time
 }
 

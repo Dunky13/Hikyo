@@ -72,7 +72,7 @@ FROM scim_credentials WHERE verifier = ?
 `
 
 // Presentation resolves the verifier, never anything inside the value: kind,
-// binding, expiry and epoch are read from the row (machine-identity ADR).
+// binding, expiry and epoch are read from the row (machine-identities ADR).
 // hikyo:authn-resolution
 func (q *Queries) GetSCIMCredentialByVerifier(ctx context.Context, verifier []byte) (ScimCredential, error) {
 	row := q.db.QueryRowContext(ctx, getSCIMCredentialByVerifier, verifier)

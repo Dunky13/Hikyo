@@ -250,6 +250,7 @@ The enforceable commitment and amendment process live in
 | Operate an instance | [Self-hosting](https://hikyo.app/docs/self-hosting/) |
 | Use the terminal | [CLI reference](https://hikyo.app/docs/cli-reference/) |
 | Contribute code | [Contributing guide](./CONTRIBUTING.md) |
+| Read the design decisions | [Architecture decision records](./docs/adr/README.md) and [specification set](./docs/spec/README.md) |
 
 [Security](./SECURITY.md) · [Support](./SUPPORT.md) ·
 [Governance](./GOVERNANCE.md) · [Trademark](./TRADEMARK.md)

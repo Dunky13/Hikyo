@@ -34,9 +34,11 @@ expect_reject() {
 all_plan='{
 	"client":true,
 	"docs":true,
+	"fuzz":true,
 	"generated":true,
 	"headline_guarantee":true,
 	"lint":true,
+	"race":true,
 	"release_snapshot":true,
 	"supply_chain_checks":true,
 	"test":true,
@@ -48,9 +50,11 @@ all_success='{
 	"client":{"result":"success"},
 	"dco":{"result":"success"},
 	"docs":{"result":"success"},
+	"fuzz":{"result":"success"},
 	"generated":{"result":"success"},
 	"headline-guarantee":{"result":"success"},
 	"lint":{"result":"success"},
+	"race":{"result":"success"},
 	"release-snapshot":{"result":"success"},
 	"supply-chain-checks":{"result":"success"},
 	"test":{"result":"success"},
@@ -60,9 +64,11 @@ all_success='{
 docs_plan=$(printf '%s' "$all_plan" | jq 'map_values(false) | .docs = true')
 docs_success=$(printf '%s' "$all_success" | jq '
 	.client.result = "skipped" |
+	.fuzz.result = "skipped" |
 	.generated.result = "skipped" |
 	.["headline-guarantee"].result = "skipped" |
 	.lint.result = "skipped" |
+	.race.result = "skipped" |
 	.["release-snapshot"].result = "skipped" |
 	.["supply-chain-checks"].result = "skipped" |
 	.test.result = "skipped" |
@@ -81,10 +87,12 @@ done
 expect_accept 'main push with skipped DCO' push \
 	"$(printf '%s' "$all_success" | jq '.dco.result = "skipped"')" "$all_plan"
 
-for result in failure cancelled skipped; do
-	expect_reject "selected client with $result result" pull_request \
-		"$(printf '%s' "$all_success" | jq --arg result "$result" '.client.result = $result')" \
-		"$all_plan"
+for job in client fuzz race; do
+	for result in failure cancelled skipped; do
+		expect_reject "selected $job with $result result" pull_request \
+			"$(printf '%s' "$all_success" | jq --arg job "$job" --arg result "$result" '.[ $job ].result = $result')" \
+			"$all_plan"
+	done
 done
 
 expect_reject 'unselected web job unexpectedly ran' pull_request \

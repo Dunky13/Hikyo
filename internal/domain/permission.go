@@ -6,7 +6,7 @@ import (
 )
 
 // Role templates, machine principal classes and grant origins — the three
-// closed tables the permission ADR fixes around the grant triple (#55).
+// closed tables the permission-model ADR fixes around the grant triple (#55).
 //
 // None of them is ever consulted by authorize(): authority is the bare
 // (principal, capability, scope) triple and nothing else. A template is an
@@ -46,7 +46,7 @@ var orgProject = map[Level]bool{LevelOrg: true, LevelProject: true}
 
 var instanceOnly = map[Level]bool{LevelNone: true}
 
-// templates is the permission ADR's closed template table, verbatim.
+// templates is the permission-model ADR's closed template table, verbatim.
 // `maintainer` is spelled as `publisher` plus three; `admin` as `maintainer`
 // plus four, with `manage-projects` at org scope only. `operator` seeds the
 // operator set plus manage-members and deliberately seeds NEITHER `reveal`
@@ -74,7 +74,7 @@ var templates = map[Template]templateSpec{
 			CapDefinitionsEdit, CapManageIdentities, CapManageAdapters,
 			CapProjectSettings, CapManageMembers,
 			// Seeded as separate, separately revocable rows — the ADR's
-			// amendment to the revision ADR. An installation may strip either
+			// amendment to the revision-model ADR. An installation may strip either
 			// from one administrator without dismantling their authority.
 			CapReveal, CapRevealHistory,
 		},
@@ -240,7 +240,7 @@ func IsCredentialLifetime(l CredentialLifetime) bool {
 	return l == LifetimeFinite || l == LifetimeIndefinite
 }
 
-// machineAllowlists is NORMATIVE, not convention (permission ADR § Machine
+// machineAllowlists is NORMATIVE, not convention (permission-model ADR § Machine
 // principals): the grant API refuses a capability outside its class's list.
 //
 // `reveal` and `reveal-history` are absent from the workload and automation

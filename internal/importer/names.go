@@ -139,7 +139,7 @@ type NearMiss struct {
 	Declared string `json:"declared"`
 }
 
-// nearMissDistance is the "small edit distance" the schema ADR leaves to the
+// nearMissDistance is the "small edit distance" the schema-model ADR leaves to the
 // implementation. One edit: a transposition, a dropped letter, a doubled
 // letter — the accident classes. Two would fire on genuinely distinct short
 // names (`DB_HOST` vs `DB_PORT` is distance 2) and an advisory that cries wolf

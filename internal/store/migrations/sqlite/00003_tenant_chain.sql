@@ -44,7 +44,7 @@ CREATE TABLE principals (
     created_at TEXT NOT NULL
 );
 
--- A grant is the permission ADR's (principal, capability, scope) triple.
+-- A grant is the permission-model ADR's (principal, capability, scope) triple.
 -- Scope is the chain to the granted level; the CHECK forbids gaps, and the
 -- composite FKs (enforced only when their columns are non-null) keep a
 -- non-instance scope consistent with the chain tables.

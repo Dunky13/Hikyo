@@ -18,8 +18,8 @@ import (
 )
 
 // The machine fetch surface and its conditional cursor (#62, machine-identities
-// ADR § Authentication, authorization and the fetch path; revision ADR §
-// Revision identity as amended by the schema ADR).
+// ADR § Authentication, authorization and the fetch path; revision-model ADR §
+// Revision identity as amended by the schema-model ADR).
 //
 // WHAT IS DELIVERED TODAY, stated first because it bounds everything below. No
 // value tables exist yet (#50/#51), so there is no plaintext anywhere on this

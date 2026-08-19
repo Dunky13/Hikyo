@@ -10,7 +10,7 @@
 --
 -- There is no UPDATE. A value write is delete-then-insert with a FRESH row id,
 -- because the row id is bound into the ciphertext's AAD and an id bound into
--- an AAD is immutable and never reused (encryption ADR).
+-- an AAD is immutable and never reused (encryption-model ADR).
 
 -- name: GetValueEntry :one
 SELECT id, org_id, project_id, environment_id, key_id, ciphertext, updated_at, updated_by

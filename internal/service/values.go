@@ -17,7 +17,7 @@ import (
 	"github.com/Hikyo-Org/hikyo/internal/store/tx"
 )
 
-// The flat value model (#50, flat-model ADR + encryption ADR + the locked
+// The flat value model (#50, flat-model ADR + encryption-model ADR + the locked
 // permission-model formula table).
 //
 // A Value attaches to a `(key, environment)`. There are no other layers, so
@@ -292,7 +292,7 @@ func findKey(ctx context.Context, cat store.CatalogueReader, p authz.Proof, name
 // without the second List, for a caller that holds the list already.
 //
 // A key that is not declared is NOT a value write — typing a name that does not
-// exist is a key creation, an explicit act elsewhere (schema ADR § Closed
+// exist is a key creation, an explicit act elsewhere (schema-model ADR § Closed
 // schema). Never auto-declare.
 func keyByName(keys []store.CatalogueKey, name string) (store.CatalogueKey, error) {
 	for _, k := range keys {
@@ -411,7 +411,7 @@ type StagedChange struct {
 // revision it was staged from, and delivery does not move until a publish names
 // its version id. The formula is therefore `edit` ALONE -- `edit` confers no
 // delivery power, and edit-without-publish IS the propose-and-review flow the
-// permission ADR says it is.
+// permission-model ADR says it is.
 //
 // SAVING IS FREE. The value is not validated here and a `required_in` key may
 // be cleared here: a draft is the user's scratchpad, and blocking a save pushes
@@ -806,7 +806,7 @@ func readCells(ctx context.Context, cat store.CatalogueReader, vals store.ValueR
 
 // auditDisclosures writes one event per key whose `secret` plaintext was
 // rendered. Never one event for a bulk reveal: "revealed 40 secrets" as a
-// single row is exactly what the audit ADR forbids.
+// single row is exactly what the audit-model ADR forbids.
 func auditDisclosures(ctx context.Context, trail store.AuditRepo, p authz.Proof,
 	principal domain.PrincipalID, cells []ValueCell, surface string) error {
 	for _, cell := range cells {
@@ -1174,7 +1174,7 @@ type sourceValue struct {
 // land `absent`, enumerated by name" — with mvp-boundary C2's clone abort —
 // would be text describing an unreachable state. The gate is classification-
 // scoped in its own wording ("begin delivering a **`secret`** value occurrence
-// the publisher did not supply"), and the permission ADR files `config` values
+// the publisher did not supply"), and the permission-model ADR files `config` values
 // under `read`.
 type materialSet struct {
 	config []sourceValue
@@ -1434,7 +1434,7 @@ func applyMaterial(ctx context.Context, r store.Repos, az *authz.TxAuthorizer, c
 // writeMaterial re-seals every piece of material into one destination and
 // records one event per key. The ciphertext is never carried over: the
 // destination row has its own id, its own environment and therefore its own
-// AAD, so duplication is always decrypt-and-reseal (encryption ADR).
+// AAD, so duplication is always decrypt-and-reseal (encryption-model ADR).
 func writeMaterial(ctx context.Context, r store.Repos, p authz.Proof, sealer *crypto.ProjectSealer,
 	caller authz.Identity, destScope domain.Scope, sourceEnvID string,
 	material []sourceValue, operation string) ([]CopiedValue, error) {

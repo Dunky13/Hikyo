@@ -190,7 +190,7 @@ func runAccessGrant(ctx context.Context, ios IO, args []string) error {
 // `member remove` is deliberately a client-side loop over the same
 // per-capability revoke the ADR requires each capability to have, NOT a bulk
 // server verb. Each revocation is its own audited event, which is what the
-// audit ADR asks for; the honest cost is that it is not atomic, so a failure
+// audit-model ADR asks for; the honest cost is that it is not atomic, so a failure
 // part-way leaves the earlier capabilities revoked. That is the safe direction
 // to fail in — authority removed, not authority retained — and the command
 // reports how far it got.

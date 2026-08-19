@@ -310,7 +310,7 @@ func (s *Workspace) MintConnection(ctx context.Context, actor Actor, label strin
 
 // ListConnections is metadata only. It is audited rather than `audited: none`
 // because reading which foreign installations may read this one's directory is
-// not a bare tenant read — the audit ADR's default-deny refuses the permit.
+// not a bare tenant read — the audit-model ADR's default-deny refuses the permit.
 func (s *Workspace) ListConnections(ctx context.Context, actor Actor) ([]ConnectionView, error) {
 	now := s.now()
 	var out []ConnectionView

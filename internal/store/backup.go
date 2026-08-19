@@ -1,6 +1,6 @@
 package store
 
-// Datastore export and restore (#76, encryption ADR § Backups and exports,
+// Datastore export and restore (#76, encryption-model ADR § Backups and exports,
 // ops spec § 11). This file owns the CONTENTS of a backup archive; the
 // age container around it is internal/crypto/backup's, and the orchestration
 // that composes the two — plus the credential-epoch bump a restore performs —

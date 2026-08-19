@@ -31,6 +31,14 @@ upsert_ruleset "$repo_root/release/repository/release-tag-creation.json"
 upsert_ruleset "$repo_root/release/repository/main-ci-gate.json"
 
 $GH_BIN api --method PUT "repos/$repository/immutable-releases" >/dev/null
+# CodeQL runs as GitHub's default setup (a repository setting, not workflow
+# YAML): actions, Go and the TypeScript surfaces, weekly and on every PR.
+# Default setup and an advanced-setup workflow are mutually exclusive — the
+# upload API rejects the latter while the former is enabled — so the setting
+# is asserted here rather than duplicated under .github/workflows.
+$GH_BIN api --method PATCH "repos/$repository/code-scanning/default-setup" \
+	-f state=configured -f query_suite=default \
+	-f 'languages[]=actions' -f 'languages[]=go' -f 'languages[]=javascript-typescript' >/dev/null
 $GH_BIN api --method PUT "repos/$repository/actions/permissions" \
 	-F enabled=true -f allowed_actions=all -F sha_pinning_required=true >/dev/null
 
@@ -68,6 +76,10 @@ printf '%s\n' "$creation" | jq -e '
 ' >/dev/null
 $GH_BIN api "repos/$repository/immutable-releases" --jq '.enabled' | grep -x true >/dev/null
 $GH_BIN api "repos/$repository/actions/permissions" --jq '.sha_pinning_required' | grep -x true >/dev/null
+$GH_BIN api "repos/$repository/code-scanning/default-setup" | jq -e '
+	.state == "configured" and
+	(["actions", "go", "javascript-typescript"] - .languages) == []
+' >/dev/null
 
 probe_tag=v-ruleset-probe
 probe_error=$(mktemp "${TMPDIR:-/tmp}/hikyo-probe-tag-lookup.XXXXXX")
@@ -93,4 +105,4 @@ fi
 		"$repo_root/scripts/release/probe-tag-move.sh" "$repository" "$probe_tag" "$replacement"
 )
 
-printf 'repository policy: PR/CI main gate, immutable releases, protected v* tags, live move probe, SHA-pinned actions active\n'
+printf 'repository policy: PR/CI main gate, immutable releases, protected v* tags, live move probe, SHA-pinned actions, CodeQL default setup active\n'

@@ -45,7 +45,7 @@ type WriteFn func(ctx context.Context, r store.Repos, az *authz.TxAuthorizer) er
 
 // ReadFn is one read-transaction attempt: read-only repositories plus the
 // attempt's authorizer. There is no proof-free read path — authorization is
-// evaluated in-transaction (permission ADR), so reads transact too.
+// evaluated in-transaction (permission-model ADR), so reads transact too.
 type ReadFn func(ctx context.Context, r store.ReadRepos, az *authz.TxAuthorizer) error
 
 // Write runs fn inside a write transaction with bounded retries. Retry

@@ -63,7 +63,7 @@ type NewCatalogueKey struct {
 }
 
 // KeyMetadata is exactly the NON-semantic field set: it cannot change what any
-// environment delivers or whether it validates, which is why the schema ADR
+// environment delivers or whether it validates, which is why the schema-model ADR
 // exempts it from per-environment publish authorization. Its own type so a
 // semantic field cannot be smuggled into a metadata write.
 type KeyMetadata struct {

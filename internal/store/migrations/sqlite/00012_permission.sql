@@ -49,7 +49,7 @@ CREATE INDEX grant_origins_grant ON grant_origins (grant_id);
 INSERT INTO grant_origins (id, grant_id, kind, subject, created_at)
 SELECT 'gor_' || g.id, g.id, 'manual', g.principal_id, g.created_at FROM grants AS g;
 
--- Per-environment protection and reauthentication window (permission ADR
+-- Per-environment protection and reauthentication window (permission-model ADR
 -- - The reveal guard). Both sit under `project-settings`, which is split out
 -- of `definitions-edit` precisely because these restrain the definitions
 -- editor.
@@ -64,7 +64,7 @@ SELECT 'gor_' || g.id, g.id, 'manual', g.principal_id, g.created_at FROM grants 
 ALTER TABLE environments ADD COLUMN protected INTEGER NOT NULL DEFAULT 0 CHECK (protected IN (0, 1));
 ALTER TABLE environments ADD COLUMN reauth_window_seconds INTEGER;
 
--- The machine principal class the permission ADR's normative allowlists key
+-- The machine principal class the permission-model ADR's normative allowlists key
 -- on (workload / automation / provisioning-connection / instance-connection).
 -- NULL for humans. It is NOT constrained by a CHECK because sqlite cannot add
 -- one to a table this many rows reference; the closed set is enforced in Go

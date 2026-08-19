@@ -124,9 +124,9 @@ func devRootKeyPath(cfg *config.Config) string {
 // configured — generates and persists a development root key beside the dev
 // database.
 //
-// The dev generation is a recorded deviation from the encryption ADR's
+// The dev generation is a recorded deviation from the encryption-model ADR's
 // refusal 1 ("the server never auto-generates a root key on first run"),
-// forced by the architecture ADR's zero-config `--dev` evaluation mode: an
+// forced by the system-architecture ADR's zero-config `--dev` evaluation mode: an
 // ephemeral key would brick hikyo-dev.db on every restart, and refusing would
 // make --dev not zero-config. The rationale behind refusal 1 (a silent key
 // nobody backed up, discovered at restore) does not bite an evaluation
@@ -221,7 +221,7 @@ func Boot(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Server, e
 	authSvc := &service.Auth{DB: db, Keyring: kr, KDF: kdf, Admission: limiter, Log: log, ExternalOrigin: cfg.ExternalOrigin}
 	samlProviders := &service.SAMLProviders{DB: db, Keyring: kr, ExternalOrigin: cfg.ExternalOrigin}
 	// RP ID + expected origins are immutable instance config derived from the
-	// configured external origin, never a request header (WebAuthn ADR §5). An
+	// configured external origin, never a request header (human-auth ADR §5). An
 	// origin that cannot yield a valid relying party is a boot refusal, not a
 	// first-ceremony surprise.
 	if err := authSvc.ConfigureWebAuthnRP(); err != nil {

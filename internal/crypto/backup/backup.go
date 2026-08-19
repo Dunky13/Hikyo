@@ -1,5 +1,5 @@
 // Package backup owns the age container around an instance export (#76,
-// encryption ADR § Backups and exports). It is the SOLE importer of
+// encryption-model ADR § Backups and exports). It is the SOLE importer of
 // filippo.io/age in the module, enforced by internal/boundary.
 //
 // Hikyo specifies no container format of its own: age supplies the recipient

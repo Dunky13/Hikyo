@@ -158,7 +158,7 @@ var fixtureSQL = []string{
 	// trail is grant-evaluated, never route-implied.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_ar', 'usr_root', 'audit-read', NULL, NULL, NULL, ` + ts + `)`,
 	// `rotate-dek` is the tier-3 rotation authority, and `rotate-token-key`
-	// rides it: the permission ADR's capability set is closed and names four
+	// rides it: the permission-model ADR's capability set is closed and names four
 	// rotation atoms for five rotation verbs, and the root token key is a
 	// tier-3 key alongside the DEKs.
 	`INSERT INTO grants (id, principal_id, capability, org_id, project_id, env_id, created_at) VALUES ('g_ro_rd', 'usr_root', 'rotate-dek', NULL, NULL, NULL, ` + ts + `)`,

@@ -9,7 +9,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// Versioned ciphertext envelope, per the encryption ADR § Envelope format:
+// Versioned ciphertext envelope, per the encryption-model ADR § Envelope format:
 //
 //	header = format_version ‖ envelope_kind ‖ algorithm_id ‖
 //	         LP(wrapping_key_id) ‖ wrapping_key_version(uint32 BE) ‖ LP(nonce)

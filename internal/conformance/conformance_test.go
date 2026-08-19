@@ -153,8 +153,13 @@ func TestConformancePostgres(t *testing.T) {
 	runCorpus(t, db)
 }
 
-// resetPostgres drops only the tables this harness owns, so a dedicated test
-// database is reusable across runs.
+// resetPostgres drops the whole public schema, as the isolation harness does
+// (#76): a drop list that names tables is a trap for whoever adds the next
+// migration — the #66 fence table was missing from the list here, and a
+// reused database failed the reset with "cannot drop table environments
+// because other objects depend on it" (SQLSTATE 2BP01). A schema drop cannot
+// have that failure mode: whatever is there, it is gone, and the dedicated
+// test database stays reusable across runs.
 func resetPostgres(t *testing.T, cfg store.Config) {
 	t.Helper()
 	db, err := store.Open(t.Context(), cfg)
@@ -162,85 +167,8 @@ func resetPostgres(t *testing.T, cfg store.Config) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	// Children before parents: tier3_keys references master_keys, and the
-	// tenant chain is grants -> environments -> projects -> orgs.
-	for _, table := range []string{
-		// Factor tables (#54, migrations 00006-00008) reference accounts/sessions,
-		// so they drop first — a stale one fails the next re-migration's CREATE.
-		"webauthn_ceremonies", "webauthn_credentials",
-		// SCIM (#73, migration 00018): children before scim_bindings, which
-		// itself references orgs and principals.
-		"scim_group_members", "scim_groups", "scim_users",
-		"scim_attention", "scim_mappings", "scim_credentials", "scim_bindings",
-		// SAML (#72, migration 00010). These were missing from this list while
-		// the isolation harness carried them, so a second postgres conformance
-		// run in the same database re-created tables migration 00010 had
-		// already left behind and died with "relation already exists". Found
-		// while adding the SCIM block; fixed here rather than filed, because a
-		// drop list that is right in one harness and wrong in the other is a
-		// trap for whoever adds the next migration.
-		"saml_transactions", "saml_replay", "saml_sp_keys",
-		"oidc_transactions", "external_identities",
-		"totp_credentials", "totp_challenges", "recovery_codes", "reauth_windows",
-		// CLI adapter reauthentication handoffs reference both sessions and
-		// principals, so they must precede either parent.
-		"cli_reauth_handoffs",
-		"credential_authorities", "password_credentials", "sessions",
-		// oidc_providers is a PARENT of sessions (sessions.provider_id
-		// REFERENCES it ON DELETE CASCADE), so it drops AFTER sessions —
-		// postgres refuses DROP while a dependent table exists (SQLSTATE 2BP01).
-		"saml_providers", "oidc_providers", "accounts",
-		"auth_instance_state", "credential_policy",
-		// The key catalogue (#49) sits between projects and environments:
-		// presence rows reference both keys and environments, keys reference
-		// key_groups, and the schema-revision row references projects — so all
-		// four drop before the hierarchy they hang from.
-		// value_entries references BOTH keys and environments (#50), so it
-		// drops before either.
-		"value_entries",
-		// Revisions, drafts and retention (#51-#53). snapshot_entries and
-		// revision_pins reference snapshots; secret_value_occurrences references
-		// environments. All drop before their parents; retention_runtime has no FKs.
-		// pending_changes references keys,
-		// environments and principals; revision_key_changes references
-		// environments. The FK-bearing tables drop before their hierarchy.
-		"retention_runtime", "snapshot_entries", "revision_pins", "snapshots",
-		"secret_value_occurrences",
-		"revision_key_changes", "pending_changes",
-		// Deployment adapters (#65), complete child-to-parent order. Effects and
-		// conflicts reference the outbox; the outbox references route moves and
-		// targets; move claims reference move keys/targets; and every remaining
-		// child hangs from a target or adapter. Keeping all 00024 tables together
-		// makes a second migration run prove the reset rather than inherit stale
-		// route-move state from a prior test.
-		"adapter_effects", "adapter_conflicts", "adapter_outbox",
-		"adapter_route_move_claims", "adapter_route_move_keys",
-		"adapter_route_move_targets", "adapter_route_moves",
-		"adapter_target_keys", "adapter_ledger", "adapter_targets", "adapters",
-		"key_presence_environments", "keys", "key_groups", "project_schema_revisions",
-		// OIDC federation (#62, migration 00018): machine_credentials gained a
-		// foreign key to federation_issuers, so the issuers drop AFTER it;
-		// pin_generations references principals.
-		"pin_generations",
-		// Machine identities (#61, migration 00014): machine_credentials
-		// references service_accounts, which references projects/principals.
-		"machine_credentials", "service_accounts",
-		"federation_issuers",
-		// Multi-instance (#71, migration 00019): snapshots reference remotes;
-		// instance_connections and workspace_handoffs reference principals.
-		"remote_snapshots", "remotes", "instance_connections",
-		"workspace_handoffs", "workspace_origins", "instance_identity",
-		// grant_origins holds grants under a RESTRICT foreign key (#55), so it
-		// goes first of the pair.
-		"auth_instance_state",
-		"grant_origins", "grants", "folders", "environments", "projects", "principals",
-		"tier3_keys", "master_keys", "key_generations",
-		"audit_tenant_events", "audit_instance_events",
-		"orgs", "goose_db_version",
-	} {
-		if _, err := db.PG().Exec(t.Context(), "DROP TABLE IF EXISTS "+table); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := db.PG().Exec(t.Context(), "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -473,7 +401,7 @@ func scenarioConcurrent(t *testing.T, db *store.DB) {
 // tenantFixture seeds an org, a project and the grants a hierarchy scenario
 // needs, and returns the addressed scopes. Grants are org-scoped so downward
 // inheritance carries them to every project and environment beneath, which is
-// the lattice the permission ADR fixes.
+// the lattice the permission-model ADR fixes.
 func tenantFixture(t *testing.T, db *store.DB, label string) (domain.PrincipalID, domain.Scope) {
 	t.Helper()
 	orgs := &service.Orgs{DB: db}

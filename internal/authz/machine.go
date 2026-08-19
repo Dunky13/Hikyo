@@ -230,7 +230,7 @@ func (a *TxAuthorizer) EnvironmentsInProject(ctx context.Context, scope domain.S
 // account already holding read(E) ∧ reveal(E) shows an EMPTY delta when
 // granted reveal-history(E), so an actor with no historical access at all
 // could hand a machine principal the power to read superseded secrets. The
-// permission ADR fixed the rule this violates — "reveal-history implies
+// permission-model ADR fixed the rule this violates — "reveal-history implies
 // nothing about reveal, and vice versa".
 type Reachable struct {
 	// Current is where read(E) ∧ reveal(E) holds — current plaintext.
